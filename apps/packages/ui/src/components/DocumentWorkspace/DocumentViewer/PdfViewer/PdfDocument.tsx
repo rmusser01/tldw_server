@@ -1,8 +1,6 @@
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react"
 import { Document, pdfjs } from "react-pdf"
 import type { DocumentProps } from "react-pdf"
-import "react-pdf/dist/esm/Page/AnnotationLayer.css"
-import "react-pdf/dist/esm/Page/TextLayer.css"
 import { Spin, Alert } from "antd"
 import { PdfPage } from "./PdfPage"
 import { TextSelectionPopover } from "../TextSelectionPopover"

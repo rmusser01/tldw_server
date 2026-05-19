@@ -182,7 +182,9 @@ describe("WorldBooksManager import/export stage-1 guidance and validation", () =
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+      // Open Tools dropdown then click Import JSON
+      await user.click(screen.getByRole("button", { name: "Tools" }))
+      await user.click(await screen.findByText("Import JSON"))
       await user.click(await screen.findByText("Format help"))
 
       expect(await screen.findByText("Expected tldw JSON shape:")).toBeInTheDocument()
@@ -199,7 +201,9 @@ describe("WorldBooksManager import/export stage-1 guidance and validation", () =
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+    // Open Tools dropdown then click Import JSON
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Import JSON"))
     await uploadJson(user, '{"world_book": }')
 
     await waitFor(() => {
@@ -213,7 +217,9 @@ describe("WorldBooksManager import/export stage-1 guidance and validation", () =
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+    // Open Tools dropdown then click Import JSON
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Import JSON"))
     await uploadJson(user, JSON.stringify({ entries: [{ keywords: ["k"], content: "c" }] }))
     await waitFor(() => {
       expect(screen.getByText("File is missing the 'world_book' field.")).toBeInTheDocument()

@@ -6,8 +6,9 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import AuditEventType,
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 import tldw_Server_API.app.core.Evaluations.audit_adapter as eval_adapter
 from tldw_Server_API.app.core.Evaluations.audit_adapter import (
+    MandatoryAuditWriteError,
     log_evaluation_created,
-    log_evaluation_created_async,
+    log_run_started_async,
     _in_test_mode,
     _parse_cache_size,
     shutdown_evaluations_audit_services,
@@ -51,19 +52,35 @@ async def test_evaluation_created_threadpool_fallback(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_evaluation_adapter_propagates_failures(monkeypatch):
+async def test_evaluation_adapter_wraps_mandatory_failures(monkeypatch):
     async def _boom(_user_id):
         raise RuntimeError("audit boom")
 
     monkeypatch.setattr(eval_adapter, "get_or_create_audit_service_for_user_id_optional", _boom)
 
-    with pytest.raises(RuntimeError):
-        await log_evaluation_created_async(
+    with pytest.raises(MandatoryAuditWriteError) as exc_info:
+        await log_run_started_async(
             user_id="user-x",
             eval_id="eval-fail",
-            name="Failing Eval",
-            eval_type="unit",
+            run_id="run-fail",
+            target_model="unit",
         )
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "audit boom" in str(exc_info.value.__cause__)
+
+
+def test_evaluations_local_shutdown_helper_stops_loop(monkeypatch):
+    calls = {"local": 0}
+
+    def _local_shutdown() -> None:
+        calls["local"] += 1
+
+    monkeypatch.setattr(eval_adapter, "_stop_sync_loop", _local_shutdown)
+
+    eval_adapter.shutdown_local_evaluations_audit_loop()
+
+    assert calls == {"local": 1}
 
 
 def test_evaluations_audit_cache_size_clamped(monkeypatch):

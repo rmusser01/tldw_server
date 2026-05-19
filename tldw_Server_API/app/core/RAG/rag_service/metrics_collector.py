@@ -455,7 +455,10 @@ class MetricsCollector:
                     )
 
             except Exception as e:
-                logger.error(f"Error in metrics aggregation: {e}")
+                logger.error(
+                    "Error in metrics aggregation: {}",
+                    type(e).__name__,
+                )
 
 
 class PerformanceAnalyzer:

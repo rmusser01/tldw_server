@@ -1,6 +1,7 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { WorldBooksManager } from "../Manager"
 
 const {
@@ -151,18 +152,28 @@ describe("WorldBooksManager stage-3 action affordances", () => {
     vi.clearAllMocks()
   })
 
-  it("uses explicit attachment affordance and consistent icon action labels", () => {
+  it("uses explicit attachment affordance and consistent icon action labels", async () => {
+    const user = userEvent.setup()
     render(<WorldBooksManager />)
 
+    // New two-panel layout has Edit button + More actions overflow per row
+    expect(screen.getByRole("button", { name: "Edit Arcana" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "More actions for Arcana" })).toBeInTheDocument()
+
+    // Open overflow menu to check available actions.
+    await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+    expect(await screen.findByText("Manage Entries")).toBeInTheDocument()
+    expect(screen.getByText("Duplicate")).toBeInTheDocument()
+    expect(screen.getByText("Quick Attach Characters")).toBeInTheDocument()
+    expect(screen.getByText("Export JSON")).toBeInTheDocument()
+    expect(screen.getByText("Statistics")).toBeInTheDocument()
+    expect(screen.getByText("Delete")).toBeInTheDocument()
+
+    await user.click(screen.getByText("Quick Attach Characters"))
     expect(
-      screen.getByRole("button", { name: "View attached characters for Arcana (1)" })
+      await screen.findByText("Quick attach: Arcana", undefined, { timeout: 10_000 })
     ).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Edit world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Manage entries" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Duplicate world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Quick attach characters" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Export world book" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "View world book statistics" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete world book" })).toBeInTheDocument()
-  })
+    expect(screen.getByText("Currently attached")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open character Aria" })).toBeInTheDocument()
+  }, 15_000)
 })

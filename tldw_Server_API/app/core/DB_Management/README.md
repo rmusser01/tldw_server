@@ -2,6 +2,12 @@
 
 Central data stores and database abstractions for content, prompts, notes, evaluations, workflows, and per-user DB paths. Provides a unified backend interface for SQLite and PostgreSQL, full-text search helpers, migrations, and factories used across the API.
 
+## Wave 1 Contract Notes
+
+- The current tree already closes the April 2026 RLS, migration-loader, UserDatabase_v2, trusted-path, media_db API, and backend-FTS findings covered by the Wave 1 rebaseline.
+- Shared content-backend cache replacement and reset must close superseded backends deterministically.
+- `verify_migrations()` reports missing migration files, checksum mismatches, and non-contiguous available-version gaps.
+
 ## 1. Descriptive of Current Feature Set
 
 - Purpose: Provide consistent, secure, and scalable database access for content (Media DB v2), ChaCha Notes/Characters, Prompts/Prompt Studio, Evaluations, Workflows, Collections, Watchlists, and related utilities (paths, backups, migrations).

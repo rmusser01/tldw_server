@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
 import { Button } from '@/components/ui/button';
@@ -17,27 +17,51 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
-  ArrowLeft, Building2, Users, UserPlus, Mail, Trash2, Key, Shield, Copy, Plus, Eye, EyeOff, ListChecks, Pencil
+  ArrowLeft, Building2, Users, UserPlus, Mail, Trash2, Key, Shield, Copy, Plus, Eye, EyeOff, ListChecks, Pencil, Search
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Organization, OrgMember, Team, ProviderSecret, User, WatchlistSettings, Subscription, OrgUsageSummary, Invoice } from '@/types';
 import Link from 'next/link';
 import { UserPicker } from '@/components/users/UserPicker';
 import { PlanBadge } from '@/components/PlanBadge';
+import { CardSkeleton, FormSkeleton } from '@/components/ui/skeleton';
 import { UsageMeter } from '@/components/UsageMeter';
 import { InvoiceTable } from '@/components/InvoiceTable';
-import { CardSkeleton } from '@/components/ui/skeleton';
 import {
   formatBillingDate,
   isBillingEnabled,
   resolveOrganizationBillingSnapshot,
 } from '@/lib/billing';
+import { Pagination } from '@/components/ui/pagination';
+import { logger } from '@/lib/logger';
 
-export default function OrganizationDetailPage() {
+const VALID_TABS = ['members', 'teams', 'keys', 'billing'] as const;
+type OrgTab = (typeof VALID_TABS)[number];
+
+function OrganizationDetailPageInner() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const confirm = useConfirm();
   const orgId = params.id as string;
+
+  // Tab state from URL search param (?tab=members)
+  const tabFromUrl = searchParams.get('tab') as OrgTab | null;
+  const initialTab: OrgTab = tabFromUrl && VALID_TABS.includes(tabFromUrl) ? tabFromUrl : 'members';
+
+  const handleTabChange = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      if (value === 'members') {
+        next.delete('tab');
+      } else {
+        next.set('tab', value);
+      }
+      const qs = next.toString();
+      router.replace(`/organizations/${orgId}${qs ? `?${qs}` : ''}`, { scroll: false });
+    },
+    [router, orgId, searchParams],
+  );
 
   const [org, setOrg] = useState<Organization | null>(null);
   const [members, setMembers] = useState<OrgMember[]>([]);
@@ -229,7 +253,7 @@ export default function OrganizationDetailPage() {
       setSelectedMember(null);
       void loadData();
     } catch (err: unknown) {
-      console.error('Failed to add member:', err);
+      logger.error('Failed to add member', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to add member');
     }
   };
@@ -250,7 +274,7 @@ export default function OrganizationDetailPage() {
       setSuccess('Member removed successfully');
       void loadData();
     } catch (err: unknown) {
-      console.error('Failed to remove member:', err);
+      logger.error('Failed to remove member', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to remove member');
     }
   };
@@ -263,7 +287,7 @@ export default function OrganizationDetailPage() {
       void loadData();
       return true;
     } catch (err: unknown) {
-      console.error('Failed to update member role:', err);
+      logger.error('Failed to update member role', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to update member role');
       return false;
     }
@@ -291,7 +315,7 @@ export default function OrganizationDetailPage() {
       setInviteEmail('');
       setInviteRole('member');
     } catch (err: unknown) {
-      console.error('Failed to create invite:', err);
+      logger.error('Failed to create invite', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to create invite');
     }
   };
@@ -315,7 +339,7 @@ export default function OrganizationDetailPage() {
       setShowByokApiKey(false);
       void loadData();
     } catch (err: unknown) {
-      console.error('Failed to add BYOK key:', err);
+      logger.error('Failed to add BYOK key', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to add provider key');
     }
   };
@@ -338,7 +362,7 @@ export default function OrganizationDetailPage() {
       setSuccess('Provider key removed');
       void loadData();
     } catch (err: unknown) {
-      console.error('Failed to delete BYOK key:', err);
+      logger.error('Failed to delete BYOK key', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to delete provider key');
     } finally {
       setDeletingByokProvider((prev) => (prev === provider ? null : prev));
@@ -441,7 +465,7 @@ export default function OrganizationDetailPage() {
         successTimerRef.current = null;
       }, 2000);
     } catch (err: unknown) {
-      console.error('Failed to copy to clipboard:', err);
+      logger.error('Failed to copy to clipboard', { component: 'OrganizationDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError('Failed to copy to clipboard');
     }
   };
@@ -597,12 +621,25 @@ export default function OrganizationDetailPage() {
               </Alert>
             )}
 
-            <Tabs defaultValue="members" className="space-y-4">
+            <Tabs defaultValue={initialTab} onValueChange={handleTabChange} className="space-y-4">
               <TabsList>
-                <TabsTrigger value="members">Members ({members.length})</TabsTrigger>
-                <TabsTrigger value="teams">Teams</TabsTrigger>
-                <TabsTrigger value="keys">Keys & Secrets</TabsTrigger>
-                {isBillingEnabled() && <TabsTrigger value="billing">Billing</TabsTrigger>}
+                <TabsTrigger value="members">
+                  <Users className="mr-2 h-4 w-4" />
+                  Members
+                </TabsTrigger>
+                <TabsTrigger value="teams">
+                  <Shield className="mr-2 h-4 w-4" />
+                  Teams
+                </TabsTrigger>
+                <TabsTrigger value="keys">
+                  <Key className="mr-2 h-4 w-4" />
+                  Keys &amp; Settings
+                </TabsTrigger>
+                {isBillingEnabled() && (
+                  <TabsTrigger value="billing">
+                    Billing
+                  </TabsTrigger>
+                )}
               </TabsList>
 
               <TabsContent value="members">
@@ -844,328 +881,348 @@ export default function OrganizationDetailPage() {
               </Card>
               </TabsContent>
 
+              {/* Teams Tab */}
               <TabsContent value="teams">
-              {/* Teams Section */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Shield className="h-5 w-5" />
-                      Teams
-                    </CardTitle>
-                    <CardDescription>
-                      {teams.length} team{teams.length !== 1 ? 's' : ''}
-                    </CardDescription>
-                  </div>
-                  <Link href={`/teams?org=${orgId}`}>
-                    <Button size="sm">
-                      <Plus className="mr-2 h-4 w-4" />
-                      New Team
-                    </Button>
-                  </Link>
-                </CardHeader>
-                <CardContent>
-                  {teams.length === 0 ? (
-                    <div className="text-center text-muted-foreground py-8">
-                      No teams in this organization yet.
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Shield className="h-5 w-5" />
+                        Teams
+                      </CardTitle>
+                      <CardDescription>
+                        {teams.length} team{teams.length !== 1 ? 's' : ''}
+                      </CardDescription>
                     </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Description</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {teams.map((team) => (
-                          <TableRow key={team.id}>
-                            <TableCell className="font-medium">{team.name}</TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {team.description || '-'}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Link href={`/teams/${team.id}`}>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  aria-label={`View team ${team.name}`}
-                                  title={`View team ${team.name}`}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </Link>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-              </TabsContent>
-
-              <TabsContent value="keys">
-              {/* BYOK Provider Keys Section */}
-              <Card className="lg:col-span-2">
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Key className="h-5 w-5" />
-                      Provider API Keys (BYOK)
-                    </CardTitle>
-                    <CardDescription>
-                      Organization-level API keys for LLM providers. These keys are shared by all members.
-                    </CardDescription>
-                  </div>
-                    <Dialog
-                      open={showAddByok}
-                      onOpenChange={(nextOpen) => {
-                        setShowAddByok(nextOpen);
-                        if (!nextOpen) {
-                          setShowByokApiKey(false);
-                          setByokProvider('');
-                          setByokApiKey('');
-                        }
-                      }}
-                    >
-                    <DialogTrigger asChild>
+                    <Link href={`/teams?org=${orgId}`}>
                       <Button size="sm">
                         <Plus className="mr-2 h-4 w-4" />
-                        Add Key
+                        New Team
                       </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add Provider API Key</DialogTitle>
-                        <DialogDescription>
-                          Add an API key for an LLM provider. This key will be used for all organization members.
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="byokProvider">Provider</Label>
-                          <Select
-                            id="byokProvider"
-                            value={byokProvider}
-                            onChange={(e) => setByokProvider(e.target.value)}
-                          >
-                            <option value="">Select provider...</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="anthropic">Anthropic</option>
-                            <option value="google">Google AI</option>
-                            <option value="cohere">Cohere</option>
-                            <option value="groq">Groq</option>
-                            <option value="mistral">Mistral AI</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="openrouter">OpenRouter</option>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="byokApiKey">API Key</Label>
-                          <div className="relative">
-                            <Input
-                              id="byokApiKey"
-                              type={showByokApiKey ? 'text' : 'password'}
-                              placeholder="sk-..."
-                              value={byokApiKey}
-                              onChange={(e) => setByokApiKey(e.target.value)}
-                              className="pr-10"
-                            />
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setShowByokApiKey((prev) => !prev)}
-                              className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
-                              title={showByokApiKey ? 'Hide API key' : 'Show API key'}
-                              aria-label={showByokApiKey ? 'Hide API key' : 'Show API key'}
-                            >
-                              {showByokApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            This key will be encrypted and stored securely.
-                          </p>
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowAddByok(false)}>Cancel</Button>
-                        <Button onClick={handleAddByokKey}>Add Key</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </CardHeader>
-                <CardContent>
-                  {byokKeys.length === 0 ? (
-                    <div className="text-center text-muted-foreground py-8">
-                      No provider keys configured. Add keys to allow members to use their own API accounts.
-                    </div>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Provider</TableHead>
-                          <TableHead>Added</TableHead>
-                          <TableHead>Last Updated</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {byokKeys.map((key) => {
-                          const isDeleting = deletingByokProvider === key.provider;
-                          return (
-                          <TableRow key={key.provider}>
-                            <TableCell>
-                              <Badge variant="outline" className="capitalize">
-                                {key.provider}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {new Date(key.created_at).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">
-                              {new Date(key.updated_at).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteByokKey(key.provider)}
-                                disabled={isDeleting}
-                                title={isDeleting ? 'Removing API key' : 'Remove API key'}
-                                aria-label={isDeleting ? 'Removing API key' : 'Remove API key'}
-                                loading={isDeleting}
-                                className="text-red-500 hover:text-red-500"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Watchlist Settings */}
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <ListChecks className="h-5 w-5" />
-                    Watchlist Settings
-                  </CardTitle>
-                  <CardDescription>
-                    Configure usage watchlists and alerts for this organization
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {watchlistLoading ? (
-                    <CardSkeleton />
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <div className="flex items-center justify-between p-3 border rounded-lg">
-                          <div>
-                            <Label htmlFor="watchlist-enabled">Enable Watchlists</Label>
-                            <p className="text-xs text-muted-foreground">Track usage and spending</p>
-                          </div>
-                          <Checkbox
-                            id="watchlist-enabled"
-                            checked={editWatchlistEnabled}
-                            onCheckedChange={setEditWatchlistEnabled}
-                          />
-                        </div>
-                        <div className="space-y-1 p-3 border rounded-lg">
-                          <Label htmlFor="watchlist-threshold">Default Threshold</Label>
-                          <Input
-                            id="watchlist-threshold"
-                            type="number"
-                            min="1"
-                            value={editWatchlistThreshold}
-                            onChange={(e) => setEditWatchlistThreshold(e.target.value)}
-                            disabled={!editWatchlistEnabled}
-                          />
-                          <p className="text-xs text-muted-foreground">Usage limit before alerts</p>
-                        </div>
-                        <div className="flex items-center justify-between p-3 border rounded-lg">
-                          <div>
-                            <Label htmlFor="watchlist-alert">Alert on Breach</Label>
-                            <p className="text-xs text-muted-foreground">Send notifications when exceeded</p>
-                          </div>
-                          <Checkbox
-                            id="watchlist-alert"
-                            checked={editWatchlistAlertOnBreach}
-                            onCheckedChange={setEditWatchlistAlertOnBreach}
-                            disabled={!editWatchlistEnabled}
-                          />
-                        </div>
-                      </div>
-                      <Button onClick={handleSaveWatchlistSettings} disabled={watchlistSaving} loading={watchlistSaving} loadingText="Saving...">
-                        Save Settings
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-              </TabsContent>
-
-              <TabsContent value="billing">
-              {/* Subscription & Billing */}
-              {isBillingEnabled() && (
-                <Card className="lg:col-span-2">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      Subscription
-                      {subscription?.plan && <PlanBadge tier={subscription.plan.tier} />}
-                    </CardTitle>
+                    </Link>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    {subscription ? (
-                      <>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="text-muted-foreground">Status</p>
-                            <p className="font-medium capitalize">{subscription.status}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Current Period</p>
-                            <p className="font-medium">
-                              {formatBillingDate(subscription.current_period_start)} —{' '}
-                              {formatBillingDate(subscription.current_period_end)}
-                            </p>
-                          </div>
-                        </div>
-                        {usageSummary && (
-                          <div>
-                            <p className="text-sm font-medium mb-2">Token Usage</p>
-                            <UsageMeter
-                              used={usageSummary.tokens_used}
-                              included={usageSummary.tokens_included}
-                              overageCostCents={usageSummary.overage_cost_cents}
-                            />
-                          </div>
-                        )}
-                        {invoices.length > 0 && (
-                          <div>
-                            <p className="text-sm font-medium mb-2">Invoices</p>
-                            <InvoiceTable invoices={invoices} />
-                          </div>
-                        )}
-                      </>
+                  <CardContent>
+                    {teams.length === 0 ? (
+                      <div className="text-center text-muted-foreground py-8">
+                        No teams in this organization yet.
+                      </div>
                     ) : (
-                      <p className="text-muted-foreground">No active subscription.</p>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {teams.map((team) => (
+                            <TableRow key={team.id}>
+                              <TableCell className="font-medium">{team.name}</TableCell>
+                              <TableCell className="text-muted-foreground text-sm">
+                                {team.description || '-'}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Link href={`/teams/${team.id}`}>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-label={`View team ${team.name}`}
+                                    title={`View team ${team.name}`}
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </Link>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     )}
                   </CardContent>
                 </Card>
-              )}
               </TabsContent>
+
+              {/* Keys & Settings Tab */}
+              <TabsContent value="keys">
+                <div className="space-y-6">
+                  {/* BYOK Provider Keys Section */}
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Key className="h-5 w-5" />
+                          Provider API Keys (BYOK)
+                        </CardTitle>
+                        <CardDescription>
+                          Organization-level API keys for LLM providers. These keys are shared by all members.
+                        </CardDescription>
+                      </div>
+                        <Dialog
+                          open={showAddByok}
+                          onOpenChange={(nextOpen) => {
+                            setShowAddByok(nextOpen);
+                            if (!nextOpen) {
+                              setShowByokApiKey(false);
+                              setByokProvider('');
+                              setByokApiKey('');
+                            }
+                          }}
+                        >
+                        <DialogTrigger asChild>
+                          <Button size="sm">
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add Key
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Add Provider API Key</DialogTitle>
+                            <DialogDescription>
+                              Add an API key for an LLM provider. This key will be used for all organization members.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="byokProvider">Provider</Label>
+                              <Select
+                                id="byokProvider"
+                                value={byokProvider}
+                                onChange={(e) => setByokProvider(e.target.value)}
+                              >
+                                <option value="">Select provider...</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="google">Google AI</option>
+                                <option value="cohere">Cohere</option>
+                                <option value="groq">Groq</option>
+                                <option value="mistral">Mistral AI</option>
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="openrouter">OpenRouter</option>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="byokApiKey">API Key</Label>
+                              <div className="relative">
+                                <Input
+                                  id="byokApiKey"
+                                  type={showByokApiKey ? 'text' : 'password'}
+                                  placeholder="sk-..."
+                                  value={byokApiKey}
+                                  onChange={(e) => setByokApiKey(e.target.value)}
+                                  className="pr-10"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setShowByokApiKey((prev) => !prev)}
+                                  className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
+                                  title={showByokApiKey ? 'Hide API key' : 'Show API key'}
+                                  aria-label={showByokApiKey ? 'Hide API key' : 'Show API key'}
+                                >
+                                  {showByokApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                This key will be encrypted and stored securely.
+                              </p>
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setShowAddByok(false)}>Cancel</Button>
+                            <Button onClick={handleAddByokKey}>Add Key</Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    </CardHeader>
+                    <CardContent>
+                      {byokKeys.length === 0 ? (
+                        <div className="text-center text-muted-foreground py-8">
+                          No provider keys configured. Add keys to allow members to use their own API accounts.
+                        </div>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Provider</TableHead>
+                              <TableHead>Added</TableHead>
+                              <TableHead>Last Updated</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {byokKeys.map((key) => {
+                              const isDeleting = deletingByokProvider === key.provider;
+                              return (
+                              <TableRow key={key.provider}>
+                                <TableCell>
+                                  <Badge variant="outline" className="capitalize">
+                                    {key.provider}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {new Date(key.created_at).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {new Date(key.updated_at).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteByokKey(key.provider)}
+                                    disabled={isDeleting}
+                                    title={isDeleting ? 'Removing API key' : 'Remove API key'}
+                                    aria-label={isDeleting ? 'Removing API key' : 'Remove API key'}
+                                    loading={isDeleting}
+                                    className="text-red-500 hover:text-red-500"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Watchlist Settings */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <ListChecks className="h-5 w-5" />
+                        Watchlist Settings
+                      </CardTitle>
+                      <CardDescription>
+                        Configure usage watchlists and alerts for this organization
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {watchlistLoading ? (
+                        <FormSkeleton />
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="grid gap-4 sm:grid-cols-3">
+                            <div className="flex items-center justify-between p-3 border rounded-lg">
+                              <div>
+                                <Label htmlFor="watchlist-enabled">Enable Watchlists</Label>
+                                <p className="text-xs text-muted-foreground">Track usage and spending</p>
+                              </div>
+                              <Checkbox
+                                id="watchlist-enabled"
+                                checked={editWatchlistEnabled}
+                                onCheckedChange={setEditWatchlistEnabled}
+                              />
+                            </div>
+                            <div className="space-y-1 p-3 border rounded-lg">
+                              <Label htmlFor="watchlist-threshold">Default Threshold</Label>
+                              <Input
+                                id="watchlist-threshold"
+                                type="number"
+                                min="1"
+                                value={editWatchlistThreshold}
+                                onChange={(e) => setEditWatchlistThreshold(e.target.value)}
+                                disabled={!editWatchlistEnabled}
+                              />
+                              <p className="text-xs text-muted-foreground">Usage limit before alerts</p>
+                            </div>
+                            <div className="flex items-center justify-between p-3 border rounded-lg">
+                              <div>
+                                <Label htmlFor="watchlist-alert">Alert on Breach</Label>
+                                <p className="text-xs text-muted-foreground">Send notifications when exceeded</p>
+                              </div>
+                              <Checkbox
+                                id="watchlist-alert"
+                                checked={editWatchlistAlertOnBreach}
+                                onCheckedChange={setEditWatchlistAlertOnBreach}
+                                disabled={!editWatchlistEnabled}
+                              />
+                            </div>
+                          </div>
+                          <Button onClick={handleSaveWatchlistSettings} disabled={watchlistSaving} loading={watchlistSaving} loadingText="Saving...">
+                            Save Settings
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              {/* Billing Tab */}
+              {isBillingEnabled() && (
+                <TabsContent value="billing">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        Subscription
+                        {subscription?.plan && <PlanBadge tier={subscription.plan.tier} />}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {subscription ? (
+                        <>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <p className="text-muted-foreground">Status</p>
+                              <p className="font-medium capitalize">{subscription.status}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Current Period</p>
+                              <p className="font-medium">
+                                {formatBillingDate(subscription.current_period_start)} —{' '}
+                                {formatBillingDate(subscription.current_period_end)}
+                              </p>
+                            </div>
+                          </div>
+                          {usageSummary && (
+                            <div>
+                              <p className="text-sm font-medium mb-2">Token Usage</p>
+                              <UsageMeter
+                                used={usageSummary.tokens_used}
+                                included={usageSummary.tokens_included}
+                                overageCostCents={usageSummary.overage_cost_cents}
+                              />
+                            </div>
+                          )}
+                          {invoices.length > 0 && (
+                            <div>
+                              <p className="text-sm font-medium mb-2">Invoices</p>
+                              <InvoiceTable invoices={invoices} />
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground">No active subscription.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              )}
             </Tabs>
           </div>
       </ResponsiveLayout>
     </PermissionGuard>
+  );
+}
+
+// Wrap with Suspense for useSearchParams
+export default function OrganizationDetailPage() {
+  return (
+    <Suspense fallback={
+      <PermissionGuard variant="route" requireAuth role="admin">
+        <ResponsiveLayout>
+          <div className="p-4 lg:p-8">
+            <CardSkeleton />
+          </div>
+        </ResponsiveLayout>
+      </PermissionGuard>
+    }>
+      <OrganizationDetailPageInner />
+    </Suspense>
   );
 }

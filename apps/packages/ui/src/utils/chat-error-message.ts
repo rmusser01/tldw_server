@@ -1,5 +1,6 @@
 import i18n from "i18next"
 import { formatErrorMessage } from "@/utils/format-error-message"
+import { parseBillingLimitError } from "@/utils/billing-error"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
@@ -7,6 +8,8 @@ export type ChatErrorPayload = {
   summary: string
   hint: string
   detail: string
+  upgradeUrl?: string
+  category?: string
 }
 
 export const encodeChatErrorPayload = (payload: ChatErrorPayload): string =>
@@ -27,7 +30,9 @@ export const decodeChatErrorPayload = (
     return {
       summary: parsed.summary,
       hint: parsed.hint,
-      detail: typeof parsed.detail === "string" ? parsed.detail : ""
+      detail: typeof parsed.detail === "string" ? parsed.detail : "",
+      upgradeUrl: typeof parsed.upgradeUrl === "string" ? parsed.upgradeUrl : undefined,
+      category: typeof parsed.category === "string" ? parsed.category : undefined,
     }
   } catch {
     return null
@@ -88,6 +93,22 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
       "common:error.imageBackendUnavailableHint",
       "Enable an image backend (e.g., Flux-Klein or ZTurbo) in your tldw server config, then try again."
     )
+  } else if (
+    lower.includes("no_provider_configured") ||
+    lower.includes("no llm providers are configured") ||
+    lower.includes("no providers configured") ||
+    lower.includes("provider_not_configured") ||
+    (lower.includes("provider") &&
+      (lower.includes("not configured") || lower.includes("no api key")))
+  ) {
+    summary = i18n.t(
+      "common:error.friendlyNoProviderSummary",
+      "No LLM provider is configured on your server."
+    )
+    hint = i18n.t(
+      "common:error.friendlyNoProviderHint",
+      "Add an API key for OpenAI, Anthropic, or another provider in your server's .env file, then restart the server and try again."
+    )
   } else if (lower.includes("stream timeout: no updates received")) {
     summary = i18n.t(
       "common:error.friendlyTimeoutSummary",
@@ -97,6 +118,79 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
       "common:error.friendlyTimeoutHint",
       "The server stopped streaming responses. Try again, or open Health & diagnostics to check server status."
     )
+  } else if (
+    lower.includes("chunkererror") ||
+    lower.includes("chunker error") ||
+    lower.includes("chunking failed") ||
+    lower.includes("unable to chunk")
+  ) {
+    summary = i18n.t(
+      "common:error.friendlyChunkerSummary",
+      "This file couldn't be processed."
+    )
+    hint = i18n.t(
+      "common:error.friendlyChunkerHint",
+      "The server had trouble splitting the file into chunks. Try a different format or a smaller file."
+    )
+  } else if (
+    lower.includes("timeouterror") ||
+    lower.includes("timed out") ||
+    lower.includes("request timeout") ||
+    lower.includes("gateway timeout") ||
+    lower.includes("504")
+  ) {
+    summary = i18n.t(
+      "common:error.friendlyProcessingTimeoutSummary",
+      "Processing took too long."
+    )
+    hint = i18n.t(
+      "common:error.friendlyProcessingTimeoutHint",
+      "Try a smaller file, or increase the timeout in Settings."
+    )
+  } else if (
+    lower.includes("connectionerror") ||
+    lower.includes("connection refused") ||
+    lower.includes("econnrefused") ||
+    lower.includes("network error") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("err_connection")
+  ) {
+    summary = i18n.t(
+      "common:error.friendlyConnectionSummary",
+      "Lost connection to the server."
+    )
+    hint = i18n.t(
+      "common:error.friendlyConnectionHint",
+      "Check that the server is running, then try again. Open Health & diagnostics for more details."
+    )
+  } else if (
+    lower.includes("limit_exceeded") ||
+    lower.includes("feature_not_available") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("upgrade your plan")
+  ) {
+    const billingInfo = parseBillingLimitError(rawError)
+    summary = i18n.t(
+      "common:error.billingLimitSummary",
+      "You've reached a plan limit."
+    )
+    hint = billingInfo?.category
+      ? i18n.t(
+          "common:error.billingLimitHint",
+          "Your {{category}} usage has reached the limit for your current plan. Upgrade to continue.",
+          { category: billingInfo.category.replace(/_/g, " ") }
+        )
+      : i18n.t(
+          "common:error.billingFeatureHint",
+          "This feature is not available on your current plan. Upgrade to unlock it."
+        )
+    return encodeChatErrorPayload({
+      summary,
+      hint,
+      detail,
+      upgradeUrl: billingInfo?.upgradeUrl || "/billing/plans",
+      category: billingInfo?.category,
+    })
   } else {
     summary = i18n.t(
       "common:error.friendlyGenericSummary",

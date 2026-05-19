@@ -695,7 +695,7 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             logger.error(f"Failed to validate user data for user {subject_identifier} into User model: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing user data: Invalid format - {e}"
+            detail="Error processing user data: Invalid format."
         ) from e
     except _USER_DB_NONCRITICAL_EXCEPTIONS as e:  # Catch other potential errors during model creation
         if pii_redact_logs:
@@ -1028,8 +1028,10 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
                 except _USER_DB_NONCRITICAL_EXCEPTIONS:
                     logger.debug("Unable to populate AuthContext for single-user API key")
                 return user
-            logger.warning(
-                "Single-user mode received a non-matching API key; falling back to AuthNZ API key lookup."
+            logger.warning("Single-user mode received a non-matching API key.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API Key",
             )
     except HTTPException:
         # Preserve explicit auth failures (e.g., IP allowlist rejection).

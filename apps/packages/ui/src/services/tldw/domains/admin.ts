@@ -203,7 +203,7 @@ export const adminMethods = {
 
   async createAlertRule(payload: {
     metric: string; operator: string; threshold: number;
-    duration_minutes?: number; severity?: string
+    duration_minutes: number; severity: string; enabled?: boolean
   }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/monitoring/alert-rules",
@@ -220,7 +220,7 @@ export const adminMethods = {
     })
   },
 
-  async assignAlert(alertIdentity: string, payload: { user_id?: number | null }): Promise<any> {
+  async assignAlert(alertIdentity: string, payload: { assigned_to_user_id?: number | null }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/monitoring/alerts/${encodeURIComponent(alertIdentity)}/assign`,
       method: "POST",

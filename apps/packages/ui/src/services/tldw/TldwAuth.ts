@@ -113,7 +113,7 @@ export class TldwAuthService {
       noAuth: true
     })
     const tokens = response as TokenResponse
-    
+
     await tldwClient.updateConfig({
       authMode: 'multi-user',
       accessToken: hostedMode ? undefined : tokens.access_token,
@@ -228,10 +228,16 @@ export class TldwAuthService {
       headers: { 'Content-Type': 'application/json' },
       body: { refresh_token: config.refreshToken }
     })
-    
-    // Update access token
+
+    const latestConfig = await tldwClient.getConfig()
+
+    // Persist rotated refresh tokens; the backend rotates them by default.
     await tldwClient.updateConfig({
-      accessToken: tokens.access_token
+      accessToken: tokens.access_token,
+      refreshToken:
+        tokens.refresh_token ||
+        latestConfig?.refreshToken ||
+        config.refreshToken
     })
 
     // Set up auto-refresh if expires_in is provided
@@ -352,7 +358,7 @@ export class TldwAuthService {
 
     // Refresh 5 minutes before expiry
     const refreshIn = Math.max(0, (expiresIn - 300) * 1000)
-    
+
     this.refreshTimer = setTimeout(async () => {
       try {
         await this.refreshToken()

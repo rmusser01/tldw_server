@@ -16,16 +16,22 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_aliases,
+    custom_openai_provider_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.Infrastructure.provider_registry import ProviderRegistryBase
 
 from .providers.base import ChatProvider
+from .providers.custom_openai_adapter import make_custom_openai_adapter_class
 
 
 class ChatProviderRegistry:
     """Registry for Chat (LLM) providers and their adapters."""
 
     # Default adapter mappings (lazy via dotted paths)
-    DEFAULT_ADAPTERS: dict[str, str] = {
+    DEFAULT_ADAPTERS: dict[str, Any] = {
         "openai": "tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter.OpenAIAdapter",
         "anthropic": "tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter.AnthropicAdapter",
         "groq": "tldw_Server_API.app.core.LLM_Calls.providers.groq_adapter.GroqAdapter",
@@ -54,6 +60,12 @@ class ChatProviderRegistry:
         "ollama": "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters.OllamaAdapter",
         "aphrodite": "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters.AphroditeAdapter",
     }
+    DEFAULT_ADAPTERS.update(
+        {
+            custom_openai_provider_name(number): make_custom_openai_adapter_class(number)
+            for number in iter_custom_openai_provider_numbers(start=3)
+        }
+    )
 
     DEFAULT_ALIASES: dict[str, tuple[str, ...]] = {
         "openai": ("oai",),
@@ -80,6 +92,12 @@ class ChatProviderRegistry:
         "local-llm": ("local_llm",),
         "zai": ("z-ai", "z.ai"),
     }
+    DEFAULT_ALIASES.update(
+        {
+            custom_openai_provider_name(number): custom_openai_aliases(number)
+            for number in iter_custom_openai_provider_numbers(start=3)
+        }
+    )
 
     @staticmethod
     def _parse_optional_bool(value: Any) -> bool | None:

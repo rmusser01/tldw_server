@@ -3,10 +3,9 @@ import base64
 import time
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
 def _receive_ws_message(ws, *, timeout_s: float = 5.0):
@@ -69,7 +68,7 @@ def test_audio_ws_quota_error_includes_error_type_and_closes_1008(monkeypatch):
 
     token = get_settings().SINGLE_USER_API_KEY
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
         except Exception:
@@ -112,7 +111,7 @@ def test_audio_ws_quota_error_without_compat_alias(monkeypatch):
 
     token = get_settings().SINGLE_USER_API_KEY
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
         except Exception:

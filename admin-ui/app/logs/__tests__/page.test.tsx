@@ -17,6 +17,11 @@ vi.mock('@/components/ResponsiveLayout', () => ({
   ),
 }));
 
+let mockSearchParams = new URLSearchParams();
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => mockSearchParams,
+}));
+
 vi.mock('@/lib/use-url-state', async () => {
   const React = await import('react');
   return {
@@ -80,6 +85,7 @@ const mockLogsResponse = {
 };
 
 beforeEach(() => {
+  mockSearchParams = new URLSearchParams();
   apiMock.getSystemLogs.mockResolvedValue(mockLogsResponse);
 });
 
@@ -147,6 +153,30 @@ describe('LogsPage', () => {
     await waitFor(() => {
       expect(screen.queryByText('Primary failure for request', { selector: 'summary' })).not.toBeInTheDocument();
       expect(screen.getByText('Different request activity', { selector: 'summary' })).toBeInTheDocument();
+    });
+  });
+
+  it('keeps the request id filter in sync with client-side URL changes', async () => {
+    const { rerender } = render(<LogsPage />);
+
+    await waitFor(() => {
+      expect(apiMock.getSystemLogs).toHaveBeenCalledWith(
+        expect.not.objectContaining({ request_id: expect.anything() }),
+        expect.any(Object)
+      );
+    });
+
+    mockSearchParams = new URLSearchParams('request_id=req-2');
+    rerender(<LogsPage />);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText('Request ID') as HTMLInputElement).value).toBe('req-2');
+    });
+    await waitFor(() => {
+      expect(apiMock.getSystemLogs).toHaveBeenLastCalledWith(
+        expect.objectContaining({ request_id: 'req-2' }),
+        expect.any(Object)
+      );
     });
   });
 });

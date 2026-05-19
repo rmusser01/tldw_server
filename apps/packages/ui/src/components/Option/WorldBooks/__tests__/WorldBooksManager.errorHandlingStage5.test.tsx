@@ -212,14 +212,21 @@ describe("WorldBooksManager error-handling stage-5 edge warnings", () => {
     vi.clearAllMocks()
   })
 
-  it("filters stale attachment rows when attached characters no longer exist", () => {
-    render(<WorldBooksManager />)
+  it(
+    "filters stale attachment rows when attached characters no longer exist",
+    async () => {
+      const user = userEvent.setup()
+      render(<WorldBooksManager />)
 
-    expect(screen.getByText("Open to load")).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /View attached characters for Arcana/i })
-    ).not.toBeInTheDocument()
-  })
+      await user.click(screen.getByText("Arcana"))
+      const detailPanel = await screen.findByRole("main", { name: "World book detail" })
+      await user.click(screen.getByRole("tab", { name: "Attachments" }))
+
+      expect(screen.queryByText("Deleted Character")).not.toBeInTheDocument()
+      expect(detailPanel).toHaveTextContent("No characters attached.")
+    },
+    20000
+  )
 
   it(
     "shows recursive scanning warning with backend max depth",

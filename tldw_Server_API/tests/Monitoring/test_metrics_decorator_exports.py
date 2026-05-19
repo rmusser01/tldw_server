@@ -31,17 +31,30 @@ def test_measure_latency_exports_default_buckets(monkeypatch):
         metrics_manager._metrics_registry = None
 
 
-def test_cache_hit_ratio_uses_cumulative_counters(monkeypatch):
+def test_cache_metrics_preserves_tuple_return(monkeypatch):
+    monkeypatch.setenv("METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED", "20")
+    metrics_manager._metrics_registry = None
+    metrics_manager.get_metrics_registry()
+
+    try:
+        @cache_metrics("tuple_cache", track_ratio=False)
+        def fetch_tuple():
+            return ("payload", True)
+
+        assert fetch_tuple() == ("payload", True)
+    finally:
+        metrics_manager._metrics_registry = None
 
 
-    monkeypatch.setenv("METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED", "2")
+def test_cache_hit_ratio_ignores_tuple_second_value_without_from_cache(monkeypatch):
+    monkeypatch.setenv("METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED", "20")
     metrics_manager._metrics_registry = None
     registry = metrics_manager.get_metrics_registry()
 
     try:
         @cache_metrics("demo_cache", track_ratio=True)
         def fetch(cache_hit: bool):
-            return "payload", cache_hit
+            return ("payload", cache_hit)
 
         fetch(False)
         fetch(True)
@@ -49,7 +62,7 @@ def test_cache_hit_ratio_uses_cumulative_counters(monkeypatch):
         fetch(True)
 
         stats = registry.get_metric_stats("cache_hit_ratio", {"cache": "demo_cache"})
-        assert stats["latest"] == pytest.approx(3 / 4)
+        assert stats["latest"] == pytest.approx(0.0)
     finally:
         metrics_manager._metrics_registry = None
 

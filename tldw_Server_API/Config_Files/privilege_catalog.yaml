@@ -824,6 +824,20 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/workflows-run-saved
+  - id: workflows.run_adhoc
+    description: Trigger an ad-hoc workflow definition manually.
+    resource_tags:
+      - workflows
+      - automation
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - automation_manager
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/workflows-run-adhoc
   - id: evals.create_run
     description: Launch evaluation runs from existing evaluation definitions.
     resource_tags:
@@ -1174,6 +1188,68 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/acp-agents-health
+  - id: acp.sessions.prompt_async
+    description: Submit an ACP prompt for asynchronous execution via the scheduler.
+    resource_tags:
+      - acp
+      - sessions
+      - async
+    sensitivity_tier: restricted
+    rate_limit_class: admin
+    default_roles:
+      - admin
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/acp-sessions-prompt-async
+  - id: acp.tasks.status
+    description: Poll status and results of async ACP tasks.
+    resource_tags:
+      - acp
+      - tasks
+      - read
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/acp-tasks-status
+  - id: acp.runs.list
+    description: Query ACP run history with optional filters.
+    resource_tags:
+      - acp
+      - runs
+      - read
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/acp-runs-list
+  - id: acp.runs.aggregate
+    description: Aggregate token usage and costs across ACP runs.
+    resource_tags:
+      - acp
+      - runs
+      - analytics
+    sensitivity_tier: high
+    rate_limit_class: elevated
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/acp-runs-aggregate
   - id: sharing.create
     description: Share workspaces with teams or organizations.
     resource_tags:

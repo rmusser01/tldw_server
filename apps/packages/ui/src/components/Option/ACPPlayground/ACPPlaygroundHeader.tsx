@@ -17,6 +17,8 @@ interface ACPPlaygroundHeaderProps {
   onToggleLeftPane: () => void
   onToggleRightPane: () => void
   hideToggles?: boolean
+  acpHealthy?: boolean
+  isHealthLoading?: boolean
 }
 
 export const ACPPlaygroundHeader: React.FC<ACPPlaygroundHeaderProps> = ({
@@ -25,6 +27,8 @@ export const ACPPlaygroundHeader: React.FC<ACPPlaygroundHeaderProps> = ({
   onToggleLeftPane,
   onToggleRightPane,
   hideToggles = false,
+  acpHealthy,
+  isHealthLoading = false,
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
 
@@ -103,8 +107,46 @@ export const ACPPlaygroundHeader: React.FC<ACPPlaygroundHeaderProps> = ({
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-primary" />
           <div>
-            <h1 className="text-lg font-semibold text-text">
+            <h1 className="flex items-center gap-2 text-lg font-semibold text-text">
               {t("playground:acp.title", "Agent Playground")}
+              {!isHealthLoading && acpHealthy !== undefined && (
+                <Tooltip
+                  title={
+                    acpHealthy
+                      ? t("playground:acp.health.healthy", "ACP backend is healthy")
+                      : t(
+                          "playground:acp.health.unhealthy",
+                          "ACP backend is not configured or unreachable"
+                        )
+                  }
+                >
+                  <span
+                    className={`inline-block h-2.5 w-2.5 rounded-full ${
+                      acpHealthy ? "bg-success" : "bg-error"
+                    }`}
+                    data-testid="acp-health-indicator"
+                    tabIndex={0}
+                    role="status"
+                    aria-label={
+                      acpHealthy
+                        ? t("playground:acp.health.healthy", "ACP backend is healthy")
+                        : t(
+                            "playground:acp.health.unhealthy",
+                            "ACP backend is not configured or unreachable"
+                          )
+                    }
+                  >
+                    <span className="sr-only">
+                      {acpHealthy
+                        ? t("playground:acp.health.healthy", "ACP backend is healthy")
+                        : t(
+                            "playground:acp.health.unhealthy",
+                            "ACP backend is not configured or unreachable"
+                          )}
+                    </span>
+                  </span>
+                </Tooltip>
+              )}
             </h1>
             <p className="text-xs text-text-muted">
               {t("playground:acp.subtitle", "Interact with AI coding agents via ACP")}

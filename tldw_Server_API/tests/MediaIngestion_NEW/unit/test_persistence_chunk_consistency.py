@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 from tldw_Server_API.app.core.Ingestion_Media_Processing import (
     persistence as ingestion_persistence,
 )
@@ -339,6 +340,8 @@ async def test_persist_primary_av_item_invokes_chunk_consistency_check(
 async def test_persist_primary_av_item_upserts_normalized_transcript_via_extracted_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    metrics_manager._metrics_registry = None
+    registry = metrics_manager.get_metrics_registry()
     _RepoBackedWorkerDB.instances = []
     _FakeMediaRepository.calls = []
     transcript_calls: list[dict[str, Any]] = []
@@ -435,18 +438,26 @@ async def test_persist_primary_av_item_upserts_normalized_transcript_via_extract
         claims_context=None,
     )
 
-    assert len(transcript_calls) == 1
-    assert transcript_calls[0]["media_id"] == 1
-    assert transcript_calls[0]["whisper_model"] == "resolved-model"
-    assert json.loads(transcript_calls[0]["transcription"]) == {
-        "text": "hello world",
-        "segments": [{"text": "hello world", "start": 0.0, "end": 1.0}],
-        "language": "en",
-        "metadata": {"provider": "fake-provider", "model": "resolved-model"},
-    }
-    assert process_result["normalized_stt"]["metadata"]["model"] == "resolved-model"
-    assert len(_RepoBackedWorkerDB.instances) == 2
-    assert all(instance.closed for instance in _RepoBackedWorkerDB.instances)
+    try:
+        assert len(transcript_calls) == 1
+        assert transcript_calls[0]["media_id"] == 1
+        assert transcript_calls[0]["whisper_model"] == "resolved-model"
+        assert transcript_calls[0].get("idempotency_key") is None
+        assert json.loads(transcript_calls[0]["transcription"]) == {
+            "text": "hello world",
+            "segments": [{"text": "hello world", "start": 0.0, "end": 1.0}],
+            "language": "en",
+            "metadata": {"provider": "fake-provider", "model": "resolved-model"},
+        }
+        assert registry.get_cumulative_counter(
+            "audio_stt_run_writes_total",
+            {"provider": "other", "write_result": "created"},
+        ) == 1
+        assert process_result["normalized_stt"]["metadata"]["model"] == "resolved-model"
+        assert len(_RepoBackedWorkerDB.instances) == 2
+        assert all(instance.closed for instance in _RepoBackedWorkerDB.instances)
+    finally:
+        metrics_manager._metrics_registry = None
 
 
 @pytest.mark.asyncio

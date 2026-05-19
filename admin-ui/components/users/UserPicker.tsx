@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import type { User } from '@/types';
+import { logger } from '@/lib/logger';
 
 type UserPickerProps = {
   label?: string;
@@ -58,7 +59,7 @@ export function UserPicker({
         const data = await api.getUsers({ search: trimmed, limit: '20' });
         setResults(data);
       } catch (err: unknown) {
-        console.error('Failed to search users:', err);
+        logger.error('Failed to search users', { component: 'UserPicker', error: err instanceof Error ? err.message : String(err) });
         setResults([]);
         setError(err instanceof Error ? err.message : 'Failed to search users');
       } finally {

@@ -363,22 +363,27 @@ class AnalyticsDatabase:
         self.db_path = db_path
         self._lock = threading.RLock()
         self._local = threading.local()
+        self._config_parser = config or self._load_config()
+        self._backend = self._resolve_backend(
+            db_path=db_path,
+            backend=backend,
+            config=self._config_parser,
+        )
+        self._uses_shared_content_backend = backend is None and self._is_shared_content_backend(self._backend)
+        self._bootstrapped_backend_targets: set[str] = set()
+        self._db_identifier = self._describe_backend(self._backend)
 
-        self.backend = self._resolve_backend(db_path=db_path, backend=backend, config=config)
-        self.backend_type = self.backend.backend_type
-        self._db_identifier = self._describe_backend()
-
-        if self.backend_type == BackendType.SQLITE:
+        if self._backend.backend_type == BackendType.SQLITE:
             path_obj = Path(db_path).expanduser().resolve()
             path_obj.parent.mkdir(parents=True, exist_ok=True)
             self.db_path = str(path_obj)
 
         logger.info(
             'Initializing AnalyticsDatabase (backend={}) at {}',
-            self.backend_type.value,
+            self._backend.backend_type.value,
             self._db_identifier,
         )
-        self._initialize_database()
+        self._ensure_bootstrap_for_backend(self._backend)
 
     def _load_config(self) -> ConfigParser | None:
         try:
@@ -387,12 +392,48 @@ class AnalyticsDatabase:
         except Exception:  # noqa: BLE001 - best-effort config loading
             return None
 
-    def _describe_backend(self) -> str:
-        if self.backend_type == BackendType.SQLITE:
+    @property
+    def backend(self) -> DatabaseBackend:
+        pinned_backend = getattr(self._local, "backend_pin", None)
+        if pinned_backend is not None:
+            return pinned_backend
+        return self._backend
+
+    def _refresh_shared_backend_after_error(self) -> None:
+        if not self._uses_shared_content_backend:
+            return
+        with self._lock:
+            if not self._uses_shared_content_backend:
+                return
+            refreshed_backend = self._resolve_backend(
+                db_path=self.db_path,
+                backend=None,
+                config=self._config_parser,
+            )
+            self._ensure_bootstrap_for_backend(refreshed_backend)
+            self._backend = refreshed_backend
+            self._uses_shared_content_backend = self._is_shared_content_backend(refreshed_backend)
+            self._db_identifier = self._describe_backend(refreshed_backend)
+
+    @property
+    def backend_type(self) -> BackendType:
+        return self.backend.backend_type
+
+    def _is_shared_content_backend(self, backend: DatabaseBackend) -> bool:
+        return getattr(backend, "backend_type", None) in {
+            BackendType.POSTGRESQL,
+            BackendType.MYSQL,
+        }
+
+    def _describe_backend(self, backend: DatabaseBackend) -> str:
+        if backend.backend_type == BackendType.SQLITE:
             return str(Path(self.db_path).expanduser())
-        cfg = self.backend.config
-        if cfg.connection_string:
-            return cfg.connection_string
+        cfg = getattr(backend, "config", None)
+        connection_string = getattr(cfg, "connection_string", None)
+        if connection_string:
+            return connection_string
+        if cfg is None:
+            return str(backend.backend_type)
         host = cfg.pg_host or "localhost"
         database = cfg.pg_database or "tldw_content"
         return f"{host}:{cfg.pg_port}/{database}"
@@ -410,7 +451,7 @@ class AnalyticsDatabase:
         parser = config or self._load_config()
         if parser is not None:
             candidate: DatabaseBackend | None = get_content_backend(parser)
-            if candidate and candidate.backend_type == BackendType.POSTGRESQL:
+            if candidate and self._is_shared_content_backend(candidate):
                 return candidate
 
         sqlite_config = DatabaseConfig(
@@ -419,14 +460,31 @@ class AnalyticsDatabase:
         )
         return DatabaseBackendFactory.create_backend(sqlite_config)
 
+    def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
+        target = self._describe_backend(backend)
+        with self._lock:
+            if target in self._bootstrapped_backend_targets:
+                return
+            self._bootstrap_backend_schema(backend, target)
+            self._bootstrapped_backend_targets.add(target)
+
     def _initialize_database(self) -> None:
-        schema = self._SCHEMA_SQLITE if self.backend_type == BackendType.SQLITE else self._SCHEMA_POSTGRES
+        backend = self.backend
+        self._ensure_bootstrap_for_backend(backend)
+
+    def _bootstrap_backend_schema(
+        self,
+        backend: DatabaseBackend,
+        target_identifier: str | None = None,
+    ) -> None:
+        target_identifier = target_identifier or self._describe_backend(backend)
+        schema = self._SCHEMA_SQLITE if backend.backend_type == BackendType.SQLITE else self._SCHEMA_POSTGRES
         try:
-            with self.backend.transaction() as conn:
-                self.backend.create_tables(schema, connection=conn)
+            with backend.transaction() as conn:
+                backend.create_tables(schema, connection=conn)
                 for statement in self._INDEX_STATEMENTS:
-                    self._execute(conn, statement)
-            logger.info("Analytics database initialized at {}", self._db_identifier)
+                    self._execute_on_backend(backend, conn, statement)
+            logger.info("Analytics database initialized at {}", target_identifier)
         except Exception as exc:
             logger.error("Failed to initialize analytics database: {}", exc)
             raise
@@ -435,12 +493,14 @@ class AnalyticsDatabase:
         self,
         query: str,
         params: tuple | list | dict | None = None,
+        backend_type: BackendType | None = None,
     ) -> tuple[str, tuple | dict | None]:
+        resolved_backend_type = backend_type or self.backend_type
         return prepare_backend_statement(
-            self.backend_type,
+            resolved_backend_type,
             query,
             params,
-            ensure_returning=self.backend_type == BackendType.POSTGRESQL,
+            ensure_returning=resolved_backend_type == BackendType.POSTGRESQL,
         )
 
     def _execute(
@@ -449,15 +509,28 @@ class AnalyticsDatabase:
         query: str,
         params: tuple | list | dict | None = None,
     ):
-        prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+        return self._execute_on_backend(self.backend, conn, query, params)
 
-        if self.backend_type == BackendType.SQLITE:
+    def _execute_on_backend(
+        self,
+        backend: DatabaseBackend,
+        conn,
+        query: str,
+        params: tuple | list | dict | None = None,
+    ):
+        prepared_query, prepared_params = self._prepare_backend_statement(
+            query,
+            params,
+            backend_type=backend.backend_type,
+        )
+
+        if backend.backend_type == BackendType.SQLITE:
             cursor = conn.cursor()
             cursor.execute(prepared_query, prepared_params or ())
             return cursor
 
         try:
-            result = self.backend.execute(
+            result = backend.execute(
                 prepared_query,
                 prepared_params,
                 connection=conn,
@@ -465,6 +538,7 @@ class AnalyticsDatabase:
             return BackendCursorAdapter(result)
         except BackendDatabaseError as exc:
             logger.error("Backend execute failed: {}", exc)
+            self._refresh_shared_backend_after_error()
             raise
 
     def _fetchone(
@@ -491,8 +565,20 @@ class AnalyticsDatabase:
 
     @contextmanager
     def transaction(self):
-        with self.backend.transaction() as conn:
-            yield conn
+        backend = self.backend
+        previous_backend = getattr(self._local, "backend_pin", None)
+        self._local.backend_pin = backend
+        try:
+            with backend.transaction() as conn:
+                yield conn
+        finally:
+            if previous_backend is None:
+                try:
+                    del self._local.backend_pin
+                except AttributeError:
+                    pass
+            else:
+                self._local.backend_pin = previous_backend
 
     def record_search(self, search_data: dict[str, Any]) -> None:
         try:

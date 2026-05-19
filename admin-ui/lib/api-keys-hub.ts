@@ -23,6 +23,10 @@ export interface UnifiedApiKeyRow {
   status: UnifiedApiKeyStatus;
   requestCount24h: number | null;
   errorRate24h: number | null;
+  /** Cumulative token count from usage attribution (null if not loaded). */
+  totalTokens: number | null;
+  /** Estimated cumulative cost in USD from usage attribution (null if not loaded). */
+  estimatedCostUsd: number | null;
 }
 
 export interface KeyAgeIndicator {
@@ -76,9 +80,16 @@ export const resolveUnifiedApiKeyStatus = (
   return 'active';
 };
 
+export interface ApiKeyUsageLike {
+  key_id: string;
+  total_tokens?: number;
+  estimated_cost_usd?: number;
+}
+
 export const buildUnifiedApiKeyRows = (
   users: UserWithKeyCount[],
-  keysByUserId: Record<number, ApiKeyMetadataLike[]>
+  keysByUserId: Record<number, ApiKeyMetadataLike[]>,
+  usageByKeyId?: Record<string, ApiKeyUsageLike>,
 ): UnifiedApiKeyRow[] => {
   const rows: UnifiedApiKeyRow[] = [];
 
@@ -87,6 +98,7 @@ export const buildUnifiedApiKeyRows = (
     userKeys.forEach((key) => {
       const keyId = String(key.id);
       const keyPrefix = (key.key_prefix || '').trim();
+      const usage = usageByKeyId?.[keyId];
       rows.push({
         keyId,
         keyPrefix,
@@ -99,6 +111,8 @@ export const buildUnifiedApiKeyRows = (
         status: resolveUnifiedApiKeyStatus(key.status, key.expires_at),
         requestCount24h: null,
         errorRate24h: null,
+        totalTokens: usage?.total_tokens ?? null,
+        estimatedCostUsd: usage?.estimated_cost_usd ?? null,
       });
     });
   });
@@ -270,6 +284,35 @@ export const buildKeyHygieneSummary = (
   };
 };
 
+export type HygieneFilter = 'none' | 'needs-rotation' | 'expiring-soon' | 'inactive';
+
+export const filterByHygiene = (
+  rows: UnifiedApiKeyRow[],
+  hygieneFilter: HygieneFilter,
+  now: Date = new Date()
+): UnifiedApiKeyRow[] => {
+  if (hygieneFilter === 'none') return rows;
+
+  return rows.filter((row) => {
+    if (row.status !== 'active') return false;
+
+    switch (hygieneFilter) {
+      case 'needs-rotation': {
+        const age = getKeyAgeIndicator(row.createdAt, now);
+        return age !== null && age.ageDays > 180;
+      }
+      case 'expiring-soon': {
+        return getKeyExpiryIndicator(row.expiresAt, now) !== null;
+      }
+      case 'inactive': {
+        return isInactiveKey(row.lastUsedAt, 30, now);
+      }
+      default:
+        return true;
+    }
+  });
+};
+
 export const formatRequestCount24h = (value: number | null): string => {
   if (value === null || !Number.isFinite(value)) {
     return 'N/A';
@@ -282,4 +325,30 @@ export const formatErrorRate24h = (value: number | null): string => {
     return 'N/A';
   }
   return `${value.toFixed(2)}%`;
+};
+
+export const formatTokenCount = (value: number | null): string => {
+  if (value === null || !Number.isFinite(value)) {
+    return '--';
+  }
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}K`;
+  }
+  return value.toLocaleString();
+};
+
+export const formatCostUsd = (value: number | null): string => {
+  if (value === null || !Number.isFinite(value)) {
+    return '--';
+  }
+  if (value === 0) {
+    return '$0.00';
+  }
+  if (value < 0.01) {
+    return '<$0.01';
+  }
+  return `$${value.toFixed(2)}`;
 };

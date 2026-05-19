@@ -29,6 +29,16 @@ const {
   useAlertRulesMock: vi.fn(),
 }));
 
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/monitoring',
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+}));
+
 vi.mock('@/components/ui/confirm-dialog', () => ({
   useConfirm: () => useConfirmMock(),
 }));

@@ -13,6 +13,16 @@ class _StubConn:
     async def execute(self, sql, *params):
         self.queries.append(sql)
 
+    async def fetch(self, sql, *params):
+        if "information_schema.columns" in sql:
+            return [
+                {"column_name": "identifier"},
+                {"column_name": "attempt_type"},
+                {"column_name": "locked_until"},
+                {"column_name": "reason"},
+            ]
+        return []
+
 
 class _StubTransaction:
     def __init__(self, conn):
@@ -51,9 +61,14 @@ async def test_rate_limiter_bootstraps_postgres_schema():
     await limiter.initialize()
 
     ddl_blob = "\n".join(pool.conn.queries)
+    account_lockouts_ddl = next(
+        q for q in pool.conn.queries if "CREATE TABLE IF NOT EXISTS account_lockouts" in q
+    )
     assert "CREATE TABLE IF NOT EXISTS rate_limits" in ddl_blob
     assert "CREATE TABLE IF NOT EXISTS failed_attempts" in ddl_blob
     assert "CREATE TABLE IF NOT EXISTS account_lockouts" in ddl_blob
+    assert "attempt_type TEXT NOT NULL" in account_lockouts_ddl
+    assert "PRIMARY KEY (identifier, attempt_type)" in account_lockouts_ddl
 
 
 @pytest.mark.asyncio

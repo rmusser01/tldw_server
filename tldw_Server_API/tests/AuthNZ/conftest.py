@@ -822,7 +822,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
                 key_prefix VARCHAR(16) NOT NULL,
                 name VARCHAR(255),
                 description TEXT,
-                scope VARCHAR(50) DEFAULT 'read',
+                scope VARCHAR(50),
                 status VARCHAR(20) DEFAULT 'active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP,
@@ -1566,7 +1566,7 @@ async def setup_test_database(monkeypatch):
                 key_prefix VARCHAR(16) NOT NULL,
                 name VARCHAR(255),
                 description TEXT,
-                scope VARCHAR(50) DEFAULT 'read',
+                scope VARCHAR(50),
                 status VARCHAR(20) DEFAULT 'active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP,
@@ -1656,9 +1656,11 @@ async def setup_test_database(monkeypatch):
         """)
         await test_conn.execute("""
             CREATE TABLE IF NOT EXISTS account_lockouts (
-                identifier TEXT PRIMARY KEY,
+                identifier TEXT NOT NULL,
+                attempt_type TEXT NOT NULL,
                 locked_until TIMESTAMPTZ NOT NULL,
-                reason TEXT
+                reason TEXT,
+                PRIMARY KEY (identifier, attempt_type)
             )
         """)
         await test_conn.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits_identifier ON rate_limits(identifier)")

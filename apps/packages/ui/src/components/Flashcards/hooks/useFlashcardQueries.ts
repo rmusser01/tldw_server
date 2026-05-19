@@ -2,17 +2,25 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   listDecks,
   listFlashcards,
+  listFlashcardTagSuggestions,
+  listRecentFlashcardReviewSessions,
+  endFlashcardReviewSession,
   createFlashcard,
   createFlashcardsBulk,
   updateFlashcardsBulk,
   createDeck,
   updateDeck,
+  createFlashcardTemplate,
+  deleteFlashcardTemplate,
+  getFlashcardTemplate,
   updateFlashcard,
   deleteFlashcard,
   resetFlashcardScheduling,
   reviewFlashcard,
   getNextReviewCard,
   getFlashcardAssistant,
+  listFlashcardTemplates,
+  updateFlashcardTemplate,
   respondFlashcardAssistant,
   generateFlashcards,
   getFlashcard,
@@ -25,8 +33,11 @@ import {
   exportFlashcardsFile,
   getFlashcardsImportLimits,
   type Deck,
+  type DeckCreateInput,
   type DeckUpdate,
   type Flashcard,
+  type FlashcardTemplateCreate,
+  type FlashcardTemplateUpdate,
   type StudyAssistantContextResponse,
   type StudyAssistantRespondRequest,
   type FlashcardBulkUpdateItem,
@@ -51,6 +62,20 @@ export interface UseFlashcardQueriesOptions {
   enabled?: boolean
   includeWorkspaceItems?: boolean
   workspaceId?: string | null
+}
+
+export interface UseFlashcardDeckRecentCardsQueryOptions extends UseFlashcardQueriesOptions {
+  limit?: number
+}
+export interface UseGlobalFlashcardTagSuggestionsQueryOptions {
+  enabled?: boolean
+  limit?: number
+}
+
+export interface UseRecentFlashcardReviewSessionsQueryOptions extends UseFlashcardQueriesOptions {
+  limit?: number
+  scopeKey?: string | null
+  status?: string | null
 }
 
 const invalidateFlashcardsQueries = (qc: ReturnType<typeof useQueryClient>) =>
@@ -175,6 +200,124 @@ export function useFlashcardAssistantQuery(
     queryKey: ["flashcards:assistant", cardUuid ?? null],
     queryFn: ({ signal }) => getFlashcardAssistant(cardUuid!, { signal }),
     enabled: (options?.enabled ?? flashcardsEnabled) && !!cardUuid
+  })
+}
+
+/**
+ * Hook for fetching recent cards for a deck reference view.
+ */
+export function useFlashcardDeckRecentCardsQuery(
+  deckId: number | null | undefined,
+  options?: UseFlashcardDeckRecentCardsQueryOptions
+) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+  const visibilityParams = buildWorkspaceVisibilityParams(options)
+  const limit = options?.limit ?? 6
+
+  return useQuery({
+    queryKey: ["flashcards:deck:recent", deckId ?? null, limit, visibilityParams],
+    queryFn: async (): Promise<Flashcard[]> => {
+      if (deckId == null) {
+        return []
+      }
+      const response = await listFlashcards({
+        deck_id: deckId,
+        due_status: "all",
+        limit,
+        offset: 0,
+        order_by: "created_at",
+        ...visibilityParams
+      })
+      return response.items || []
+    },
+    enabled: (options?.enabled ?? flashcardsEnabled) && !!deckId
+  })
+}
+
+/**
+ * Hook for searching cards in a deck reference view.
+ */
+export function useFlashcardDeckSearchQuery(
+  params: {
+    deckId: number | null | undefined
+    query: string
+    limit?: number
+  },
+  options?: UseFlashcardQueriesOptions
+) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+  const visibilityParams = buildWorkspaceVisibilityParams(options)
+  const trimmedQuery = params.query.trim()
+  const limit = params.limit ?? 20
+
+  return useQuery({
+    queryKey: [
+      "flashcards:deck:search",
+      params.deckId ?? null,
+      trimmedQuery,
+      limit,
+      visibilityParams
+    ],
+    queryFn: async (): Promise<Flashcard[]> => {
+      if (params.deckId == null || trimmedQuery.length === 0) {
+        return []
+      }
+      const response = await listFlashcards({
+        deck_id: params.deckId,
+        q: trimmedQuery,
+        due_status: "all",
+        limit,
+        offset: 0,
+        order_by: "created_at",
+        ...visibilityParams
+      })
+      return response.items || []
+    },
+    enabled: (options?.enabled ?? flashcardsEnabled) && !!params.deckId && trimmedQuery.length > 0
+  })
+}
+
+export function useRecentFlashcardReviewSessionsQuery(
+  params: {
+    deckId?: number | null
+    scopeKey?: string | null
+    status?: string | null
+    limit?: number
+  } = {},
+  options?: UseRecentFlashcardReviewSessionsQueryOptions
+) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+  const effectiveLimit = params.limit ?? options?.limit ?? 20
+
+  return useQuery({
+    queryKey: [
+      "flashcards:review-sessions:recent",
+      params.deckId ?? null,
+      params.scopeKey ?? null,
+      params.status ?? null,
+      effectiveLimit
+    ],
+    queryFn: () =>
+      listRecentFlashcardReviewSessions({
+        deck_id: params.deckId ?? undefined,
+        scope_key: params.scopeKey ?? undefined,
+        status: params.status ?? undefined,
+        limit: effectiveLimit
+      }),
+    enabled: options?.enabled ?? flashcardsEnabled,
+    refetchOnWindowFocus: false
+  })
+}
+
+export function useEndFlashcardReviewSessionMutation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:review-sessions:end"],
+    mutationFn: (reviewSessionId: number) => endFlashcardReviewSession(reviewSessionId),
+    onSuccess: async () => {
+      await invalidateFlashcardsQueries(queryClient)
+    }
   })
 }
 
@@ -442,6 +585,29 @@ export function useTagSuggestionsQuery(
 }
 
 /**
+ * Hook for fetching global flashcard tag suggestions for create/edit tag autocompletion.
+ */
+export function useGlobalFlashcardTagSuggestionsQuery(
+  query: string | null | undefined,
+  options?: UseGlobalFlashcardTagSuggestionsQueryOptions
+) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+  const limit = options?.limit ?? 50
+  const normalizedQuery = query?.trim() || undefined
+
+  return useQuery({
+    queryKey: ["flashcards:tags:suggestions:global", normalizedQuery ?? null, limit],
+    queryFn: ({ signal }) =>
+      listFlashcardTagSuggestions({
+        q: normalizedQuery,
+        limit,
+        signal
+      }),
+    enabled: options?.enabled ?? flashcardsEnabled
+  })
+}
+
+/**
  * Hook for fetching import limits
  */
 export function useImportLimitsQuery(options?: UseFlashcardQueriesOptions) {
@@ -523,15 +689,32 @@ export function useCreateDeckMutation() {
     mutationFn: (params: {
       name: string
       description?: string
+      parent_deck_id?: number | null
+      review_prompt_side?: Deck["review_prompt_side"]
       scheduler_type?: Deck["scheduler_type"]
       scheduler_settings?: Deck["scheduler_settings"]
-    }) =>
-      createDeck({
-        name: params.name.trim(),
-        description: params.description?.trim() || undefined,
-        scheduler_type: params.scheduler_type,
-        scheduler_settings: params.scheduler_settings
-      }),
+    }) => {
+      const input: DeckCreateInput = {
+        name: params.name.trim()
+      }
+      const description = params.description?.trim()
+      if (description) {
+        input.description = description
+      }
+      if (params.parent_deck_id !== undefined) {
+        input.parent_deck_id = params.parent_deck_id
+      }
+      if (params.review_prompt_side !== undefined) {
+        input.review_prompt_side = params.review_prompt_side
+      }
+      if (params.scheduler_type !== undefined) {
+        input.scheduler_type = params.scheduler_type
+      }
+      if (params.scheduler_settings !== undefined) {
+        input.scheduler_settings = params.scheduler_settings
+      }
+      return createDeck(input)
+    },
     onSuccess: () => {
       invalidateFlashcardsQueries(qc)
     },
@@ -565,6 +748,79 @@ export function useUpdateDeckMutation() {
     },
     onError: (error) => {
       console.error("Failed to update flashcard deck:", error)
+    }
+  })
+}
+
+export function useFlashcardTemplatesQuery(options?: UseFlashcardQueriesOptions) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+
+  return useQuery({
+    queryKey: ["flashcards:templates"],
+    queryFn: () => listFlashcardTemplates({}),
+    enabled: options?.enabled ?? flashcardsEnabled
+  })
+}
+
+export function useFlashcardTemplateQuery(
+  templateId: number | null | undefined,
+  options?: UseFlashcardQueriesOptions
+) {
+  const { flashcardsEnabled } = useFlashcardsEnabled()
+
+  return useQuery({
+    queryKey: ["flashcards:templates", templateId ?? null],
+    queryFn: () => getFlashcardTemplate(templateId!),
+    enabled: (options?.enabled ?? flashcardsEnabled) && templateId != null
+  })
+}
+
+export function useCreateFlashcardTemplateMutation() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:template:create"],
+    mutationFn: (payload: FlashcardTemplateCreate) => createFlashcardTemplate(payload),
+    onSuccess: async (template) => {
+      qc.setQueryData(["flashcards:templates", template.id], template)
+      await qc.invalidateQueries({ queryKey: ["flashcards:templates"] })
+    },
+    onError: (error) => {
+      console.error("Failed to create flashcard template:", error)
+    }
+  })
+}
+
+export function useUpdateFlashcardTemplateMutation() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:template:update"],
+    mutationFn: (params: { templateId: number; update: FlashcardTemplateUpdate }) =>
+      updateFlashcardTemplate(params.templateId, params.update),
+    onSuccess: async (template) => {
+      qc.setQueryData(["flashcards:templates", template.id], template)
+      await qc.invalidateQueries({ queryKey: ["flashcards:templates"] })
+    },
+    onError: (error) => {
+      console.error("Failed to update flashcard template:", error)
+    }
+  })
+}
+
+export function useDeleteFlashcardTemplateMutation() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationKey: ["flashcards:template:delete"],
+    mutationFn: (params: { templateId: number; expectedVersion: number }) =>
+      deleteFlashcardTemplate(params.templateId, params.expectedVersion),
+    onSuccess: async (_result, variables) => {
+      qc.removeQueries({ queryKey: ["flashcards:templates", variables.templateId] })
+      await qc.invalidateQueries({ queryKey: ["flashcards:templates"] })
+    },
+    onError: (error) => {
+      console.error("Failed to delete flashcard template:", error)
     }
   })
 }

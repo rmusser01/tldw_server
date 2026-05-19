@@ -95,8 +95,8 @@ async def run_audio_normalize_adapter(config: dict[str, Any], context: dict[str,
 
     try:
         resolved_input = resolve_workflow_file_path(input_path, context, config)
-    except _AUDIO_PROCESSING_PATH_EXCEPTIONS as e:
-        return {"error": f"input_path_error: {e}", "normalized": False}
+    except _AUDIO_PROCESSING_PATH_EXCEPTIONS:
+        return {"error": "input_path_error", "normalized": False}
 
     target_loudness = float(config.get("target_loudness", -23))
 
@@ -137,11 +137,11 @@ async def run_audio_normalize_adapter(config: dict[str, Any], context: dict[str,
 
     except subprocess.TimeoutExpired:
         return {"error": "ffmpeg_timeout", "normalized": False}
-    except subprocess.CalledProcessError as e:
-        return {"error": f"ffmpeg_error: {e.stderr.decode() if e.stderr else str(e)}", "normalized": False}
-    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio normalize error: {e}")
-        return {"error": str(e), "normalized": False}
+    except subprocess.CalledProcessError:
+        return {"error": "ffmpeg_error", "normalized": False}
+    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio normalize error")
+        return {"error": "audio_normalize_error", "normalized": False}
 
 
 @registry.register(
@@ -247,9 +247,9 @@ async def run_audio_concat_adapter(config: dict[str, Any], context: dict[str, An
 
         return {"output_path": output_path, "concatenated": True, "file_count": len(resolved_inputs)}
 
-    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio concat error: {e}")
-        return {"error": str(e), "concatenated": False}
+    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio concat error")
+        return {"error": "audio_concat_error", "concatenated": False}
 
 
 @registry.register(
@@ -285,8 +285,8 @@ async def run_audio_trim_adapter(config: dict[str, Any], context: dict[str, Any]
 
     try:
         resolved_input = resolve_workflow_file_path(input_path, context, config)
-    except _AUDIO_PROCESSING_PATH_EXCEPTIONS as e:
-        return {"error": f"input_path_error: {e}", "trimmed": False}
+    except _AUDIO_PROCESSING_PATH_EXCEPTIONS:
+        return {"error": "input_path_error", "trimmed": False}
 
     start = config.get("start", "0")
     end = config.get("end")
@@ -309,9 +309,9 @@ async def run_audio_trim_adapter(config: dict[str, Any], context: dict[str, Any]
 
         return {"output_path": output_path, "trimmed": True, "start": start, "end": end or duration}
 
-    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio trim error: {e}")
-        return {"error": str(e), "trimmed": False}
+    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio trim error")
+        return {"error": "audio_trim_error", "trimmed": False}
 
 
 @registry.register(
@@ -352,8 +352,8 @@ async def run_audio_convert_adapter(config: dict[str, Any], context: dict[str, A
 
     try:
         resolved_input = resolve_workflow_file_path(input_path, context, config)
-    except _AUDIO_PROCESSING_PATH_EXCEPTIONS as e:
-        return {"error": f"input_path_error: {e}", "converted": False}
+    except _AUDIO_PROCESSING_PATH_EXCEPTIONS:
+        return {"error": "input_path_error", "converted": False}
 
     output_format = config.get("format", "mp3")
     bitrate = config.get("bitrate")
@@ -376,9 +376,9 @@ async def run_audio_convert_adapter(config: dict[str, Any], context: dict[str, A
 
         return {"output_path": output_path, "converted": True, "format": output_format}
 
-    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio convert error: {e}")
-        return {"error": str(e), "converted": False}
+    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio convert error")
+        return {"error": "audio_convert_error", "converted": False}
 
 
 @registry.register(
@@ -417,8 +417,8 @@ async def run_audio_extract_adapter(config: dict[str, Any], context: dict[str, A
 
     try:
         resolved_input = resolve_workflow_file_path(input_path, context, config)
-    except _AUDIO_PROCESSING_PATH_EXCEPTIONS as e:
-        return {"error": f"input_path_error: {e}", "extracted": False}
+    except _AUDIO_PROCESSING_PATH_EXCEPTIONS:
+        return {"error": "input_path_error", "extracted": False}
 
     output_format = config.get("format", "mp3")
 
@@ -442,9 +442,9 @@ async def run_audio_extract_adapter(config: dict[str, Any], context: dict[str, A
 
         return {"output_path": output_path, "extracted": True, "format": output_format}
 
-    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio extract error: {e}")
-        return {"error": str(e), "extracted": False}
+    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio extract error")
+        return {"error": "audio_extract_error", "extracted": False}
 
 
 @registry.register(
@@ -504,6 +504,6 @@ async def run_audio_mix_adapter(config: dict[str, Any], context: dict[str, Any])
 
         return {"output_path": output_path, "mixed": True, "track_count": len(resolved_inputs)}
 
-    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
-        logger.exception(f"Audio mix error: {e}")
-        return {"error": str(e), "mixed": False}
+    except _AUDIO_PROCESSING_NONCRITICAL_EXCEPTIONS:
+        logger.exception("Audio mix error")
+        return {"error": "audio_mix_error", "mixed": False}

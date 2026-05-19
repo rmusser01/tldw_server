@@ -48,13 +48,14 @@ describe("data table export", () => {
     const blob = await exportToExcel(table)
     expect(blob.size).toBeGreaterThan(0)
 
-    const XLSX = await import("xlsx")
+    const ExcelJS = await import("exceljs")
+    const workbook = new ExcelJS.Workbook()
     const buffer = await blob.arrayBuffer()
-    const workbook = XLSX.read(buffer, { type: "array" })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    await workbook.xlsx.load(buffer)
+    const worksheet = workbook.worksheets[0]
 
-    expect(sheet.A1?.v).toBe("Name")
-    expect(sheet.A2?.v).toBe("Widget")
-    expect(sheet.B2?.v).toBe(10)
+    expect(worksheet.getCell("A1").value).toBe("Name")
+    expect(worksheet.getCell("A2").value).toBe("Widget")
+    expect(worksheet.getCell("B2").value).toBe(10)
   })
 })

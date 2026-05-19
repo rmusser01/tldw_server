@@ -27,6 +27,7 @@ from datetime import datetime
 from enum import Enum
 from fnmatch import fnmatch
 from functools import lru_cache
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from typing import Any
 
 import numpy as np
@@ -45,11 +46,9 @@ from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    rbac_rate_limit,
-    require_permissions,
-    require_roles,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.embeddings_models import (
@@ -64,16 +63,12 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
+from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
 
 # Authentication
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 
 # Configuration
 from tldw_Server_API.app.core.config import settings
@@ -373,6 +368,9 @@ DEFAULT_CACHE_CLEANUP_INTERVAL = 300
 DEFAULT_CONNECTION_POOL_SIZE = 20
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_MAX_RETRIES = 3
+EMBEDDING_SERVICE_FAILED_DETAIL = "Embedding service error"
+EMBEDDING_MODEL_WARMUP_FAILED_DETAIL = "Warmup failed"
+EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL = "Download failed"
 
 # Allow overriding via settings/env
 def _cfg_int(name: str, default_val: int) -> int:
@@ -1200,13 +1198,82 @@ def count_tokens(text: str, model_name: str) -> int:
         logger.warning(f"Token counting failed: {e}, estimating")
         return len(text) // 4
 
-def get_cache_key(text: str, provider: str, model: str, dimensions: int | None = None) -> str:
+
+_EMBEDDING_CACHE_KEY_PBKDF2_ITERATIONS = 10_000
+
+
+def get_cache_key(
+    text: str,
+    provider: str,
+    model: str,
+    dimensions: int | None = None,
+    backend_identity: str | None = None,
+) -> str:
     """Generate cache key for embedding"""
     key_parts = [text, provider, model]
     if dimensions:
         key_parts.append(str(dimensions))
+    if backend_identity:
+        key_parts.append(backend_identity)
     key_string = "|".join(key_parts)
-    return hashlib.sha256(key_string.encode()).hexdigest()
+    # Cache inputs may contain low-entropy secrets (for example pasted passwords), so
+    # derive the deterministic cache key with a password-safe KDF rather than a direct digest.
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        key_string.encode("utf-8"),
+        _embedding_cache_key_secret(),
+        _EMBEDDING_CACHE_KEY_PBKDF2_ITERATIONS,
+        dklen=32,
+    ).hex()
+
+
+@lru_cache(maxsize=1)
+def _embedding_cache_key_secret() -> bytes:
+    """Return a stable keyed-hash secret for embedding cache partitioning."""
+    try:
+        return derive_hmac_key()
+    except ValueError:
+        if _is_test_context():
+            # Keep cache keys deterministic in test contexts when AuthNZ secrets are absent.
+            return b"tldw_embeddings_cache_hmac_fallback"
+        raise
+
+
+_SENSITIVE_QUERY_KEYS = frozenset({
+    "access_token", "api_key", "apikey", "auth", "bearer",
+    "credential", "key", "passwd", "password", "secret", "token",
+})
+
+
+def _sanitize_query(query: str) -> str:
+    """Remove known sensitive query params, keep the rest sorted for determinism."""
+    params = parse_qs(query, keep_blank_values=True)
+    filtered = {
+        k: v for k, v in params.items()
+        if k.lower() not in _SENSITIVE_QUERY_KEYS
+    }
+    if not filtered:
+        return ""
+    return urlencode(sorted(filtered.items()), doseq=True)
+
+
+def _normalize_cache_backend_identity(config: dict[str, Any], provider: str) -> str | None:
+    """Derive stable backend identity for cache partitioning."""
+    if provider != "local_api":
+        return None
+
+    api_url = str(config.get("api_url") or "").strip()
+    if not api_url:
+        return None
+
+    parsed = urlsplit(api_url)
+    if parsed.scheme and parsed.hostname:
+        host = parsed.hostname
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        sanitized_query = _sanitize_query(parsed.query)
+        return urlunsplit((parsed.scheme, host, parsed.path.rstrip("/"), sanitized_query, ""))
+    return api_url.rstrip("/")
 
 
 # ---------------------------------------------------------------------------
@@ -1228,7 +1295,7 @@ class CompactorRunResponse(BaseModel):
     "/embeddings/compactor/run",
     response_model=CompactorRunResponse,
     summary="Run a one-shot vector compaction for a user (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def run_compactor_once(
     req: CompactorRunRequest,
@@ -1291,9 +1358,7 @@ def tokens_to_texts(
                 len(arr),
                 exc,
             )
-            # Fall back to an empty string to preserve request shape; the raw
-            # token counts are still used for limits/usage accounting.
-            texts.append("")
+            raise ValueError("Invalid token array input") from exc
         return texts, total_tokens, token_counts
 
     # Batch of token arrays
@@ -1313,7 +1378,7 @@ def tokens_to_texts(
                     len(arr),
                     exc,
                 )
-                texts.append("")
+                raise ValueError("Invalid token array input") from exc
         return texts, total_tokens, token_counts
 
     raise ValueError("Invalid token array input")
@@ -1842,11 +1907,7 @@ async def create_embeddings_with_circuit_breaker(
                 try:
                     status_code = int(getattr(resp, "status_code", 0))
                     if status_code >= 400:
-                        try:
-                            detail = resp.text
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                            detail = ""
-                        raise HTTPException(status_code=status_code, detail=f"Cohere error: {detail}")
+                        raise HTTPException(status_code=status_code, detail="Cohere embeddings error")
                     data = resp.json()
                 finally:
                     close = getattr(resp, "aclose", None)
@@ -1890,11 +1951,7 @@ async def create_embeddings_with_circuit_breaker(
                 try:
                     status_code = int(getattr(resp, "status_code", 0))
                     if status_code >= 400:
-                        try:
-                            detail = resp.text
-                        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                            detail = ""
-                        raise HTTPException(status_code=status_code, detail=f"Google Embeddings error: {detail}")
+                        raise HTTPException(status_code=status_code, detail="Google embeddings error")
                     data = resp.json()
                 finally:
                     close = getattr(resp, "aclose", None)
@@ -1938,7 +1995,7 @@ async def create_embeddings_with_circuit_breaker(
                 except HTTPException:
                     raise
                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"MLX embeddings error: {exc}") from exc
+                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="MLX embeddings error") from exc
             else:
                 raise ValueError(f"Unknown provider: {provider}")
 
@@ -2004,9 +2061,40 @@ async def create_embeddings_batch_async(
     uncached_texts = []
     uncached_indices = []
 
+    try:
+        provider_enum = EmbeddingProvider(provider)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown provider: {provider}"
+        ) from None
+
+    try:
+        _validate_dimensions_request(provider, model_id or "", dimensions)
+        config = build_provider_config(
+            provider_enum,
+            model_id,
+            api_key,
+            api_url,
+            dimensions,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    backend_identity = _normalize_cache_backend_identity(config, provider)
+
     # Check cache
     for i, text in enumerate(texts):
-        cache_key = get_cache_key(text, provider, model_id or "default", dimensions)
+        cache_key = get_cache_key(
+            text,
+            provider,
+            model_id or "default",
+            dimensions,
+            backend_identity=backend_identity,
+        )
         cached = await embedding_cache.get(cache_key)
 
         if cached:
@@ -2020,29 +2108,6 @@ async def create_embeddings_batch_async(
 
     # Process uncached texts
     if uncached_texts:
-        try:
-            provider_enum = EmbeddingProvider(provider)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown provider: {provider}"
-            ) from None
-
-        try:
-            _validate_dimensions_request(provider, model_id or "", dimensions)
-            config = build_provider_config(
-                provider_enum,
-                model_id,
-                api_key,
-                api_url,
-                dimensions
-            )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-
         # Process in batches with circuit breaker (or synthesize in test mode for OpenAI)
         all_new_embeddings = []
         if (
@@ -2104,7 +2169,7 @@ async def create_embeddings_batch_async(
 
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail=f"Embedding service error: {str(e)}"
+                        detail=EMBEDDING_SERVICE_FAILED_DETAIL,
                     ) from e
 
         if len(all_new_embeddings) != len(uncached_texts):
@@ -2121,7 +2186,13 @@ async def create_embeddings_batch_async(
             embedding = all_new_embeddings[i]
             embeddings[idx] = embedding
 
-            cache_key = get_cache_key(text, provider, model_id or "default", dimensions)
+            cache_key = get_cache_key(
+                text,
+                provider,
+                model_id or "default",
+                dimensions,
+                backend_identity=backend_identity,
+            )
             await embedding_cache.set(cache_key, embedding)
 
     return embeddings
@@ -2136,7 +2207,15 @@ async def create_embeddings_batch_async(
     response_model=CreateEmbeddingResponse,
     status_code=status.HTTP_200_OK,
     summary="Create embeddings (enhanced with circuit breaker)",
-    dependencies=[Depends(rbac_rate_limit("embeddings.create"))]
+    dependencies=[
+        Depends(rbac_rate_limit("embeddings.create")),
+        Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
+    ],
+    responses={
+        status.HTTP_402_PAYMENT_REQUIRED: {
+            "description": "Billing limit exceeded. Upgrade plan to continue."
+        },
+    },
 )
 async def create_embedding_endpoint(
     request: Request,
@@ -2811,7 +2890,15 @@ class EmbeddingsBatchResponse(BaseModel):
     "/embeddings/batch",
     response_model=EmbeddingsBatchResponse,
     summary="Create embeddings for a batch of texts",
-    dependencies=[Depends(rbac_rate_limit("embeddings.create"))],
+    dependencies=[
+        Depends(rbac_rate_limit("embeddings.create")),
+        Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
+    ],
+    responses={
+        status.HTTP_402_PAYMENT_REQUIRED: {
+            "description": "Billing limit exceeded. Upgrade plan to continue."
+        },
+    },
 )
 async def create_embeddings_batch_endpoint(
     payload: EmbeddingsBatchRequest,
@@ -3130,8 +3217,8 @@ class PriorityBumpRequest(BaseModel):
     "/embeddings/job/priority/bump",
     summary="Override/bump job priority for routing into priority queues (best-effort)",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(EMBEDDINGS_ADMIN)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(EMBEDDINGS_ADMIN)),
     ],
 )
 async def bump_job_priority(
@@ -3167,7 +3254,7 @@ async def bump_job_priority(
             "ttl_seconds": int(req.ttl_seconds or 600),
         }
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to set priority override: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to set priority override") from e
     finally:
         try:
             if client is not None:
@@ -3204,7 +3291,7 @@ class CollectionStatsResponse(BaseModel):
 @router.post(
     "/embeddings/models/warmup",
     summary="Warmup (preload) an embedding model (admin)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def warmup_model(
     payload: ModelActionRequest,
@@ -3227,13 +3314,16 @@ async def warmup_model(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Warmup failed for {provider}:{payload.model}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Warmup failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=EMBEDDING_MODEL_WARMUP_FAILED_DETAIL,
+        ) from e
 
 
 @router.post(
     "/embeddings/models/download",
     summary="Download/prepare a model (admin)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def download_model(
     payload: ModelActionRequest,
@@ -3257,12 +3347,15 @@ async def download_model(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Download failed for {provider}:{payload.model}: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Download failed: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=EMBEDDING_MODEL_DOWNLOAD_FAILED_DETAIL,
+        ) from e
 
 @router.delete(
     "/embeddings/cache",
     summary="Clear embedding cache (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def clear_cache(
     current_user: User = Depends(get_request_user),
@@ -3497,7 +3590,7 @@ async def health_check():
 @router.get(
     "/embeddings/circuit-breakers",
     summary="Get circuit breaker status (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def get_circuit_breakers(
     _current_user: User = Depends(get_request_user),
@@ -3509,7 +3602,7 @@ async def get_circuit_breakers(
 @router.post(
     "/embeddings/circuit-breakers/{provider}/reset",
     summary="Reset circuit breaker (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def reset_circuit_breaker(
     provider: str,
@@ -3543,7 +3636,7 @@ async def reset_circuit_breaker(
 @router.get(
     "/embeddings/metrics",
     summary="Get service metrics (admin only)",
-    dependencies=[Depends(require_roles("admin")), Depends(require_permissions(SYSTEM_CONFIGURE))],
+    dependencies=[Depends(RequireRole("admin")), Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def get_metrics(
     request: Request,
@@ -3656,7 +3749,7 @@ def _redact_obj(obj: Any, depth: int = 0) -> Any:
 @router.get(
     "/embeddings/dlq",
     summary="List DLQ items for a stage (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def list_dlq_items(
     stage: str = Query("embedding", description="Stage: chunking|embedding|storage|content"),
@@ -3719,7 +3812,7 @@ async def list_dlq_items(
     except HTTPException:
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list DLQ items: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list DLQ items") from e
     finally:
         try:
             if client is not None:
@@ -3739,7 +3832,7 @@ class DLQRequeueRequest(BaseModel):
 @router.post(
     "/embeddings/dlq/requeue",
     summary="Requeue a DLQ item to its live stream (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def requeue_dlq_item(
     req: DLQRequeueRequest,
@@ -3822,7 +3915,7 @@ async def requeue_dlq_item(
         raise
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
         dlq_requeue_errors_total.labels(queue_name=dlq_stream, error_type=type(e).__name__).inc()
-        raise HTTPException(status_code=500, detail=f"Failed to requeue DLQ item: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to requeue DLQ item") from e
     finally:
         await ensure_async_client_closed(client)
 
@@ -3837,7 +3930,7 @@ class DLQRequeueBulkRequest(BaseModel):
 @router.post(
     "/embeddings/dlq/requeue/bulk",
     summary="Bulk requeue DLQ items to live stream (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def requeue_dlq_bulk(
     req: DLQRequeueBulkRequest,
@@ -3936,7 +4029,7 @@ async def requeue_dlq_bulk(
 @router.get(
     "/embeddings/dlq/stats",
     summary="DLQ and queue depths (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_dlq_stats(
     current_user: User = Depends(get_request_user),
@@ -4013,7 +4106,7 @@ def _dlq_state_key(stream: str, entry_id: str) -> str:
 @router.post(
     "/embeddings/dlq/state",
     summary="Set DLQ quarantine state (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def set_dlq_state(req: DLQStateSetRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4078,7 +4171,7 @@ def _stage_key(stage: str, suffix: str) -> str:
 @router.get(
     "/embeddings/stage/status",
     summary="Get per-stage pause/drain flags (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_stage_status(current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4099,7 +4192,7 @@ async def get_stage_status(current_user: User = Depends(get_request_user)):
 @router.post(
     "/embeddings/stage/control",
     summary="Pause/Resume/Drain a stage (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def control_stage(req: StageControlRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4157,7 +4250,7 @@ def _skip_key(job_id: str) -> str:
 @router.post(
     "/embeddings/job/skip",
     summary="Mark a job_id as skipped (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4190,7 +4283,7 @@ async def mark_job_skipped(req: JobSkipRequest, current_user: User = Depends(get
 @router.get(
     "/embeddings/job/skip/status",
     summary="Check if a job_id is marked as skipped (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_job_skip_status(job_id: str = Query(..., description="Job ID to check"), current_user: User = Depends(get_request_user)):
     client = await _get_redis_client()
@@ -4217,7 +4310,7 @@ class LedgerEntry(BaseModel):
 @router.get(
     "/embeddings/ledger/status",
     summary="Inspect ledger entries by idempotency_key/dedupe_key (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def get_ledger_status(
     idempotency_key: str | None = Query(default=None),
@@ -4304,7 +4397,7 @@ class ReembedScheduleResponse(BaseModel):
     "/embeddings/reembed/schedule",
     response_model=ReembedScheduleResponse,
     summary="Schedule a re-embed expansion job (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def schedule_reembed(
     req: ReembedScheduleRequest,
@@ -4399,7 +4492,7 @@ async def schedule_reembed(
             job_type=str(root_row.get("job_type")),
         )
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to schedule re-embed: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to schedule re-embed") from e
 
 
 # ---------------------------------------------------------------------------
@@ -4535,7 +4628,14 @@ async def _sse_orchestrator_stream(client: aioredis.Redis):
 @router.get(
     "/embeddings/orchestrator/events",
     summary="SSE: embeddings orchestrator live summary (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Embeddings orchestrator event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_events(_current_user: User = Depends(get_request_user)):
     # Admin/embeddings-admin gate is enforced via AuthNZ permissions; _current_user is used for audit context.
@@ -4603,8 +4703,10 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
                         await asyncio.gather(producer, return_exceptions=True)
                 raise
             else:
-                # Normal shutdown: ensure producer completes without forced cancel
+                # Normal shutdown: the producer loop is long-running, so cancel before awaiting it.
                 if not producer.done():
+                    with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
+                        producer.cancel()
                     with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                         await asyncio.gather(producer, return_exceptions=True)
         finally:
@@ -4625,7 +4727,7 @@ async def orchestrator_events(_current_user: User = Depends(get_request_user)):
 @router.get(
     "/embeddings/orchestrator/summary",
     summary="Orchestrator summary for polling (admin only)",
-    dependencies=[Depends(require_permissions(EMBEDDINGS_ADMIN))],
+    dependencies=[Depends(RequirePermission(EMBEDDINGS_ADMIN))],
 )
 async def orchestrator_summary(current_user: User = Depends(get_request_user)):
     """Return a snapshot identical to the SSE payload.

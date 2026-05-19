@@ -1,66 +1,118 @@
-# Docker Single-User Setup
+# Docker Single-User + WebUI Setup
 
-Use this profile when you want a containerized single-user deployment with minimal host setup.
+Use this profile when you want the quickest self-hosted path: one operator, single-user API-key auth, Docker-managed persistence, and the Next.js WebUI.
 
-## Prerequisites
+> **Windows:** Use WSL2 for the documented make commands. If you prefer PowerShell, run the equivalent tldw-setup command shown under each step and start Docker Desktop before Docker profiles.
 
-- Docker Engine
+## Prepare
+
+Prerequisites:
+
+- Docker Engine or Docker Desktop
 - Docker Compose
 - Git
-
-## Install
+- Python 3.10+ for the lightweight `tldw-setup` helper used by the Makefile
 
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-cp tldw_Server_API/Config_Files/.env.example tldw_Server_API/Config_Files/.env
+make setup-docker-single
 ```
 
-Set a single-user API key in `tldw_Server_API/Config_Files/.env`:
+PowerShell / no-`make` equivalent:
+
+```powershell
+py -3.12 -m venv .setup-venv
+.\.setup-venv\Scripts\python -m pip install --upgrade pip setuptools wheel
+.\.setup-venv\Scripts\python -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0"
+.\.setup-venv\Scripts\python -m tldw_Server_API.cli.wizard.cli init --profile docker-single-webui --env-file tldw_Server_API/Config_Files/.env --default --yes
+```
+
+`make setup-docker-single` creates or updates `tldw_Server_API/Config_Files/.env` for `AUTH_MODE=single_user` and generates a strong `SINGLE_USER_API_KEY` when needed. Keep that `.env` file with your backups.
+
+`make quickstart` is the shortest alias for this same Docker single-user + WebUI lifecycle. It runs setup, start, and verification in order.
+
+## Start
 
 ```bash
-AUTH_MODE=single_user
-SINGLE_USER_API_KEY=replace-with-strong-key
+make start-docker-single
 ```
 
-## Run
+PowerShell / no-`make` equivalent:
+
+```powershell
+docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --wait
+```
+
+The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The WebUI uses the same-origin proxy by default, so browser requests stay on the WebUI origin unless you intentionally configure advanced LAN/custom-host access.
+
+Default persistence uses Docker named volumes:
+
+- `app-data` backs `/app/Databases`, including the default SQLite AuthNZ DB, per-user databases, uploads, first-run markers, and vector stores.
+- `redis_data` backs the bundled Redis container.
+- No nested named volume is mounted under /app/Databases/user_databases.
+
+`docker compose down` keeps named volumes. `docker compose down -v` deletes them and removes persisted databases, user files, and vector stores.
+
+If you prefer host-visible storage for inspection or external backups, use `Dockerfiles/docker-compose.host-storage.yml` instead of the default profile compose file:
 
 ```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml up -d --build
+docker compose --env-file tldw_Server_API/Config_Files/.env \
+  -f Dockerfiles/docker-compose.host-storage.yml \
+  -f Dockerfiles/docker-compose.webui.yml up -d --wait
 ```
-
-By default this profile stores application data in Docker named volumes, not in the repo checkout:
-
-- `app-data` backs `/app/Databases`
-- `chroma-data` backs `/app/Databases/user_databases`
-- `postgres_data` and `redis_data` back the bundled Postgres and Redis containers
-
-Keep `tldw_Server_API/Config_Files/.env` with your backups, because it stores the startup auth mode and single-user API key that the quickstart uses.
-
-`docker compose down` keeps the Docker named volumes. `docker compose down -v` deletes them and removes the persisted databases, user files, and vector storage.
-
-If you prefer host-visible storage for manual backups or inspection, use `Dockerfiles/docker-compose.host-storage.yml` instead of the default compose file:
-
-```bash
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.host-storage.yml up -d --build
-```
-
-That optional variant writes data under `docker-data/` at the repo root and preserves the default quickstart behavior for existing users.
 
 ## Verify
+
+```bash
+make verify-docker-single
+```
+
+PowerShell / no-`make` equivalent:
+
+```powershell
+.\.setup-venv\Scripts\python -m tldw_Server_API.cli.wizard.cli verify --profile docker-single-webui --env-file tldw_Server_API/Config_Files/.env --base-url http://127.0.0.1:8000 --webui-url http://127.0.0.1:8080 --first-value
+```
+
+Manual spot checks:
 
 ```bash
 curl -sS http://127.0.0.1:8000/health
 curl -sS http://127.0.0.1:8000/docs > /dev/null && echo "docs-ok"
 curl -sS http://127.0.0.1:8000/api/v1/config/quickstart
+curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 ```
 
-## Optional Add-ons
+## First Value
 
-- If speech is part of day-one setup, continue with [First-Time Audio Setup: CPU Systems](./First_Time_Audio_Setup_CPU.md) or [First-Time Audio Setup: GPU/Accelerated Systems](./First_Time_Audio_Setup_GPU_Accelerated.md) after this profile is running.
+Open the WebUI at http://127.0.0.1:8080, or run the provider-independent first-value ingest/search verification. The verify command posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
+
+```bash
+make verify-docker-single
+```
+
+This does not require an LLM provider key. Add provider keys to `tldw_Server_API/Config_Files/.env` later when you are ready to use chat or hosted model features.
+
+## Audio Path
+
+Stock Docker CPU/default audio works with the bundled container dependencies. If you edit host-side audio config or add host-side model files, rebuild the image or use the documented host-storage/custom image path so those changes are visible inside the container.
+
+After this profile is running, continue with one of:
+
+- [First-Time Audio Setup: CPU Systems](./First_Time_Audio_Setup_CPU.md)
+- [First-Time Audio Setup: GPU/Accelerated Systems](./First_Time_Audio_Setup_GPU_Accelerated.md)
 
 ## Troubleshoot
 
-- If containers do not start, check: `docker compose -f Dockerfiles/docker-compose.yml logs --tail=200`.
-- If API is unavailable, verify no port conflict on `8000`.
-- If auth errors appear, confirm `AUTH_MODE` and `SINGLE_USER_API_KEY` in `.env`.
+- If Docker is not reachable on Windows, start Docker Desktop and run the documented commands from WSL2.
+- If containers do not start, run `docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml logs --tail=200`.
+- If the API is unavailable, verify no other process is using port `8000`.
+- If the WebUI is unavailable, verify no other process is using port `8080`.
+- If direct API calls return `401`, confirm `SINGLE_USER_API_KEY` in `tldw_Server_API/Config_Files/.env` and use it as `X-API-KEY`.
+- If you need a full reset, stop the stack and remove volumes with `docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml down -v`.
+
+## Optional Add-ons
+
+- Add provider API keys to `tldw_Server_API/Config_Files/.env`, then restart the stack.
+- Use `Dockerfiles/docker-compose.host-storage.yml` for host-visible data under `docker-data/`.
+- Use the advanced WebUI environment variables only when browsers must reach a LAN host, reverse proxy, or custom domain.

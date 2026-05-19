@@ -23,11 +23,14 @@ import { Form, FormCheckbox, FormInput, FormSelect } from '@/components/ui/form'
 import {
   Eye,
   Key,
+  Mail,
+  RefreshCw,
   Search,
   Plus,
   Trash2,
   UserCheck,
   UserX,
+  XCircle,
   BookmarkPlus,
   BookmarkX,
 } from 'lucide-react';
@@ -51,6 +54,7 @@ import {
   type UserStatusFilter,
   type UserVerifiedFilter,
 } from './hooks/use-user-filters';
+import { logger } from '@/lib/logger';
 
 type BulkActionType =
   | 'activate'
@@ -171,6 +175,29 @@ function UsersPageContent() {
   const [createUserError, setCreateUserError] = useState('');
   const [creatingUser, setCreatingUser] = useState(false);
   const [deletingUserIds, setDeletingUserIds] = useState<Set<number>>(new Set());
+  const [showInviteUserDialog, setShowInviteUserDialog] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('user');
+  const [invitingUser, setInvitingUser] = useState(false);
+  const [inviteUserError, setInviteUserError] = useState('');
+  type DirectInvitation = {
+    id: string;
+    email: string;
+    role: string;
+    status: string;
+    invited_by: string | null;
+    created_at: string | null;
+    expires_at: string | null;
+    email_sent: boolean;
+    email_error: string | null;
+    resend_count?: number;
+    last_resent_at?: string | null;
+  };
+  const [directInvitations, setDirectInvitations] = useState<DirectInvitation[]>([]);
+  const [directInvitesLoading, setDirectInvitesLoading] = useState(true);
+  const [directInvitesError, setDirectInvitesError] = useState('');
+  const [revokingInviteIds, setRevokingInviteIds] = useState<Set<string>>(new Set());
+  const [resendingInviteIds, setResendingInviteIds] = useState<Set<string>>(new Set());
   const [mfaByUserId, setMfaByUserId] = useState<Record<number, boolean | null>>({});
   const [mfaLoading, setMfaLoading] = useState(false);
   const [orgInvites, setOrgInvites] = useState<OrgInviteRecord[]>([]);
@@ -222,6 +249,120 @@ function UsersPageContent() {
     }
   }, [createUserForm, showCreateUserDialog]);
 
+  useEffect(() => {
+    if (!showInviteUserDialog) {
+      setInviteEmail('');
+      setInviteRole('user');
+      setInviteUserError('');
+    }
+  }, [showInviteUserDialog]);
+
+  const loadDirectInvitations = useCallback(async () => {
+    try {
+      setDirectInvitesLoading(true);
+      setDirectInvitesError('');
+      const response = await api.getInvitations() as { items?: DirectInvitation[] };
+      setDirectInvitations(Array.isArray(response?.items) ? response.items : []);
+    } catch (err: unknown) {
+      logger.error('Failed to load direct invitations', { component: 'UsersPage', error: err instanceof Error ? err.message : String(err) });
+      setDirectInvitesError(err instanceof Error ? err.message : 'Failed to load invitations');
+      setDirectInvitations([]);
+    } finally {
+      setDirectInvitesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDirectInvitations();
+  }, [loadDirectInvitations]);
+
+  const handleInviteUser = async () => {
+    setInviteUserError('');
+    if (!inviteEmail.trim()) {
+      setInviteUserError('Email is required');
+      return;
+    }
+    try {
+      setInvitingUser(true);
+      const result = await api.inviteUser({
+        email: inviteEmail.trim(),
+        role: inviteRole,
+      }) as { email_sent?: boolean; email_error?: string | null };
+      if (result.email_sent) {
+        success('Invitation sent', `Invite email sent to ${inviteEmail.trim()}.`);
+      } else {
+        success(
+          'Invitation created',
+          `Invitation created for ${inviteEmail.trim()}, but email could not be sent. ${result.email_error || 'Check email configuration.'}`,
+        );
+      }
+      setShowInviteUserDialog(false);
+      void loadDirectInvitations();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to send invitation';
+      setInviteUserError(message);
+      showError('Invite failed', message);
+    } finally {
+      setInvitingUser(false);
+    }
+  };
+
+  const handleRevokeInvitation = async (invitationId: string) => {
+    const confirmed = await confirm({
+      title: 'Revoke invitation',
+      message: 'Revoke this pending invitation? The invite link will no longer work.',
+      confirmText: 'Revoke',
+      variant: 'danger',
+      icon: 'delete',
+    });
+    if (!confirmed) return;
+
+    try {
+      setRevokingInviteIds((prev) => new Set(prev).add(invitationId));
+      await api.revokeInvitation(invitationId);
+      success('Invitation revoked', 'The invitation has been revoked.');
+      void loadDirectInvitations();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to revoke invitation';
+      showError('Revoke failed', message);
+    } finally {
+      setRevokingInviteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(invitationId);
+        return next;
+      });
+    }
+  };
+
+  const handleResendInvitation = async (inv: DirectInvitation) => {
+    if ((inv.resend_count ?? 0) >= 3) {
+      showError('Resend limit', 'This invitation has reached the maximum resend limit (3).');
+      return;
+    }
+    try {
+      setResendingInviteIds((prev) => new Set(prev).add(inv.id));
+      const result = await api.resendInvitation(inv.id) as DirectInvitation;
+      if (result.email_sent) {
+        success('Invitation resent', `Invite email resent to ${inv.email}.`);
+      } else {
+        success(
+          'Invitation renewed',
+          `Token renewed for ${inv.email}, but email could not be sent. ${result.email_error || 'Check email configuration.'}`,
+        );
+      }
+      void loadDirectInvitations();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to resend invitation';
+      showError('Resend failed', message);
+    } finally {
+      setResendingInviteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(inv.id);
+        return next;
+      });
+    }
+  };
+
   const loadUsersResource = useCallback(async () => {
     const params: Record<string, string> = { limit: '200' };
     if (selectedOrg) params.org_id = String(selectedOrg.id);
@@ -235,7 +376,7 @@ function UsersPageContent() {
     try {
       return await api.getUsers(params);
     } catch (err: unknown) {
-      console.error('Failed to load users:', err);
+      logger.error('Failed to load users', { component: 'UsersPage', error: err instanceof Error ? err.message : String(err) });
       throw err instanceof Error
         ? err
         : new Error('Failed to load users');
@@ -304,7 +445,7 @@ function UsersPageContent() {
 
       setOrgInvites(invites);
     } catch (err: unknown) {
-      console.error('Failed to load invitations:', err);
+      logger.error('Failed to load invitations', { component: 'UsersPage', error: err instanceof Error ? err.message : String(err) });
       setInvitesError(err instanceof Error && err.message ? err.message : 'Failed to load invitations');
       setOrgInvites([]);
     } finally {
@@ -384,6 +525,7 @@ function UsersPageContent() {
       cancelled = true;
     };
   }, [mfaByUserId, mfaFilter, users]);
+
 
   const filteredUsers = users.filter((user) => {
     const query = (searchQuery || '').toLowerCase();
@@ -698,15 +840,6 @@ function UsersPageContent() {
           successIds.push(ids[index]);
         }
       });
-      if (successIds.length > 0) {
-        setMfaByUserId((prev) => {
-          const next = { ...prev };
-          successIds.forEach((id) => {
-            next[id] = requireMfa;
-          });
-          return next;
-        });
-      }
 
       if (failures > 0) {
         showError(
@@ -720,6 +853,9 @@ function UsersPageContent() {
         );
       }
       handleClearSelection();
+      if (successIds.length > 0) {
+        void loadUsers();
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to update MFA requirement';
       showError('Bulk MFA update failed', message);
@@ -956,6 +1092,69 @@ function UsersPageContent() {
                     </FormProvider>
                   </DialogContent>
                 </Dialog>
+                <Dialog open={showInviteUserDialog} onOpenChange={setShowInviteUserDialog}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">
+                      <Mail className="mr-2 h-4 w-4" />
+                      Invite User
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Invite user</DialogTitle>
+                      <DialogDescription>Send an invitation email to a new user.</DialogDescription>
+                    </DialogHeader>
+                    {inviteUserError && (
+                      <Alert variant="destructive">
+                        <AlertDescription>{inviteUserError}</AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="invite-email">Email address</Label>
+                        <Input
+                          id="invite-email"
+                          type="email"
+                          placeholder="user@example.com"
+                          value={inviteEmail}
+                          onChange={(e) => setInviteEmail(e.target.value)}
+                          disabled={invitingUser}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="invite-role">Role</Label>
+                        <Select
+                          id="invite-role"
+                          value={inviteRole}
+                          onChange={(e) => setInviteRole(e.target.value)}
+                          disabled={invitingUser}
+                        >
+                          <option value="user">User</option>
+                          <option value="admin">Admin</option>
+                          <option value="viewer">Viewer</option>
+                          <option value="service">Service</option>
+                        </Select>
+                      </div>
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-0">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setShowInviteUserDialog(false)}
+                        disabled={invitingUser}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleInviteUser}
+                        loading={invitingUser}
+                        loadingText="Sending..."
+                      >
+                        Send invitation
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 
@@ -1095,9 +1294,6 @@ function UsersPageContent() {
                     >
                       Clear filters
                     </Button>
-                    {mfaFilter !== 'all' && mfaLoading && (
-                      <span className="text-xs text-muted-foreground">Loading MFA status...</span>
-                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1105,7 +1301,108 @@ function UsersPageContent() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Invitations</CardTitle>
+                <CardTitle>Pending Invitations</CardTitle>
+                <CardDescription>
+                  Direct email invitations sent to prospective users.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {directInvitesError && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{directInvitesError}</AlertDescription>
+                  </Alert>
+                )}
+                {directInvitesLoading ? (
+                  <div className="text-sm text-muted-foreground">Loading invitations...</div>
+                ) : directInvitations.length === 0 ? (
+                  <EmptyState
+                    icon={Mail}
+                    title="No invitations"
+                    description="Use the Invite User button to send email invitations."
+                  />
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Invited by</TableHead>
+                          <TableHead>Email Sent</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Expires</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {directInvitations.map((inv) => (
+                          <TableRow key={inv.id} data-testid={`direct-invitation-row-${inv.id}`}>
+                            <TableCell>
+                              <Badge variant={
+                                inv.status === 'accepted' ? 'default'
+                                : inv.status === 'revoked' || inv.status === 'expired' ? 'destructive'
+                                : 'secondary'
+                              }>
+                                {inv.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{inv.email}</TableCell>
+                            <TableCell>{inv.role}</TableCell>
+                            <TableCell>{inv.invited_by || '\u2014'}</TableCell>
+                            <TableCell>
+                              {inv.email_sent ? (
+                                <Badge variant="default">Sent</Badge>
+                              ) : (
+                                <Badge variant="destructive" title={inv.email_error || 'Not sent'}>
+                                  Not sent
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '\u2014'}
+                            </TableCell>
+                            <TableCell>
+                              {inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : '\u2014'}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {inv.status === 'pending' && (
+                                <span className="inline-flex gap-1">
+                                  <AccessibleIconButton
+                                    icon={RefreshCw}
+                                    label="Resend invitation"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleResendInvitation(inv)}
+                                    disabled={resendingInviteIds.has(inv.id) || (inv.resend_count ?? 0) >= 3}
+                                    loading={resendingInviteIds.has(inv.id)}
+                                    title={(inv.resend_count ?? 0) >= 3 ? 'Resend limit reached (3)' : `Resend (${inv.resend_count ?? 0}/3)`}
+                                  />
+                                  <AccessibleIconButton
+                                    icon={XCircle}
+                                    label="Revoke invitation"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRevokeInvitation(inv.id)}
+                                    disabled={revokingInviteIds.has(inv.id)}
+                                    loading={revokingInviteIds.has(inv.id)}
+                                    className="text-destructive hover:text-destructive"
+                                  />
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Organization Invitations</CardTitle>
                 <CardDescription>
                   Onboarding invitation visibility across organizations.
                 </CardDescription>
@@ -1211,7 +1508,7 @@ function UsersPageContent() {
                 />
                 {loading ? (
                   <div className="py-4">
-                    <TableSkeleton rows={5} columns={9} />
+                    <TableSkeleton rows={5} columns={10} />
                   </div>
                 ) : filteredUsers.length === 0 ? (
                   <EmptyState
@@ -1254,6 +1551,7 @@ function UsersPageContent() {
                           <TableHead>Email</TableHead>
                           <TableHead>Role</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>MFA</TableHead>
                           <TableHead>Storage</TableHead>
                           <TableHead>Created</TableHead>
                           <TableHead>Last Login</TableHead>
@@ -1297,6 +1595,13 @@ function UsersPageContent() {
                                 )}
                               </TableCell>
                               <TableCell>
+                                {user.mfa_enabled ? (
+                                  <span className="text-green-600" title="MFA enabled" aria-label="MFA enabled">&#10003;</span>
+                                ) : (
+                                  <span className="text-gray-400" title="MFA disabled" aria-label="MFA disabled">&#8212;</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
                                 <div className="space-y-1">
                                   <div className="text-xs">{storage.text}</div>
                                   <div
@@ -1327,17 +1632,23 @@ function UsersPageContent() {
                                   : '—'}
                               </TableCell>
                               <TableCell className="text-muted-foreground text-sm">
-                                <div className="flex items-center gap-1">
-                                  {user.last_login
-                                    ? new Date(user.last_login).toLocaleDateString()
-                                    : 'Never'}
+                                <div className="flex items-center gap-1.5">
+                                  <span>
+                                    {user.last_login
+                                      ? new Date(user.last_login).toLocaleDateString()
+                                      : 'Never'}
+                                  </span>
                                   {(() => {
-                                    if (!user.last_login) return null;
                                     const DORMANT_THRESHOLD_DAYS = 90;
-                                    const lastLogin = new Date(user.last_login);
-                                    const daysSinceLogin = Math.floor((Date.now() - lastLogin.getTime()) / (1000 * 60 * 60 * 24));
-                                    return Number.isFinite(daysSinceLogin) && daysSinceLogin > DORMANT_THRESHOLD_DAYS ? (
-                                      <Badge variant="destructive" className="text-[10px] px-1 py-0">Dormant</Badge>
+                                    const now = Date.now();
+                                    const lastLoginMs = user.last_login ? Date.parse(user.last_login) : 0;
+                                    const daysSinceLogin = !user.last_login || !Number.isFinite(lastLoginMs)
+                                      ? Infinity
+                                      : (now - lastLoginMs) / (1000 * 60 * 60 * 24);
+                                    return daysSinceLogin > DORMANT_THRESHOLD_DAYS ? (
+                                      <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                        Dormant
+                                      </Badge>
                                     ) : null;
                                   })()}
                                 </div>

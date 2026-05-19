@@ -111,14 +111,12 @@ class MFAService:
         """
         Return True when MFA storage is supported by the current DB backend.
 
-        MFA persistence depends on PostgreSQL-backed AuthNZ tables. Returning
-        False allows callers to short-circuit gracefully (for example, in
-        sqlite-based development/test environments) without issuing failing
-        repo queries on every request.
+        MFA persistence is implemented through ``AuthnzMfaRepo``, which supports
+        both PostgreSQL and SQLite-backed ``DatabasePool`` instances once the
+        pool has been initialized. Callers use this to decide whether MFA
+        endpoints may be exposed for the active AuthNZ backend.
         """
-        if not self.db_pool:
-            return False
-        return bool(getattr(self.db_pool, "pool", None))
+        return self.db_pool is not None
 
     def _ensure_cipher_candidates(self) -> list[Fernet]:
         """Return Fernet instances for all active/legacy key materials."""

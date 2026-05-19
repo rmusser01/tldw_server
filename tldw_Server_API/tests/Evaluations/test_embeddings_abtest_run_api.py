@@ -1,7 +1,9 @@
+import json
 import os
 from typing import Tuple
 
 import pytest
+from fastapi import HTTPException, Response
 from fastapi.testclient import TestClient
 
 
@@ -125,3 +127,201 @@ def test_run_embeddings_abtest_treats_testing_y_as_synchronous(evals_client, mon
     r = client.post("/api/v1/evaluations/embeddings/abtest/mytest/run", json=payload, headers=headers)
     assert r.status_code == 200, r.text
     assert calls["run"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_embeddings_abtest_idempotent_replay_uses_stored_normalized_status(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_embeddings_abtest as ab
+    from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import EmbeddingsABTestRunRequest
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    class _DBStub:
+        def get_abtest(self, test_id, created_by=None):
+            return {
+                "test_id": test_id,
+                "created_by": created_by or "tenant-user",
+                "status": "canceled",
+                "stats_json": json.dumps({"progress": {"phase": 0.75}}),
+            }
+
+        def lookup_idempotency(self, *args, **kwargs):
+            _ = (args, kwargs)
+            return "mytest"
+
+    class _SvcStub:
+        def __init__(self):
+            self.db = _DBStub()
+
+    monkeypatch.setattr(ab, "enforce_heavy_evaluations_admin", lambda _principal: None)
+    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
+
+    result = await ab.run_embeddings_abtest(
+        test_id="mytest",
+        payload=EmbeddingsABTestRunRequest(
+            config={
+                "arms": [{"provider": "openai", "model": "text-embedding-3-small"}],
+                "media_ids": [],
+                "retrieval": {"k": 5, "search_mode": "vector"},
+                "queries": [{"text": "hello"}],
+            }
+        ),
+        user_ctx="tenant-user",
+        _=None,
+        __=None,
+        media_db=None,
+        principal=object(),
+        current_user=User(id="tenant-user", username="tester", email=None, is_active=True),
+        idempotency_key="idem-run-1",
+        response=Response(),
+    )
+
+    assert result.status == "cancelled"
+    assert result.progress == {"phase": 0.75}
+
+
+@pytest.mark.asyncio
+async def test_run_embeddings_abtest_sanitizes_enqueue_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_embeddings_abtest as ab
+    from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import EmbeddingsABTestRunRequest
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    class _LoggerStub:
+        def __init__(self):
+            self.errors = []
+
+        def error(self, message, *args, **kwargs):
+            self.errors.append((message, args, kwargs))
+
+        def info(self, *args, **kwargs):
+            pass
+
+    class _DBStub:
+        def get_abtest(self, test_id, created_by=None):
+            return {"test_id": test_id, "created_by": created_by or "tenant-user"}
+
+        def lookup_idempotency(self, *args, **kwargs):
+            return None
+
+    class _SvcStub:
+        def __init__(self):
+            self.db = _DBStub()
+
+    logger = _LoggerStub()
+
+    monkeypatch.setenv("TESTING", "false")
+    monkeypatch.setattr(ab, "logger", logger)
+    monkeypatch.setattr(ab, "enforce_heavy_evaluations_admin", lambda _principal: None)
+    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
+    monkeypatch.setattr(ab, "log_run_started", lambda *args, **kwargs: None)
+
+    def _raise_queue_error():
+        raise RuntimeError("queue backend leaked /private/evals-abtest-jobs.db")
+
+    monkeypatch.setattr(ab, "abtest_jobs_manager", _raise_queue_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ab.run_embeddings_abtest(
+            test_id="sensitive-test-id",
+            payload=EmbeddingsABTestRunRequest(
+                config={
+                    "arms": [{"provider": "openai", "model": "text-embedding-3-small"}],
+                    "media_ids": [],
+                    "retrieval": {"k": 5, "search_mode": "vector"},
+                    "queries": [{"text": "hello"}],
+                }
+            ),
+            user_ctx="tenant-user",
+            _=None,
+            __=None,
+            media_db=None,
+            principal=object(),
+            current_user=User(id="tenant-user", username="tester", email=None, is_active=True),
+            idempotency_key=None,
+            response=Response(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to enqueue A/B test job"
+    assert logger.errors == [("Failed to enqueue A/B test job", (), {})]
+    logged = repr(logger.errors)
+    assert "sensitive-test-id" not in logged
+    assert "queue backend leaked" not in logged
+    assert "/private/evals-abtest-jobs.db" not in logged
+
+
+@pytest.mark.asyncio
+async def test_run_embeddings_abtest_sanitizes_synchronous_failure_warning(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_embeddings_abtest as ab
+    from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import EmbeddingsABTestRunRequest
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    class _LoggerStub:
+        def __init__(self):
+            self.infos = []
+            self.warnings = []
+
+        def info(self, message, *args, **kwargs):
+            self.infos.append((message, args, kwargs))
+
+        def warning(self, message, *args, **kwargs):
+            self.warnings.append((message, args, kwargs))
+
+    class _DBStub:
+        def __init__(self):
+            self.status_updates = []
+
+        def get_abtest(self, test_id, created_by=None):
+            return {"test_id": test_id, "created_by": created_by or "tenant-user"}
+
+        def lookup_idempotency(self, *args, **kwargs):
+            return None
+
+        def record_idempotency(self, *args, **kwargs):
+            return None
+
+        def set_abtest_status(self, *args, **kwargs):
+            self.status_updates.append((args, kwargs))
+
+    class _SvcStub:
+        def __init__(self, db):
+            self.db = db
+
+    async def _raise_run_error(*args, **kwargs):
+        raise RuntimeError("runner leaked /private/evals-abtest-run.db")
+
+    logger = _LoggerStub()
+    db = _DBStub()
+
+    monkeypatch.setenv("TESTING", "true")
+    monkeypatch.setattr(ab, "logger", logger)
+    monkeypatch.setattr(ab, "enforce_heavy_evaluations_admin", lambda _principal: None)
+    monkeypatch.setattr(ab, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub(db))
+    monkeypatch.setattr(ab, "log_run_started", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ab, "run_abtest_full", _raise_run_error)
+
+    result = await ab.run_embeddings_abtest(
+        test_id="sensitive-test-id",
+        payload=EmbeddingsABTestRunRequest(
+            config={
+                "arms": [{"provider": "openai", "model": "text-embedding-3-small"}],
+                "media_ids": [],
+                "retrieval": {"k": 5, "search_mode": "vector"},
+                "queries": [{"text": "hello"}],
+            }
+        ),
+        user_ctx="tenant-user",
+        _=None,
+        __=None,
+        media_db=None,
+        principal=object(),
+        current_user=User(id="tenant-user", username="tester", email=None, is_active=True),
+        idempotency_key=None,
+        response=Response(),
+    )
+
+    assert result.status == "failed"
+    assert logger.warnings == [("A/B test synchronous run failed", (), {})]
+    logged = repr(logger.warnings)
+    assert "sensitive-test-id" not in logged
+    assert "runner leaked" not in logged
+    assert "/private/evals-abtest-run.db" not in logged

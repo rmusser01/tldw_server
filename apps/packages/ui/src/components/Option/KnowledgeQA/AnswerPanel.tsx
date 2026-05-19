@@ -18,6 +18,8 @@ import {
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
 import { remarkCitationLinks } from "./answerMarkdown"
 import { LowQualityRecoveryBanner } from "./panels/LowQualityRecoveryBanner"
+import { buildAnswerTrustSummary, type AnswerTrustLabel } from "./trustSummary"
+import type { KnowledgeSourceHealth } from "./types"
 
 type AnswerPanelProps = {
   className?: string
@@ -126,6 +128,16 @@ function describeFaithfulness(score: number | null): TrustDescriptor | null {
   }
 }
 
+function sourceHealthNeedsAttention(
+  health: KnowledgeSourceHealth | null | undefined
+): boolean {
+  if (!health) return true
+  if (!health.available || !health.searchable) return true
+  if (health.workspaceScoped || health.hiddenByDefault) return true
+  if (health.indexStatus !== "ready") return true
+  return ["missing", "unavailable", "error"].includes(health.embeddingStatus)
+}
+
 export function AnswerPanel({ className }: AnswerPanelProps) {
   const {
     answer,
@@ -144,6 +156,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     preset,
     settings,
     rerunWithTokenLimit,
+    sourceHealth,
+    expertMode = false,
   } = useKnowledgeQA()
   const [isExpanded, setIsExpanded] = useState(false)
   const [answerFeedback, setAnswerFeedback] = useState<"up" | "down" | null>(null)
@@ -201,6 +215,41 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   const faithfulnessDescriptor = useMemo(
     () => describeFaithfulness(trustScore),
     [trustScore]
+  )
+  const sourceHealthCaveatCount = useMemo(() => {
+    const selectedSources = settings?.sources ?? []
+    return selectedSources.filter((source) =>
+      sourceHealthNeedsAttention(sourceHealth?.bySource[source])
+    ).length
+  }, [settings?.sources, sourceHealth?.bySource])
+  const answerTrustLabel: AnswerTrustLabel =
+    faithfulnessDescriptor?.label ?? (citations.length > 0 ? "Partial" : "Weak")
+  const answerTrustSummaryLines = useMemo(
+    () =>
+      buildAnswerTrustSummary({
+        selectedSources: settings?.sources ?? [],
+        resultCount: results.length,
+        citationCount: citations.length,
+        webFallbackEnabled:
+          searchDetails?.webFallbackEnabled ?? Boolean(settings?.enable_web_fallback),
+        webFallbackTriggered: Boolean(searchDetails?.webFallbackTriggered),
+        generationProvider: settings?.generation_provider,
+        generationModel: settings?.generation_model,
+        sourceHealthCaveatCount,
+        trustLabel: answerTrustLabel,
+      }),
+    [
+      answerTrustLabel,
+      citations.length,
+      results.length,
+      searchDetails?.webFallbackEnabled,
+      searchDetails?.webFallbackTriggered,
+      settings?.enable_web_fallback,
+      settings?.generation_model,
+      settings?.generation_provider,
+      settings?.sources,
+      sourceHealthCaveatCount,
+    ]
   )
   const lowConfidenceRecovery = useMemo(() => {
     if (!normalizedAnswer || results.length === 0) return null
@@ -413,7 +462,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         type: "workspace_handoff",
         source_count: results.length,
       })
-      navigate("/workspace-playground")
+      navigate("/research-studio")
     } catch (error) {
       if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
         return
@@ -602,7 +651,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
               {citations.length} citation{citations.length !== 1 ? "s" : ""}
             </span>
           )}
-          {groundingCoverage && !showLowConfidenceRecovery ? (
+          {/* Grounding coverage badge: expert mode only */}
+          {expertMode && groundingCoverage && !showLowConfidenceRecovery ? (
             groundingCoverage.percent > 0 ? (
               <span
                 className="inline-flex items-center rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-text-muted"
@@ -612,7 +662,9 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
               </span>
             ) : null
           ) : null}
-          {faithfulnessDescriptor ? (
+          {/* Faithfulness badge: always in expert mode, non-expert only when below Strong */}
+          {faithfulnessDescriptor &&
+          (expertMode || faithfulnessDescriptor.label !== "Strong") ? (
             <span
               className={cn(
                 "inline-flex items-center rounded-md border px-2 py-0.5 text-xs",
@@ -687,6 +739,15 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
             </button>
           </div>
         </div>
+        <div
+          role="note"
+          aria-label="Answer trust summary"
+          className="mt-3 flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-surface2/60 px-3 py-2 text-xs text-text-muted"
+        >
+          {answerTrustSummaryLines.map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </div>
       </div>
       {showLowConfidenceRecovery ? (
         <div className="border-b border-primary/10 px-6 py-4">
@@ -696,6 +757,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
             refineLabel="Refine search"
             enableWebLabel="Include web sources"
             selectSourcesLabel="Adjust sources"
+            sourceStatus={searchDetails?.sourceStatus}
+            sourceHealthCaveatCount={sourceHealthCaveatCount}
             onRefine={() => {
               const input = document.getElementById("knowledge-search-input")
               input?.focus()
@@ -904,16 +967,17 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <button
             type="button"
             onClick={() => {
+              if (answerFeedback === "up") return
               void handleSubmitAnswerFeedback("up")
             }}
-            disabled={answerFeedbackSubmitting}
+            disabled={answerFeedbackSubmitting || answerFeedback === "up"}
             aria-pressed={answerFeedback === "up"}
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors",
               answerFeedback === "up"
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border bg-surface text-text-subtle hover:text-text hover:bg-hover",
-              answerFeedbackSubmitting && "opacity-60 cursor-not-allowed"
+              (answerFeedbackSubmitting || answerFeedback === "up") && "opacity-60 cursor-not-allowed"
             )}
           >
             <ThumbsUp className="w-3.5 h-3.5" />
@@ -922,16 +986,17 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <button
             type="button"
             onClick={() => {
+              if (answerFeedback === "down") return
               void handleSubmitAnswerFeedback("down")
             }}
-            disabled={answerFeedbackSubmitting}
+            disabled={answerFeedbackSubmitting || answerFeedback === "down"}
             aria-pressed={answerFeedback === "down"}
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors",
               answerFeedback === "down"
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border bg-surface text-text-subtle hover:text-text hover:bg-hover",
-              answerFeedbackSubmitting && "opacity-60 cursor-not-allowed"
+              (answerFeedbackSubmitting || answerFeedback === "down") && "opacity-60 cursor-not-allowed"
             )}
           >
             <ThumbsDown className="w-3.5 h-3.5" />

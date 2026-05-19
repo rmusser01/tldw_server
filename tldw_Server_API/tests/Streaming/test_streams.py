@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import pytest
 
 from tldw_Server_API.app.core.LLM_Calls.streaming import iter_sse_lines_requests
+from tldw_Server_API.app.core.Streaming import streams
 from tldw_Server_API.app.core.Streaming.streams import SSEStream, WebSocketStream
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 
@@ -289,6 +290,49 @@ async def test_sse_stream_comment_heartbeat_mode(monkeypatch):
 
     hb = await asyncio.wait_for(collect_first_heartbeat(), timeout=1.0)
     assert hb.startswith(":")
+
+
+def test_stream_metrics_registration_failure_debug_log_is_sanitized(monkeypatch):
+    class FailingRegistry:
+        def register_metric(self, metric_definition):
+            raise RuntimeError("secret metric path /private/metrics.db")
+
+    class FakeLogger:
+        def __init__(self):
+            self.debug_messages = []
+
+        def debug(self, message):
+            self.debug_messages.append(message)
+
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(streams, "_STREAM_METRICS_REGISTERED", False)
+    monkeypatch.setattr(streams, "get_metrics_registry", lambda: FailingRegistry())
+    monkeypatch.setattr(streams, "logger", fake_logger)
+
+    streams._ensure_stream_metrics_registered()
+
+    assert fake_logger.debug_messages == ["Stream metrics registration failed or already registered"]
+    assert "secret metric path" not in fake_logger.debug_messages[0]
+    assert "/private/metrics.db" not in fake_logger.debug_messages[0]
+    assert streams._STREAM_METRICS_REGISTERED is False
+
+
+def test_parse_float_env_invalid_value_debug_log_is_sanitized(monkeypatch):
+    class FakeLogger:
+        def __init__(self):
+            self.debug_messages = []
+
+        def debug(self, message):
+            self.debug_messages.append(message)
+
+    fake_logger = FakeLogger()
+    monkeypatch.setenv("STREAM_IDLE_TIMEOUT_S", "super-secret-token")
+    monkeypatch.setattr(streams, "logger", fake_logger)
+
+    assert streams._parse_float_env("STREAM_IDLE_TIMEOUT_S") is None
+    assert fake_logger.debug_messages == ["Invalid float in stream env"]
+    assert "STREAM_IDLE_TIMEOUT_S" not in fake_logger.debug_messages[0]
+    assert "super-secret-token" not in fake_logger.debug_messages[0]
 
 
 class _StubWebSocket:

@@ -1,11 +1,105 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
+import type { RagSource } from "@/services/rag/unified-rag"
+import type { KnowledgeSourceHealthState } from "../types"
 
 const submitExplicitFeedbackMock = vi.fn()
 const messageOpenMock = vi.fn()
 const navigateMock = vi.fn()
 const trackMetricMock = vi.fn()
+
+type AnswerPanelTestSettings = {
+  max_generation_tokens: number
+  strip_min_relevance: number
+  enable_web_fallback: boolean
+  sources: RagSource[]
+  generation_provider: string | null
+  generation_model: string | null
+}
+
+const createSourceHealthState = (): KnowledgeSourceHealthState => ({
+  loading: false,
+  error: null,
+  loadedAt: "2026-05-16T00:00:00Z",
+  sources: [
+    {
+      sourceId: "media_db",
+      label: "Documents & Media",
+      available: true,
+      searchable: true,
+      itemCount: null,
+      indexedCount: null,
+      lastUpdated: null,
+      lastIndexed: null,
+      indexStatus: "ready",
+      embeddingStatus: "not_applicable",
+      disabledReason: null,
+      workspaceScoped: false,
+      hiddenByDefault: false,
+      privacyNote: null,
+    },
+    {
+      sourceId: "notes",
+      label: "Notes",
+      available: true,
+      searchable: true,
+      itemCount: null,
+      indexedCount: null,
+      lastUpdated: null,
+      lastIndexed: null,
+      indexStatus: "stale",
+      embeddingStatus: "ready",
+      disabledReason: null,
+      workspaceScoped: false,
+      hiddenByDefault: false,
+      privacyNote: null,
+    },
+  ],
+  bySource: {
+    media_db: {
+      sourceId: "media_db",
+      label: "Documents & Media",
+      available: true,
+      searchable: true,
+      itemCount: null,
+      indexedCount: null,
+      lastUpdated: null,
+      lastIndexed: null,
+      indexStatus: "ready",
+      embeddingStatus: "not_applicable",
+      disabledReason: null,
+      workspaceScoped: false,
+      hiddenByDefault: false,
+      privacyNote: null,
+    },
+    notes: {
+      sourceId: "notes",
+      label: "Notes",
+      available: true,
+      searchable: true,
+      itemCount: null,
+      indexedCount: null,
+      lastUpdated: null,
+      lastIndexed: null,
+      indexStatus: "stale",
+      embeddingStatus: "ready",
+      disabledReason: null,
+      workspaceScoped: false,
+      hiddenByDefault: false,
+      privacyNote: null,
+    },
+  },
+})
+
+const createSettings = (): AnswerPanelTestSettings => ({
+  max_generation_tokens: 800,
+  strip_min_relevance: 0.3,
+  enable_web_fallback: false,
+  sources: ["media_db", "notes"],
+  generation_provider: null,
+  generation_model: null,
+})
 
 const state = {
   answer: null as string | null,
@@ -15,21 +109,14 @@ const state = {
   results: [] as Array<{ id: string; score?: number; metadata?: { title?: string } }>,
   setSettingsPanelOpen: vi.fn(),
   updateSetting: vi.fn(),
-  settings: {
-    max_generation_tokens: 800,
-    strip_min_relevance: 0.3,
-    enable_web_fallback: false,
-  } as {
-    max_generation_tokens: number
-    strip_min_relevance: number
-    enable_web_fallback: boolean
-  },
+  settings: createSettings(),
   preset: "balanced" as "fast" | "balanced" | "thorough" | "custom",
   rerunWithTokenLimit: vi.fn(),
   searchDetails: null as
     | {
         tokensUsed?: number | null
         estimatedCostUsd?: number | null
+        webFallbackEnabled?: boolean
         webFallbackTriggered?: boolean
         webFallbackEngine?: string | null
         faithfulnessScore?: number | null
@@ -43,6 +130,8 @@ const state = {
   messages: [] as Array<{ id: string; role: string }>,
   scrollToSource: vi.fn(),
   focusedSourceIndex: null as number | null,
+  sourceHealth: createSourceHealthState(),
+  expertMode: false,
 }
 
 vi.mock("@/services/feedback", () => ({
@@ -91,6 +180,8 @@ vi.mock("../KnowledgeQAProvider", () => ({
     rerunWithTokenLimit: state.rerunWithTokenLimit,
     scrollToSource: state.scrollToSource,
     focusedSourceIndex: state.focusedSourceIndex,
+    sourceHealth: state.sourceHealth,
+    expertMode: state.expertMode,
   })
 }))
 
@@ -104,9 +195,7 @@ describe("AnswerPanel state guardrails", () => {
     state.results = []
     state.setSettingsPanelOpen = vi.fn()
     state.updateSetting = vi.fn()
-    state.settings.max_generation_tokens = 800
-    state.settings.strip_min_relevance = 0.3
-    state.settings.enable_web_fallback = false
+    state.settings = createSettings()
     state.preset = "balanced"
     state.rerunWithTokenLimit = vi.fn().mockResolvedValue(undefined)
     state.searchDetails = null
@@ -114,6 +203,8 @@ describe("AnswerPanel state guardrails", () => {
     state.currentThreadId = "thread-1"
     state.messages = []
     state.focusedSourceIndex = null
+    state.sourceHealth = createSourceHealthState()
+    state.expertMode = false
     submitExplicitFeedbackMock.mockResolvedValue({ ok: true })
     trackMetricMock.mockResolvedValue(undefined)
   })
@@ -189,6 +280,7 @@ describe("AnswerPanel state guardrails", () => {
   })
 
   it("shows grounding coverage and highlights uncited paragraphs", () => {
+    state.expertMode = true
     state.answer = "This statement is grounded [1].\n\nThis sentence has no citation."
     state.citations = [{ index: 1 }]
     state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
@@ -202,6 +294,7 @@ describe("AnswerPanel state guardrails", () => {
   })
 
   it("renders trust badges from server verification metadata", () => {
+    state.expertMode = true
     state.answer = "Claim one [1]. Claim two [1]."
     state.citations = [{ index: 1 }]
     state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
@@ -215,6 +308,56 @@ describe("AnswerPanel state guardrails", () => {
 
     expect(screen.getByText("Source support: Strong")).toBeInTheDocument()
     expect(screen.getByText("Claim check (3 claims)")).toBeInTheDocument()
+  })
+
+  it("renders a compact answer trust summary outside the markdown answer body", () => {
+    state.answer = "Claim one [1]. Claim two."
+    state.citations = [{ index: 1 }]
+    state.results = [
+      { id: "r1", metadata: { title: "Doc 1" } },
+      { id: "r2", metadata: { title: "Note 1" } },
+    ]
+    state.settings.enable_web_fallback = true
+    state.settings.generation_provider = "openai"
+    state.settings.generation_model = "gpt-4o-mini"
+    state.searchDetails = {
+      webFallbackEnabled: true,
+      webFallbackTriggered: false,
+      faithfulnessScore: 0.72,
+    }
+
+    render(<AnswerPanel />)
+
+    const trustSummary = screen.getByLabelText("Answer trust summary")
+    expect(trustSummary).toHaveTextContent(
+      "Searched Documents & Media and Notes. 2 sources returned, 1 cited."
+    )
+    expect(trustSummary).toHaveTextContent("Web fallback enabled, not used.")
+    expect(trustSummary).toHaveTextContent("AI model: openai / gpt-4o-mini.")
+    expect(trustSummary).toHaveTextContent("1 selected source needs attention.")
+    expect(trustSummary).toHaveTextContent("Trust: Partial.")
+    expect(screen.getByTestId("knowledge-answer-content")).not.toContainElement(
+      trustSummary
+    )
+  })
+
+  it("treats missing selected source-health entries as caveats", () => {
+    const health = createSourceHealthState()
+    const mediaHealth = health.bySource.media_db
+    state.answer = "Claim one."
+    state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
+    state.settings.sources = ["media_db", "prompts"]
+    state.sourceHealth = {
+      ...health,
+      sources: mediaHealth ? [mediaHealth] : [],
+      bySource: mediaHealth ? { media_db: mediaHealth } : {},
+    }
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "1 selected source needs attention."
+    )
   })
 
   it("uses verification rate as trust badge fallback when faithfulness is missing", () => {

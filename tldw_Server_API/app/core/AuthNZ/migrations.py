@@ -150,7 +150,7 @@ def migration_003_create_api_keys_table(conn: sqlite3.Connection) -> None:
             key_prefix TEXT,
             name TEXT,
             description TEXT,
-            scope TEXT DEFAULT 'read',
+            scope TEXT,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP,
@@ -182,7 +182,7 @@ def migration_003_create_api_keys_table(conn: sqlite3.Connection) -> None:
         add_col('key_id', "key_id TEXT")
         add_col('key_prefix', "key_prefix TEXT")
         add_col('description', "description TEXT")
-        add_col('scope', "scope TEXT DEFAULT 'read'")
+        add_col('scope', "scope TEXT")
         add_col('status', "status TEXT DEFAULT 'active'")
         add_col('last_used_at', "last_used_at TIMESTAMP")
         add_col('last_used_ip', "last_used_ip TEXT")
@@ -494,6 +494,536 @@ def migration_011_add_enhanced_auth_tables(conn: sqlite3.Connection) -> None:
     logger.info("Migration 011: Created enhanced authentication tables")
 
 
+def migration_084_scope_account_lockouts_by_attempt_type(conn: sqlite3.Connection) -> None:
+    """Rebuild account_lockouts so lockouts are scoped by attempt_type."""
+    logger.info("Migration 084: START scope account_lockouts by attempt_type")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS account_lockouts_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identifier TEXT NOT NULL,
+            attempt_type TEXT NOT NULL,
+            locked_until TIMESTAMP NOT NULL,
+            reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(identifier, attempt_type)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO account_lockouts_new
+            (identifier, attempt_type, locked_until, reason, created_at)
+        SELECT
+            identifier,
+            'login',
+            locked_until,
+            reason,
+            COALESCE(created_at, CURRENT_TIMESTAMP)
+        FROM account_lockouts
+        """
+    )
+    conn.execute("DROP TABLE IF EXISTS account_lockouts")
+    conn.execute("ALTER TABLE account_lockouts_new RENAME TO account_lockouts")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lockouts_identifier_attempt_type "
+        "ON account_lockouts(identifier, attempt_type)"
+    )
+    conn.commit()
+    logger.info("Migration 084: COMPLETE scope account_lockouts by attempt_type")
+
+
+def migration_085_remove_api_keys_scope_default(conn: sqlite3.Connection) -> None:
+    """Rebuild api_keys so omitted scope no longer defaults to read."""
+    logger.info("Migration 085: START remove api_keys.scope default")
+
+    pragma_rows = conn.execute("PRAGMA table_info(api_keys)").fetchall()
+    if not pragma_rows:
+        logger.info("Migration 085: api_keys table not present; skipping")
+        return
+
+    desired_defs = {
+        "id": "id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "user_id": "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE",
+        "key_hash": "key_hash TEXT UNIQUE NOT NULL",
+        "key_id": "key_id TEXT",
+        "key_prefix": "key_prefix TEXT",
+        "name": "name TEXT",
+        "description": "description TEXT",
+        "scope": "scope TEXT",
+        "status": "status TEXT DEFAULT 'active'",
+        "created_at": "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "expires_at": "expires_at TIMESTAMP",
+        "last_used_at": "last_used_at TIMESTAMP",
+        "last_used_ip": "last_used_ip TEXT",
+        "usage_count": "usage_count INTEGER DEFAULT 0",
+        "rate_limit": "rate_limit INTEGER",
+        "allowed_ips": "allowed_ips TEXT",
+        "metadata": "metadata TEXT",
+        "rotated_from": "rotated_from INTEGER REFERENCES api_keys(id)",
+        "rotated_to": "rotated_to INTEGER REFERENCES api_keys(id)",
+        "revoked_at": "revoked_at TIMESTAMP",
+        "revoked_by": "revoked_by INTEGER",
+        "revoke_reason": "revoke_reason TEXT",
+        "is_virtual": "is_virtual INTEGER DEFAULT 0",
+        "parent_key_id": "parent_key_id INTEGER REFERENCES api_keys(id)",
+        "org_id": "org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL",
+        "team_id": "team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL",
+        "llm_budget_day_tokens": "llm_budget_day_tokens INTEGER",
+        "llm_budget_month_tokens": "llm_budget_month_tokens INTEGER",
+        "llm_budget_day_usd": "llm_budget_day_usd REAL",
+        "llm_budget_month_usd": "llm_budget_month_usd REAL",
+        "llm_allowed_endpoints": "llm_allowed_endpoints TEXT",
+        "llm_allowed_providers": "llm_allowed_providers TEXT",
+        "llm_allowed_models": "llm_allowed_models TEXT",
+    }
+
+    pragma_by_name = {row[1]: row for row in pragma_rows}
+    current_columns = [row[1] for row in pragma_rows]
+
+    def _quote_sqlite_identifier(identifier: str) -> str:
+        """Quote a SQLite identifier derived from trusted schema metadata."""
+        escaped_identifier = identifier.replace('"', '""')
+        return f'"{escaped_identifier}"'
+
+    def _fallback_definition(column_name: str) -> str:
+        row = pragma_by_name[column_name]
+        column_type = row[2] or "TEXT"
+        not_null = bool(row[3])
+        default = row[4]
+        primary_key = bool(row[5])
+
+        parts = [_quote_sqlite_identifier(column_name), column_type]
+        if primary_key:
+            parts.append("PRIMARY KEY")
+        elif not_null:
+            parts.append("NOT NULL")
+        if default is not None and column_name != "scope":
+            parts.append(f"DEFAULT {default}")
+        return " ".join(parts)
+
+    column_defs = [desired_defs.get(name, _fallback_definition(name)) for name in current_columns]
+    quoted_current_columns = ", ".join(_quote_sqlite_identifier(name) for name in current_columns)
+
+    # Use the foreign-key-off rebuild pattern to avoid FK cascade
+    # actions (e.g. ON DELETE CASCADE on api_key_audit_log, ON DELETE
+    # SET NULL on usage_log / llm_usage_log) that SQLite would otherwise
+    # trigger when the live api_keys table is dropped.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        create_api_keys_sql = f"""
+            CREATE TABLE IF NOT EXISTS api_keys_new (
+                {', '.join(column_defs)}
+            )
+        """  # nosec B608
+        conn.execute(create_api_keys_sql)
+        # SECURITY: SQL identifiers cannot be bound parameters; the column
+        # names here come from trusted PRAGMA metadata and are SQLite-quoted.
+        insert_api_keys_rebuild_sql = " ".join(
+            (
+                "INSERT INTO api_keys_new",
+                f"({quoted_current_columns})",  # nosec B608
+                "SELECT",
+                quoted_current_columns,
+                "FROM api_keys",
+            )
+        )
+        conn.execute(insert_api_keys_rebuild_sql)
+        conn.execute("DROP TABLE IF EXISTS api_keys")
+        conn.execute("ALTER TABLE api_keys_new RENAME TO api_keys")
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash)")
+        if "key_id" in current_columns:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys(key_id)")
+        if "status" in current_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status)")
+        if "expires_at" in current_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at)")
+        if "is_virtual" in current_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_virtual ON api_keys(is_virtual)")
+        if "org_id" in current_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_org ON api_keys(org_id)")
+        if "team_id" in current_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_team ON api_keys(team_id)")
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    conn.commit()
+    logger.info("Migration 085: COMPLETE remove api_keys.scope default")
+
+
+def migration_086_create_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
+    """Create shared metadata tables for prototype workspaces and collaboration sessions."""
+    logger.info("Migration 086: START prototype workspace metadata tables")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_workspaces (
+            id TEXT PRIMARY KEY,
+            owner_user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            creation_source TEXT NOT NULL
+                CHECK (creation_source IN ('prompt', 'template', 'existing_workspace')),
+            canonical_snapshot_id TEXT,
+            last_known_good_snapshot_id TEXT,
+            canonical_preview_status TEXT,
+            publish_validation_status TEXT,
+            preview_policy_json TEXT NOT NULL DEFAULT '{}',
+            share_policy_json TEXT NOT NULL DEFAULT '{}',
+            runtime_policy_json TEXT NOT NULL DEFAULT '{}',
+            designated_promoter_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            archived_at TIMESTAMP,
+            FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_owner_updated "
+        "ON prototype_workspaces(owner_user_id, updated_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_workspaces_archived_at_cleanup "
+        "ON prototype_workspaces(archived_at) WHERE archived_at IS NOT NULL"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_snapshots (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            parent_snapshot_id TEXT,
+            created_from_session_id TEXT,
+            author_user_id INTEGER,
+            author_shared_actor_id TEXT,
+            storage_ref TEXT,
+            diff_summary_json TEXT NOT NULL DEFAULT '{}',
+            prompt_summary TEXT,
+            preview_health_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            UNIQUE (id, prototype_workspace_id),
+            CHECK (
+                (author_user_id IS NOT NULL AND author_shared_actor_id IS NULL)
+                OR (author_user_id IS NULL AND author_shared_actor_id IS NOT NULL)
+            )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_snapshots_workspace_created "
+        "ON prototype_snapshots(prototype_workspace_id, created_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_shared_actors (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            share_link_id INTEGER NOT NULL,
+            display_name TEXT NOT NULL,
+            session_binding_id TEXT,
+            runtime_policy_profile TEXT NOT NULL,
+            quota_policy_json TEXT NOT NULL DEFAULT '{}',
+            last_activity_at TIMESTAMP,
+            expires_at TIMESTAMP,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            UNIQUE (id, prototype_workspace_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_workspace "
+        "ON prototype_shared_actors(prototype_workspace_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_active_lookup "
+        "ON prototype_shared_actors(prototype_workspace_id, revoked_at, expires_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_expires_revoked_cleanup "
+        "ON prototype_shared_actors(expires_at, revoked_at) "
+        "WHERE expires_at IS NOT NULL AND revoked_at IS NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_shared_actors_share_link_revoked "
+        "ON prototype_shared_actors(share_link_id, revoked_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_sessions (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            base_snapshot_id TEXT NOT NULL,
+            actor_user_id INTEGER,
+            actor_shared_actor_id TEXT,
+            actor_type TEXT NOT NULL
+                CHECK (actor_type IN ('owner', 'internal_collaborator', 'external_collaborator')),
+            share_link_id INTEGER,
+            acp_session_id TEXT,
+            sandbox_session_id TEXT,
+            sandbox_run_id TEXT,
+            runtime_status TEXT,
+            preview_handle TEXT,
+            preview_status TEXT,
+            last_saved_snapshot_id TEXT,
+            last_activity_at TIMESTAMP,
+            expires_at TIMESTAMP,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (actor_user_id) REFERENCES users(id),
+            FOREIGN KEY (base_snapshot_id, prototype_workspace_id)
+                REFERENCES prototype_snapshots(id, prototype_workspace_id),
+            FOREIGN KEY (actor_shared_actor_id, prototype_workspace_id)
+                REFERENCES prototype_shared_actors(id, prototype_workspace_id),
+            UNIQUE (id, prototype_workspace_id),
+            CHECK (
+                (actor_type = 'external_collaborator'
+                    AND actor_user_id IS NULL
+                    AND actor_shared_actor_id IS NOT NULL)
+                OR (
+                    actor_type IN ('owner', 'internal_collaborator')
+                    AND actor_user_id IS NOT NULL
+                    AND actor_shared_actor_id IS NULL
+                )
+            )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_workspace_updated "
+        "ON prototype_sessions(prototype_workspace_id, updated_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_workspace_active_updated "
+        "ON prototype_sessions(prototype_workspace_id, revoked_at, updated_at, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_active_lookup "
+        "ON prototype_sessions("
+        "prototype_workspace_id, base_snapshot_id, actor_type, actor_user_id, "
+        "actor_shared_actor_id, share_link_id, revoked_at, expires_at, updated_at"
+        ")"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_revoked_at_cleanup "
+        "ON prototype_sessions(revoked_at) WHERE revoked_at IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_sessions_expires_at_cleanup "
+        "ON prototype_sessions(expires_at) WHERE expires_at IS NOT NULL"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_preview_handles (
+            id TEXT PRIMARY KEY,
+            preview_scope TEXT NOT NULL
+                CHECK (preview_scope IN ('canonical', 'session')),
+            scope_id TEXT NOT NULL,
+            prototype_workspace_id TEXT NOT NULL,
+            prototype_session_id TEXT,
+            actor_key TEXT NOT NULL,
+            target_ref TEXT NOT NULL,
+            runtime_policy_profile TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            revoked_at TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (prototype_session_id, prototype_workspace_id)
+                REFERENCES prototype_sessions(id, prototype_workspace_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_workspace "
+        "ON prototype_preview_handles(prototype_workspace_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_session "
+        "ON prototype_preview_handles(prototype_session_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_scope_active "
+        "ON prototype_preview_handles(scope_id, is_active)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_prototype_preview_handles_active_scope "
+        "ON prototype_preview_handles(scope_id) WHERE is_active = 1"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_preview_handles_inactive_revoked_cleanup "
+        "ON prototype_preview_handles(is_active, revoked_at) "
+        "WHERE is_active = 0 AND revoked_at IS NOT NULL"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prototype_promotion_requests (
+            id TEXT PRIMARY KEY,
+            prototype_workspace_id TEXT NOT NULL,
+            prototype_session_id TEXT NOT NULL,
+            candidate_snapshot_id TEXT NOT NULL,
+            requested_by_user_id INTEGER,
+            requested_by_shared_actor_id TEXT,
+            status TEXT NOT NULL
+                CHECK (status IN ('pending', 'approved', 'rejected', 'promoted', 'stale')),
+            reviewed_by_user_id INTEGER,
+            review_notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prototype_workspace_id) REFERENCES prototype_workspaces(id) ON DELETE CASCADE,
+            FOREIGN KEY (prototype_session_id) REFERENCES prototype_sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (candidate_snapshot_id, prototype_workspace_id)
+                REFERENCES prototype_snapshots(id, prototype_workspace_id),
+            FOREIGN KEY (prototype_session_id, prototype_workspace_id)
+                REFERENCES prototype_sessions(id, prototype_workspace_id),
+            CHECK (
+                (requested_by_user_id IS NOT NULL AND requested_by_shared_actor_id IS NULL)
+                OR (requested_by_user_id IS NULL AND requested_by_shared_actor_id IS NOT NULL)
+            )
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_promotion_requests_workspace_status "
+        "ON prototype_promotion_requests(prototype_workspace_id, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prototype_promotion_requests_workspace_status_updated "
+        "ON prototype_promotion_requests(prototype_workspace_id, status, updated_at)"
+    )
+
+    conn.commit()
+    logger.info("Migration 086: Created prototype workspace metadata tables")
+
+
+def migration_087_expand_share_tokens_resource_type_for_prototypes(conn: sqlite3.Connection) -> None:
+    """Rebuild share_tokens to support prototype_workspace and backfill legacy encoded rows."""
+    logger.info("Migration 087: START expand share_tokens resource_type for prototypes")
+
+    if not _sqlite_table_exists(conn, "share_tokens"):
+        logger.info("Migration 087: share_tokens table missing; skipping")
+        return
+
+    table_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'share_tokens'"
+    ).fetchone()
+    table_sql = str(table_sql_row[0] if table_sql_row else "").lower()
+    has_prototype_type = "prototype_workspace" in table_sql
+    legacy_count_row = conn.execute(
+        """
+        SELECT COUNT(*) FROM share_tokens
+        WHERE resource_type = 'workspace'
+          AND resource_id LIKE 'prototype_workspace::%'
+        """
+    ).fetchone()
+    legacy_count = int(legacy_count_row[0]) if legacy_count_row else 0
+
+    conn.execute("DROP TABLE IF EXISTS share_tokens_new")
+
+    if has_prototype_type and legacy_count == 0:
+        logger.info("Migration 087: share_tokens already supports prototype_workspace; skipping")
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS share_tokens_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash      TEXT UNIQUE NOT NULL,
+                token_prefix    TEXT NOT NULL,
+                resource_type   TEXT NOT NULL
+                    CHECK (resource_type IN ('chatbook', 'workspace', 'prototype_workspace')),
+                resource_id     TEXT NOT NULL,
+                owner_user_id   INTEGER NOT NULL,
+                access_level    TEXT NOT NULL DEFAULT 'view_chat',
+                allow_clone     INTEGER NOT NULL DEFAULT 1,
+                password_hash   TEXT,
+                max_uses        INTEGER,
+                use_count       INTEGER NOT NULL DEFAULT 0,
+                expires_at      TIMESTAMP,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                revoked_at      TIMESTAMP,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            INSERT INTO share_tokens_new (
+                id, token_hash, token_prefix, resource_type, resource_id,
+                owner_user_id, access_level, allow_clone, password_hash,
+                max_uses, use_count, expires_at, created_at, revoked_at
+            )
+            SELECT
+                id,
+                token_hash,
+                token_prefix,
+                CASE
+                    WHEN resource_type = 'workspace'
+                         AND resource_id LIKE 'prototype_workspace::%'
+                    THEN 'prototype_workspace'
+                    ELSE resource_type
+                END AS resource_type,
+                CASE
+                    WHEN resource_type = 'workspace'
+                         AND resource_id LIKE 'prototype_workspace::%'
+                    THEN substr(resource_id, 22)
+                    ELSE resource_id
+                END AS resource_id,
+                owner_user_id,
+                access_level,
+                allow_clone,
+                password_hash,
+                max_uses,
+                use_count,
+                expires_at,
+                created_at,
+                revoked_at
+            FROM share_tokens
+            """
+        )
+
+        conn.execute("DROP TABLE IF EXISTS share_tokens")
+        conn.execute("ALTER TABLE share_tokens_new RENAME TO share_tokens")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_share_tokens_prefix ON share_tokens(token_prefix)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_share_tokens_owner ON share_tokens(owner_user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_share_tokens_resource ON share_tokens(resource_type, resource_id)")
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    conn.commit()
+    logger.info(
+        "Migration 087: Expanded share_tokens resource_type and backfilled {} legacy prototype rows",
+        legacy_count,
+    )
+
+
+def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
+    """Rollback migration 086 by dropping prototype workspace metadata tables."""
+    conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
+    conn.execute("DROP TABLE IF EXISTS prototype_preview_handles")
+    conn.execute("DROP TABLE IF EXISTS prototype_sessions")
+    conn.execute("DROP TABLE IF EXISTS prototype_shared_actors")
+    conn.execute("DROP TABLE IF EXISTS prototype_snapshots")
+    conn.execute("DROP TABLE IF EXISTS prototype_workspaces")
+    conn.commit()
+    logger.info("Rollback 086: Dropped prototype workspace metadata tables")
+
+
 def migration_012_create_rbac_tables(conn: sqlite3.Connection) -> None:
     """Create core RBAC tables: roles, permissions, mappings, and user overrides."""
     logger.info("Migration 012: START RBAC core tables")
@@ -732,7 +1262,12 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
         ('api.rate_limit_override','Override rate limits','api'),
         # claims
         ('claims.review','Review claims','claims'),
-        ('claims.admin','Administer claims','claims')
+        ('claims.admin','Administer claims','claims'),
+        # moderation review
+        ('moderation.review.read','Read moderation review items','moderation'),
+        ('moderation.review.decide','Decide moderation review items','moderation'),
+        ('moderation.review.bulk_decide','Bulk decide moderation review items','moderation'),
+        ('moderation.audit.read','Read moderation review audit events','moderation')
     ]
     for name, description, category in perms:
         conn.execute(
@@ -785,8 +1320,15 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
                 (mod_id, pid),
             )
 
-    # Reviewer: read media + claims.review
-    reviewer_perms = ['media.read', 'claims.review']
+    # Reviewer: read media + claims and moderation review decisions
+    reviewer_perms = [
+        'media.read',
+        'claims.review',
+        'moderation.review.read',
+        'moderation.review.decide',
+        'moderation.review.bulk_decide',
+        'moderation.audit.read',
+    ]
     for code in reviewer_perms:
         pid = _id('permissions', code)
         if pid is not None and reviewer_id is not None:
@@ -839,7 +1381,18 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
                 remote_ip TEXT,
                 user_agent TEXT,
                 token_name TEXT,
-                conversation_id TEXT
+                conversation_id TEXT,
+                cached_input_tokens INTEGER,
+                cache_write_input_tokens INTEGER,
+                cache_read_input_tokens INTEGER,
+                billable_input_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                choice_count INTEGER,
+                estimate_source TEXT,
+                prompt_fingerprint TEXT,
+                prompt_fingerprint_version TEXT,
+                world_book_fingerprint TEXT,
+                raw_usage_metadata_json TEXT
             )
             """
         )
@@ -870,6 +1423,17 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
                 user_agent TEXT,
                 token_name TEXT,
                 conversation_id TEXT,
+                cached_input_tokens INTEGER,
+                cache_write_input_tokens INTEGER,
+                cache_read_input_tokens INTEGER,
+                billable_input_tokens INTEGER,
+                reasoning_tokens INTEGER,
+                choice_count INTEGER,
+                estimate_source TEXT,
+                prompt_fingerprint TEXT,
+                prompt_fingerprint_version TEXT,
+                world_book_fingerprint TEXT,
+                raw_usage_metadata_json TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
                 FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE SET NULL
             )
@@ -1364,6 +1928,38 @@ def migration_054_add_llm_usage_log_router_analytics_columns(conn: sqlite3.Conne
 
     conn.commit()
     logger.info("Migration 054: Added llm_usage_log router analytics columns/indexes")
+
+
+def migration_088_add_llm_usage_cache_accounting_columns(conn: sqlite3.Connection) -> None:
+    """Add cache-aware accounting columns to llm_usage_log (SQLite)."""
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(llm_usage_log)").fetchall()
+    }
+    if not existing_columns:
+        raise sqlite3.OperationalError("llm_usage_log table missing for migration 088")
+
+    columns = (
+        ("cached_input_tokens", "INTEGER"),
+        ("cache_write_input_tokens", "INTEGER"),
+        ("cache_read_input_tokens", "INTEGER"),
+        ("billable_input_tokens", "INTEGER"),
+        ("reasoning_tokens", "INTEGER"),
+        ("choice_count", "INTEGER"),
+        ("estimate_source", "TEXT"),
+        ("prompt_fingerprint", "TEXT"),
+        ("prompt_fingerprint_version", "TEXT"),
+        ("world_book_fingerprint", "TEXT"),
+        ("raw_usage_metadata_json", "TEXT"),
+    )
+    for column_name, column_type in columns:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE llm_usage_log ADD COLUMN {column_name} {column_type}")  # nosec B608
+        existing_columns.add(column_name)
+
+    conn.commit()
+    logger.info("Migration 088: Added llm_usage_log cache accounting columns")
 
 
 def migration_055_create_mcp_hub_tables(conn: sqlite3.Connection) -> None:
@@ -4241,6 +4837,37 @@ def migration_082_harden_admin_webhooks_and_create_admin_settings(conn: sqlite3.
     logger.info("Migration 082: Hardened admin_webhooks schema and created admin_settings")
 
 
+def migration_083_create_org_stt_settings(conn: sqlite3.Connection) -> None:
+    """Create org_stt_settings table for org-scoped STT policy."""
+    logger.info("Migration 083: START org_stt_settings table")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS org_stt_settings (
+            org_id INTEGER PRIMARY KEY,
+            delete_audio_after_success INTEGER NOT NULL DEFAULT 1,
+            audio_retention_hours REAL NOT NULL DEFAULT 0.0,
+            redact_pii INTEGER NOT NULL DEFAULT 0,
+            allow_unredacted_partials INTEGER NOT NULL DEFAULT 0,
+            redact_categories_json TEXT NOT NULL DEFAULT '[]',
+            updated_by INTEGER,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+            FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_org_stt_settings_updated_by ON org_stt_settings(updated_by)")
+    conn.commit()
+    logger.info("Migration 083: Created org_stt_settings table")
+
+
+def rollback_083_drop_org_stt_settings(conn: sqlite3.Connection) -> None:
+    """Rollback migration 083 by dropping org_stt_settings."""
+    conn.execute("DROP TABLE IF EXISTS org_stt_settings")
+    conn.commit()
+    logger.info("Rollback 083: Dropped org_stt_settings table")
+
+
 def rollback_081_drop_admin_dependency_health_history(conn: sqlite3.Connection) -> None:
     """Rollback migration 081."""
     conn.execute("DROP TABLE IF EXISTS admin_dependency_health_history")
@@ -4611,6 +5238,38 @@ def get_authnz_migrations() -> list[Migration]:
             82,
             "Harden admin webhooks schema and create admin settings table",
             migration_082_harden_admin_webhooks_and_create_admin_settings,
+        ),
+        Migration(
+            83,
+            "Create org STT settings table",
+            migration_083_create_org_stt_settings,
+            rollback_083_drop_org_stt_settings,
+        ),
+        Migration(
+            84,
+            "Scope account lockouts by attempt type",
+            migration_084_scope_account_lockouts_by_attempt_type,
+        ),
+        Migration(
+            85,
+            "Remove api_keys.scope default",
+            migration_085_remove_api_keys_scope_default,
+        ),
+        Migration(
+            86,
+            "Create prototype workspace metadata tables",
+            migration_086_create_prototype_workspace_tables,
+            rollback_086_drop_prototype_workspace_tables,
+        ),
+        Migration(
+            87,
+            "Expand share_tokens resource_type for prototype workspace links",
+            migration_087_expand_share_tokens_resource_type_for_prototypes,
+        ),
+        Migration(
+            88,
+            "Add llm_usage_log cache accounting columns",
+            migration_088_add_llm_usage_cache_accounting_columns,
         ),
     ]
 

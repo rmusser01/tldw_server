@@ -1,18 +1,28 @@
+# Monitoring overlay for tldw_server.
+# Usage (overlay — recommended):
+#   docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/Monitoring/docker-compose.monitoring.yml up -d
+# NOTE: This is a compose overlay. prometheus.yml scrapes "app:8000" which
+# requires the main docker-compose.yml stack to provide the "app" service.
+# Running this file standalone will cause Prometheus scrape failures.
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: ${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE to a pinned image reference such as prom/prometheus:v2.55.1}
     container_name: tldw_prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Linux host gateway mapping
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../Docs/Operations/monitoring/prometheus_alerts_tldw.yml:/etc/prometheus/alerts/tldw_alerts.yml:ro
+      - ../../Docs/Operations/monitoring/alerts:/etc/prometheus/alerts/extra:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
     ports:
       - '9090:9090'
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
       - alertmanager
 
@@ -20,29 +30,33 @@ services:
     image: prom/alertmanager:v0.30.1
     container_name: tldw_alertmanager
     volumes:
-      - ../../Docs/Operations/monitoring/alertmanager_email_webhook.yml:/etc/alertmanager/alertmanager.yml:ro
-      - ./secrets/smtp_password:/etc/alertmanager/secrets/smtp_password:ro
+      - ${ALERTMANAGER_CONFIG:-../../Docs/Operations/monitoring/alertmanager_webhook_only.yml}:/etc/alertmanager/alertmanager.yml:ro
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
     ports:
       - '9093:9093'
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   grafana:
-    image: grafana/grafana:latest
+    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE to a pinned image reference such as grafana/grafana:11.5.2}
     container_name: tldw_grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER before starting Grafana}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD before starting Grafana}
     ports:
-      - '3000:3000'
+      - '${GRAFANA_PORT:-3002}:3000'
     depends_on:
       - prometheus
     volumes:
+      - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ../../Docs/Monitoring/Grafana_Dashboards:/var/lib/grafana/dashboards:ro
     restart: unless-stopped
 
-networks:
-  default:
-    name: tldw_monitoring
+volumes:
+  grafana_data:

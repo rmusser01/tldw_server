@@ -97,7 +97,7 @@ async def test_validate_api_key_kdf_path(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_validate_api_key_allows_missing_scope_for_read(monkeypatch):
+async def test_validate_api_key_denies_missing_scope_for_read(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
@@ -123,8 +123,7 @@ async def test_validate_api_key_allows_missing_scope_for_read(monkeypatch):
 
     result = await manager.validate_api_key(api_key, required_scope="read")
 
-    assert result is not None
-    assert result["id"] == 2
+    assert result is None
 
 
 @pytest.mark.asyncio

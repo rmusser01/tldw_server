@@ -22,7 +22,7 @@ STT_ENGINES = {
     'nemo_canary',
 }
 
-TTS_ENGINES = {'kokoro', 'kitten_tts', 'dia', 'higgs', 'vibevoice', 'echo_tts', 'pocket_tts', 'neutts'}
+TTS_ENGINES = {'kokoro', 'kitten_tts', 'dia', 'higgs', 'vibevoice', 'echo_tts', 'pocket_tts', 'neutts', 'omnivoice'}
 
 
 class STTInstall(BaseModel):

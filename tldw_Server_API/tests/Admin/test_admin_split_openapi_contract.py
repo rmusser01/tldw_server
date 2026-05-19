@@ -72,6 +72,8 @@ EXPECTED_SPLIT_ADMIN_OPERATIONS: set[tuple[str, str]] = {
     ("POST", "/api/v1/admin/monitoring/alerts/{alert_identity}/snooze"),
     ("POST", "/api/v1/admin/monitoring/alerts/{alert_identity}/escalate"),
     ("GET", "/api/v1/admin/monitoring/alerts/history"),
+    ("GET", "/api/v1/admin/errors/breakdown"),
+    ("GET", "/api/v1/admin/rate-limits/summary"),
 }
 
 

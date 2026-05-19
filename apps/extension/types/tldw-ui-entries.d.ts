@@ -8,6 +8,11 @@ declare module "@tldw/ui/entries/copilot-popup.content" {
   export default entry
 }
 
+declare module "@tldw/ui/entries/web-clipper.content" {
+  const entry: unknown
+  export default entry
+}
+
 declare module "@tldw/ui/entries/hf-pull.content" {
   const entry: unknown
   export default entry

@@ -1,9 +1,12 @@
 {
   "navigation": {
-    "serverAndAuth": "Server & Auth",
-    "knowledgeTools": "Knowledge Tools",
-    "workspace": "Workspace",
-    "about": "About"
+    "connect": "Connect",
+    "aiModels": "AI & Models",
+    "experience": "Experience",
+    "knowledgeWorkspace": "Knowledge & Workspace",
+    "safetyAdmin": "Safety & Admin",
+    "about": "About",
+    "dataManagement": "Data Management"
   },
   "healthNav": "Health & Diagnostics",
   "worldBooksNav": "World Books",
@@ -33,6 +36,9 @@
   "splashSettingsNav": "Splash screens",
   "familyGuardrailsWizardNav": "Family Guardrails Wizard",
   "guardianNav": "Guardian & Monitoring",
+  "providerKeys": {
+    "navTitle": "Provider Keys"
+  },
   "familyWizard": {
     "title": "Family Guardrails Wizard",
     "subtitle": "Template-first setup for guardians, dependents, and moderation acceptance tracking.",
@@ -944,7 +950,8 @@
         "dictation": "Dictation",
         "liveVoice": "Live voice",
         "speechPlayground": "Speech Playground"
-      }
+      },
+      "noModelsAlert": "No STT models available on your server. Configure a transcription engine to enable speech-to-text."
     },
     "empty": {
       "connectTitle": "Connect tldw Assistant to your server",
@@ -2398,5 +2405,10 @@
   },
   "serverOverview": {
     "docsUrl": "https://github.com/rmusser01/tldw_browser_assistant"
+  },
+  "dataManagement": {
+    "navTitle": "Data Management",
+    "title": "Data Management",
+    "description": "Export, import, sync, or reset local extension and WebUI data."
   }
 }

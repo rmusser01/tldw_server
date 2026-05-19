@@ -369,11 +369,148 @@ _BUILTIN_NEWSLETTER_HTML = """\
 </html>
 """
 
+_BUILTIN_CTI_OSINT_REPORT_MARKDOWN = """\
+# {{ title }}
+
+**Generated:** {{ generated_at }}
+**Job:** {{ job_name }} | **Run:** {{ run_id }}
+{% set report_data = report | default({}) %}
+{% set readiness = report_data.readiness | default({}) %}
+{% set source_summary = report_data.source_summary | default({}) %}
+{% set evidence_items = report_data.included_items | default(items) %}
+{% set excluded_items = report_data.excluded_items | default([]) %}
+
+## Executive summary
+
+Report readiness: {{ readiness.state | default('unknown') }}{% if readiness.score is defined %} ({{ readiness.score }}/100){% endif %}
+
+- Included evidence: {{ report_data.included_count | default(evidence_items | length) }}
+- Alert matches: {{ report_data.alert_count | default(0) }}
+- Unique sources: {{ source_summary.unique_source_count | default(0) }}
+- Missing provenance: {{ source_summary.missing_source_count | default(0) }}
+
+{% if readiness.warnings | default([]) %}
+## Evidence caveats
+
+{% for warning in readiness.warnings %}
+- {{ warning.message | default(warning.code | default('Evidence warning')) }}
+{% endfor %}
+{% endif %}
+
+## Key findings
+
+{% for item in evidence_items %}
+### {{ loop.index }}. {{ item.title or 'Untitled' }}
+
+{% if item.summary %}{{ item.summary }}{% elif item.llm_summary %}{{ item.llm_summary }}{% endif %}
+
+- Source: {{ item.source_name | default('Unknown source') }}
+{% if item.published_at %}- Published: {{ item.published_at }}{% endif %}
+{% if item.url %}- Link: {{ item.url }}{% endif %}
+
+{% if item.alerts | default([]) %}
+Alert evidence:
+{% for alert in item.alerts %}
+- {{ alert.rule_name | default('Alert') }} ({{ alert.severity | default('unknown') }}){% if alert.matched_text %}: {{ alert.matched_text }}{% endif %}
+{% endfor %}
+{% else %}
+Alert evidence: none captured.
+{% endif %}
+
+{% endfor %}
+
+## Evidence table
+
+| Update | Source | Published | Alerts | Link |
+| --- | --- | --- | --- | --- |
+{% for item in evidence_items %}
+| {{ item.title or 'Untitled' }} | {{ item.source_name | default('Unknown source') }} | {{ item.published_at | default('-') }} | {{ item.alerts | default([]) | length }} | {{ item.url | default('-') }} |
+{% endfor %}
+
+## Excluded trail
+
+{% if excluded_items %}
+{% for item in excluded_items %}
+- {{ item.title or ('Update #' ~ item.id) }} - {{ item.reason | default('excluded') }}
+{% endfor %}
+{% else %}
+No excluded updates captured.
+{% endif %}
+"""
+
+_BUILTIN_NEWS_BRIEFING_MARKDOWN = """\
+# {{ title }}
+
+**Generated:** {{ generated_at }}
+{% set report_data = report | default({}) %}
+{% set readiness = report_data.readiness | default({}) %}
+{% set source_summary = report_data.source_summary | default({}) %}
+{% set evidence_items = report_data.included_items | default(items) %}
+{% set excluded_items = report_data.excluded_items | default([]) %}
+
+## What changed
+
+{% for item in evidence_items %}
+### {{ loop.index }}. {{ item.title or 'Untitled' }}
+
+{% if item.summary %}{{ item.summary }}{% elif item.llm_summary %}{{ item.llm_summary }}{% endif %}
+
+{% if item.published_at %}Published: {{ item.published_at }}{% endif %}
+{% if item.url %}[Follow up]({{ item.url }}){% endif %}
+
+{% endfor %}
+
+## Timeline and recency
+
+- Report readiness: {{ readiness.state | default('unknown') }}{% if readiness.score is defined %} ({{ readiness.score }}/100){% endif %}
+- Included updates: {{ report_data.included_count | default(evidence_items | length) }}
+- Generated at: {{ generated_at }}
+
+{% if readiness.warnings | default([]) %}
+## Evidence caveats
+
+{% for warning in readiness.warnings %}
+- {{ warning.message | default(warning.code | default('Evidence warning')) }}
+{% endfor %}
+{% endif %}
+
+## Source diversity
+
+- Unique sources: {{ source_summary.unique_source_count | default(0) }}
+- Missing provenance: {{ source_summary.missing_source_count | default(0) }}
+
+## Follow-up links
+
+{% for item in evidence_items %}
+{% if item.url %}- [{{ item.title or 'Untitled' }}]({{ item.url }}){% endif %}
+{% endfor %}
+
+## Excluded trail
+
+{% if excluded_items %}
+{% for item in excluded_items %}
+- {{ item.title or ('Update #' ~ item.id) }} - {{ item.reason | default('excluded') }}
+{% endfor %}
+{% else %}
+No excluded updates captured.
+{% endif %}
+"""
+
 _BUILTIN_TEMPLATES: dict[str, tuple[str, str, str]] = {
     "briefing_markdown": ("md", _BUILTIN_BRIEFING_MARKDOWN, "Default markdown briefing template"),
     "newsletter_markdown": ("md", _BUILTIN_NEWSLETTER_MARKDOWN, "Default markdown newsletter template"),
     "mece_markdown": ("md", _BUILTIN_MECE_MARKDOWN, "Default MECE categorized briefing template"),
     "newsletter_html": ("html", _BUILTIN_NEWSLETTER_HTML, "Default HTML newsletter template"),
+    "cti_osint_report_markdown": (
+        "md",
+        _BUILTIN_CTI_OSINT_REPORT_MARKDOWN,
+        "CTI/OSINT report template with readiness, alert evidence, provenance, and excluded trail",
+    ),
+    "news_briefing_markdown": (
+        "md",
+        _BUILTIN_NEWS_BRIEFING_MARKDOWN,
+        "News briefing template with recency, source diversity, follow-up links, and evidence caveats",
+    ),
 }
 
 _defaults_seeded = False

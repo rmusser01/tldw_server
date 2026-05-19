@@ -8,7 +8,7 @@ from tldw_Server_API.app.core.AuthNZ.session_manager import (
     SessionManager,
     reset_session_manager,
 )
-from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 from tldw_Server_API.app.core.config import settings as core_settings
 
 
@@ -146,6 +146,66 @@ async def test_session_manager_uses_secondary_secret_on_rotation(monkeypatch, tm
     reset_settings()
 
 
+def test_settings_exposes_secondary_private_key_from_environment(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_ALGORITHM", "RS256")
+    monkeypatch.setenv("JWT_PRIVATE_KEY", "primary-private-key-abcdefghijklmnopqrstuvwxyz123456")
+    monkeypatch.setenv("JWT_SECONDARY_PRIVATE_KEY", "secondary-private-key-abcdefghijklmnopqrstuvwxyz654321")
+
+    settings = Settings()
+
+    assert settings.JWT_SECONDARY_PRIVATE_KEY == "secondary-private-key-abcdefghijklmnopqrstuvwxyz654321"
+
+    for env_key in (
+        "AUTH_MODE",
+        "DATABASE_URL",
+        "JWT_ALGORITHM",
+        "JWT_PRIVATE_KEY",
+        "JWT_SECONDARY_PRIVATE_KEY",
+    ):
+        monkeypatch.delenv(env_key, raising=False)
+    reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_session_manager_uses_secondary_private_key_on_rotation(monkeypatch, tmp_path):
+    monkeypatch.setitem(core_settings, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JWT_ALGORITHM", "RS256")
+    old_private_key = "old-private-key-abcdefghijklmnopqrstuvwxyz123456"
+    new_private_key = "new-private-key-abcdefghijklmnopqrstuvwxyz654321"
+    monkeypatch.setenv("JWT_PRIVATE_KEY", old_private_key)
+    reset_settings()
+
+    monkeypatch.setattr(SessionManager, "_persist_session_key", lambda self, key: False, raising=False)
+
+    manager = SessionManager()
+    payload = "rotation-token-private-key"
+    encrypted = manager.encrypt_token(payload)
+
+    await reset_session_manager()
+
+    monkeypatch.setenv("JWT_PRIVATE_KEY", new_private_key)
+    monkeypatch.setenv("JWT_SECONDARY_PRIVATE_KEY", old_private_key)
+    reset_settings()
+
+    manager_after_rotation = SessionManager()
+    assert manager_after_rotation.decrypt_token(encrypted) == payload
+
+    await reset_session_manager()
+    for env_key in (
+        "AUTH_MODE",
+        "DATABASE_URL",
+        "JWT_ALGORITHM",
+        "JWT_PRIVATE_KEY",
+        "JWT_SECONDARY_PRIVATE_KEY",
+    ):
+        monkeypatch.delenv(env_key, raising=False)
+    reset_settings()
+
+
 @pytest.mark.asyncio
 async def test_session_manager_rejects_symlink_persistence(monkeypatch, tmp_path):
     monkeypatch.setenv("SESSION_KEY_STORAGE", "project")
@@ -160,6 +220,18 @@ async def test_session_manager_rejects_symlink_persistence(monkeypatch, tmp_path
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("JWT_SECRET_KEY", "symlink-test-secret-key-0123456789abcdef0123456789abcdef")
     reset_settings()
+
+    try:
+        manager = SessionManager()
+        encrypted = manager.encrypt_token("symlink-safe")
+        assert manager.decrypt_token(encrypted) == "symlink-safe"
+        assert target.read_text(encoding="utf-8") == "stealme"
+        assert key_path.is_symlink()
+    finally:
+        await reset_session_manager()
+        for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
+            monkeypatch.delenv(env_key, raising=False)
+        reset_settings()
 
 
 @pytest.mark.asyncio

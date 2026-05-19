@@ -193,7 +193,7 @@ describe("NotesManagerPage stage 24 keyword picker prioritization", () => {
   it("defaults to frequency sorting and supports alphabetical sort toggles", async () => {
     renderPage()
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await waitFor(() => {
       expect(screen.getByTestId("notes-keyword-picker-sort-select")).toBeInTheDocument()
     })
@@ -220,7 +220,7 @@ describe("NotesManagerPage stage 24 keyword picker prioritization", () => {
   it("surfaces recently used keywords at the top of the picker", async () => {
     renderPage()
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await waitFor(() => {
       expect(screen.getByText("Apply filters")).toBeInTheDocument()
     })
@@ -229,7 +229,7 @@ describe("NotesManagerPage stage 24 keyword picker prioritization", () => {
     fireEvent.click(screen.getByText("alpha (2)"))
     fireEvent.click(screen.getByText("Apply filters"))
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     const recentSection = await screen.findByTestId("notes-keyword-picker-recent-section")
     const recentButtons = within(recentSection).getAllByRole("button")
 

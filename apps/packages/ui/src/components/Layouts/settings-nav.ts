@@ -20,17 +20,21 @@ export type SettingsNavGroup = {
 }
 
 const NAV_GROUPS: Array<{ key: NavGroupKey; titleToken: string }> = [
-  { key: "server", titleToken: "settings:navigation.serverAndAuth" },
-  { key: "knowledge", titleToken: "settings:navigation.knowledgeTools" },
-  { key: "workspace", titleToken: "settings:navigation.workspace" },
+  { key: "connect", titleToken: "settings:navigation.connect" },
+  { key: "aiModels", titleToken: "settings:navigation.aiModels" },
+  { key: "experience", titleToken: "settings:navigation.experience" },
+  {
+    key: "knowledgeWorkspace",
+    titleToken: "settings:navigation.knowledgeWorkspace"
+  },
+  { key: "safetyAdmin", titleToken: "settings:navigation.safetyAdmin" },
+  { key: "dataManagement", titleToken: "settings:navigation.dataManagement" },
   { key: "about", titleToken: "settings:navigation.about" }
 ]
 
 type NavItemWithOrder = SettingsNavItem & { order: number }
 
 const SETTINGS_BETA_BADGE_WINDOWS: Record<string, string> = {
-  "/settings/family-guardrails": "2026-12-31",
-  "/settings/guardian": "2026-12-31",
   "/settings/prompt-studio": "2026-09-30"
 }
 

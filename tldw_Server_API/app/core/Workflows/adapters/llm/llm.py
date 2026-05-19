@@ -56,11 +56,8 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
         if isinstance(val, str):
             try:
                 return _tmpl(val, context) or val
-            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                snippet = val.strip().replace("\n", "\\n")
-                if len(snippet) > 120:
-                    snippet = f"{snippet[:120]}..."
-                logger.debug(f"LLM adapter: template rendering failed for value '{snippet}': {exc}")
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                logger.debug("LLM adapter: template rendering failed")
                 return val
         return val
 
@@ -204,8 +201,8 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                             try:
                                 if callable(context.get("append_event")):
                                     context["append_event"]("llm_stream", {"delta": chunk})
-                            except (AttributeError, RuntimeError, TypeError, ValueError) as e:
-                                logger.debug(f"LLM stream event dispatch failed: {e}")
+                            except (AttributeError, RuntimeError, TypeError, ValueError):
+                                logger.debug("LLM stream event dispatch failed")
                     continue
             # Fallback: treat as plain text chunk
             text += raw
@@ -322,16 +319,16 @@ async def run_llm_with_tools_adapter(config: dict[str, Any], context: dict[str, 
 
                     messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
                     messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": json.dumps(result, default=str)})
-                except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-                    tool_results.append({"tool": tool_name, "error": str(e)})
+                except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+                    tool_results.append({"tool": tool_name, "error": "tool_execution_error"})
                     messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
-                    messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": f"Error: {e}"})
+                    messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": "Error: tool_execution_error"})
 
         return {"text": final_response or "", "tool_results": tool_results, "iterations": iteration + 1}
 
-    except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"LLM with tools error: {e}")
-        return {"error": str(e), "text": "", "tool_results": []}
+    except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("LLM with tools error")
+        return {"error": "llm_with_tools_error", "text": "", "tool_results": []}
 
 
 @registry.register(
@@ -406,11 +403,11 @@ async def run_llm_compare_adapter(config: dict[str, Any], context: dict[str, Any
                     "elapsed_ms": elapsed_ms,
                     "char_count": len(text),
                 })
-            except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
+            except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
                 responses.append({
                     "provider": provider,
                     "model": model,
-                    "error": str(e),
+                    "error": "llm_provider_error",
                     "elapsed_ms": (time.time() - start_time) * 1000,
                 })
 
@@ -423,9 +420,9 @@ async def run_llm_compare_adapter(config: dict[str, Any], context: dict[str, Any
             },
         }
 
-    except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"LLM compare error: {e}")
-        return {"responses": [], "error": str(e)}
+    except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("LLM compare error")
+        return {"responses": [], "error": "llm_compare_error"}
 
 
 @registry.register(
@@ -518,6 +515,6 @@ Revise the content to address the critique while maintaining the original intent
 
         return {"critique": critique, "revised": revised, "criteria": criteria}
 
-    except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"LLM critique error: {e}")
-        return {"error": str(e), "critique": "", "revised": ""}
+    except (AdapterError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("LLM critique error")
+        return {"error": "llm_critique_error", "critique": "", "revised": ""}

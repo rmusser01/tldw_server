@@ -7,6 +7,7 @@ import base64
 import copy
 import inspect
 import os
+import tempfile
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
@@ -34,6 +35,7 @@ from .adapter_registry import (
     get_tts_factory,
 )
 from .adapters.base import AudioFormat, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse
+from .adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
 from .adapters.pocket_tts_cpp_runtime import (
     cleanup_transient_voice_reference,
     get_runtime_dir,
@@ -44,6 +46,7 @@ from .adapters.pocket_tts_cpp_runtime import (
     register_provider_managed_voice_path,
     revoke_provider_managed_voice_token,
 )
+from .audio_converter import AudioConverter
 from .audio_utils import (
     crossfade_audio,
     evaluate_audio_quality,
@@ -200,6 +203,8 @@ class TTSServiceV2:
         self._active_requests_lock = asyncio.Lock()
         self._provider_semaphores: dict[str, asyncio.Semaphore] = {}
         self._provider_limits: dict[str, int] = {}
+        self._closing = False
+        self._omnivoice_supervisor: Optional[OmniVoiceSidecarSupervisor] = None
 
         # Initialize metrics
         self.metrics = get_metrics_registry()
@@ -1172,19 +1177,41 @@ class TTSServiceV2:
 
     async def shutdown(self) -> None:
         """Gracefully close any underlying factory/adapters (best-effort)."""
-        try:
-            if self.factory and hasattr(self.factory, "close"):
+        self._closing = True
+        supervisor = self._omnivoice_supervisor
+        if supervisor is not None:
+            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                supervisor.mark_closing()
+            shutdown_supervisor = getattr(supervisor, "shutdown", None)
+            if callable(shutdown_supervisor):
+                with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                    maybe_stop = shutdown_supervisor()
+                    if asyncio.iscoroutine(maybe_stop):
+                        await maybe_stop
+            else:
+                stop_process = getattr(supervisor, "_stop_process", None)
+                if callable(stop_process):
+                    with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                        maybe_stop = stop_process()
+                        if asyncio.iscoroutine(maybe_stop):
+                            await maybe_stop
+
+        if self.factory and hasattr(self.factory, "close"):
+            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
                 maybe = self.factory.close()  # type: ignore[attr-defined]
                 if asyncio.iscoroutine(maybe):
                     await maybe  # type: ignore[func-returns-value]
-            # Some tests set/patch `_factory` only
-            if self._factory and self._factory is not self.factory and hasattr(self._factory, "close"):
+
+        # Some tests set/patch `_factory` only
+        if self._factory and self._factory is not self.factory and hasattr(self._factory, "close"):
+            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
                 maybe2 = self._factory.close()  # type: ignore[attr-defined]
                 if asyncio.iscoroutine(maybe2):
                     await maybe2  # type: ignore[func-returns-value]
-        except _TTS_NONCRITICAL_EXCEPTIONS:
-            # Do not let shutdown errors fail tests
-            pass
+
+        self._omnivoice_supervisor = None
+        self.factory = None
+        self._factory = None
 
     async def generate(self, request: TTSRequest) -> TTSResponse:
         """Legacy synchronous-style generation wrapper expected by unit tests."""
@@ -1679,6 +1706,7 @@ class TTSServiceV2:
             bool(getattr(request, "stream", False)),
             metadata_only,
         )
+        fallback = fallback and not self._is_explicit_omnivoice_request(request, provider)
         factory = await self._ensure_factory()
 
         provider_hint: Optional[str] = None
@@ -1856,6 +1884,12 @@ class TTSServiceV2:
                         response = await _generate_with_adapter()
 
                     if fallback_plan is None and response is not None:
+                        if not metadata_only:
+                            response = await self._convert_response_if_needed(
+                                response,
+                                request_for_provider,
+                                provider_key=provider_key,
+                            )
                         self._attach_response_metadata(
                             request,
                             response,
@@ -2230,11 +2264,19 @@ class TTSServiceV2:
                     raise TTSGenerationError(error_message, provider=provider_key)
                 success = True
         except _TTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Fallback generation failed: {e}")
-            error_message = str(e)
+            logger.error(
+                "Fallback generation failed for provider {}: {}",
+                provider_key,
+                type(e).__name__,
+            )
+            error_message = "All providers failed"
             if self._stream_errors_as_audio:
                 yield f"ERROR: All providers failed - {str(e)}".encode()
-            raise TTSGenerationError(f"All providers failed - {str(e)}") from e
+            raise TTSGenerationError(
+                error_message,
+                provider=provider_key,
+                details={"error_type": type(e).__name__},
+            ) from e
         finally:
             await self._close_response_audio_stream(response)
             self._cleanup_transient_pocket_tts_cpp_voice_path(request_for_provider)
@@ -2530,12 +2572,126 @@ class TTSServiceV2:
             if provider_enum is None:
                 logger.warning(f"Unknown provider: {provider}")
             else:
+                if provider_enum == TTSProvider.OMNIVOICE:
+                    return await factory.registry.create_adapter_with_overrides(
+                        provider_enum,
+                        self._build_omnivoice_adapter_overrides(overrides),
+                    )
                 if overrides:
                     return await factory.registry.create_adapter_with_overrides(provider_enum, overrides)
                 return await factory.registry.get_adapter(provider_enum)
 
         # Get adapter by model name
+        model_provider = factory.get_provider_for_model(model)
+        if model_provider == TTSProvider.OMNIVOICE:
+            return await factory.registry.create_adapter_with_overrides(
+                model_provider,
+                self._build_omnivoice_adapter_overrides(overrides),
+            )
         return await factory.get_adapter_by_model(model)
+
+    def _build_omnivoice_adapter_overrides(
+        self,
+        overrides: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        merged_overrides = dict(overrides or {})
+        merged_overrides["_supervisor"] = self._get_or_create_omnivoice_supervisor()
+        return merged_overrides
+
+    @staticmethod
+    def _is_explicit_omnivoice_request(
+        request: OpenAISpeechRequest,
+        provider: Optional[str] = None,
+    ) -> bool:
+        provider_value = (provider or "").strip().lower()
+        if provider_value in {"omnivoice", "omni-voice", "omni_voice"}:
+            return True
+        model_value = (getattr(request, "model", None) or "").strip().lower()
+        return (
+            model_value.startswith("omnivoice")
+            or model_value.startswith("omni-voice")
+            or model_value.startswith("omni_voice")
+        )
+
+    def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
+        if self._closing:
+            raise RuntimeError("TTS service is closing")
+        if self._omnivoice_supervisor is None:
+            provider_cfg = self._get_provider_runtime_config("omnivoice")
+            repo_root = Path(__file__).resolve().parents[4]
+            self._omnivoice_supervisor = OmniVoiceSidecarSupervisor(
+                provider_cfg,
+                repo_root=repo_root,
+            )
+        return self._omnivoice_supervisor
+
+    @staticmethod
+    def _write_temp_audio_file_sync(audio_data: bytes, *, suffix: str) -> Path:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(audio_data)
+            return Path(handle.name)
+
+    @staticmethod
+    def _reserve_temp_audio_path_sync(*, suffix: str) -> Path:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            return Path(handle.name)
+
+    @staticmethod
+    def _remove_temp_path_sync(path: Path) -> None:
+        with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+            path.unlink()
+
+    async def _convert_response_if_needed(
+        self,
+        response: TTSResponse,
+        request: TTSRequest,
+        *,
+        provider_key: str,
+    ) -> TTSResponse:
+        if response.audio_data is None:
+            return response
+        if response.format == request.format:
+            return response
+        if response.format != AudioFormat.WAV:
+            return response
+
+        input_path = None
+        output_path = None
+        try:
+            input_path = await asyncio.to_thread(
+                self._write_temp_audio_file_sync,
+                response.audio_data,
+                suffix=".wav",
+            )
+            output_path = await asyncio.to_thread(
+                self._reserve_temp_audio_path_sync,
+                suffix=f".{request.format.value}",
+            )
+
+            converted = await AudioConverter.convert_format(
+                input_path,
+                output_path,
+                request.format.value,
+                sample_rate=response.sample_rate,
+                channels=response.channels,
+            )
+            if not converted or output_path is None or not output_path.exists():
+                raise TTSGenerationError(
+                    "TTS output conversion failed",
+                    provider=provider_key,
+                    details={"target_format": request.format.value},
+                )
+
+            converted_bytes = await asyncio.to_thread(output_path.read_bytes)
+            response.audio_data = converted_bytes
+            response.audio_content = converted_bytes
+            response.format = request.format
+            return response
+        finally:
+            if input_path is not None:
+                await asyncio.to_thread(self._remove_temp_path_sync, input_path)
+            if output_path is not None:
+                await asyncio.to_thread(self._remove_temp_path_sync, output_path)
 
     def _resolve_provider_key(self, adapter: TTSAdapter) -> str:
         provider_key = getattr(adapter, "provider_key", None)
@@ -3104,6 +3260,7 @@ async def close_tts_service_v2():
     global _service_instance
 
     if _service_instance:
+        await _service_instance.shutdown()
         await close_tts_factory()
         _service_instance = None
         logger.info("Enhanced TTS Service (V2) closed")

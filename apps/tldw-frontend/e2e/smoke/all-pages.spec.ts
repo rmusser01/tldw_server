@@ -85,10 +85,16 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
     routeLabel: 'Chunking Playground',
   },
   {
-    name: 'Moderation Playground',
-    path: '/moderation-playground',
-    routeId: 'moderation-playground',
-    routeLabel: 'Moderation Playground',
+    name: 'Moderation Review',
+    path: '/moderation',
+    routeId: 'moderation-review',
+    routeLabel: 'Moderation Review',
+  },
+  {
+    name: 'Content Rules',
+    path: '/moderation/rules',
+    routeId: 'moderation-rules',
+    routeLabel: 'Content Rules',
   },
   { name: 'Collections', path: '/collections', routeId: 'collections', routeLabel: 'Collections' },
   {
@@ -695,16 +701,16 @@ test.describe('Smoke Tests - Wayfinding', () => {
       .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid')));
 
     expect(controlOrder).toEqual([
-      'not-found-go-chat',
+      'not-found-open-home',
       'not-found-open-research',
       'not-found-open-media',
       'not-found-open-settings',
       'not-found-go-back',
     ]);
 
-    const goChatButton = page.getByTestId('not-found-go-chat');
-    await goChatButton.focus();
-    await expect(goChatButton).toBeFocused();
+    const openHomeButton = page.getByTestId('not-found-open-home');
+    await openHomeButton.focus();
+    await expect(openHomeButton).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(page.getByTestId('not-found-open-research')).toBeFocused();
 

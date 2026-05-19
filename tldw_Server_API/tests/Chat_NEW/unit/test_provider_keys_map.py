@@ -16,6 +16,7 @@ def test_provider_requires_key_map_basic():
         "novita",
         "poe",
         "together",
+        "custom-openai-api-99",
     ]:
         assert provider_requires_api_key(prov) is True
 

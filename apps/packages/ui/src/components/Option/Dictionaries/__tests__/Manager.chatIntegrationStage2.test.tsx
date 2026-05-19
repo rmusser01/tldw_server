@@ -270,7 +270,9 @@ describe("DictionariesManager chat integration stage-2", () => {
     expect(String(deactivateCall?.content || "")).toContain("3 linked chat sessions")
 
     await user.click(
-      screen.getByRole("button", { name: "Delete dictionary Alpha Dictionary" })
+      screen.getByRole("button", {
+        name: "Delete dictionary Alpha Dictionary"
+      })
     )
 
     await waitFor(() => {

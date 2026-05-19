@@ -4,13 +4,20 @@ import { useStorage } from "@plasmohq/storage/hook"
 import React from "react"
 import { Search, Star, UserCircle2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import type { PersonaInfo } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import {
+  OPEN_ASSISTANT_SELECT_EVENT,
+  type AssistantSelectOpenDetail,
+  type AssistantSelectTab
+} from "@/utils/assistant-select-events"
 import {
   characterToAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 
 type Props = {
   className?: string
@@ -27,15 +34,6 @@ type CharacterSummary = Record<string, unknown> & {
   avatar_url?: string
   system_prompt?: string
   greeting?: string
-  extensions?: Record<string, unknown> | null
-}
-
-type PersonaSummary = Record<string, unknown> & {
-  id?: string | number
-  name?: string | null
-  avatar_url?: string | null
-  system_prompt?: string | null
-  greeting?: string | null
   extensions?: Record<string, unknown> | null
 }
 
@@ -69,7 +67,7 @@ const normalizeCharacterSelection = (
 }
 
 const normalizePersonaSelection = (
-  persona: PersonaSummary
+  persona: PersonaInfo
 ): AssistantSelection | null => {
   const normalizedId =
     persona.id != null ? String(persona.id) : null
@@ -116,17 +114,58 @@ export const AssistantSelect: React.FC<Props> = ({
     selectedAssistant?.kind ?? "character"
   )
   const [characters, setCharacters] = React.useState<CharacterSummary[]>([])
-  const [personas, setPersonas] = React.useState<PersonaSummary[]>([])
+  const [personas, setPersonas] = React.useState<PersonaInfo[]>([])
   const [favoriteCharacters, setFavoriteCharacters] = useStorage<
     FavoriteCharacter[]
   >("favoriteCharacters", [])
   const searchInputRef = React.useRef<InputRef | null>(null)
+  const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const returnFocusSelectorRef = React.useRef<string | null>(null)
+
+  const restoreReturnFocus = React.useCallback(() => {
+    const selector = returnFocusSelectorRef.current
+    returnFocusSelectorRef.current = null
+    if (!selector) {
+      if (variant === "dropdown" && typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          triggerButtonRef.current?.focus()
+        })
+      }
+      return
+    }
+
+    scheduleFocusFirstVisibleElement(selector)
+  }, [variant])
 
   React.useEffect(() => {
     if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
       setActiveTab(selectedAssistant.kind)
     }
   }, [selectedAssistant?.kind])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<AssistantSelectOpenDetail>).detail
+      const requestedTab = detail?.tab
+      if (requestedTab === "character" || requestedTab === "persona") {
+        setActiveTab(requestedTab as AssistantSelectTab)
+      }
+      returnFocusSelectorRef.current =
+        typeof detail?.returnFocusSelector === "string" &&
+        detail.returnFocusSelector.trim().length > 0
+          ? detail.returnFocusSelector.trim()
+          : null
+      setSearchText("")
+      setOpen(true)
+    }
+
+    window.addEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
+    return () => {
+      window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!open || typeof window === "undefined") return
@@ -172,7 +211,7 @@ export const AssistantSelect: React.FC<Props> = ({
       if (typeof tldwClient.listPersonaProfiles === "function") {
         const result = await tldwClient.listPersonaProfiles().catch(() => [])
         if (!cancelled && Array.isArray(result)) {
-          setPersonas(result as PersonaSummary[])
+          setPersonas(result as PersonaInfo[])
         }
       }
     }
@@ -299,24 +338,27 @@ export const AssistantSelect: React.FC<Props> = ({
   )
 
   const handleSelect = React.useCallback(
-    async (entry: AssistantSelection) => {
-      await setSelectedAssistant(entry)
+    (entry: AssistantSelection) => {
       setOpen(false)
       setSearchText("")
+      restoreReturnFocus()
+      void setSelectedAssistant(entry)
     },
-    [setSelectedAssistant]
+    [restoreReturnFocus, setSelectedAssistant]
   )
 
   const handleOpenChange = React.useCallback((nextOpen: boolean) => {
     setOpen(nextOpen)
     if (!nextOpen) {
       setSearchText("")
+      restoreReturnFocus()
     }
-  }, [])
+  }, [restoreReturnFocus])
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
     setSearchText("")
+    restoreReturnFocus()
     try {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tldw:open-actor-settings"))
@@ -324,19 +366,19 @@ export const AssistantSelect: React.FC<Props> = ({
     } catch {
       // no-op
     }
-  }, [])
+  }, [restoreReturnFocus])
 
   const buttonLabel =
     selectedAssistant?.name ||
-    t("option:assistant.selectAssistant", "Select assistant")
+    t("option:assistant.selectAssistant", "Select character or persona")
 
   const searchLabel = t(
     "option:assistant.searchPlaceholder",
-    "Search assistants"
+    "Search characters and personas"
   )
   const actorLabel = t(
     "playground:composer.actorTitle",
-    "Scene Director (Actor)"
+    "Optional scene context"
   )
 
   const tabs = [
@@ -404,7 +446,7 @@ export const AssistantSelect: React.FC<Props> = ({
                   className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
                     isActive
                       ? "border-primary bg-primary/10 text-text"
-                      : "border-border bg-background text-text hover:bg-surface2"
+                      : "border-border bg-surface text-text hover:bg-surface2"
                   }`}
                   onClick={() => {
                     void handleSelect(entry)
@@ -461,7 +503,10 @@ export const AssistantSelect: React.FC<Props> = ({
     )
 
   const content = (
-    <div className="w-[320px] rounded-lg border border-border bg-background shadow-lg">
+    <div
+      data-testid="assistant-select-panel"
+      className="w-[320px] rounded-lg border border-border bg-elevated shadow-lg"
+    >
       <div className="border-b border-border p-2">
         <Input
           ref={searchInputRef}
@@ -477,7 +522,7 @@ export const AssistantSelect: React.FC<Props> = ({
       </div>
       <div
         role="tablist"
-        aria-label={t("option:assistant.tabList", "Assistant types")}
+        aria-label={t("option:assistant.tabList", "Character or persona")}
         className="flex items-center gap-1 border-b border-border px-2 pt-2"
       >
         {tabs.map((tab) => {
@@ -534,20 +579,20 @@ export const AssistantSelect: React.FC<Props> = ({
       placement="topLeft"
       trigger={["click"]}
     >
-      <Tooltip title={buttonLabel}>
-        <button
-          type="button"
-          data-testid="character-select"
-          className={`inline-flex items-center gap-2 ${className}`.trim()}
-          aria-label={buttonLabel}
-          aria-expanded={open}
-        >
-          <UserCircle2 className={iconClassName} />
-          {showLabel ? (
-            <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
-          ) : null}
-        </button>
-      </Tooltip>
+      <button
+        ref={triggerButtonRef}
+        type="button"
+        data-testid="character-select"
+        className={`inline-flex items-center gap-2 ${className}`.trim()}
+        aria-label={buttonLabel}
+        aria-expanded={open}
+        title={buttonLabel}
+      >
+        <UserCircle2 className={iconClassName} />
+        {showLabel ? (
+          <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
+        ) : null}
+      </button>
     </Dropdown>
   )
 }

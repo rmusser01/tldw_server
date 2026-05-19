@@ -70,13 +70,18 @@ async def test_verify_jwt_rejects_stale_token_org_team_claims(monkeypatch):
     )
     monkeypatch.setattr(user_handling, "list_memberships_for_user", _fake_list_memberships)
     monkeypatch.setattr(user_handling, "get_session_manager", _fake_get_session_manager)
-    monkeypatch.setattr(user_handling, "_enrich_user_with_rbac", lambda *_args, **_kwargs: (["user"], [], False))
+    monkeypatch.setattr(
+        user_handling,
+        "_enrich_user_with_rbac",
+        lambda *_args, **_kwargs: (["user"], [], False),
+    )
     monkeypatch.setattr(user_handling, "set_scope", lambda *_, **__: None)
 
     request = _build_request()
+    jwt_value = ".".join(("fake", "jwt", "token"))
 
     with pytest.raises(HTTPException) as exc_info:
-        await user_handling.verify_jwt_and_fetch_user(request, token="fake.jwt.token")
+        await user_handling.verify_jwt_and_fetch_user(request, token=jwt_value)
 
     assert exc_info.value.status_code == 403
 
@@ -139,6 +144,62 @@ async def test_verify_jwt_denies_when_membership_lookup_fails(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Token membership could not be validated"
+
+
+@pytest.mark.asyncio
+async def test_verify_jwt_sanitizes_user_model_validation_failure(monkeypatch):
+    payload = {"sub": "1"}
+
+    class _StubJWT:
+        def decode_access_token(self, _token: str):
+            return payload
+
+    class _StubUsersRepo:
+        async def get_user_by_id(self, _user_id: int):
+            return {
+                "id": 1,
+                "email": "tester@example.com",
+                "is_active": True,
+                "role": "user",
+            }
+
+        async def get_user_by_uuid(self, _identifier: str):
+            return None
+
+        async def get_user_by_username(self, _username: str):
+            return None
+
+    async def _fake_from_pool():
+        return _StubUsersRepo()
+
+    class _StubSessionManager:
+        async def is_token_blacklisted(self, *_args, **_kwargs):
+            return False
+
+    async def _fake_get_session_manager():
+        return _StubSessionManager()
+
+    monkeypatch.setattr(user_handling, "get_jwt_service", lambda: _StubJWT())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.repos.users_repo.AuthnzUsersRepo.from_pool",
+        _fake_from_pool,
+    )
+    monkeypatch.setattr(user_handling, "get_session_manager", _fake_get_session_manager)
+    monkeypatch.setattr(
+        user_handling,
+        "_enrich_user_with_rbac",
+        lambda *_args, **_kwargs: (["user"], [], False),
+    )
+
+    request = _build_request()
+    jwt_value = ".".join(("fake", "jwt", "token"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await user_handling.verify_jwt_and_fetch_user(request, token=jwt_value)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Error processing user data: Invalid format."
+    assert "username" not in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio

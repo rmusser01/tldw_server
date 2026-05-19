@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_rate_limits
+from tldw_Server_API.app.api.v1.schemas.admin_rbac_schemas import RateLimitUpsertRequest
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_rate_limits_service
 
@@ -92,6 +95,11 @@ class _PostgresDbStub:
         raise AssertionError(f"Unexpected query: {query!r}")
 
 
+class _ExplodingRateLimitsDb:
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("rate limits backend exploded at /private/rate-limits.db")
+
+
 def _platform_admin_principal() -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -101,6 +109,95 @@ def _platform_admin_principal() -> AuthPrincipal:
         is_admin=True,
         org_ids=[],
         team_ids=[],
+    )
+
+
+async def _assert_rate_limits_log_sanitized(
+    call: Callable[[], Awaitable[Any]],
+    *,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = admin_rate_limits.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        with pytest.raises(HTTPException) as excinfo:
+            await call()
+    finally:
+        admin_rate_limits.logger.remove(sink_id)
+
+    assert excinfo.value.status_code == 500  # nosec B101
+    joined = "\n".join(messages)
+    assert expected_log in joined  # nosec B101
+    assert raw_marker not in joined  # nosec B101
+    assert "/private/" not in joined  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("call_factory", "expected_log"),
+    [
+        (
+            lambda: admin_rate_limits.list_admin_rate_limits(db=_ExplodingRateLimitsDb()),
+            "Failed to list admin rate limits",
+        ),
+        (
+            lambda: admin_rate_limits.upsert_role_rate_limit(
+                role_id=7,
+                payload=RateLimitUpsertRequest(
+                    resource="/api/v1/chat/completions",
+                    limit_per_min=30,
+                    burst=5,
+                ),
+                db=_ExplodingRateLimitsDb(),
+            ),
+            "Failed to upsert role rate limit",
+        ),
+        (
+            lambda: admin_rate_limits.clear_role_rate_limits(
+                role_id=7,
+                db=_ExplodingRateLimitsDb(),
+            ),
+            "Failed to clear role rate limits",
+        ),
+        (
+            lambda: admin_rate_limits.upsert_user_rate_limit(
+                user_id=11,
+                payload=RateLimitUpsertRequest(
+                    resource="/api/v1/rag/search",
+                    limit_per_min=12,
+                    burst=2,
+                ),
+                principal=_platform_admin_principal(),
+                db=_ExplodingRateLimitsDb(),
+            ),
+            "Failed to upsert user rate limit",
+        ),
+    ],
+)
+async def test_admin_rate_limit_endpoints_sanitize_backend_failure_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    call_factory: Callable[[], Awaitable[Any]],
+    expected_log: str,
+) -> None:
+    async def _fake_is_postgres() -> bool:
+        return False
+
+    async def _allow_admin_scope(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(
+        admin_rate_limits,
+        "_get_is_postgres_backend_fn",
+        lambda: _fake_is_postgres,
+    )
+    monkeypatch.setattr(admin_rate_limits, "_enforce_admin_user_scope", _allow_admin_scope)
+
+    await _assert_rate_limits_log_sanitized(
+        call_factory,
+        expected_log=expected_log,
+        raw_marker="rate limits backend exploded",
     )
 
 

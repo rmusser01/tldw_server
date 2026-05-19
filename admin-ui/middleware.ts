@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildApiUrl } from '@/lib/api-config';
+import { generateRequestId } from '@/lib/correlation-id';
 
 const AUTH_COOKIE_NAMES = ['access_token', 'x_api_key', 'x-api-key'] as const;
 
@@ -85,6 +86,23 @@ const setCachedAuth = (cacheKey: string, ok: boolean, ttlMs: number): void => {
   pruneExpiredCacheEntries();
   touchAuthCacheEntry(cacheKey, { ok, expiresAt: Date.now() + ttlMs });
   enforceCacheSizeLimit();
+};
+
+/**
+ * Invalidate all auth cache entries for a given raw token.
+ * Called by the logout route to prevent revoked tokens from being accepted
+ * for the remainder of the cache TTL.
+ */
+export const invalidateAuthCache = async (rawToken: string): Promise<void> => {
+  const normalized = rawToken.replace(/^Bearer\s+/i, '').trim();
+  if (!normalized || normalized.length > MAX_TOKEN_LENGTH) return;
+
+  for (const kind of ['jwt', 'apiKey'] as AuthTokenKind[]) {
+    const cacheKey = await buildAuthCacheKey(kind, normalized);
+    if (cacheKey) {
+      authCache.delete(cacheKey);
+    }
+  }
 };
 
 const safeDecodeCookieValue = (value: string): string => {
@@ -312,8 +330,12 @@ const hasAuthSession = async (request: NextRequest): Promise<boolean> => {
 };
 
 export async function middleware(request: NextRequest) {
+  const requestId = request.headers.get('x-request-id') || generateRequestId();
+
   if (await hasAuthSession(request)) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    response.headers.set('x-request-id', requestId);
+    return response;
   }
 
   const loginUrl = request.nextUrl.clone();
@@ -322,7 +344,9 @@ export async function middleware(request: NextRequest) {
     'redirectTo',
     `${request.nextUrl.pathname}${request.nextUrl.search}`
   );
-  return NextResponse.redirect(loginUrl);
+  const response = NextResponse.redirect(loginUrl);
+  response.headers.set('x-request-id', requestId);
+  return response;
 }
 
 export const config = {

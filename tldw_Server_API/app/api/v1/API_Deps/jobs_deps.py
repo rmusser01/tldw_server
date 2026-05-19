@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 
 from loguru import logger
 
@@ -29,10 +30,12 @@ else:
 _job_manager_lock = threading.Lock()
 
 
-def _build_job_manager(db_url: str) -> JobManager:
+def _build_job_manager(db_url: str, db_path: str | None = None) -> JobManager:
     """Create a JobManager instance for the resolved jobs DB URL."""
     backend = "postgres" if db_url.startswith("postgres") else None
-    return JobManager(backend=backend, db_url=db_url or None)
+    if backend == "postgres":
+        return JobManager(backend=backend, db_url=db_url or None)
+    return JobManager(db_path=Path(db_path) if db_path else None, backend=backend, db_url=db_url or None)
 
 
 def _normalize_jobs_db_url(db_url: str) -> str:
@@ -46,11 +49,12 @@ def _normalize_jobs_db_url(db_url: str) -> str:
 def get_job_manager() -> JobManager:
     """Return a cached JobManager keyed by JOBS_DB_URL."""
     db_url = _normalize_jobs_db_url((os.getenv("JOBS_DB_URL") or "").strip())
-    cache_key = db_url or "default"
+    db_path = (os.getenv("JOBS_DB_PATH") or "").strip()
+    cache_key = db_url or f"sqlite:{db_path or 'default'}"
     with _job_manager_lock:
         cached = _job_manager_cache.get(cache_key)
         if cached is not None:
             return cached
-        job_manager = _build_job_manager(db_url)
+        job_manager = _build_job_manager(db_url, db_path or None)
         _job_manager_cache[cache_key] = job_manager
         return job_manager

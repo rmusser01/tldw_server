@@ -396,4 +396,54 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
       'Could not load backlinks.'
     )
   })
+
+  it('retries neighbor loading after an error', async () => {
+    let neighborAttempts = 0
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+
+      if (path.startsWith('/api/v1/notes/?')) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        neighborAttempts += 1
+        if (neighborAttempts === 1) throw new Error('graph unavailable')
+        return {
+          nodes: [{ id: 'note-a', type: 'note', label: 'Graph seed note' }],
+          edges: []
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+
+    const retryButton = await screen.findByTestId('notes-related-retry')
+    fireEvent.click(retryButton)
+
+    await waitFor(() => {
+      expect(neighborAttempts).toBe(2)
+    })
+    expect(await screen.findByTestId('notes-related-empty')).toHaveTextContent(
+      'No related notes yet.'
+    )
+  })
 })

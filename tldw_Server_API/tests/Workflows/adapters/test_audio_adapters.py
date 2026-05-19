@@ -226,6 +226,37 @@ async def test_tts_adapter_service_unavailable(monkeypatch, tmp_path):
     assert "audio_uri" in result or result.get("error") in ("tts_unavailable", "missing_input_text")
 
 
+@pytest.mark.asyncio
+async def test_tts_adapter_sanitizes_generation_errors(monkeypatch, tmp_path):
+    """Test TTS adapter hides generation backend error details."""
+    from tldw_Server_API.app.core.Workflows.adapters.audio import run_tts_adapter
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+    mock_tts_service = AsyncMock()
+
+    async def mock_generate_speech(req, provider=None):
+        raise RuntimeError("TTS backend failed at /private/tts-model.bin")
+        yield b"unreachable"
+
+    mock_tts_service.generate_speech = mock_generate_speech
+
+    async def mock_get_tts_service():
+        return mock_tts_service
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.audio.tts.get_tts_service_v2",
+        mock_get_tts_service,
+    ):
+        result = await run_tts_adapter(
+            {"input": "Hello world", "voice": "af_heart"},
+            {"user_id": "test", "step_run_id": "step_tts_generation_error"},
+        )
+
+    assert result == {"error": "tts_unavailable"}
+
+
 # ============================================================================
 # STT Adapter Tests
 # ============================================================================
@@ -311,6 +342,27 @@ async def test_stt_adapter_invalid_file_uri(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_stt_adapter_sanitizes_file_resolution_errors(monkeypatch, tmp_path):
+    """Test STT adapter hides path resolution error details."""
+    from tldw_Server_API.app.core.exceptions import AdapterError
+    from tldw_Server_API.app.core.Workflows.adapters.audio import run_stt_transcribe_adapter
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.audio.stt.resolve_workflow_file_uri",
+        side_effect=AdapterError("audio path denied at /private/audio-secret.wav"),
+    ):
+        result = await run_stt_transcribe_adapter(
+            {"file_uri": "file:///private/audio-secret.wav"},
+            {"user_id": "test", "step_run_id": "step_stt_resolution_error"},
+        )
+
+    assert result == {"error": "file_access_denied"}
+
+
+@pytest.mark.asyncio
 async def test_stt_adapter_with_diarization(monkeypatch, tmp_path):
     """Test STT adapter with diarization enabled."""
     from tldw_Server_API.app.core.Workflows.adapters.audio import run_stt_transcribe_adapter
@@ -366,7 +418,7 @@ async def test_stt_adapter_handles_stt_error(monkeypatch, tmp_path):
     audio_file.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfmt ")
 
     def mock_speech_to_text(*args, **kwargs):
-        raise RuntimeError("STT service failed")
+        raise RuntimeError("STT service failed at /private/model-cache.bin")
 
     with patch(
         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
@@ -378,7 +430,7 @@ async def test_stt_adapter_handles_stt_error(monkeypatch, tmp_path):
         result = await run_stt_transcribe_adapter(config, context)
 
         assert "error" in result
-        assert "stt_error" in result.get("error", "")
+        assert result.get("error") == "stt_error"
 
 
 # ============================================================================
@@ -1095,6 +1147,96 @@ async def test_audio_mix_adapter_ffmpeg_error(monkeypatch, tmp_path):
         assert result.get("mixed") is False
 
 
+@pytest.mark.parametrize(
+    ("adapter_name", "flag_key", "expected_error"),
+    [
+        ("run_audio_normalize_adapter", "normalized", "ffmpeg_error"),
+        ("run_audio_concat_adapter", "concatenated", "audio_concat_error"),
+        ("run_audio_trim_adapter", "trimmed", "audio_trim_error"),
+        ("run_audio_convert_adapter", "converted", "audio_convert_error"),
+        ("run_audio_extract_adapter", "extracted", "audio_extract_error"),
+        ("run_audio_mix_adapter", "mixed", "audio_mix_error"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_audio_processing_adapters_sanitize_ffmpeg_errors(
+    adapter_name,
+    flag_key,
+    expected_error,
+    monkeypatch,
+    tmp_path,
+):
+    """Test audio processing adapters hide ffmpeg/backend details."""
+    from tldw_Server_API.app.core.Workflows import adapters as workflow_adapters
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+    audio_file = tmp_path / "input.mp3"
+    video_file = tmp_path / "input.mp4"
+    second_audio_file = tmp_path / "second.mp3"
+    for path in (audio_file, video_file, second_audio_file):
+        path.write_bytes(b"fake media")
+
+    configs = {
+        "run_audio_normalize_adapter": {"input_path": str(audio_file)},
+        "run_audio_concat_adapter": {"input_paths": [str(audio_file), str(second_audio_file)]},
+        "run_audio_trim_adapter": {"input_path": str(audio_file), "start": "0", "duration": "5"},
+        "run_audio_convert_adapter": {"input_path": str(audio_file), "format": "wav"},
+        "run_audio_extract_adapter": {"input_path": str(video_file), "format": "mp3"},
+        "run_audio_mix_adapter": {"input_paths": [str(audio_file), str(second_audio_file)]},
+    }
+
+    def mock_subprocess_run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd, stderr=b"ffmpeg failed at /private/ffmpeg-cache")
+
+    with patch("subprocess.run", mock_subprocess_run):
+        result = await getattr(workflow_adapters, adapter_name)(
+            configs[adapter_name],
+            {"user_id": "test", "step_run_id": f"step_{adapter_name}"},
+        )
+
+    assert result.get("error") == expected_error
+    assert result.get(flag_key) is False
+
+
+@pytest.mark.parametrize(
+    ("adapter_name", "config", "flag_key"),
+    [
+        ("run_audio_normalize_adapter", {"input_path": "private.mp3"}, "normalized"),
+        ("run_audio_trim_adapter", {"input_path": "private.mp3", "start": "0"}, "trimmed"),
+        ("run_audio_convert_adapter", {"input_path": "private.mp3", "format": "wav"}, "converted"),
+        ("run_audio_extract_adapter", {"input_path": "private.mp4", "format": "mp3"}, "extracted"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_audio_processing_adapters_sanitize_input_path_errors(
+    adapter_name,
+    config,
+    flag_key,
+    monkeypatch,
+    tmp_path,
+):
+    """Test audio processing adapters hide path resolution details."""
+    from tldw_Server_API.app.core.Workflows import adapters as workflow_adapters
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.audio.processing.resolve_workflow_file_path",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("audio denied at /private/audio-input")),
+    )
+
+    result = await getattr(workflow_adapters, adapter_name)(
+        config,
+        {"user_id": "test", "step_run_id": f"step_path_{adapter_name}"},
+    )
+
+    assert result.get("error") == "input_path_error"
+    assert result.get(flag_key) is False
+
+
 # ============================================================================
 # Audio Diarize Adapter Tests
 # ============================================================================
@@ -1310,6 +1452,84 @@ async def test_audio_diarize_adapter_fallback_whisper(monkeypatch, tmp_path):
 
             # Should indicate unavailable or work with fallback
             assert "segments" in result or "error" in result
+
+
+@pytest.mark.asyncio
+async def test_audio_diarize_adapter_sanitizes_file_uri_errors(monkeypatch, tmp_path):
+    """Test diarization hides workflow URI resolver exception details."""
+    from tldw_Server_API.app.core.Workflows.adapters.audio import run_audio_diarize_adapter
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.audio.diarize.resolve_workflow_file_uri",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("uri denied at /private/audio-uri")),
+    )
+
+    result = await run_audio_diarize_adapter(
+        {"file_uri": "file:///private/audio-uri/interview.wav"},
+        {"user_id": "test", "step_run_id": "step_diarize_uri_error"},
+    )
+
+    assert result == {"error": "invalid_audio_uri", "segments": [], "speakers": []}
+
+
+@pytest.mark.asyncio
+async def test_audio_diarize_adapter_sanitizes_path_errors(monkeypatch, tmp_path):
+    """Test diarization hides workflow path resolver exception details."""
+    from tldw_Server_API.app.core.Workflows.adapters.audio import run_audio_diarize_adapter
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.audio.diarize.resolve_workflow_file_path",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("path denied at /private/audio-path")),
+    )
+
+    result = await run_audio_diarize_adapter(
+        {"audio_path": "/private/audio-path/interview.wav"},
+        {"user_id": "test", "step_run_id": "step_diarize_path_error"},
+    )
+
+    assert result == {"error": "audio_access_denied", "segments": [], "speakers": []}
+
+
+@pytest.mark.asyncio
+async def test_audio_diarize_adapter_sanitizes_backend_errors(monkeypatch, tmp_path):
+    """Test diarization hides pyannote/backend exception details."""
+    from tldw_Server_API.app.core.Workflows.adapters.audio import run_audio_diarize_adapter
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    audio_file = tmp_path / "interview.wav"
+    audio_file.write_bytes(b"fake_audio_data")
+
+    class FailingPipeline:
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            raise RuntimeError("pyannote backend exploded at /private/diarize-cache")
+
+    mock_pyannote = MagicMock()
+    mock_pyannote.Pipeline = FailingPipeline
+    mock_torch = MagicMock()
+    mock_torch.cuda.is_available.return_value = False
+
+    import sys
+
+    with patch.dict(
+        sys.modules,
+        {
+            "pyannote": MagicMock(),
+            "pyannote.audio": mock_pyannote,
+            "torch": mock_torch,
+        },
+    ):
+        result = await run_audio_diarize_adapter(
+            {"audio_path": str(audio_file)},
+            {"user_id": "test", "step_run_id": "step_diarize_backend_error"},
+        )
+
+    assert result == {"error": "diarization_error", "segments": [], "speakers": []}
 
 
 # ============================================================================
@@ -1646,9 +1866,7 @@ class TestMultiVoiceTTSAdapter:
         assert result["sections_generated"] == 3
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_fallback_on_failure(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_fallback_on_failure(self, base_context, tmp_path, monkeypatch):
         """Test fallback when primary TTS fails."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -1683,6 +1901,46 @@ class TestMultiVoiceTTSAdapter:
 
         assert "error" not in result
         assert result["sections_generated"] == 1
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_sanitizes_section_warning_logs(self, base_context, tmp_path, monkeypatch):
+        """Test primary and fallback TTS warning logs hide backend details."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio import multi_voice_tts
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+            if model == "kokoro":
+                raise RuntimeError("primary TTS token at /private/mvtts-primary-cache")
+            raise RuntimeError("fallback TTS token at /private/mvtts-fallback-cache")
+
+        config = {
+            "sections": [{"voice": "HOST", "text": "Hello world"}],
+            "voice_assignments": {"HOST": "af_bella"},
+            "default_model": "kokoro",
+            "fallback_provider": "openai",
+            "normalize": False,
+        }
+        messages: list[str] = []
+        sink_id = multi_voice_tts.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            with patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=mock_synthesize,
+            ):
+                result = await run_multi_voice_tts_adapter(config, base_context)
+        finally:
+            multi_voice_tts.logger.remove(sink_id)
+
+        assert result.get("error") == "no_sections_generated"
+        joined = "\n".join(messages)
+        assert "Section 0 TTS failed with kokoro/af_bella" in joined
+        assert "Section 0 fallback TTS" in joined
+        assert "mvtts-primary-cache" not in joined
+        assert "mvtts-fallback-cache" not in joined
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_cancelled(self, base_context):
@@ -1747,15 +2005,85 @@ class TestMultiVoiceTTSAdapter:
         ):
             result = await run_multi_voice_tts_adapter(config, base_context)
 
-        assert len(artifacts) == 1
-        assert artifacts[0]["type"] == "tts_audio"
-        assert artifacts[0]["metadata"]["multi_voice"] is True
+        final_artifacts = [artifact for artifact in artifacts if artifact["metadata"].get("final_artifact") is True]
+        assert len(final_artifacts) == 1
+        assert final_artifacts[0]["type"] == "tts_audio"
+        assert final_artifacts[0]["metadata"]["multi_voice"] is True
         assert result.get("artifact_id") is not None
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_default_voice_fallback(
-        self, base_context, tmp_path, monkeypatch
+    async def test_multi_voice_tts_registers_per_speaker_artifacts(
+        self, sample_voice_assignments, base_context, tmp_path, monkeypatch
     ):
+        """Test each speaker is registered once before final mix."""
+        from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
+            run_multi_voice_tts_adapter,
+        )
+
+        monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+        artifacts: list[dict[str, Any]] = []
+        base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+        sections = [
+            {"voice": "HOST", "text": "Welcome to the briefing."},
+            {"voice": "REPORTER", "text": "The story details go here."},
+            {"voice": "HOST", "text": "That wraps up the briefing."},
+        ]
+
+        async def mock_synthesize(text, model, voice, fmt, speed, output_path):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(f"audio-{voice}".encode("utf-8"))
+            return output_path.stat().st_size
+
+        async def mock_concat(files, output, fmt="mp3"):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"concat_data")
+            return True
+
+        config = {
+            "sections": sections,
+            "voice_assignments": sample_voice_assignments,
+            "normalize": False,
+        }
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._synthesize_section",
+                side_effect=mock_synthesize,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._generate_silence",
+                return_value=False,
+            ),
+            patch(
+                "tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts._concat_files",
+                side_effect=mock_concat,
+            ),
+        ):
+            result = await run_multi_voice_tts_adapter(config, base_context)
+
+        speaker_artifacts = [artifact for artifact in artifacts if artifact["metadata"].get("speaker_artifact") is True]
+        assert result["sections_generated"] == 3
+        assert len(speaker_artifacts) == 2
+        assert [artifact["metadata"]["speaker_id"] for artifact in speaker_artifacts] == [
+            "HOST",
+            "REPORTER",
+        ]
+        assert [artifact["metadata"]["voice"] for artifact in speaker_artifacts] == [
+            "af_bella",
+            "am_adam",
+        ]
+        assert speaker_artifacts[0]["metadata"]["sections_count"] == 2
+        assert speaker_artifacts[0]["metadata"]["sections"] == [
+            {"section_index": 0, "voice": "af_bella", "model": "kokoro", "fallback": False},
+            {"section_index": 2, "voice": "af_bella", "model": "kokoro", "fallback": False},
+        ]
+        assert speaker_artifacts[1]["metadata"]["sections_count"] == 1
+        assert all(Path(artifact["uri"].removeprefix("file://")).exists() for artifact in speaker_artifacts)
+        assert any(artifact["metadata"].get("final_artifact") is True for artifact in artifacts)
+
+    @pytest.mark.asyncio
+    async def test_multi_voice_tts_default_voice_fallback(self, base_context, tmp_path, monkeypatch):
         """Test unknown voice markers use default_voice."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -1787,9 +2115,7 @@ class TestMultiVoiceTTSAdapter:
         assert calls[0] == "bm_george"
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_cleans_text_before_synthesis(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_cleans_text_before_synthesis(self, base_context, tmp_path, monkeypatch):
         """Test section text is normalized before synthesis."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -1829,9 +2155,7 @@ class TestMultiVoiceTTSAdapter:
         assert " and " in observed_texts[0]
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_background_mix_applied(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_background_mix_applied(self, base_context, tmp_path, monkeypatch):
         """Test optional background track mixing produces mixed final artifact."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,
@@ -1878,9 +2202,7 @@ class TestMultiVoiceTTSAdapter:
         assert mock_mix.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_multi_voice_tts_background_mix_fallback_to_narration(
-        self, base_context, tmp_path, monkeypatch
-    ):
+    async def test_multi_voice_tts_background_mix_fallback_to_narration(self, base_context, tmp_path, monkeypatch):
         """Test mixing failures return narration-only output without hard failure."""
         from tldw_Server_API.app.core.Workflows.adapters.audio.multi_voice_tts import (
             run_multi_voice_tts_adapter,

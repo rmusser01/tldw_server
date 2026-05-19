@@ -88,15 +88,33 @@ jobs:
         if: needs.changes.outputs.e2e_changed == 'true'
         id: e2e_primary
         continue-on-error: true
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
-          python -m pytest -p pytest_asyncio.plugin tldw_Server_API/tests/e2e/ --critical-only -q
+          python -m pytest \
+            -p pytest_asyncio.plugin \
+            -p tldw_Server_API.tests._plugins.e2e_fixtures \
+            -p tldw_Server_API.tests._plugins.e2e_state_fixtures \
+            -p tldw_Server_API.tests._plugins.media_fixtures \
+            -p tldw_Server_API.tests._plugins.postgres \
+            -p tldw_Server_API.tests.helpers.pgvector \
+            tldw_Server_API/tests/e2e/ --critical-only -q
 
       - name: Run critical e2e suite (retry)
         if: needs.changes.outputs.e2e_changed == 'true' && steps.e2e_primary.outcome == 'failure'
         id: e2e_retry
         continue-on-error: true
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
-          python -m pytest -p pytest_asyncio.plugin tldw_Server_API/tests/e2e/ --critical-only -q
+          python -m pytest \
+            -p pytest_asyncio.plugin \
+            -p tldw_Server_API.tests._plugins.e2e_fixtures \
+            -p tldw_Server_API.tests._plugins.e2e_state_fixtures \
+            -p tldw_Server_API.tests._plugins.media_fixtures \
+            -p tldw_Server_API.tests._plugins.postgres \
+            -p tldw_Server_API.tests.helpers.pgvector \
+            tldw_Server_API/tests/e2e/ --critical-only -q
 
       - name: Fail when both attempts fail
         if: needs.changes.outputs.e2e_changed == 'true' && steps.e2e_primary.outcome == 'failure' && steps.e2e_retry.outcome == 'failure'

@@ -3,11 +3,14 @@ import contextlib
 import json
 import os
 from collections.abc import Awaitable
+from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     MetricDefinition,
@@ -38,6 +41,9 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     WebSocketDisconnect,
 )
+
+AUTH_TOKEN_TYPE_ACCESS = "access"  # nosec B105 - auth token type enum, not a credential
+AUTH_TOKEN_TYPE_API_KEY = "api_key"  # nosec B105 - auth token type enum, not a credential
 
 
 def _get_chat_history_max_messages() -> int:
@@ -263,6 +269,67 @@ async def _audio_ws_authenticate(
     """
     jwt_user_id: Optional[int] = None
 
+    def _ensure_ws_state() -> Any:
+        state = getattr(websocket, "state", None)
+        if state is None:
+            state = SimpleNamespace()
+            with contextlib.suppress(Exception):
+                setattr(websocket, "state", state)
+        return state
+
+    async def _attach_ws_principal(
+        *,
+        kind: str,
+        user_id: Optional[int],
+        api_key_id: Optional[int] = None,
+        subject: Optional[str] = None,
+        token_type: Optional[str] = None,
+        org_ids: Optional[list[int]] = None,
+        active_org_id: Optional[int] = None,
+    ) -> None:
+        resolved_org_ids = list(org_ids or [])
+        resolved_active_org_id = active_org_id
+        if user_id is not None and not resolved_org_ids and subject != "single_user":
+            try:
+                memberships = await list_org_memberships_for_user(int(user_id))
+            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("WS auth org lookup failed for user_id={}: {}", user_id, exc)
+            else:
+                for membership in memberships or []:
+                    try:
+                        org_id = membership.get("org_id")
+                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
+                        continue
+                    if org_id is None:
+                        continue
+                    org_id_int = int(org_id)
+                    if org_id_int not in resolved_org_ids:
+                        resolved_org_ids.append(org_id_int)
+                if resolved_active_org_id is None and len(resolved_org_ids) == 1:
+                    resolved_active_org_id = resolved_org_ids[0]
+
+        principal = AuthPrincipal(
+            kind=kind,  # type: ignore[arg-type]
+            user_id=int(user_id) if user_id is not None else None,
+            api_key_id=api_key_id,
+            subject=subject,
+            token_type=token_type,
+            jti=None,
+            roles=[],
+            permissions=[],
+            is_admin=False,
+            org_ids=resolved_org_ids,
+            team_ids=[],
+            active_org_id=resolved_active_org_id,
+            active_team_id=None,
+        )
+        state = _ensure_ws_state()
+        with contextlib.suppress(Exception):
+            state.auth_principal = principal
+            state.user_id = principal.user_id
+            state.org_ids = list(principal.org_ids or [])
+            state.active_org_id = principal.active_org_id
+
     def _policy_close_code() -> int:
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
@@ -348,6 +415,19 @@ async def _audio_ws_authenticate(
                 raise InvalidTokenError("user not found")
             if not await _enforce_jwt_limits(payload):
                 return None
+            raw_org_ids = payload.get("org_ids") or []
+            org_ids = [int(org_id) for org_id in raw_org_ids if org_id is not None]
+            active_org_id = payload.get("active_org_id")
+            with contextlib.suppress(Exception):
+                active_org_id = int(active_org_id) if active_org_id is not None else None
+            await _attach_ws_principal(
+                kind="user",
+                user_id=int(uid),
+                subject=str(payload.get("sub")) if payload.get("sub") else None,
+                token_type=AUTH_TOKEN_TYPE_ACCESS,
+                org_ids=org_ids,
+                active_org_id=active_org_id,
+            )
             return int(uid)
         except (InvalidTokenError, TokenExpiredError):
             await _stream_error("Invalid or expired token", code=4401)
@@ -438,6 +518,13 @@ async def _audio_ws_authenticate(
                     jwt_user_id = int(uid) if uid is not None else None
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
                     jwt_user_id = None
+                await _attach_ws_principal(
+                    kind="api_key",
+                    user_id=jwt_user_id,
+                    api_key_id=int(info.get("id")) if info.get("id") is not None else None,
+                    subject=f"api_key:{info.get('id')}" if info.get("id") is not None else None,
+                    token_type=AUTH_TOKEN_TYPE_API_KEY,
+                )
                 return True, jwt_user_id
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"API key authentication failed: {exc}")
@@ -542,6 +629,12 @@ async def _audio_ws_authenticate(
         if not _ip_allowed_single_user(client_ip):
             await _stream_error("IP not allowed", code=1008)
             return False, None
+        await _attach_ws_principal(
+            kind="user",
+            user_id=settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None,
+            subject="single_user",
+            token_type=AUTH_TOKEN_TYPE_ACCESS,
+        )
         return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
     try:
         first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
@@ -552,6 +645,12 @@ async def _audio_ws_authenticate(
         if not _ip_allowed_single_user(client_ip):
             await _stream_error("IP not allowed", code=1008)
             return False, None
+        await _attach_ws_principal(
+            kind="user",
+            user_id=settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None,
+            subject="single_user",
+            token_type=AUTH_TOKEN_TYPE_ACCESS,
+        )
         return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
     except asyncio.TimeoutError:
         await _stream_error("Authentication timeout. Send auth message within 5 seconds.")

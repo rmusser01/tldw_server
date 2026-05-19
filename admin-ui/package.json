@@ -11,6 +11,7 @@
     "test:smoke": "playwright test",
     "test:real-backend": "playwright test tests/e2e/real-backend --workers=1",
     "test:a11y": "vitest run app/__tests__/dashboard.a11y.test.tsx app/users/__tests__/page.test.tsx app/monitoring/__tests__/page.test.tsx app/audit/__tests__/page.test.tsx app/data-ops/__tests__/page.a11y.test.tsx app/__tests__/dark-mode-contrast.test.ts app/__tests__/icon-button-audit.test.ts",
+    "analyze": "ANALYZE=true next build",
     "lint": "BROWSERSLIST_IGNORE_OLD_DATA=1 BASELINE_BROWSER_MAPPING_IGNORE_OLD_DATA=1 eslint ."
   },
   "keywords": [],
@@ -28,6 +29,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
+    "@sentry/nextjs": "^10.46.0",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^24.10.9",
     "@types/react": "^19.2.9",
@@ -49,6 +51,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.1",
     "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

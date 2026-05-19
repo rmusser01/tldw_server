@@ -281,11 +281,12 @@ class CodeChunkingStrategy(BaseChunkingStrategy):
             # Identify headers per language
             headers = self._find_headers(lines, language)
             blocks: list[tuple[int, int]] = []
-            # Add import/header block first if present
-            imp_s, imp_e = self._extract_import_block(lines)
-            if imp_e > imp_s:
-                blocks.append((imp_s, imp_e))
             if headers:
+                # Only split out the leading import/comment prefix when we also
+                # found later code headers. Otherwise the full file is the block.
+                imp_s, imp_e = self._extract_import_block(lines)
+                if imp_e > imp_s:
+                    blocks.append((imp_s, imp_e))
                 for _idx, h in enumerate(headers):
                     start = h.line_index
                     if self._is_brace_lang(language):
@@ -338,11 +339,11 @@ class CodeChunkingStrategy(BaseChunkingStrategy):
         # Use non-keepends lines for regex detection
         lines = [ln.rstrip('\n').rstrip('\r') for ln in lines_ke]
         blocks: list[tuple[int, int, str, str | None]] = []  # (s_line, e_line_excl, block_type, name)
-        imp_s, imp_e = self._extract_import_block(lines)
-        if imp_e > imp_s:
-            blocks.append((imp_s, imp_e, 'imports', None))
         headers = self._find_headers(lines, language)
         if headers:
+            imp_s, imp_e = self._extract_import_block(lines)
+            if imp_e > imp_s:
+                blocks.append((imp_s, imp_e, 'imports', None))
             for h in headers:
                 s = h.line_index
                 if self._is_brace_lang(language):

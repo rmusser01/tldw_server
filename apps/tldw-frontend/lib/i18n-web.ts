@@ -9,6 +9,7 @@
 import i18n from "i18next"
 import ICU from "@tldw/ui/i18n/icu-format"
 import { initReactI18next } from "react-i18next"
+import { browser } from "wxt/browser"
 
 // Static imports for English locale - these get bundled at build time
 import commonEn from "@tldw/ui/assets/locale/en/common.json"
@@ -76,11 +77,6 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 
 const RTL_LANGUAGES = ["ar", "fa", "he"]
 
-const getStoredLanguage = (): string => {
-  if (typeof localStorage === "undefined") return "en"
-  return localStorage.getItem("i18nextLng") || "en"
-}
-
 const normalizeLanguage = (lng: string): string => {
   if (!lng) return "en"
   const trimmed = lng.replace("_", "-").trim()
@@ -119,7 +115,7 @@ i18n
   .init({
     resources,
     fallbackLng: "en",
-    lng: normalizeLanguage(getStoredLanguage()),
+    lng: "en",
     ns: [...NAMESPACES],
     defaultNS: "common",
     interpolation: {
@@ -200,6 +196,29 @@ export const ensureLanguageLoaded = async (lng: string): Promise<void> => {
     console.warn(`Failed to load translations for ${normalized}`)
   }
 }
+
+async function syncStoredLanguage(): Promise<void> {
+  try {
+    const stored = await browser.storage.local.get("i18nextLng")
+    const storedRecord =
+      stored && typeof stored === "object" && !Array.isArray(stored)
+        ? (stored as Record<string, unknown>)
+        : null
+    const rawLanguage = storedRecord?.i18nextLng
+    const normalized = normalizeLanguage(
+      typeof rawLanguage === "string" ? rawLanguage : "en"
+    )
+    if (normalized === normalizeLanguage(i18n.language || "en")) {
+      return
+    }
+    await ensureLanguageLoaded(normalized)
+    await i18n.changeLanguage(normalized)
+  } catch (error) {
+    console.warn("Failed to load stored language from browser storage.", error)
+  }
+}
+
+void syncStoredLanguage()
 
 // Listen for language changes
 i18n.on("languageChanged", (lng) => {

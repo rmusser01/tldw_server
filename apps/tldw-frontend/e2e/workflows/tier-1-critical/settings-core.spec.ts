@@ -94,6 +94,83 @@ test.describe("Settings", () => {
     })
   }
 
+  test.describe("Prompt route intent", () => {
+    test("legacy prompt studio route redirects to the prompts studio tab", async ({
+      authedPage,
+      diagnostics,
+    }) => {
+      await authedPage.goto("/prompt-studio", { waitUntil: "domcontentloaded" })
+
+      await expect(authedPage).toHaveURL(/\/prompts\?tab=studio/)
+      await expect(
+        authedPage.getByRole("heading", { name: /^prompts$/i }).first()
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(
+        authedPage.getByText("Getting started with Prompt Studio")
+      ).toBeVisible({ timeout: 20_000 })
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("prompt workspace link settings and prompt studio settings stay distinct", async ({
+      authedPage,
+      diagnostics,
+    }) => {
+      await authedPage.goto("/settings/prompt-studio", {
+        waitUntil: "domcontentloaded",
+      })
+      await settings.waitForReady()
+
+      await expect(authedPage).toHaveURL(/\/settings\/prompt-studio/)
+      await expect(
+        authedPage.getByText(
+          "Configure defaults and monitor Prompt Studio health."
+        )
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(
+        authedPage.getByRole("button", { name: /test prompt studio/i })
+      ).toBeVisible({ timeout: 20_000 })
+
+      await authedPage.goto("/settings/prompt", {
+        waitUntil: "domcontentloaded",
+      })
+      await settings.waitForReady()
+
+      await expect(authedPage).toHaveURL(/\/settings\/prompt(?:\?.*)?$/)
+      await expect(
+        authedPage.getByRole("heading", { name: "Prompts workspace" })
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(
+        authedPage.getByRole("button", { name: /open prompts workspace/i })
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(
+        authedPage.getByRole("button", { name: /test prompt studio/i })
+      ).toHaveCount(0)
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+
+    test("settings navigation uses different labels for prompt workspace and prompt studio settings", async ({
+      diagnostics,
+    }) => {
+      await settings.goto()
+      await settings.waitForReady()
+
+      const promptSettingsLink = settings.page.getByTestId(
+        "settings-nav-link--settings-prompt"
+      )
+      const promptStudioSettingsLink = settings.page.getByTestId(
+        "settings-nav-link--settings-prompt-studio"
+      )
+
+      await expect(promptSettingsLink).toContainText(/manage prompts/i)
+      await expect(promptSettingsLink).not.toContainText(/prompt studio/i)
+      await expect(promptStudioSettingsLink).toContainText(/prompt studio/i)
+
+      await assertNoCriticalErrors(diagnostics)
+    })
+  })
+
   // --- Save button fires an API call ---
   test("save settings fires API", async ({ authedPage, diagnostics }) => {
     await settings.goto()

@@ -19,6 +19,7 @@ import { CreditCard, Plus, Pencil, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { isBillingEnabled } from '@/lib/billing';
 import { Plan } from '@/types';
+import { logger } from '@/lib/logger';
 
 const PLAN_TIERS = ['free', 'pro', 'enterprise'] as const;
 
@@ -51,7 +52,7 @@ export default function PlansPage() {
   const [loading, setLoading] = useState(true);
   const { success, error: showError } = useToast();
   const confirm = useConfirm();
-  const privilegedAction = usePrivilegedActionDialog();
+  const promptPrivilegedAction = usePrivilegedActionDialog();
 
   const [showDialog, setShowDialog] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
@@ -78,7 +79,7 @@ export default function PlansPage() {
       const data = await api.getPlans();
       setPlans(Array.isArray(data) ? data : []);
     } catch (err: unknown) {
-      console.error('Failed to load plans:', err);
+      logger.error('Failed to load plans', { component: 'PlansPage', error: err instanceof Error ? err.message : String(err) });
       showError('Failed to load plans', err instanceof Error ? err.message : 'Please try again.');
     } finally {
       setLoading(false);
@@ -142,7 +143,7 @@ export default function PlansPage() {
       form.reset();
       loadPlans();
     } catch (err: unknown) {
-      console.error('Failed to save plan:', err);
+      logger.error('Failed to save plan', { component: 'PlansPage', error: err instanceof Error ? err.message : String(err) });
       showError('Failed to save plan', err instanceof Error ? err.message : 'Please try again.');
     } finally {
       setSubmitting(false);
@@ -150,39 +151,43 @@ export default function PlansPage() {
   });
 
   const handleDelete = async (plan: Plan) => {
-    // Check for active subscribers before allowing deletion
-    try {
-      const subs = await api.getSubscriptions({ plan_id: plan.id, status: 'active' });
-      const activeSubs = subs.filter(
-        (s) => s.plan_id === plan.id && s.status !== 'canceled'
-      );
-      if (activeSubs.length > 0) {
-        showError(
-          'Cannot delete plan',
-          `"${plan.name}" has ${activeSubs.length} active subscription${activeSubs.length === 1 ? '' : 's'}. Migrate subscribers to another plan first.`
-        );
-        return;
+    let subscriberCount = 0;
+    let subscriberCheckFailed = false;
+
+    if (billingEnabled) {
+      try {
+        const subs = await api.getSubscriptions({ plan_id: String(plan.id) });
+        const allSubs = Array.isArray(subs) ? subs : [];
+        subscriberCount = allSubs.filter(
+          (s) => s.status === 'active' || s.status === 'trialing'
+        ).length;
+      } catch (err: unknown) {
+        logger.error('Failed to check plan subscribers', { component: 'PlansPage', error: err instanceof Error ? err.message : String(err) });
+        subscriberCheckFailed = true;
       }
-    } catch (err) {
-      console.error('Failed to verify subscribers:', err);
-      showError('Cannot delete plan', 'Unable to verify subscriber count. Please try again.');
-      return;
     }
 
-    const result = await privilegedAction({
+    let message = `Are you sure you want to delete the plan "${plan.name}"? This action cannot be undone.`;
+    if (subscriberCount > 0) {
+      message = `This plan has ${subscriberCount} active subscription(s). Deleting it will affect these organizations.\n\n${message}`;
+    } else if (subscriberCheckFailed) {
+      message = `Warning: Could not verify whether this plan has active subscribers.\n\n${message}`;
+    }
+
+    const approval = await promptPrivilegedAction({
       title: 'Delete Plan',
-      message: `Are you sure you want to delete the plan "${plan.name}"? This action cannot be undone.`,
+      message,
       confirmText: 'Delete',
       requirePassword: true,
     });
-    if (!result) return;
+    if (!approval) return;
 
     try {
       await api.deletePlan(plan.id);
       success('Plan Deleted', `Plan "${plan.name}" has been deleted`);
       loadPlans();
     } catch (err: unknown) {
-      console.error('Failed to delete plan:', err);
+      logger.error('Failed to delete plan', { component: 'PlansPage', error: err instanceof Error ? err.message : String(err) });
       showError('Failed to delete plan', err instanceof Error ? err.message : 'Please try again.');
     }
   };

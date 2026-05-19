@@ -3,9 +3,39 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import AnyUrl, BaseModel, Field, field_validator
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 SourceType = Literal["rss", "site", "forum"]  # forums are feature-flagged for Phase 3
+WatchlistDomain = Literal["cti_osint", "news", "general"]
+WatchlistStatus = Literal["active", "paused", "archived"]
+WatchlistPriority = Literal["low", "medium", "high", "critical"]
+WatchlistContentAlertRuleKind = Literal["keyword", "regex", "descriptor", "classification", "entity", "ioc", "cve"]
+WatchlistContentAlertMatchMode = Literal["contains", "exact", "regex"]
+WatchlistContentAlertSeverity = Literal["info", "low", "medium", "high", "critical"]
+WatchlistContentAlertStatus = Literal["unread", "read", "dismissed"]
+WatchlistReportPreset = Literal["auto", "cti_osint", "news_briefing", "general_research"]
+WatchlistReportReadinessState = Literal["ready", "warning", "blocked", "legacy_live_only"]
+WatchlistReportReadinessWarningSeverity = Literal["info", "warning", "blocking"]
+ScrapedItemMutableStatus = Literal["ingested", "filtered", "ignored", "reviewed"]
+ScrapedItemSavedViewSmartFilter = Literal["all", "today", "today_unread", "todayUnread", "unread", "reviewed", "queued"]
+ScrapedItemSortMode = Literal[
+    "created_desc",
+    "created_asc",
+    "published_desc",
+    "published_asc",
+    "unread_first",
+    "source_asc",
+    "alert_severity_desc",
+]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 # --------------------
@@ -44,6 +74,166 @@ class WatchlistIngestPrefs(BaseModel):
     )
 
 
+class WatchlistCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str | None = None
+    objective: str | None = None
+    domain: WatchlistDomain = "general"
+    status: WatchlistStatus = "active"
+    priority: WatchlistPriority = "medium"
+    tags: list[str] = Field(default_factory=list)
+
+
+class WatchlistUpdateRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = None
+    objective: str | None = None
+    domain: WatchlistDomain | None = None
+    status: WatchlistStatus | None = None
+    priority: WatchlistPriority | None = None
+    tags: list[str] | None = None
+
+
+class WatchlistContainer(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    objective: str | None = None
+    domain: WatchlistDomain
+    status: WatchlistStatus
+    priority: WatchlistPriority
+    tags: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+    deleted_at: str | None = None
+    restore_expires_at: str | None = None
+
+
+class WatchlistsListResponse(BaseModel):
+    items: list[WatchlistContainer]
+    total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+class WatchlistContentAlertRuleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    rule_kind: WatchlistContentAlertRuleKind
+    match_mode: WatchlistContentAlertMatchMode = "contains"
+    pattern: str = Field(..., min_length=1, max_length=1000)
+    severity: WatchlistContentAlertSeverity = "medium"
+    enabled: bool = True
+    classification: str | None = Field(default=None, max_length=200)
+    descriptor: str | None = Field(default=None, max_length=200)
+    entity_type: str | None = Field(default=None, max_length=200)
+    source_constraints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("name", "pattern")
+    @classmethod
+    def _strip_required_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
+
+
+class WatchlistContentAlertRuleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    enabled: bool | None = None
+    rule_kind: WatchlistContentAlertRuleKind | None = None
+    match_mode: WatchlistContentAlertMatchMode | None = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=1000)
+    severity: WatchlistContentAlertSeverity | None = None
+    classification: str | None = Field(default=None, max_length=200)
+    descriptor: str | None = Field(default=None, max_length=200)
+    entity_type: str | None = Field(default=None, max_length=200)
+    source_constraints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("name", "pattern")
+    @classmethod
+    def _strip_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
+
+
+class WatchlistContentAlertRule(BaseModel):
+    id: int
+    watchlist_id: int
+    name: str
+    enabled: bool
+    rule_kind: WatchlistContentAlertRuleKind
+    match_mode: WatchlistContentAlertMatchMode
+    pattern: str
+    severity: WatchlistContentAlertSeverity
+    classification: str | None = None
+    descriptor: str | None = None
+    entity_type: str | None = None
+    source_constraints: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+    created_at: str
+    updated_at: str
+
+
+class WatchlistContentAlertRuleList(BaseModel):
+    items: list[WatchlistContentAlertRule]
+    total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+class WatchlistContentAlertUpdate(BaseModel):
+    status: WatchlistContentAlertStatus
+
+
+class WatchlistContentAlert(BaseModel):
+    id: int
+    watchlist_id: int
+    rule_id: int
+    item_id: int
+    run_id: int
+    job_id: int
+    source_id: int
+    severity: WatchlistContentAlertSeverity
+    status: WatchlistContentAlertStatus
+    title: str | None = None
+    snippet: str | None = None
+    matched_text: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    dedupe_key: str
+    created_at: str
+    read_at: str | None = None
+    dismissed_at: str | None = None
+
+
+class WatchlistContentAlertList(BaseModel):
+    items: list[WatchlistContentAlert]
+    total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
 class SourceCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     url: AnyUrl
@@ -52,6 +242,7 @@ class SourceCreateRequest(BaseModel):
     settings: dict[str, Any] | None = None
     tags: list[str] | None = Field(default=None, description="Tag names; server normalizes and resolves to IDs")
     group_ids: list[int] | None = None
+    watchlist_id: int | None = Field(default=None, ge=1)
 
 
 class SourceUpdateRequest(BaseModel):
@@ -76,8 +267,9 @@ class Source(BaseModel):
     url: str
     source_type: SourceType
     active: bool
-    tags: list[str] = []
-    group_ids: list[int] = []
+    tags: list[str] = Field(default_factory=list)
+    group_ids: list[int] = Field(default_factory=list)
+    watchlist_ids: list[int] = Field(default_factory=list)
     settings: dict[str, Any] | None = None
     last_scraped_at: str | None = None
     status: str | None = None
@@ -88,6 +280,13 @@ class Source(BaseModel):
 class SourcesListResponse(BaseModel):
     items: list[Source]
     total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ReversibleDeleteResponse(BaseModel):
@@ -98,6 +297,10 @@ class ReversibleDeleteResponse(BaseModel):
 
 class SourceDeleteResponse(ReversibleDeleteResponse):
     source_id: int
+
+
+class WatchlistDeleteResponse(ReversibleDeleteResponse):
+    watchlist_id: int
 
 
 class SourceSeenStats(BaseModel):
@@ -186,6 +389,13 @@ class Group(BaseModel):
 class GroupsListResponse(BaseModel):
     items: list[Group]
     total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class Tag(BaseModel):
@@ -196,6 +406,13 @@ class Tag(BaseModel):
 class TagsListResponse(BaseModel):
     items: list[Tag]
     total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class JobCreateRequest(BaseModel):
@@ -217,6 +434,7 @@ class JobCreateRequest(BaseModel):
         default=None,
         description="Optional job-level filters payload (bridge from SUBS Import Rules)",
     )
+    watchlist_id: int | None = Field(default=None, ge=1)
 
 
 class JobUpdateRequest(BaseModel):
@@ -238,12 +456,14 @@ class JobUpdateRequest(BaseModel):
         default=None,
         description="Optional job-level filters payload (replace)",
     )
+    watchlist_id: int | None = Field(default=None, ge=1)
 
 
 class Job(BaseModel):
     id: int
     name: str
     description: str | None = None
+    watchlist_id: int | None = None
     scope: dict[str, Any]
     schedule_expr: str | None
     timezone: str | None
@@ -264,6 +484,13 @@ class Job(BaseModel):
 class JobsListResponse(BaseModel):
     items: list[Job]
     total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class JobDeleteResponse(ReversibleDeleteResponse):
@@ -290,7 +517,13 @@ class RunCancelResponse(BaseModel):
 class RunsListResponse(BaseModel):
     items: list[Run]
     total: int
-    has_more: bool | None = None
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WatchlistOnboardingTelemetryIngestRequest(BaseModel):
@@ -383,11 +616,23 @@ class PreviewItem(BaseModel):
     flagged: bool = False
 
 
+class SourcePreviewDiagnostics(BaseModel):
+    fetch_mode: str | None = None
+    selector_errors: list[str] = Field(default_factory=list)
+    selector_warnings: list[str] = Field(default_factory=list)
+    no_match_warnings: list[str] = Field(default_factory=list)
+    non_unique_warnings: list[str] = Field(default_factory=list)
+    fragile_selector_warnings: list[str] = Field(default_factory=list)
+    dedupe_preview_key: str | None = None
+
+
 class PreviewResponse(BaseModel):
     items: list[PreviewItem]
     total: int
+    pagination: OffsetPaginationMeta
     ingestable: int
     filtered: int
+    diagnostics: SourcePreviewDiagnostics | None = None
 
 
 class RunDetail(BaseModel):
@@ -409,6 +654,20 @@ class RunDetail(BaseModel):
     audio_briefing_truncated: bool = False
 
 
+class ScrapedItemAlertSummary(BaseModel):
+    total: int = 0
+    unread: int = 0
+    read: int = 0
+    dismissed: int = 0
+    highest_severity: WatchlistContentAlertSeverity | None = None
+    latest_alert_id: int | None = None
+    latest_alert_status: WatchlistContentAlertStatus | None = None
+    latest_alert_created_at: str | None = None
+    latest_matched_text: str | None = None
+    rule_ids: list[int] = Field(default_factory=list)
+    severities: list[WatchlistContentAlertSeverity] = Field(default_factory=list)
+
+
 class ScrapedItem(BaseModel):
     id: int
     run_id: int
@@ -426,11 +685,19 @@ class ScrapedItem(BaseModel):
     reviewed: bool
     queued_for_briefing: bool = False
     created_at: str
+    alert_summary: ScrapedItemAlertSummary | None = None
 
 
 class ScrapedItemsListResponse(BaseModel):
     items: list[ScrapedItem]
     total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ScrapedItemSmartCountsResponse(BaseModel):
@@ -451,9 +718,174 @@ class ScrapedItemUpdateRequest(BaseModel):
     )
 
 
+class ScrapedItemBatchScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: int | None = Field(default=None, ge=1)
+    job_id: int | None = Field(default=None, ge=1)
+    source_id: int | None = Field(default=None, ge=1)
+    status: str | None = None
+    reviewed: bool | None = None
+    queued_for_briefing: bool | None = None
+    q: str | None = Field(default=None, description="Search by title/summary/content substring")
+    search: str | None = Field(default=None, description="Alias for q")
+    since: str | None = None
+    until: str | None = None
+    has_alert: bool | None = None
+    alert_status: WatchlistContentAlertStatus | None = None
+    alert_severity: WatchlistContentAlertSeverity | None = None
+    alert_rule_id: int | None = Field(default=None, ge=1)
+
+
+class ScrapedItemBatchUpdateRequest(BaseModel):
+    watchlist_id: int = Field(..., ge=1)
+    item_ids: list[int] | None = Field(default=None, description="Explicit selected item IDs to update")
+    scope: ScrapedItemBatchScope | None = Field(default=None, description="Filter scope for all-filtered updates")
+    reviewed: bool | None = None
+    status: ScrapedItemMutableStatus | None = Field(default=None, description="Explicit item status update")
+    queued_for_briefing: bool | None = None
+    limit: int = Field(default=500, ge=1, le=5000)
+
+    @model_validator(mode="after")
+    def _validate_batch_request(self):
+        has_ids = bool(self.item_ids)
+        has_scope = self.scope is not None
+        if has_ids == has_scope:
+            raise ValueError("provide_exactly_one_item_ids_or_scope")
+        if self.reviewed is None and self.status is None and self.queued_for_briefing is None:
+            raise ValueError("provide_at_least_one_update")
+        if self.item_ids:
+            self.item_ids = list(dict.fromkeys(int(item_id) for item_id in self.item_ids))
+        return self
+
+
+class ScrapedItemBatchUpdateResponse(BaseModel):
+    matched: int = 0
+    changed: int = 0
+    unchanged: int = 0
+    failed: int = 0
+    matched_ids: list[int] = Field(default_factory=list)
+    changed_ids: list[int] = Field(default_factory=list)
+    unchanged_ids: list[int] = Field(default_factory=list)
+    failed_ids: list[int] = Field(default_factory=list)
+    capped: bool = False
+    exhausted: bool = True
+    limit: int = 500
+
+
+class WatchlistItemSavedViewBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    sort: ScrapedItemSortMode = "created_desc"
+    is_default: bool = False
+
+
+class WatchlistItemSavedViewCreate(WatchlistItemSavedViewBase):
+    pass
+
+
+class WatchlistItemSavedViewUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    filters: dict[str, Any] | None = None
+    sort: ScrapedItemSortMode | None = None
+    is_default: bool | None = None
+
+
+class WatchlistItemSavedView(BaseModel):
+    id: int
+    watchlist_id: int
+    name: str
+    filters: dict[str, Any] = Field(default_factory=dict)
+    sort: ScrapedItemSortMode
+    is_default: bool = False
+    created_at: str
+    updated_at: str
+
+
+class WatchlistItemSavedViewsList(BaseModel):
+    items: list[WatchlistItemSavedView]
+
+
+class WatchlistReportReadinessWarning(BaseModel):
+    code: str
+    severity: WatchlistReportReadinessWarningSeverity = "warning"
+    message: str
+    affected_item_ids: list[int] = Field(default_factory=list)
+
+
+class WatchlistReportReadiness(BaseModel):
+    state: WatchlistReportReadinessState
+    score: int = Field(ge=0, le=100)
+    warnings: list[WatchlistReportReadinessWarning] = Field(default_factory=list)
+
+
+class WatchlistReportEvidenceAlert(BaseModel):
+    id: int
+    rule_id: int
+    rule_name: str | None = None
+    severity: str
+    status: str
+    title: str | None = None
+    snippet: str | None = None
+    matched_text: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+class WatchlistReportEvidenceItem(BaseModel):
+    id: int
+    title: str | None = None
+    url: str | None = None
+    source_id: int | None = None
+    source_name: str | None = None
+    published_at: str | None = None
+    summary: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    reviewed: bool = False
+    queued_for_briefing: bool = False
+    alerts: list[WatchlistReportEvidenceAlert] = Field(default_factory=list)
+
+
+class WatchlistReportExcludedItem(BaseModel):
+    id: int
+    title: str | None = None
+    url: str | None = None
+    reason: str
+
+
+class WatchlistReportEvidenceSnapshot(BaseModel):
+    schema_version: int = 1
+    snapshot_id: str
+    generated_at: str
+    preset: WatchlistReportPreset
+    watchlist_id: int | None = None
+    job_id: int
+    run_id: int
+    output_id: int | None = None
+    included_items: list[WatchlistReportEvidenceItem] = Field(default_factory=list)
+    excluded_items: list[WatchlistReportExcludedItem] = Field(default_factory=list)
+    source_summary: dict[str, Any] = Field(default_factory=dict)
+    included_count: int = 0
+    excluded_count: int = 0
+    excluded_total_count: int | None = None
+    excluded_items_truncated: bool = False
+    alert_count: int = 0
+    critical_alert_count: int = 0
+    readiness: WatchlistReportReadiness
+
+
+class WatchlistOutputEvidenceResponse(BaseModel):
+    output_id: int
+    immutable_snapshot: bool
+    snapshot: WatchlistReportEvidenceSnapshot | None = None
+    readiness: WatchlistReportReadiness
+
+
 class WatchlistOutputEmailDelivery(BaseModel):
     enabled: bool = True
-    recipients: list[str] | None = Field(default=None, description="Explicit recipient emails; defaults to user email when empty")
+    recipients: list[str] | None = Field(
+        default=None, description="Explicit recipient emails; defaults to user email when empty"
+    )
     subject: str | None = Field(default=None, description="Overrides default subject (defaults to output title)")
     attach_file: bool = Field(default=True, description="Attach rendered content as a file")
     body_format: Literal["auto", "text", "html"] = Field(default="auto", description="Controls email body format")
@@ -474,6 +906,68 @@ class WatchlistOutputDeliveries(BaseModel):
     chatbook: WatchlistOutputChatbookDelivery | None = None
 
 
+class WatchlistAudioCastSpeaker(BaseModel):
+    """Defines one named speaker for generated watchlist audio briefings."""
+
+    id: str = Field(..., min_length=1, max_length=64)
+    label: str = Field(..., min_length=1, max_length=128)
+    role: str | None = Field(default=None, max_length=128)
+    voice: str = Field(..., min_length=1, max_length=128)
+    persona: str | None = Field(default=None, max_length=128)
+
+
+class WatchlistAudioCast(BaseModel):
+    """Defines the structured one-to-four speaker cast for an audio output."""
+
+    speaker_count: int = Field(..., ge=1, le=4)
+    speakers: list[WatchlistAudioCastSpeaker] = Field(..., min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def _validate_speaker_config(self):
+        """Ensure speaker_count and speaker definitions describe the same cast."""
+        if len(self.speakers) != self.speaker_count:
+            raise ValueError("speaker_count_must_match_speakers_length")
+
+        speaker_ids = [speaker.id.strip().casefold() for speaker in self.speakers]
+        if len(set(speaker_ids)) != len(speaker_ids):
+            raise ValueError("speaker_ids_must_be_unique")
+
+        return self
+
+
+class WatchlistAudioArtifactSummary(BaseModel):
+    """Summarizes a script, speaker clip, or final audio artifact for a run."""
+
+    artifact_id: str | int | None = None
+    type: str | None = None
+    uri: str | None = None
+    download_url: str | None = None
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    title: str | None = None
+    speaker_id: str | None = None
+    voice: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WatchlistRunAudioResponse(BaseModel):
+    """Response payload for watchlist run audio status and artifact metadata."""
+
+    run_id: int
+    task_id: str | None = None
+    status: str
+    audio_uri: str | None = None
+    download_url: str | None = None
+    artifact_id: str | int | None = None
+    size_bytes: int | None = None
+    mime_type: str | None = None
+    script_artifact: WatchlistAudioArtifactSummary | None = None
+    speaker_artifacts: list[WatchlistAudioArtifactSummary] = Field(default_factory=list)
+    final_artifact: WatchlistAudioArtifactSummary | None = None
+    fallback_reason: str | None = None
+    error: str | None = None
+
+
 class WatchlistOutputCreateRequest(BaseModel):
     run_id: int = Field(..., description="Run identifier the output is based on")
     item_ids: list[int] | None = Field(None, description="Explicit list of scraped item IDs to include")
@@ -481,6 +975,18 @@ class WatchlistOutputCreateRequest(BaseModel):
     type: str = Field("briefing_markdown", description="Output template/type identifier")
     format: Literal["md", "html"] | None = Field(None, description="Rendered output format (overrides template)")
     metadata: dict[str, Any] | None = Field(None, description="Optional metadata stored alongside the output")
+    report_preset: WatchlistReportPreset = Field(
+        default="auto",
+        description="Report evidence/readiness preset. Defaults to Watchlist domain when available.",
+    )
+    include_evidence_table: bool = Field(default=True, description="Expose evidence details to report templates")
+    include_excluded_items: bool = Field(
+        default=True, description="Capture excluded same-run items in evidence snapshots"
+    )
+    require_reviewed_items: bool = Field(
+        default=False, description="Warn when queued report items have not been reviewed"
+    )
+    allow_weak_evidence: bool = Field(default=True, description="Allow generation when readiness warnings are present")
     template_name: str | None = Field(None, description="Name of a stored template to render with")
     template_version: int | None = Field(
         default=None,
@@ -549,11 +1055,17 @@ class WatchlistOutputCreateRequest(BaseModel):
         default=None,
         description="Voice marker to Kokoro voice ID mapping, e.g., {'HOST': 'af_bella', 'REPORTER': 'am_adam'}",
     )
+    audio_cast: WatchlistAudioCast | None = Field(
+        default=None,
+        description="Optional structured 1-4 speaker audio cast. voice_map remains supported for legacy callers.",
+    )
     ingest_to_media_db: bool = Field(default=False, description="Ingest outputs into Media DB")
     tts_model: str | None = Field(default=None, description="TTS model id, e.g., 'kokoro', 'tts-1'")
     tts_voice: str | None = Field(default=None, description="TTS voice id, e.g., 'af_heart'")
     tts_speed: float | None = Field(default=None, ge=0.25, le=4.0, description="TTS speed override")
-    retention_seconds: int | None = Field(None, ge=0, description="Optional custom retention in seconds (0 = no expiry)")
+    retention_seconds: int | None = Field(
+        None, ge=0, description="Optional custom retention in seconds (0 = no expiry)"
+    )
     temporary: bool | None = Field(False, description="Whether to use temporary retention defaults")
     deliveries: WatchlistOutputDeliveries | None = Field(
         default=None,
@@ -590,6 +1102,13 @@ class WatchlistOutput(BaseModel):
 class WatchlistOutputsListResponse(BaseModel):
     items: list[WatchlistOutput]
     total: int
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class WatchlistTemplateSummary(BaseModel):

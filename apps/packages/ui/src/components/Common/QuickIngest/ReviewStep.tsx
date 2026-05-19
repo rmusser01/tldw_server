@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -82,7 +83,19 @@ const TYPE_ICONS: Record<DetectedMediaType, React.ElementType> = {
 // Component
 // ---------------------------------------------------------------------------
 
-export const ReviewStep: React.FC = () => {
+type ReviewStepProps = {
+  isOnlineForIngest?: boolean
+  isCheckingConnection?: boolean
+  connectionRecoveryMessage?: string
+  onRetryConnection?: () => void
+}
+
+export const ReviewStep: React.FC<ReviewStepProps> = ({
+  isOnlineForIngest = true,
+  isCheckingConnection = false,
+  connectionRecoveryMessage,
+  onRetryConnection,
+}) => {
   const { t } = useTranslation(["option"])
   const { state, goBack, goNext, startProcessing } = useIngestWizard()
 
@@ -94,12 +107,16 @@ export const ReviewStep: React.FC = () => {
     [t]
   )
 
-  const { queueItems, selectedPreset, presetConfig } = state
+  const { queueItems, selectedPreset, presetConfig, conferenceBatchMetadata } = state
+  const selectedQueueItems = useMemo(
+    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
+    [queueItems]
+  )
 
   // Compute total estimated time
   const totalEstimatedSeconds = useMemo(
-    () => estimateTotalSeconds(queueItems, selectedPreset),
-    [queueItems, selectedPreset]
+    () => estimateTotalSeconds(selectedQueueItems, selectedPreset),
+    [selectedQueueItems, selectedPreset]
   )
 
   const estimatedTimeLabel = useMemo(
@@ -115,13 +132,25 @@ export const ReviewStep: React.FC = () => {
 
   // Storage mode
   const storageMode = presetConfig.storeRemote ? "Server" : "Local"
+  const validItemCount = useMemo(
+    () => selectedQueueItems.filter((item) => item.validation.valid).length,
+    [selectedQueueItems]
+  )
+  const canStartProcessing =
+    validItemCount > 0 && isOnlineForIngest && !isCheckingConnection
+
+  const handleStartProcessing = useCallback(() => {
+    if (!canStartProcessing) return
+    startProcessing()
+    goNext()
+  }, [canStartProcessing, goNext, startProcessing])
 
   // Contextual warnings
   const warnings = useMemo(() => {
     const result: string[] = []
 
     // Large files
-    queueItems.forEach((item) => {
+    selectedQueueItems.forEach((item) => {
       if (item.fileSize > LARGE_FILE_THRESHOLD) {
         const name = item.fileName ?? item.url ?? item.id
         const size = formatFileSize(item.fileSize)
@@ -144,21 +173,22 @@ export const ReviewStep: React.FC = () => {
     }
 
     // Large batch
-    if (queueItems.length > LARGE_BATCH_THRESHOLD) {
+    if (selectedQueueItems.length > LARGE_BATCH_THRESHOLD) {
       result.push(
         qi(
           "review.warnLargeBatch",
           "{{count}} items queued -- consider processing in smaller batches for better feedback",
-          { count: queueItems.length }
+          { count: selectedQueueItems.length }
         )
       )
     }
 
     return result
-  }, [queueItems, totalEstimatedSeconds, estimatedTimeLabel, qi])
+  }, [selectedQueueItems, totalEstimatedSeconds, estimatedTimeLabel, qi])
 
   // Item display name
   const getItemLabel = useCallback((item: WizardQueueItem): string => {
+    if (item.conferenceOverride?.title) return item.conferenceOverride.title
     if (item.fileName) return item.fileName
     if (item.url) {
       // Truncate long URLs for display
@@ -177,7 +207,7 @@ export const ReviewStep: React.FC = () => {
         </h2>
         <p className="mt-1 text-sm text-text-muted">
           {qi("review.summary", "{{count}} items | {{preset}} preset | ~{{time}} estimated", {
-            count: queueItems.length,
+            count: selectedQueueItems.length,
             preset: presetLabel,
             time: estimatedTimeLabel,
           })}
@@ -186,12 +216,41 @@ export const ReviewStep: React.FC = () => {
 
       {/* Scrollable item list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-6">
+        {conferenceBatchMetadata && (
+          <div
+            className="mb-3 rounded-md border border-border bg-surface px-3 py-2 text-sm"
+            aria-label="Conference batch review"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-text">
+                {conferenceBatchMetadata.collectionName || "Conference batch"}
+              </span>
+              <span className="text-text-muted">
+                {selectedQueueItems.length} selected
+              </span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
+              {conferenceBatchMetadata.conferenceName && (
+                <span>{conferenceBatchMetadata.conferenceName}</span>
+              )}
+              {conferenceBatchMetadata.eventYear && (
+                <span>{conferenceBatchMetadata.eventYear}</span>
+              )}
+              {conferenceBatchMetadata.eventDate && (
+                <span>{conferenceBatchMetadata.eventDate}</span>
+              )}
+              {conferenceBatchMetadata.sharedTags.length > 0 && (
+                <span>{conferenceBatchMetadata.sharedTags.join(", ")}</span>
+              )}
+            </div>
+          </div>
+        )}
         <ul
           className="divide-y divide-border rounded-lg border border-border bg-surface2"
           role="list"
           aria-label={qi("review.itemList.ariaLabel", "Items to process")}
         >
-          {queueItems.map((item) => {
+          {selectedQueueItems.map((item) => {
             const IconComponent = TYPE_ICONS[item.detectedType] ?? File
             const ops = getOperationDescription(item.detectedType, selectedPreset, presetConfig)
             const label = getItemLabel(item)
@@ -207,6 +266,11 @@ export const ReviewStep: React.FC = () => {
                 />
                 <span className="min-w-0 flex-1 truncate font-medium text-text" title={item.fileName ?? item.url}>
                   {label}
+                  {item.conferenceOverride?.speaker && (
+                    <span className="ml-2 font-normal text-text-muted">
+                      {item.conferenceOverride.speaker}
+                    </span>
+                  )}
                 </span>
                 <span className="flex-shrink-0 whitespace-nowrap text-xs text-text-muted">
                   {presetLabel} &middot; {ops}
@@ -220,6 +284,35 @@ export const ReviewStep: React.FC = () => {
         <p className="mt-3 text-xs text-text-muted">
           {qi("review.storage", "Storage: {{mode}}", { mode: storageMode })}
         </p>
+
+        {!isOnlineForIngest && (
+          <DesignSystemAlert
+            variant="warning"
+            icon={<AlertTriangle className="h-4 w-4" />}
+            className="mt-3"
+            title={qi("wizard.offline.title", "Server offline")}
+            action={
+              onRetryConnection
+                ? {
+                    label: isCheckingConnection
+                      ? qi("wizard.offline.checking", "Checking...")
+                      : qi("wizard.offline.retry", "Retry connection"),
+                    onClick: onRetryConnection,
+                    loading: isCheckingConnection,
+                    disabled: isCheckingConnection,
+                  }
+                : undefined
+            }
+          >
+            {
+              connectionRecoveryMessage ||
+              qi(
+                "wizard.offline.description",
+                "Reconnect to your tldw server before processing. You can go back and keep editing the queue."
+              )
+            }
+          </DesignSystemAlert>
+        )}
 
         {/* Contextual warnings */}
         {warnings.length > 0 && (
@@ -254,8 +347,8 @@ export const ReviewStep: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => { startProcessing(); goNext() }}
-          disabled={queueItems.length === 0}
+          onClick={handleStartProcessing}
+          disabled={!canStartProcessing}
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={qi("review.startAriaLabel", "Start processing")}
         >

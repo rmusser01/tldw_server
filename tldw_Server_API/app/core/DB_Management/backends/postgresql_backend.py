@@ -33,6 +33,7 @@ from .base import (
     FTSQuery,
     QueryResult,
 )
+from .fts_translator import FTSQueryTranslator
 from .query_utils import (
     prepare_backend_many_statement,
     prepare_backend_statement,
@@ -1092,6 +1093,13 @@ class PostgreSQLBackend(DatabaseBackend):
             source_table = mapping.get("source_table", source_table)
             fts_column = mapping.get("fts_column", fts_column)
 
+        normalized_query = FTSQueryTranslator.normalize_query(
+            fts_query.query_text,
+            "postgresql",
+        )
+        if not normalized_query:
+            raise DatabaseError("FTS query normalized to empty for postgresql")
+
         query_parts = [
             f"SELECT *, ts_rank({self.escape_identifier(fts_column)}, query) AS rank",
             f"FROM {self.escape_identifier(source_table)},",
@@ -1099,7 +1107,7 @@ class PostgreSQLBackend(DatabaseBackend):
             f"WHERE {self.escape_identifier(fts_column)} @@ query"
         ]
 
-        params = [fts_query.query_text]
+        params = [normalized_query]
 
         # Add additional filters
         for key, value in fts_query.filters.items():

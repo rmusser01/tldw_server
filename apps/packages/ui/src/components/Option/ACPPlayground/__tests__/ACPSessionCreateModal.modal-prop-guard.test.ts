@@ -16,4 +16,22 @@ describe("ACPSessionCreateModal modal prop guard", () => {
     expect(source).toContain("destroyOnHidden")
     expect(source).not.toContain("destroyOnClose")
   })
+
+  it("uses the design-system registry for the ready step fallback label", () => {
+    const source = readFileSync(sourcePath, "utf8")
+
+    expect(source).toContain('getDesignSystemState("ready").label')
+    expect(source).toContain('t("acp.create.steps.ready"')
+  })
+
+  it("uses the shared product-state Alert adapter for creation errors", () => {
+    const source = readFileSync(sourcePath, "utf8")
+    const antdImport = source.match(/import\s*\{[\s\S]*?\}\s*from\s*"antd"/)?.[0] ?? ""
+
+    expect(source).toContain(
+      'import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"'
+    )
+    expect(antdImport).not.toMatch(/\bAlert\b/)
+    expect(source).toContain("<Alert")
+  })
 })

@@ -1,0 +1,35 @@
+[
+  {
+    "name": "grounded_session_from_source_bundle",
+    "deck_name": "Grounded Audit Deck",
+    "review_mode": "due",
+    "scope_prefix": "due:grounded-audit",
+    "tag_filter": null,
+    "source_bundle_json": [
+      {
+        "source_type": "note",
+        "source_id": "note-7",
+        "label": "Renal basics"
+      }
+    ],
+    "study_pack_id": 44,
+    "reviews": [
+      {"rating": 4, "answer_time_ms": 850},
+      {"rating": 2, "answer_time_ms": 600},
+      {"rating": 4, "answer_time_ms": 700}
+    ]
+  },
+  {
+    "name": "exploratory_session_without_provenance",
+    "deck_name": "Exploratory Audit Deck",
+    "review_mode": "cram",
+    "scope_prefix": "cram:exploratory-audit",
+    "tag_filter": null,
+    "source_bundle_json": [],
+    "study_pack_id": null,
+    "reviews": [
+      {"rating": 2, "answer_time_ms": 500},
+      {"rating": 1, "answer_time_ms": 550}
+    ]
+  }
+]

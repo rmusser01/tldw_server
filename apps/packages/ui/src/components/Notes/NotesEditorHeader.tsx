@@ -34,6 +34,7 @@ interface NotesEditorHeaderProps {
   hasContent: boolean
   canSave: boolean
   canGenerateFlashcards: boolean
+  canCreateStudyPack?: boolean
   canOpenNotesStudio?: boolean
   canExport: boolean
   canDuplicate?: boolean
@@ -53,6 +54,7 @@ interface NotesEditorHeaderProps {
   onChangeEditorMode: (mode: 'edit' | 'split' | 'preview') => void
   onCopy: (mode: 'content' | 'markdown') => void
   onGenerateFlashcards: () => void
+  onCreateStudyPack?: () => void
   onOpenNotesStudio?: () => void
   onExport: (format: 'md' | 'json' | 'print') => void
   onSave: () => void
@@ -73,6 +75,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   hasContent,
   canSave,
   canGenerateFlashcards,
+  canCreateStudyPack = false,
   canOpenNotesStudio = false,
   canExport,
   canDuplicate = false,
@@ -92,6 +95,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   onChangeEditorMode,
   onCopy,
   onGenerateFlashcards,
+  onCreateStudyPack,
   onOpenNotesStudio,
   onExport,
   onSave,
@@ -121,6 +125,34 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
 
   const overflowMenuItems: MenuProps['items'] = useMemo(() => {
     const items: MenuProps['items'] = []
+
+    // --- Editor mode group (mobile only) ---
+    if (isMobileViewport) {
+      items.push({
+        type: 'group' as const,
+        label: t('option:notesSearch.overflowGroupEditorMode', { defaultValue: 'View' }),
+        children: [
+          {
+            key: 'mode-edit',
+            icon: (<EditIcon className="w-4 h-4" />),
+            label: t('option:notesSearch.editModeLabel', { defaultValue: 'Edit' }),
+            disabled: editorMode === 'edit',
+          },
+          {
+            key: 'mode-split',
+            icon: (<SplitIcon className="w-4 h-4" />),
+            label: t('option:notesSearch.splitModeLabel', { defaultValue: 'Split' }),
+            disabled: editorMode === 'split',
+          },
+          {
+            key: 'mode-preview',
+            icon: (<EyeIcon className="w-4 h-4" />),
+            label: t('option:notesSearch.previewModeLabel', { defaultValue: 'Preview' }),
+            disabled: editorMode === 'preview',
+          },
+        ]
+      })
+    }
 
     // --- Create group ---
     if (!editorDisabled) {
@@ -211,6 +243,14 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             }),
             icon: (<SparklesIcon className="w-4 h-4" />),
             disabled: !canGenerateFlashcards
+          },
+          {
+            key: 'study-pack',
+            label: t('option:notesSearch.createStudyPackAction', {
+              defaultValue: 'Create study pack'
+            }),
+            icon: (<SparklesIcon className="w-4 h-4" />),
+            disabled: !canCreateStudyPack
           }
         ]
       })
@@ -284,11 +324,14 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
     return items
   }, [
     editorDisabled,
+    editorMode,
+    isMobileViewport,
     canDuplicate,
     canPin,
     isPinned,
     canOpenNotesStudio,
     canGenerateFlashcards,
+    canCreateStudyPack,
     canExport,
     canDelete,
     hasContent,
@@ -302,6 +345,15 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
 
   const handleOverflowMenuClick: MenuProps['onClick'] = ({ key }) => {
     switch (key) {
+      case 'mode-edit':
+        onChangeEditorMode('edit')
+        break
+      case 'mode-split':
+        onChangeEditorMode('split')
+        break
+      case 'mode-preview':
+        onChangeEditorMode('preview')
+        break
       case 'duplicate':
         onDuplicate?.()
         break
@@ -313,6 +365,9 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         break
       case 'flashcards':
         onGenerateFlashcards()
+        break
+      case 'study-pack':
+        onCreateStudyPack?.()
         break
       case 'notes-studio':
         onOpenNotesStudio?.()
@@ -416,7 +471,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
                   defaultValue: 'Add a title or content to save'
                 })
               : t('option:notesSearch.toolbarSaveTooltip', {
-                  defaultValue: 'Save note'
+                  defaultValue: 'Save note (auto-saves after 5 seconds)'
                 })
           }
         >

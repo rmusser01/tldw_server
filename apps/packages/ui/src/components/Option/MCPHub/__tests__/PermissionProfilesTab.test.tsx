@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { Modal } from "antd"
 
 const mocks = vi.hoisted(() => ({
   listPermissionProfiles: vi.fn(),
@@ -220,5 +221,39 @@ describe("PermissionProfilesTab", () => {
     await user.click(screen.getByRole("checkbox", { name: /Write token/ }))
 
     expect(mocks.upsertProfileCredentialBinding).toHaveBeenCalledWith(5, "search-api", "token_write")
+  })
+
+  it("deletes a profile when the user confirms the modal", async () => {
+    mocks.deletePermissionProfile.mockResolvedValue(undefined)
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {
+      void config?.onOk?.()
+      return { destroy: vi.fn(), update: vi.fn() } as any
+    })
+    const user = userEvent.setup()
+    render(<PermissionProfilesTab />)
+
+    await screen.findByText("Process Exec")
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Delete Profile" })
+    )
+    expect(mocks.deletePermissionProfile).toHaveBeenCalledWith(5)
+  })
+
+  it("does not delete a profile when the user cancels the modal", async () => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementation(() => {
+      return { destroy: vi.fn(), update: vi.fn() } as any
+    })
+    const user = userEvent.setup()
+    render(<PermissionProfilesTab />)
+
+    await screen.findByText("Process Exec")
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Delete Profile" })
+    )
+    expect(mocks.deletePermissionProfile).not.toHaveBeenCalled()
   })
 })

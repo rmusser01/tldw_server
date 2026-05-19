@@ -16,9 +16,6 @@ export const MemoryRouterWithFuture: React.FC<{
   <MemoryRouter future={routerFutureConfig}>{children}</MemoryRouter>
 )
 
-export const resolveRouter = (mode: "hash" | "memory") =>
-  mode === "hash" ? HashRouterWithFuture : MemoryRouterWithFuture
-
 const resolveMemoryInitialEntry = () => {
   if (typeof window === "undefined") {
     return "/"
@@ -31,7 +28,8 @@ const resolveMemoryInitialEntry = () => {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`
 }
 
-export const SidepanelMemoryRouter: React.FC<{
+/** MemoryRouter that seeds its initial route from window.location.hash (for deep links). */
+export const HashAwareMemoryRouter: React.FC<{
   children: React.ReactNode
 }> = ({ children }) => {
   const initialEntries = React.useMemo(() => [resolveMemoryInitialEntry()], [])
@@ -41,3 +39,9 @@ export const SidepanelMemoryRouter: React.FC<{
     </MemoryRouter>
   )
 }
+
+/** @deprecated Use HashAwareMemoryRouter instead. */
+export const SidepanelMemoryRouter = HashAwareMemoryRouter
+
+export const resolveRouter = (mode: "hash" | "memory") =>
+  mode === "hash" ? HashRouterWithFuture : HashAwareMemoryRouter

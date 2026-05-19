@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Card, Checkbox, Empty, List, Space, Tag, Typography } from "antd"
+import { Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
+import { QuestionCircleOutlined } from "@ant-design/icons"
+import { useQueryClient } from "@tanstack/react-query"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   clearExternalServerSlotSecret,
@@ -10,6 +13,8 @@ import {
   getExternalServerAuthTemplate,
   importExternalServer,
   listExternalServers,
+  describeExternalServerDiscoveryRefreshFailure,
+  refreshExternalServerDiscovery,
   setExternalServerSecret,
   setExternalServerSlotSecret,
   type McpHubDrillTarget,
@@ -26,6 +31,7 @@ import {
   getManagedExternalServers,
   getManagedExternalServerSlots
 } from "./policyHelpers"
+import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
 const DEFAULT_SLOT_SECRET_KIND = "bearer_token"
 const DEFAULT_SLOT_PRIVILEGE_CLASS = "read"
@@ -33,6 +39,67 @@ const AUTH_TEMPLATE_TARGET_BY_TRANSPORT: Record<string, "header" | "env"> = {
   websocket: "header",
   stdio: "env"
 }
+const NO_AUTH_MODE_VALUES = new Set(["", "none", "no_auth", "disabled"])
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const normalizeStringValue = (value: unknown): string =>
+  typeof value === "string" ? value.trim().toLowerCase() : ""
+
+const getExternalServerAuthMode = (server: McpHubExternalServer | null | undefined): string => {
+  const config = asRecord(server?.config)
+  const authConfig = asRecord(config?.auth)
+  return normalizeStringValue(authConfig?.mode || config?.auth_mode)
+}
+
+const hasServerLevelAuthConfig = (server: McpHubExternalServer | null | undefined): boolean => {
+  if (!server) {
+    return false
+  }
+  if (server.secret_configured) {
+    return true
+  }
+
+  const config = asRecord(server.config)
+  const authConfig = asRecord(config?.auth)
+  const authMode = getExternalServerAuthMode(server)
+  if (!NO_AUTH_MODE_VALUES.has(authMode)) {
+    return true
+  }
+  return Boolean(
+    authConfig?.token_env ||
+      authConfig?.api_key_env ||
+      config?.token_env ||
+      config?.api_key_env
+  )
+}
+
+const isNoAuthManagedStdioServer = (server: McpHubExternalServer | null | undefined): boolean => {
+  if (!server || server.server_source === "legacy") {
+    return false
+  }
+  const transport = normalizeStringValue(server.transport)
+  const slots = getManagedExternalServerSlots(server)
+  return (
+    transport === "stdio" &&
+    slots.length === 0 &&
+    !server.secret_configured &&
+    !server.auth_template_present &&
+    !server.auth_template_valid &&
+    !hasServerLevelAuthConfig(server)
+  )
+}
+
+const shouldShowLegacySecretFallback = (server: McpHubExternalServer | null | undefined): boolean =>
+  Boolean(
+    server &&
+      getManagedExternalServerSlots(server).length === 0 &&
+      !isNoAuthManagedStdioServer(server) &&
+      hasServerLevelAuthConfig(server)
+  )
 
 const normalizeAuthTemplateMapping = (
   mapping: Partial<McpHubExternalServerAuthTemplateMapping>,
@@ -51,10 +118,16 @@ type ExternalServersTabProps = {
   onDrillHandled?: (requestId: number) => void
 }
 
+type RuntimeRefreshResult = { ok: true } | { ok: false; message: string }
+
+const getRuntimeRefreshFailureMessage = (result: RuntimeRefreshResult) =>
+  "message" in result ? result.message : ""
+
 export const ExternalServersTab = ({
   drillTarget = null,
   onDrillHandled
 }: ExternalServersTabProps) => {
+  const queryClient = useQueryClient()
   const handledDrillRequestRef = useRef<number | null>(null)
   const [servers, setServers] = useState<McpHubExternalServer[]>([])
   const [serversLoaded, setServersLoaded] = useState(false)
@@ -74,6 +147,8 @@ export const ExternalServersTab = ({
   const [enabledValue, setEnabledValue] = useState(true)
   const [configText, setConfigText] = useState("{}")
   const [serverSaving, setServerSaving] = useState(false)
+  const [runtimeRefreshCount, setRuntimeRefreshCount] = useState(0)
+  const runtimeRefreshing = runtimeRefreshCount > 0
   const [slotFormOpen, setSlotFormOpen] = useState(false)
   const [editingSlotName, setEditingSlotName] = useState<string | null>(null)
   const [slotNameValue, setSlotNameValue] = useState("")
@@ -110,6 +185,14 @@ export const ExternalServersTab = ({
   const activeAuthTemplateBlockedReason = getExternalAuthTemplateBlockedReasonLabel(
     activeManagedServer?.auth_template_blocked_reason
   )
+  const activeServerHasNoCredentialRequirements = useMemo(
+    () => isNoAuthManagedStdioServer(activeManagedServer),
+    [activeManagedServer]
+  )
+  const showLegacySecretFallback = useMemo(
+    () => shouldShowLegacySecretFallback(activeManagedServer),
+    [activeManagedServer]
+  )
 
   const canSave = useMemo(
     () => activeServerId.trim().length > 0 && secretValue.trim().length > 0 && !saving,
@@ -143,13 +226,38 @@ export const ExternalServersTab = ({
         return
       }
       setActiveServerId(managedRows[0]?.id || "")
-    } catch {
+    } catch (err) {
       setServers([])
       setActiveServerId("")
-      setErrorMessage("Failed to load external servers.")
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(`Failed to load external servers: ${msg}`)
     } finally {
       setLoading(false)
       setServersLoaded(true)
+    }
+  }
+
+  const refreshRuntimeDiscovery = async (
+    serverId?: string
+  ): Promise<RuntimeRefreshResult> => {
+    setRuntimeRefreshCount((count) => count + 1)
+    try {
+      const refreshResult = serverId
+        ? await refreshExternalServerDiscovery(serverId)
+        : await refreshExternalServerDiscovery()
+      await invalidateMcpRuntimeQueries(queryClient)
+      if (!refreshResult.ok) {
+        return {
+          ok: false,
+          message: describeExternalServerDiscoveryRefreshFailure(refreshResult)
+        }
+      }
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      return { ok: false, message: msg }
+    } finally {
+      setRuntimeRefreshCount((count) => Math.max(0, count - 1))
     }
   }
 
@@ -200,7 +308,7 @@ export const ExternalServersTab = ({
     let cancelled = false
 
     const loadAuthTemplate = async () => {
-      if (!activeManagedServer || !activeAuthTemplateTarget) {
+      if (!activeManagedServer || !activeAuthTemplateTarget || activeServerHasNoCredentialRequirements) {
         setAuthTemplateMappings([])
         setAuthTemplateLoading(false)
         return
@@ -232,7 +340,7 @@ export const ExternalServersTab = ({
     return () => {
       cancelled = true
     }
-  }, [activeManagedServer?.id, activeAuthTemplateTarget])
+  }, [activeManagedServer?.id, activeAuthTemplateTarget, activeServerHasNoCredentialRequirements])
 
   const resetSlotForm = () => {
     setSlotFormOpen(false)
@@ -255,8 +363,9 @@ export const ExternalServersTab = ({
       setSecretValue("")
       setSuccessMessage("Secret configured")
       await loadServers()
-    } catch {
-      setErrorMessage("Failed to save external server secret.")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(`Failed to save external server secret: ${msg}`)
     } finally {
       setSaving(false)
     }
@@ -301,9 +410,16 @@ export const ExternalServersTab = ({
     setSuccessMessage(null)
     try {
       const imported = await importExternalServer(serverId)
+      const refreshResult = await refreshRuntimeDiscovery(imported.id)
       await loadServers()
       setActiveServerId(imported.id)
-      setSuccessMessage("Legacy server imported")
+      if (refreshResult.ok) {
+        setSuccessMessage("Legacy server imported and tools refreshed")
+      } else {
+        setSuccessMessage(
+          `Legacy server imported, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+        )
+      }
     } catch {
       setErrorMessage("Failed to import legacy external server.")
     } finally {
@@ -370,37 +486,63 @@ export const ExternalServersTab = ({
         owner_scope_type: ownerScopeType,
         enabled: enabledValue
       }
+      let refreshServerId: string | undefined
       if (editingServerId) {
         await updateExternalServer(editingServerId, payload)
+        refreshServerId = enabledValue ? editingServerId : undefined
       } else {
-        await createExternalServer({
+        const created = await createExternalServer({
           server_id: serverIdValue.trim(),
           ...payload
         })
+        refreshServerId = enabledValue ? created.id : undefined
       }
       resetServerForm()
+      const refreshResult = await refreshRuntimeDiscovery(refreshServerId)
       await loadServers()
-      setSuccessMessage(editingServerId ? "Server updated" : "Server created")
-    } catch {
-      setErrorMessage(editingServerId ? "Failed to update external server." : "Failed to create external server.")
+      const action = editingServerId ? "updated" : "created"
+      if (refreshResult.ok) {
+        setSuccessMessage(`Server ${action} and tools refreshed`)
+      } else {
+        setSuccessMessage(
+          `Server ${action}, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+        )
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(editingServerId ? `Failed to update external server: ${msg}` : `Failed to create external server: ${msg}`)
     } finally {
       setServerSaving(false)
     }
   }
 
-  const handleDeleteServer = async (serverId: string) => {
-    if (typeof window !== "undefined" && !window.confirm("Delete this external server?")) {
-      return
-    }
-    setErrorMessage(null)
-    setSuccessMessage(null)
-    try {
-      await deleteExternalServer(serverId)
-      await loadServers()
-      setSuccessMessage("Server deleted")
-    } catch {
-      setErrorMessage("Failed to delete external server.")
-    }
+  const handleDeleteServer = (server: McpHubExternalServer) => {
+    Modal.confirm({
+      title: "Delete External Server",
+      content: `Are you sure you want to delete the server "${server.name}"? This cannot be undone.`,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        setErrorMessage(null)
+        setSuccessMessage(null)
+        try {
+          await deleteExternalServer(server.id)
+          const refreshResult = await refreshRuntimeDiscovery()
+          await loadServers()
+          if (refreshResult.ok) {
+            setSuccessMessage("Server deleted and tools refreshed")
+          } else {
+            setSuccessMessage(
+              `Server deleted, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
+            )
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error"
+          setErrorMessage(`Failed to delete external server: ${msg}`)
+        }
+      }
+    })
   }
 
   const openCreateSlotForm = () => {
@@ -460,24 +602,31 @@ export const ExternalServersTab = ({
     }
   }
 
-  const handleDeleteSlot = async (slot: McpHubExternalServerCredentialSlot) => {
+  const handleDeleteSlot = (slot: McpHubExternalServerCredentialSlot) => {
     if (!activeManagedServer) return
-    if (typeof window !== "undefined" && !window.confirm("Delete this credential slot?")) {
-      return
-    }
-    const slotKey = `${activeManagedServer.id}:${slot.slot_name}`
-    setSlotDeletingKey(slotKey)
-    setErrorMessage(null)
-    setSuccessMessage(null)
-    try {
-      await deleteExternalServerCredentialSlot(activeManagedServer.id, slot.slot_name)
-      await loadServers()
-      setSuccessMessage("Credential slot deleted")
-    } catch {
-      setErrorMessage("Failed to delete credential slot.")
-    } finally {
-      setSlotDeletingKey(null)
-    }
+    Modal.confirm({
+      title: "Delete Credential Slot",
+      content: `Are you sure you want to delete the credential slot "${slot.display_name}"? This cannot be undone.`,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        const slotKey = `${activeManagedServer.id}:${slot.slot_name}`
+        setSlotDeletingKey(slotKey)
+        setErrorMessage(null)
+        setSuccessMessage(null)
+        try {
+          await deleteExternalServerCredentialSlot(activeManagedServer.id, slot.slot_name)
+          await loadServers()
+          setSuccessMessage("Credential slot deleted")
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error"
+          setErrorMessage(`Failed to delete credential slot: ${msg}`)
+        } finally {
+          setSlotDeletingKey(null)
+        }
+      }
+    })
   }
 
   const handleAddAuthTemplateMapping = () => {
@@ -598,7 +747,18 @@ export const ExternalServersTab = ({
 
             <Space>
               <Space orientation="vertical">
-                <label htmlFor="mcp-external-server-transport">Transport</label>
+                <span className="flex items-center gap-1">
+                  <label htmlFor="mcp-external-server-transport">Transport</label>
+                  <Tooltip title="How to communicate with the server. Use 'stdio' for local processes, 'websocket' for remote servers.">
+                    <button
+                      type="button"
+                      aria-label="Transport help"
+                      style={{ border: 0, background: "transparent", padding: 0, cursor: "help", lineHeight: 1 }}
+                    >
+                      <QuestionCircleOutlined style={{ color: "rgba(0,0,0,0.45)" }} />
+                    </button>
+                  </Tooltip>
+                </span>
                 <select
                   id="mcp-external-server-transport"
                   aria-label="Transport"
@@ -643,7 +803,7 @@ export const ExternalServersTab = ({
             </Checkbox>
 
             <Space>
-              <Button type="primary" onClick={handleSaveServer} loading={serverSaving}>
+              <Button type="primary" onClick={handleSaveServer} loading={serverSaving || runtimeRefreshing}>
                 {editingServerId ? "Update Server" : "Save Server"}
               </Button>
               <Button onClick={resetServerForm}>Cancel</Button>
@@ -672,8 +832,8 @@ export const ExternalServersTab = ({
         <Alert
           type="info"
           showIcon
-          title="No managed external servers are available yet."
-          description="Import a legacy server into MCP Hub before configuring secrets or bindings."
+          title="No external servers connected"
+          description="External MCP servers extend your AI assistant with tools like web search, code execution, and more. Click 'New Managed Server' above to add one, or import a legacy server from the list below."
         />
       )}
 
@@ -681,6 +841,14 @@ export const ExternalServersTab = ({
         <>
           <Card size="small" title="Credential Slots" extra={<Button onClick={openCreateSlotForm}>Add Slot</Button>}>
             <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+              {activeServerHasNoCredentialRequirements ? (
+                <Alert
+                  type="success"
+                  showIcon
+                  title="No credentials required"
+                  description="This local stdio server runs without brokered credentials, so no slot secret or server-level secret is needed."
+                />
+              ) : null}
               {slotFormOpen ? (
                 <Card size="small" title={editingSlotName ? "Edit Credential Slot" : "Create Credential Slot"}>
                   <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
@@ -708,7 +876,18 @@ export const ExternalServersTab = ({
                     </Space>
                     <Space>
                       <Space orientation="vertical">
-                        <label htmlFor="mcp-external-slot-secret-kind">Secret Kind</label>
+                        <span className="flex items-center gap-1">
+                          <label htmlFor="mcp-external-slot-secret-kind">Secret Kind</label>
+                          <Tooltip title="The type of credential needed. 'bearer_token' for API keys, 'api_key' for simple keys, 'client_secret' for OAuth.">
+                            <button
+                              type="button"
+                              aria-label="Secret kind help"
+                              style={{ border: 0, background: "transparent", padding: 0, cursor: "help", lineHeight: 1 }}
+                            >
+                              <QuestionCircleOutlined style={{ color: "rgba(0,0,0,0.45)" }} />
+                            </button>
+                          </Tooltip>
+                        </span>
                         <select
                           id="mcp-external-slot-secret-kind"
                           aria-label="Secret Kind"
@@ -750,7 +929,17 @@ export const ExternalServersTab = ({
               <List
                 bordered
                 dataSource={activeSlots}
-                locale={{ emptyText: <Empty description="No credential slots yet." /> }}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      description={
+                        activeServerHasNoCredentialRequirements
+                          ? "No credential slots required."
+                          : "No credential slots yet."
+                      }
+                    />
+                  )
+                }}
                 renderItem={(slot) => {
                   const slotKey = `${activeManagedServer.id}:${slot.slot_name}`
                   return (
@@ -792,13 +981,22 @@ export const ExternalServersTab = ({
             size="small"
             title="Auth Template"
             extra={
+              activeServerHasNoCredentialRequirements ? null : (
               <Button onClick={handleAddAuthTemplateMapping} disabled={!activeAuthTemplateTarget || activeSlots.length === 0}>
                 Add Mapping
               </Button>
+              )
             }
           >
             <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-              {activeManagedServer.auth_template_valid ? (
+              {activeServerHasNoCredentialRequirements ? (
+                <Alert
+                  type="success"
+                  showIcon
+                  title="Auth template not required"
+                  description="No auth material is brokered into this stdio process."
+                />
+              ) : activeManagedServer.auth_template_valid ? (
                 <Alert type="success" showIcon title="Template valid" />
               ) : (
                 <Alert
@@ -816,13 +1014,15 @@ export const ExternalServersTab = ({
               )}
               <Space wrap size="small">
                 <Tag>{`Transport: ${activeManagedServer.transport}`}</Tag>
-                {activeAuthTemplateTarget ? (
+                {activeServerHasNoCredentialRequirements ? (
+                  <Tag color="green">No credentials required</Tag>
+                ) : activeAuthTemplateTarget ? (
                   <Tag color="blue">{`Template target: ${activeAuthTemplateTarget === "header" ? "header" : "env"}`}</Tag>
                 ) : (
                   <Tag color="red">Unsupported transport</Tag>
                 )}
               </Space>
-              {activeSlots.length === 0 ? (
+              {activeServerHasNoCredentialRequirements ? null : activeSlots.length === 0 ? (
                 <Empty description="Add at least one credential slot before creating an auth template." />
               ) : authTemplateMappings.length === 0 && !authTemplateLoading ? (
                 <Empty description="No auth template mappings configured." />
@@ -910,14 +1110,16 @@ export const ExternalServersTab = ({
                   </Space>
                 </Card>
               ))}
-              <Button
-                type="primary"
-                onClick={handleSaveAuthTemplate}
-                disabled={!canSaveAuthTemplate}
-                loading={authTemplateSaving || authTemplateLoading}
-              >
-                Save Auth Template
-              </Button>
+              {activeServerHasNoCredentialRequirements ? null : (
+                <Button
+                  type="primary"
+                  onClick={handleSaveAuthTemplate}
+                  disabled={!canSaveAuthTemplate}
+                  loading={authTemplateSaving || authTemplateLoading}
+                >
+                  Save Auth Template
+                </Button>
+              )}
             </Space>
           </Card>
 
@@ -960,7 +1162,7 @@ export const ExternalServersTab = ({
                 </Space>
               </Space>
             </Card>
-          ) : (
+          ) : showLegacySecretFallback ? (
             <Card size="small" title="Legacy Secret Fallback">
               <Space orientation="vertical" style={{ width: "100%" }}>
                 <Typography.Text type="secondary">
@@ -980,7 +1182,7 @@ export const ExternalServersTab = ({
                 </Button>
               </Space>
             </Card>
-          )}
+          ) : null}
         </>
       ) : null}
 
@@ -988,65 +1190,87 @@ export const ExternalServersTab = ({
         bordered
         loading={loading}
         dataSource={servers}
-        locale={{ emptyText: <Empty description="No external servers configured" /> }}
-        renderItem={(server) => (
-          <List.Item>
-            <Space wrap size="small" style={{ width: "100%", justifyContent: "space-between" }}>
-              <Space wrap size="small">
-                <Typography.Text strong>{server.name}</Typography.Text>
-                {focusedServerId === server.id ? <Tag color="blue">focused from audit</Tag> : null}
-                {server.server_source === "legacy" ? (
-                  <Tag>legacy read only</Tag>
-                ) : (
-                  <Tag color="green">managed</Tag>
-                )}
-                {server.auth_template_valid ? (
-                  <Tag color="green">template valid</Tag>
-                ) : (
-                  <Tag color={server.auth_template_present ? "orange" : "default"}>
-                    {getExternalAuthTemplateBlockedReasonLabel(server.auth_template_blocked_reason) || "No auth template"}
-                  </Tag>
-                )}
-                {server.secret_configured ? <Tag color="green">secret configured</Tag> : <Tag>no secret</Tag>}
-                {server.runtime_executable ? <Tag color="green">runtime executable</Tag> : <Tag>inventory only</Tag>}
-                <Tag>{`${server.binding_count || 0} ${(server.binding_count || 0) === 1 ? "binding" : "bindings"}`}</Tag>
-                {server.credential_slots?.length ? (
-                  <Tag color="blue">{`${server.credential_slots.length} slot${server.credential_slots.length === 1 ? "" : "s"}`}</Tag>
-                ) : null}
-                {server.superseded_by_server_id ? (
-                  <Tag color="blue">{`superseded by ${server.superseded_by_server_id}`}</Tag>
+        locale={{
+          emptyText: (
+            <Empty
+              description={
+                <Space orientation="vertical" size={4}>
+                  <Typography.Text type="secondary">No external servers configured</Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                    External MCP servers extend your AI assistant with tools like web search, code execution, and more.
+                  </Typography.Text>
+                </Space>
+              }
+            >
+              <Button type="primary" onClick={openCreateForm}>
+                Add New Server
+              </Button>
+            </Empty>
+          )
+        }}
+        renderItem={(server) => {
+          const serverHasNoCredentialRequirements = isNoAuthManagedStdioServer(server)
+          return (
+            <List.Item>
+              <Space wrap size="small" style={{ width: "100%", justifyContent: "space-between" }}>
+                <Space wrap size="small">
+                  <Typography.Text strong>{server.name}</Typography.Text>
+                  {focusedServerId === server.id ? <Tag color="blue">focused from audit</Tag> : null}
+                  {server.server_source === "legacy" ? (
+                    <Tag>legacy read only</Tag>
+                  ) : (
+                    <Tag color="green">managed</Tag>
+                  )}
+                  {serverHasNoCredentialRequirements ? (
+                    <Tag color="green">No credentials required</Tag>
+                  ) : server.auth_template_valid ? (
+                    <Tag color="green">template valid</Tag>
+                  ) : (
+                    <Tag color={server.auth_template_present ? "orange" : "default"}>
+                      {getExternalAuthTemplateBlockedReasonLabel(server.auth_template_blocked_reason) || "No auth template"}
+                    </Tag>
+                  )}
+                  {serverHasNoCredentialRequirements ? null : server.secret_configured ? <Tag color="green">secret configured</Tag> : <Tag>no secret</Tag>}
+                  {server.runtime_executable ? <Tag color="green">runtime executable</Tag> : <Tag>inventory only</Tag>}
+                  <Tag>{`${server.binding_count || 0} ${(server.binding_count || 0) === 1 ? "binding" : "bindings"}`}</Tag>
+                  {server.credential_slots?.length ? (
+                    <Tag color="blue">{`${server.credential_slots.length} slot${server.credential_slots.length === 1 ? "" : "s"}`}</Tag>
+                  ) : null}
+                  {server.superseded_by_server_id ? (
+                    <Tag color="blue">{`superseded by ${server.superseded_by_server_id}`}</Tag>
+                  ) : null}
+                </Space>
+                {server.server_source === "legacy" && !server.superseded_by_server_id ? (
+                  <Button
+                    size="small"
+                    onClick={() => void handleImport(server.id)}
+                    loading={importingServerId === server.id}
+                  >
+                    Import to MCP Hub
+                  </Button>
+                ) : server.server_source !== "legacy" ? (
+                  <Space>
+                    <Button
+                      size="small"
+                      aria-label={`Edit ${server.name}`}
+                      onClick={() => openEditForm(server)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      aria-label={`Delete ${server.name}`}
+                      onClick={() => handleDeleteServer(server)}
+                    >
+                      Delete
+                    </Button>
+                  </Space>
                 ) : null}
               </Space>
-              {server.server_source === "legacy" && !server.superseded_by_server_id ? (
-                <Button
-                  size="small"
-                  onClick={() => void handleImport(server.id)}
-                  loading={importingServerId === server.id}
-                >
-                  Import to MCP Hub
-                </Button>
-              ) : server.server_source !== "legacy" ? (
-                <Space>
-                  <Button
-                    size="small"
-                    aria-label={`Edit ${server.name}`}
-                    onClick={() => openEditForm(server)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="small"
-                    danger
-                    aria-label={`Delete ${server.name}`}
-                    onClick={() => void handleDeleteServer(server.id)}
-                  >
-                    Delete
-                  </Button>
-                </Space>
-              ) : null}
-            </Space>
-          </List.Item>
-        )}
+            </List.Item>
+          )
+        }}
       />
     </Space>
   )

@@ -7,6 +7,7 @@ Ensures consistent database file locations across the application.
 import hashlib
 import os
 import re
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Callable, Optional, Union
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.constants import (
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, StorageUnavailableError
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
 UserId = Union[int, str]
@@ -108,23 +110,200 @@ def _normalize_user_db_base_dir(raw_path: Path) -> Path:
     return candidate
 
 
-def _ensure_dir(path: Path, *, label: str) -> None:
+def _ensure_dir(path: Path, *, label: str) -> bool:
     try:
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=False)
+        return True
+    except FileExistsError as e:
+        if path.is_dir():
+            return False
+        logger.error(f"Failed to create {label} directory {path}: {e}")
+        raise StorageUnavailableError(f"Failed to create {label} directory") from e
     except OSError as e:
         logger.error(f"Failed to create {label} directory {path}: {e}")
         raise StorageUnavailableError(f"Failed to create {label} directory") from e
 
 
-def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> Path:
+def _normalize_trusted_root(root: str | Path, *, project_root: Path) -> list[Path]:
+    try:
+        candidate = Path(root).expanduser()
+    except Exception:
+        return []
+
+    if candidate.is_absolute():
+        lexical_root = Path(os.path.abspath(str(candidate)))
+    else:
+        lexical_root = Path(os.path.abspath(str(project_root / candidate)))
+
+    roots = [lexical_root]
+    try:
+        resolved_root = lexical_root.resolve(strict=False)
+    except Exception:
+        resolved_root = lexical_root
+    if resolved_root not in roots:
+        roots.append(resolved_root)
+    return roots
+
+
+def _iter_trusted_database_roots(
+    *,
+    extra_roots: Optional[list[Path]] = None,
+) -> list[Path]:
+    project_root = Path(get_project_root()).resolve()
+    trusted_roots: list[Path] = []
+
+    trusted_roots.extend(_normalize_trusted_root(project_root, project_root=project_root))
+
+    try:
+        user_db_base_dir = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)
+    except Exception as exc:
+        logger.debug("Skipping user database trusted root discovery: {}", exc)
+    else:
+        trusted_roots.extend(_normalize_trusted_root(user_db_base_dir, project_root=project_root))
+
+    if extra_roots:
+        for root in extra_roots:
+            normalized_roots = _normalize_trusted_root(root, project_root=project_root)
+            if not normalized_roots:
+                logger.debug("Skipping invalid trusted root {}", root)
+                continue
+            trusted_roots.extend(normalized_roots)
+
+    if _is_test_context():
+        trusted_roots.extend(_normalize_trusted_root(tempfile.gettempdir(), project_root=project_root))
+        trusted_roots.extend(_normalize_trusted_root(Path.cwd(), project_root=project_root))
+
+    unique_roots: list[Path] = []
+    for root in trusted_roots:
+        if root not in unique_roots:
+            unique_roots.append(root)
+    return unique_roots
+
+
+def _path_is_within_root(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _path_is_within_trusted_roots(candidate: Path, trusted_roots: list[Path]) -> bool:
+    return any(_path_is_within_root(candidate, root) for root in trusted_roots)
+
+
+def _resolve_real_path_within_trusted_roots(
+    candidate_path: str | Path,
+    trusted_roots: list[Path],
+) -> Path:
+    candidate_real = os.path.realpath(str(candidate_path))
+    for root in trusted_roots:
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([root_real, candidate_real]) == root_real:
+                return Path(candidate_real)
+        except ValueError:
+            continue
+    raise InvalidStoragePathError("invalid_path")
+
+
+def resolve_trusted_database_path(
+    db_path: str | Path,
+    *,
+    label: str = "database",
+    extra_roots: Optional[list[Path]] = None,
+) -> Path:
+    """Resolve a database path and require containment within trusted roots."""
+    raw_path = str(db_path or "").strip()
+    if not raw_path:
+        raise InvalidStoragePathError("invalid_path")
+
+    project_root = Path(get_project_root()).resolve()
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
+
+    try:
+        expanded_path = os.path.expanduser(raw_path)
+    except Exception as exc:
+        raise InvalidStoragePathError("invalid_path") from exc
+    if raw_path.startswith("~") and (
+        expanded_path == raw_path or expanded_path.startswith("~")
+    ):
+        raise InvalidStoragePathError("invalid_path")
+
+    if os.path.isabs(expanded_path):
+        try:
+            return _resolve_real_path_within_trusted_roots(expanded_path, trusted_roots)
+        except Exception as exc:
+            normalized_absolute = os.path.normpath(expanded_path)
+            logger.warning("Rejected {} path outside trusted roots: {}", label, normalized_absolute)
+            raise InvalidStoragePathError("invalid_path") from exc
+
+    safe_candidate = safe_join(str(project_root), expanded_path)
+    if safe_candidate is not None:
+        return Path(safe_candidate)
+
+    logger.warning("Rejected {} path outside trusted roots: {}", label, expanded_path)
+    raise InvalidStoragePathError("invalid_path")
+
+
+def _get_trusted_database_parent_dir(
+    resolved_db_path: Path,
+    *,
+    extra_roots: Optional[list[Path]] = None,
+) -> Path:
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
+    return _resolve_real_path_within_trusted_roots(resolved_db_path.parent, trusted_roots)
+
+
+def ensure_trusted_database_parent_dir(
+    db_path: str | Path,
+    *,
+    label: str = "database",
+    extra_roots: Optional[list[Path]] = None,
+) -> Path:
+    """Resolve a trusted database path and create its parent directory safely."""
+    resolved_db_path = resolve_trusted_database_path(db_path, label=label, extra_roots=extra_roots)
+    parent_dir = _get_trusted_database_parent_dir(resolved_db_path, extra_roots=extra_roots)
+    _ensure_dir(parent_dir, label=f"{label} parent")
+    return resolved_db_path
+
+
+def require_trusted_database_parent_exists(
+    db_path: str | Path,
+    *,
+    label: str = "database",
+    extra_roots: Optional[list[Path]] = None,
+    missing_parent_message: str | None = None,
+) -> Path:
+    """Resolve a trusted database path and require its parent directory to exist."""
+    resolved_db_path = resolve_trusted_database_path(db_path, label=label, extra_roots=extra_roots)
+    trusted_roots = _iter_trusted_database_roots(extra_roots=extra_roots)
+    parent_dir = os.path.realpath(str(resolved_db_path.parent))
+    parent_is_trusted = False
+    for root in trusted_roots:
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([root_real, parent_dir]) == root_real:
+                parent_is_trusted = True
+                break
+        except ValueError:
+            continue
+    if not parent_is_trusted:
+        raise InvalidStoragePathError("invalid_path")
+    if not os.path.isdir(parent_dir):
+        raise ValueError(missing_parent_message or f"{label} parent directory must already exist")
+    return resolved_db_path
+
+
+def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> tuple[Path, bool]:
     safe_user_id = _resolve_user_id_for_storage(user_id)
     user_dir = (base_path / safe_user_id).resolve()
     try:
         user_dir.relative_to(base_path)
     except ValueError as exc:
         raise ValueError(f"Computed user directory escapes base path: {user_dir!r}") from exc
-    _ensure_dir(user_dir, label="user")
-    return user_dir
+    created = _ensure_dir(user_dir, label="user")
+    return user_dir, created
 
 
 def normalize_output_storage_filename(
@@ -244,9 +423,16 @@ class DatabasePaths:
     CHATBOOKS_IMPORTS_SUBDIR = "imports"
     CHATBOOKS_TEMP_SUBDIR = "temp"
     READING_IMPORTS_SUBDIR = "reading_imports"
+    PERSONA_VISUALS_SUBDIR = "persona_visuals"
 
     @staticmethod
-    def get_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
+    def resolve_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
+        """
+        Resolve the configured per-user database base directory without creating it.
+
+        This mirrors ``get_user_db_base_dir`` path selection, including isolated
+        test fallbacks, for read-only checks that must not create storage.
+        """
         env_user_db_base = os.getenv("USER_DB_BASE_DIR")
         settings_user_db_base = settings.get("USER_DB_BASE_DIR")
         project_root = Path(get_project_root())
@@ -306,6 +492,13 @@ class DatabasePaths:
                 logger.warning(f"USER_DB_BASE_DIR not configured, using fallback: {base_path}")
         else:
             base_path = _normalize_user_db_base_dir(Path(user_db_base))
+        return base_path
+
+    @staticmethod
+    def get_user_db_base_dir(*, allow_legacy_alias: bool = False) -> Path:
+        base_path = DatabasePaths.resolve_user_db_base_dir(
+            allow_legacy_alias=allow_legacy_alias
+        )
         _ensure_dir(base_path, label="user database base")
         return base_path
 
@@ -332,8 +525,9 @@ class DatabasePaths:
             _ensure_dir(base_path, label="user database base")
         else:
             base_path = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=allow_legacy_alias)
-        user_dir = _build_user_dir(base_path, user_id)
-        logger.debug(f"Ensured user directory exists: {user_dir}")
+        user_dir, created = _build_user_dir(base_path, user_id)
+        if created:
+            logger.debug(f"Created user directory: {user_dir}")
         return user_dir
 
     @staticmethod
@@ -606,10 +800,18 @@ class DatabasePaths:
         return imports_dir
 
     @staticmethod
+    def get_user_persona_visuals_dir(user_id: Optional[UserId]) -> Path:
+        """Get the path to the user's persona visual asset directory."""
+        user_dir = DatabasePaths.get_user_base_directory(user_id)
+        visuals_dir = user_dir / DatabasePaths.PERSONA_VISUALS_SUBDIR
+        _ensure_dir(visuals_dir, label="persona visuals")
+        return visuals_dir
+
+    @staticmethod
     def get_user_rewrite_cache_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's rewrite cache file."""
         base_path = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)
-        user_dir = _build_user_dir(base_path, user_id)
+        user_dir, _ = _build_user_dir(base_path, user_id)
         cache_dir = user_dir / DatabasePaths.REWRITE_CACHE_SUBDIR
         _ensure_dir(cache_dir, label="rewrite cache")
         return cache_dir / "rewrite_cache.jsonl"

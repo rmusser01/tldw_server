@@ -13,24 +13,38 @@
 // - When you remove or rename an endpoint, update ClientPath (and any entries
 //   in API_PATHS) to match the current server API.
 // - To verify that ClientPath and MEDIA_ADD_SCHEMA_FALLBACK stay in sync with
-//   openapi.json, run:
-//     npm run verify:openapi
-//     bun run verify:openapi
+//   the current OpenAPI contract, run `bun run verify:openapi` from
+//   `apps/packages/ui`.
 //   If verification fails, reconcile the differences by updating ClientPath
-//   (or, if the spec is stale, regenerate / update openapi.json) until the
-//   check passes.
+//   or by refreshing `apps/extension/openapi.json`. If that snapshot is absent,
+//   the verifier derives the spec from the checked-out backend using the
+//   project Python environment.
 
 // Union of relative API paths that the web UI calls via bgRequest/bgStream
 // or direct fetch. If a new endpoint is added in the UI, it should be
 // added here so TypeScript can verify it exists in the spec.
 export type ClientPath =
   | "/api/v1/health"
+  | "/api/v1/setup/readiness/profiles"
+  | "/api/v1/setup/readiness/status"
+  | "/api/v1/setup/readiness/preview"
+  | "/api/v1/setup/readiness/provision"
+  | "/api/v1/setup/readiness/verify"
+  | "/api/v1/setup/admin/readiness/profiles"
+  | "/api/v1/setup/admin/readiness/status"
+  | "/api/v1/setup/admin/readiness/preview"
+  | "/api/v1/setup/admin/readiness/provision"
+  | "/api/v1/setup/admin/readiness/verify"
   | "/api/v1/llm/models"
   | "/api/v1/llm/models/metadata"
   | "/api/v1/llm/providers"
   | "/api/v1/chat/completions"
   | "/api/v1/chat/commands"
   | "/api/v1/feedback/explicit"
+  | "/api/v1/web-clipper/save"
+  | "/api/v1/web-clipper/{clip_id}"
+  | "/api/v1/web-clipper/{clip_id}/enrichments"
+  | "/api/v1/research-studio/capabilities"
   | "/api/v1/rag/health"
   | "/api/v1/rag/search"
   | "/api/v1/rag/search/stream"
@@ -133,6 +147,9 @@ export type ClientPath =
   | "/api/v1/evaluations/rate-limits"
   | "/api/v1/evaluations/history"
   | "/api/v1/evaluations/webhooks"
+  | "/api/v1/evaluations/recipes/embeddings_model_selection/candidates"
+  | "/api/v1/evaluations/recipe-runs/{run_id}/apply-preview"
+  | "/api/v1/evaluations/recipe-runs/{run_id}/apply"
   | "/api/v1/mcp/health"
   | "/api/v1/mcp/tools"
   | "/api/v1/mcp/tool_catalogs"
@@ -215,6 +232,8 @@ export type ClientPath =
   | "/api/v1/quizzes/import/json"
   | "/api/v1/flashcards"
   | "/api/v1/flashcards/decks"
+  | "/api/v1/flashcards/templates"
+  | "/api/v1/flashcards/templates/{template_id}"
   | "/api/v1/flashcards/generate"
   | "/api/v1/flashcards/review"
   | "/api/v1/flashcards/import"
@@ -238,6 +257,12 @@ export type ClientPath =
   | "/api/v1/auth/register"
   | "/api/v1/auth/magic-link/request"
   | "/api/v1/auth/magic-link/verify"
+  | "/api/v1/persona/profiles"
+  | "/api/v1/persona/archetypes"
+  | "/api/v1/persona/archetypes/{archetype_key}"
+  | "/api/v1/persona/archetypes/{archetype_key}/preview"
+  | "/api/v1/mcp/catalog"
+  | "/api/v1/mcp/catalog/test-connection"
   | "/api/v1/users/keys"
   | "/api/v1/users/keys/openai/oauth/authorize"
   | "/api/v1/users/keys/openai/oauth/callback"
@@ -268,6 +293,12 @@ export type ClientPath =
   | "/api/v1/moderation/blocklist/append"
   | "/api/v1/moderation/blocklist/{item_id}"
   | "/api/v1/moderation/blocklist/lint"
+  | "/api/v1/moderation/review/items"
+  | "/api/v1/moderation/review/items/{item_id}"
+  | "/api/v1/moderation/review/items/{item_id}/decision"
+  | "/api/v1/moderation/review/items/{item_id}/undo"
+  | "/api/v1/moderation/review/bulk-decision"
+  | "/api/v1/moderation/review/audit"
   | "/api/v1/moderation/test"
 
 

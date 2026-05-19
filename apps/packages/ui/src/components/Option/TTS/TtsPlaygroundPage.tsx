@@ -3,13 +3,15 @@ import {
   Button,
   Input,
   Alert,
+  Progress,
   Typography,
   Space,
   Card,
   Tag,
   Select
 } from "antd"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
+import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   DEFAULT_TLDW_TTS_MODEL,
@@ -34,6 +36,7 @@ import {
   OPENAI_TTS_VOICES,
   useTtsProviderData
 } from "@/hooks/useTtsProviderData"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { PageShell } from "@/components/Common/PageShell"
 import { TtsProviderPanel } from "@/components/Option/TTS/TtsProviderPanel"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
@@ -88,10 +91,12 @@ const TtsPlaygroundPage: React.FC = () => {
     elevenLabsApiKey: ttsSettings?.elevenLabsApiKey,
     inferredProviderKey
   })
+  const { capabilities } = useServerCapabilities()
 
   const {
     segments,
     isGenerating,
+    generationProgress,
     generateSegments,
     clearSegments
   } = useTtsPlayground()
@@ -152,7 +157,7 @@ const TtsPlaygroundPage: React.FC = () => {
     if (typeof window === "undefined" || !window.speechSynthesis) return
     try {
       window.speechSynthesis.cancel()
-    } catch {}
+    } catch (_error) { void _error }
     browserQueueRef.current = []
     browserUtteranceRef.current = null
     setBrowserIsSpeaking(false)
@@ -482,14 +487,14 @@ const TtsPlaygroundPage: React.FC = () => {
     if (!el) return
     try {
       el.scrollIntoView({ block: "center" })
-    } catch {}
+    } catch (_error) { void _error }
     ;(el as HTMLElement).focus()
   }
 
   return (
     <PageShell maxWidthClassName="max-w-3xl" className="py-6">
-      <Title level={3} className="!mb-1">
-        {t("playground:tts.title", "TTS Playground")}
+      <Title level={1} className="!mb-1 !text-2xl">
+        {t("playground:tts.routeTitle", "Text to Speech")}
       </Title>
       <Text type="secondary">
         {t(
@@ -497,18 +502,85 @@ const TtsPlaygroundPage: React.FC = () => {
           "Try out text-to-speech and tweak providers, models, and voices."
         )}
       </Text>
+      <p className="text-[11px] text-text-subtle mt-1">
+        <Trans
+          i18nKey="playground:tts.combinedWorkflowHint"
+          defaults="For combined TTS + STT workflows, try the <speechLink>Speech Playground</speechLink>."
+          components={{ speechLink: <Link to="/speech" className="underline" /> }}
+        />
+      </p>
+      <div className="mt-1">
+        <a
+          href="https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/First_Time_Audio_Setup_CPU.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-text-muted underline hover:text-text"
+        >
+          {t("playground:tts.audioSetupGuide", "Audio Setup Guide")}
+        </a>
+      </div>
+
+      {capabilities?.ffmpegAvailable === false && (
+        <Alert
+          type="warning"
+          showIcon
+          className="mt-3 mb-0"
+          message={t("playground:tts.ffmpegWarningTitle", "ffmpeg not detected")}
+          description={t("playground:tts.ffmpegWarningBody", "Some audio processing features require ffmpeg. Install it for full functionality.")}
+        />
+      )}
 
       <div className="mt-4 space-y-4">
-        <TtsProviderPanel
-          providerLabel={providerLabel}
-          provider={provider}
-          ttsSettings={ttsSettings}
-          isTldw={isTldw}
-          hasAudio={hasAudio}
-          activeProviderCaps={activeProviderCaps}
-          activeVoices={activeVoices}
-          providersInfo={providersInfo}
-        />
+        <div data-testid="tts-provider-selector">
+          <TtsProviderPanel
+            providerLabel={providerLabel}
+            provider={provider}
+            ttsSettings={ttsSettings}
+            isTldw={isTldw}
+            hasAudio={hasAudio}
+            activeProviderCaps={activeProviderCaps}
+            activeVoices={activeVoices}
+            providersInfo={providersInfo}
+          />
+        </div>
+
+        {isTldw && !hasAudio && (
+          <Alert
+            type="info"
+            showIcon
+            className="mb-4"
+            message={t("playground:tts.noProviderTitle", "No TTS provider detected on your server")}
+            description={
+              <Trans
+                i18nKey="playground:tts.noProviderDescription"
+                defaults="Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
+                components={{
+                  settingsLink: <Link to="/settings/speech" />,
+                  strong: <strong />
+                }}
+              />
+            }
+          />
+        )}
+
+        {isTldw && !hasAudio && (
+          <Alert
+            type="info"
+            showIcon
+            className="mb-4"
+            message={t("playground:tts.noProviderTitle", "No TTS provider detected on your server")}
+            description={
+              <Trans
+                i18nKey="playground:tts.noProviderDescription"
+                defaults="Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
+                components={{
+                  settingsLink: <Link to="/settings/speech" />,
+                  strong: <strong />
+                }}
+              />
+            }
+          />
+        )}
 
         <Card>
           <Space orientation="vertical" className="w-full" size="middle">
@@ -533,6 +605,7 @@ const TtsPlaygroundPage: React.FC = () => {
               </div>
               <Input.TextArea
                 id={controlIds.textInput}
+                data-testid="tts-text-input"
                 aria-label={t(
                   "playground:tts.inputLabel",
                   "Enter some text to hear it spoken."
@@ -586,7 +659,7 @@ const TtsPlaygroundPage: React.FC = () => {
             )}
 
             {ttsSettings?.ttsProvider === "elevenlabs" && elevenLabsData && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" data-testid="tts-voice-picker-elevenlabs">
                 <Text type="secondary">
                   {t(
                     "playground:tts.voiceSelector.elevenLabs",
@@ -639,7 +712,7 @@ const TtsPlaygroundPage: React.FC = () => {
             )}
 
             {isTldw && providerVoices.length > 0 && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" data-testid="tts-voice-picker-tldw">
                 <Text type="secondary">
                   {t(
                     "playground:tts.voiceSelector.tldw",
@@ -706,7 +779,7 @@ const TtsPlaygroundPage: React.FC = () => {
             )}
 
             {ttsSettings?.ttsProvider === "openai" && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" data-testid="tts-voice-picker-openai">
                 <Text type="secondary">
                   {t(
                     "playground:tts.voiceSelector.openai",
@@ -765,6 +838,7 @@ const TtsPlaygroundPage: React.FC = () => {
             <Space>
               <Button
                 type="primary"
+                data-testid="tts-play-button"
                 onClick={handlePlay}
                 disabled={isPlayDisabled}
                 loading={isGenerating}
@@ -789,8 +863,26 @@ const TtsPlaygroundPage: React.FC = () => {
               {!canStop && stopDisabledReason ? ` ${stopDisabledReason}` : ""}
             </Text>
 
+            {isGenerating && generationProgress && generationProgress.total > 1 && (
+              <div className="w-full">
+                <Progress
+                  percent={Math.round(
+                    (generationProgress.completed / generationProgress.total) * 100
+                  )}
+                  size="small"
+                  status="active"
+                  format={() =>
+                    t("playground:tts.progressSegments", "{{completed}}/{{total}} segments", {
+                      completed: generationProgress.completed,
+                      total: generationProgress.total
+                    })
+                  }
+                />
+              </div>
+            )}
+
             {provider === "browser" && segments.length > 0 && (
-              <div className="mt-4 space-y-2 w-full">
+              <div className="mt-4 space-y-2 w-full" data-testid="tts-audio-output">
                 <div>
                   <Text strong>
                     {t(
@@ -920,7 +1012,7 @@ const TtsPlaygroundPage: React.FC = () => {
             )}
 
             {provider !== "browser" && segments.length > 0 && (
-              <div className="mt-4 space-y-2 w-full">
+              <div className="mt-4 space-y-2 w-full" data-testid="tts-audio-output">
                 <div>
                   <Text strong>
                     {t(
@@ -989,20 +1081,6 @@ const TtsPlaygroundPage: React.FC = () => {
           </Space>
         </Card>
 
-        {isTldw && !hasAudio && (
-          <Alert
-            type="warning"
-            showIcon
-            title={t(
-              "playground:tts.tldwWarningTitle",
-              "tldw audio/speech API not detected"
-            )}
-            description={t(
-              "playground:tts.tldwWarningBody",
-              "Ensure your tldw_server version includes /api/v1/audio/speech and that your extension is connected with a valid API key."
-            )}
-          />
-        )}
       </div>
     </PageShell>
   )

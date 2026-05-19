@@ -177,6 +177,103 @@ def test_search_web_brave_builds_expected_request(monkeypatch: pytest.MonkeyPatc
     assert captured["params"]["exclude_sites"] == "example.com,test.com"
 
 
+def test_search_web_brave_blocks_with_shared_policy_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+        WebOutboundPolicyDecision,
+    )
+
+    monkeypatch.setattr(
+        web_search,
+        "decide_web_outbound_policy_sync",
+        lambda *args, **kwargs: WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_test",
+            stage=kwargs.get("stage", "provider_request"),
+            source=kwargs.get("source", "websearch_brave"),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        web_search,
+        "brave_http_get",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("provider HTTP call should not run when outbound policy blocks")
+        ),
+    )
+    monkeypatch.setattr(
+        web_search,
+        "get_loaded_config",
+        lambda: {"search_engines": {"brave_search_ai_api_key": "ai-key"}},
+    )
+
+    with pytest.raises(ValueError, match="Blocked by outbound policy: deny_test"):
+        web_search.search_web_brave(
+            search_term="capital of france",
+            country="US",
+            search_lang="en",
+            ui_lang="en",
+            result_count=5,
+        )
+
+
+def test_perform_websearch_duckduckgo_surfaces_policy_denial(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+        WebOutboundPolicyDecision,
+    )
+
+    monkeypatch.setattr(
+        web_search,
+        "decide_web_outbound_policy_sync",
+        lambda *args, **kwargs: WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="deny_test",
+            stage=kwargs.get("stage", "provider_request"),
+            source=kwargs.get("source", "websearch_duckduckgo_html"),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        web_search,
+        "fetch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("provider fetch should not run when outbound policy blocks")
+        ),
+    )
+
+    result = web_search.perform_websearch(
+        "duckduckgo",
+        "capital of france",
+        "US",
+        "en",
+        "en",
+        5,
+    )
+
+    assert result["processing_error"] == "Error performing web search: Blocked by outbound policy: deny_test"
+
+
+def test_perform_websearch_sanitizes_provider_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_search(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("provider failed at /private/websearch/token")
+
+    monkeypatch.setattr(web_search, "search_web_tavily", fail_search)
+
+    result = web_search.perform_websearch(
+        "tavily",
+        "capital of france",
+        "US",
+        "en",
+        "en",
+        5,
+    )
+
+    assert result["processing_error"] == "Error performing web search"
+    assert "provider failed" not in result["processing_error"]
+    assert "/private/websearch/token" not in result["processing_error"]
+
+
 def test_generate_and_search_propagates_searx_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: Dict[str, Any] = {}
 
@@ -342,6 +439,33 @@ def test_perform_websearch_tavily_forwards_site_whitelist(monkeypatch: pytest.Mo
     assert captured.get("site_whitelist") == ["allowed.example"]
     assert captured.get("site_blacklist") == ["blocked.example"]
     assert result.get("search_engine") == "tavily"
+
+
+def test_search_web_tavily_sanitizes_fetch_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tavily fetch errors should not expose backend exception details."""
+    from tldw_Server_API.app.core import http_client
+
+    monkeypatch.setattr(
+        web_search,
+        "get_loaded_config",
+        lambda: {"search_engines": {"tavily_search_api_key": "test-key"}},
+    )
+    monkeypatch.setattr(
+        web_search,
+        "_enforce_provider_outbound_policy",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fail_fetch_json(*_args: Any, **_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("tavily backend failed at /private/tavily.key")
+
+    monkeypatch.setattr(http_client, "fetch_json", fail_fetch_json)
+
+    result = web_search.search_web_tavily("test query")
+
+    assert result == {"error": "There was an error searching for content."}
+    assert "tavily backend failed" not in result["error"]
+    assert "/private/tavily.key" not in result["error"]
 
 
 def test_perform_websearch_google_forwards_google_domain(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -823,6 +947,83 @@ def test_generate_and_search_surfaces_provider_error_as_warning_when_results_exi
         for warning in payload["warnings"]
         if isinstance(warning, dict)
     )
+
+
+@pytest.mark.asyncio
+async def test_search_result_relevance_uses_fallback_content_when_scrape_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: Dict[str, Any] = {}
+
+    async def failing_scrape_article(_url: str) -> Dict[str, Any]:
+        raise RuntimeError("blocked")
+
+    def fake_summarize(input_data: str, **_: Any) -> str:
+        captured["input_data"] = input_data
+        return f"summary::{input_data}"
+
+    def fake_chat_api_call(**_: Any) -> str:
+        return "Selected Answer: True\nReasoning: Snippet is relevant."
+
+    monkeypatch.setattr(web_search, "scrape_article", failing_scrape_article)
+    monkeypatch.setattr(web_search, "summarize", fake_summarize)
+    monkeypatch.setattr(web_search, "chat_api_call", fake_chat_api_call)
+    monkeypatch.setattr(web_search, "get_loaded_config", lambda: {})
+
+    relevant = await web_search.search_result_relevance(
+        search_results=[
+            {
+                "id": "keep",
+                "title": "Paris title",
+                "url": "https://example.com/keep",
+                "content": "",
+                "metadata": {"snippet": "Paris is the capital of France."},
+            }
+        ],
+        original_question="What is the capital of France?",
+        sub_questions=["capital of France"],
+        api_endpoint="fake-llm",
+    )
+
+    assert "keep" in relevant
+    assert "Paris title" in captured["input_data"]
+    assert "Paris is the capital of France." in captured["input_data"]
+    assert relevant["keep"]["content"].startswith("summary::")
+    assert "Paris is the capital of France." in relevant["keep"]["original_content"]
+
+
+def test_search_web_duckduckgo_raises_on_egress_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Security import egress as egress_module
+
+    monkeypatch.setattr(
+        egress_module,
+        "evaluate_url_policy",
+        lambda _url: SimpleNamespace(allowed=False, reason="blocked"),
+    )
+
+    with pytest.raises(ValueError, match="Blocked by outbound policy: blocked"):
+        web_search.search_web_duckduckgo("capital of france")
+
+
+def test_relevant_results_log_summary_redacts_original_content() -> None:
+    summary = web_search._summarize_relevant_results_for_log(
+        {
+            "keep": {
+                "content": "short summary",
+                "original_content": "very secret original body",
+                "reasoning": "Contains the answer",
+            }
+        }
+    )
+
+    serialized = str(summary)
+    assert "very secret original body" not in serialized
+    assert "short summary" not in serialized
+    assert summary[0]["id"] == "keep"
+    assert summary[0]["content_chars"] == len("short summary")
+    assert summary[0]["original_content_chars"] == len("very secret original body")
 
 
 @pytest.mark.asyncio

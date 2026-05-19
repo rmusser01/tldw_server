@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { api } from '@/lib/api-client';
 import { isAlertSnoozed } from '@/lib/monitoring-alerts';
@@ -54,8 +55,13 @@ type MonitoringPageController = {
   managementPanelsProps: ComponentProps<typeof MonitoringManagementPanels>;
 };
 
+const VALID_TIME_RANGES: MonitoringTimeRangeOption[] = ['1h', '6h', '24h', '7d', '30d', 'custom'];
+
 export const useMonitoringPageController = (): MonitoringPageController => {
   const confirm = useConfirm();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     metrics,
     setMetrics,
@@ -113,6 +119,44 @@ export const useMonitoringPageController = (): MonitoringPageController => {
     onManualRangeLoadSuccess: markMonitoringDataUpdated,
   });
 
+  // --- URL state sync for time range (5.16) ---
+  const initialTimeRangeFromUrl = useMemo(() => {
+    const urlRange = searchParams.get('range');
+    if (urlRange && VALID_TIME_RANGES.includes(urlRange as MonitoringTimeRangeOption)) {
+      return urlRange as MonitoringTimeRangeOption;
+    }
+    return null;
+    // Only read on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const timeRangeUrlSynced = useRef(false);
+
+  // Seed the metrics history hook with the URL time range on first load
+  useEffect(() => {
+    if (initialTimeRangeFromUrl && !timeRangeUrlSynced.current) {
+      timeRangeUrlSynced.current = true;
+      void handleSelectTimeRange(initialTimeRangeFromUrl);
+    }
+  }, [initialTimeRangeFromUrl, handleSelectTimeRange]);
+
+  // Write time range changes back to URL
+  useEffect(() => {
+    const current = new URLSearchParams(Array.from(searchParams.entries()));
+    if (timeRange === '24h') {
+      current.delete('range');
+    } else {
+      current.set('range', timeRange);
+    }
+    const search = current.toString();
+    const query = search ? `?${search}` : '';
+    const nextUrl = `${pathname}${query}`;
+    const currentUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
+    if (nextUrl !== currentUrl) {
+      router.replace(nextUrl, { scroll: false });
+    }
+  }, [timeRange, pathname, router, searchParams]);
+
   const handleToggleSeries = useCallback((seriesKey: MonitoringMetricSeriesKey) => {
     setSeriesVisibility((prev) => toggleMonitoringSeriesVisibility(prev, seriesKey));
   }, []);
@@ -160,6 +204,40 @@ export const useMonitoringPageController = (): MonitoringPageController => {
     loadInFlightRef.current = pendingLoad;
     return pendingLoad;
   }, [loadData]);
+
+  // --- Auto-refresh (60 s) --------------------------------------------------
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const loadingRef = useRef(false);
+
+  // Keep loadingRef in sync with the loading state so the interval guard works
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  // Mark lastRefreshed whenever the dashboard state is updated
+  useEffect(() => {
+    if (lastUpdated) {
+      setLastRefreshed(lastUpdated);
+    }
+  }, [lastUpdated]);
+
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible' && !loadingRef.current) {
+        void guardedLoadData();
+      }
+    }, 60_000);
+
+    return () => clearInterval(intervalId);
+  }, [autoRefreshEnabled, guardedLoadData]);
+
+  const onAutoRefreshToggle = useCallback(() => {
+    setAutoRefreshEnabled((prev) => !prev);
+  }, []);
+  // ---------------------------------------------------------------------------
 
   const {
     showCreateWatchlist,
@@ -223,14 +301,6 @@ export const useMonitoringPageController = (): MonitoringPageController => {
     void guardedLoadData();
   }, [guardedLoadData]);
 
-  // Auto-refresh dashboard data every 60 seconds
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const id = setInterval(() => { void guardedLoadData(); }, 60_000);
-    return () => clearInterval(id);
-  }, [autoRefreshEnabled, guardedLoadData]);
-
   const activeAlertsCount = useMemo(
     () =>
       alerts.filter((alert) => !alert.acknowledged && !isAlertSnoozed(alert)).length,
@@ -242,10 +312,11 @@ export const useMonitoringPageController = (): MonitoringPageController => {
       lastUpdated,
       loading,
       onRefresh: guardedLoadData,
+      lastRefreshed,
       autoRefreshEnabled,
-      onToggleAutoRefresh: () => setAutoRefreshEnabled((prev) => !prev),
+      onAutoRefreshToggle,
     }),
-    [lastUpdated, loading, guardedLoadData, autoRefreshEnabled]
+    [lastUpdated, loading, guardedLoadData, lastRefreshed, autoRefreshEnabled, onAutoRefreshToggle]
   );
 
   const feedbackBannersProps = useMemo<ComponentProps<typeof MonitoringFeedbackBanners>>(

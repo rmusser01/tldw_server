@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -46,6 +47,10 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+from tldw_Server_API.app.core.Persona.robustness_eval import (
+    PersonaRobustnessCase,
+    PersonaRobustnessEval,
+)
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
@@ -240,6 +245,69 @@ def _extract_summarization_sample_id(sample: dict[str, Any], index: int) -> str:
     if isinstance(sample_id, str) and sample_id.strip():
         return sample_id.strip()
     return f"sample-{index}"
+
+
+def _extract_persona_robustness_case_id(sample: dict[str, Any], index: int) -> str:
+    for key in ("case_id", "scenario_id", "sample_id", "id"):
+        value = sample.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return f"scenario-{index + 1}"
+
+
+def _extract_persona_robustness_prompt(sample: dict[str, Any]) -> str:
+    for key in ("prompt", "input", "user_message"):
+        value = sample.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    raise ValueError("Persona dialogue-tree robustness scenarios must include a non-empty prompt.")
+
+
+def _build_persona_robustness_suite(dataset: list[dict[str, Any]]) -> list[PersonaRobustnessCase]:
+    suite: list[PersonaRobustnessCase] = []
+    for index, sample in enumerate(dataset):
+        candidates = sample.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError(
+                f"Persona dialogue-tree robustness scenario {index} must include candidates."
+            )
+        normalized_candidates = [
+            dict(candidate)
+            for candidate in candidates
+            if isinstance(candidate, dict)
+        ]
+        if not normalized_candidates:
+            raise ValueError(
+                f"Persona dialogue-tree robustness scenario {index} must include object candidates."
+            )
+        metadata = sample.get("metadata")
+        case_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        suite.append(
+            PersonaRobustnessCase(
+                case_id=_extract_persona_robustness_case_id(sample, index),
+                prompt=_extract_persona_robustness_prompt(sample),
+                candidates=normalized_candidates,
+                metadata=case_metadata,
+            )
+        )
+    return suite
+
+
+def _persona_target_id(target: dict[str, Any], index: int) -> str:
+    target_id = str(target.get("target_id") or "").strip()
+    if target_id:
+        return target_id
+    persona = target.get("persona") if isinstance(target.get("persona"), dict) else {}
+    character = target.get("character") if isinstance(target.get("character"), dict) else {}
+    persona_id = str(persona.get("id") or "").strip()
+    character_id = str(character.get("id") or "").strip()
+    if persona_id and character_id:
+        return f"{persona_id}:{character_id}"
+    if persona_id:
+        return persona_id
+    if character_id:
+        return character_id
+    return f"target-{index + 1}"
 
 
 def _extract_rag_sample_id(sample: dict[str, Any], index: int) -> str:
@@ -894,6 +962,90 @@ def _execute_rag_retrieval_tuning_recipe_run(
     }
 
 
+def _execute_persona_dialogue_tree_robustness_recipe_run(
+    *,
+    record: Any,
+    db: EvaluationsDatabase,
+    user_id: str | None,
+    service: RecipeRunsService | Any,
+) -> dict[str, Any]:
+    del service
+    dataset = _resolve_inline_or_persisted_dataset(record, db, user_id)
+    run_config = _run_config_for_execution(record)
+    targets = [dict(target) for target in (run_config.get("targets") or []) if isinstance(target, dict)]
+    if not targets:
+        raise ValueError(
+            "Persona dialogue-tree robustness run_config.targets must include at least one target."
+        )
+
+    suite = _build_persona_robustness_suite(dataset)
+    include_trace_artifacts = bool(run_config.get("include_trace_artifacts", True))
+    evaluator = PersonaRobustnessEval()
+    target_results: list[dict[str, Any]] = []
+    trace_artifacts: list[dict[str, Any]] = []
+
+    for target_index, target in enumerate(targets):
+        target_id = _persona_target_id(target, target_index)
+        persona = target.get("persona") if isinstance(target.get("persona"), dict) else {}
+        character = target.get("character") if isinstance(target.get("character"), dict) else {}
+        report = evaluator.run_suite(
+            persona=persona,
+            character=character,
+            suite=suite,
+        )
+        payload = report.model_dump(mode="json")
+        target_trace_refs: list[dict[str, Any]] = []
+        for artifact in payload.get("trace_artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            case_id = str(artifact.get("case_id") or "")
+            artifact_id = f"{target_id}:{case_id}:trace"
+            if include_trace_artifacts:
+                trace_artifacts.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "target_id": target_id,
+                        **artifact,
+                    }
+                )
+                target_trace_refs.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "case_id": case_id,
+                    }
+                )
+
+        target_results.append(
+            {
+                "target_id": target_id,
+                "persona_id": persona.get("id"),
+                "character_id": character.get("id"),
+                "summary": payload.get("summary") or {},
+                "cases": payload.get("cases") or [],
+                "trace_artifact_refs": target_trace_refs,
+            }
+        )
+
+    recipe_report_inputs = {
+        "dataset_mode": record.metadata.get("dataset_mode"),
+        "review_sample": record.metadata.get("review_sample") or {
+            "required": False,
+            "sample_size": 0,
+            "sample_ids": [],
+        },
+        "target_results": target_results,
+        "trace_artifacts": trace_artifacts,
+    }
+    return {
+        "child_run_ids": [],
+        "metadata": {
+            "robustness_results": target_results,
+            "trace_artifacts": trace_artifacts,
+            "recipe_report_inputs": recipe_report_inputs,
+        },
+    }
+
+
 def _execute_recipe_run(
     *,
     record: Any,
@@ -924,6 +1076,16 @@ def _execute_recipe_run(
         )
     if record.recipe_id == "rag_answer_quality" and not record.metadata.get("candidate_results"):
         return execute_rag_answer_quality_recipe_run(
+            record=record,
+            db=db,
+            user_id=user_id,
+            service=service,
+        )
+    if (
+        record.recipe_id == "persona_dialogue_tree_robustness"
+        and not record.metadata.get("robustness_results")
+    ):
+        return _execute_persona_dialogue_tree_robustness_recipe_run(
             record=record,
             db=db,
             user_id=user_id,
@@ -1049,7 +1211,7 @@ async def handle_recipe_run_job_async(job: dict[str, Any]) -> dict[str, Any]:
     return await asyncio.to_thread(handle_recipe_run_job, job)
 
 
-async def run_recipe_run_jobs_worker() -> None:
+async def run_recipe_run_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Run the WorkerSDK loop for recipe-run Jobs."""
     worker_id = (os.getenv("EVALUATIONS_RECIPE_RUN_JOBS_WORKER_ID") or f"recipe-run-{os.getpid()}").strip()
     cfg = WorkerConfig(
@@ -1059,8 +1221,24 @@ async def run_recipe_run_jobs_worker() -> None:
     )
     jm = JobManager()
     sdk = WorkerSDK(jm, cfg)
+    stop_task: asyncio.Task[None] | None = None
+    if stop_event is not None:
+        async def _watch_stop() -> None:
+            await stop_event.wait()
+            sdk.stop()
+
+        stop_task = asyncio.create_task(
+            _watch_stop(),
+            name="recipe_run_jobs_worker_stop_watch",
+        )
     logger.info("Recipe run Jobs worker starting: queue={} worker_id={}", cfg.queue, worker_id)
-    await sdk.run(handler=handle_recipe_run_job_async)
+    try:
+        await sdk.run(handler=handle_recipe_run_job_async)
+    finally:
+        if stop_task is not None:
+            stop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_task
 
 
 def recipe_run_jobs_worker_enabled() -> bool:
@@ -1070,12 +1248,14 @@ def recipe_run_jobs_worker_enabled() -> bool:
     )
 
 
-async def start_recipe_run_jobs_worker() -> asyncio.Task[None] | None:
+async def start_recipe_run_jobs_worker(
+    stop_event: asyncio.Event | None = None,
+) -> asyncio.Task[None] | None:
     """Start the recipe-run worker as a background task."""
     if not recipe_run_jobs_worker_enabled():
         return None
     return asyncio.create_task(
-        run_recipe_run_jobs_worker(),
+        run_recipe_run_jobs_worker(stop_event),
         name="recipe_run_jobs_worker",
     )
 

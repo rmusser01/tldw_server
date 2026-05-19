@@ -5,6 +5,7 @@ import {
   resolveMonitoringRangeParams,
   type MonitoringTimeRangeOption,
 } from '@/lib/monitoring-metrics';
+import { logger } from '@/lib/logger';
 import type { MetricsHistoryPoint } from './types';
 
 export type MonitoringMetricsApiClient = {
@@ -91,7 +92,7 @@ export const useMonitoringMetricsHistory = ({
       }
       throw new Error('No monitoring metrics history returned');
     } catch (historyErr: unknown) {
-      console.warn('Failed to load monitoring metrics history endpoint.', historyErr);
+      logger.warn('Failed to load monitoring metrics history endpoint', { component: 'useMonitoringMetricsHistory', error: historyErr instanceof Error ? historyErr.message : String(historyErr) });
       setMetricsHistory([]);
       return false;
     }

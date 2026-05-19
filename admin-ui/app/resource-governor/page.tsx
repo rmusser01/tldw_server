@@ -22,6 +22,7 @@ import { api } from '@/lib/api-client';
 import { formatDateTime } from '@/lib/format';
 import { parseOptionalInt } from '@/lib/number';
 import { RateLimitEvent, normalizeRateLimitEventsPayload, parseRateLimitEventsFromMetricsText } from '@/lib/rate-limit-events';
+import Link from 'next/link';
 import { RefreshCw, Trash2, Edit2, Plus, Gauge, X } from 'lucide-react';
 
 type ResourcePolicy = {
@@ -216,7 +217,7 @@ const getPolicyRowKey = (policy: ResourcePolicy, fallbackIndex: number) => {
 
 export default function ResourceGovernorPage() {
   const confirm = useConfirm();
-  const privilegedAction = usePrivilegedActionDialog();
+  const promptPrivilegedAction = usePrivilegedActionDialog();
   const { success, error: showError } = useToast();
 
   // Policies state
@@ -250,6 +251,13 @@ export default function ResourceGovernorPage() {
   const [rateLimitEventsLoading, setRateLimitEventsLoading] = useState(false);
   const [rateLimitEventsError, setRateLimitEventsError] = useState('');
   const [rateLimitEventsSource, setRateLimitEventsSource] = useState<RateLimitEventsSource>('unavailable');
+  const [rateLimitSummary, setRateLimitSummary] = useState<{
+    total_throttle_events: number;
+    period: string;
+    top_throttled_entities: Array<{ entity: string; rejections: number; last_rejected_at: string | null }>;
+    policy_headroom: Array<{ policy_id: string; resource_type: string | null; utilization_pct: number; total_denials: number; total_decisions: number }>;
+  } | null>(null);
+  const [rateLimitSummaryLoading, setRateLimitSummaryLoading] = useState(false);
 
   const policyForm = useForm<PolicyFormInput, unknown, PolicyFormData>({
     resolver: zodResolver(policyFormSchema),
@@ -395,6 +403,31 @@ export default function ResourceGovernorPage() {
     }
   }, []);
 
+  const loadRateLimitSummary = useCallback(async () => {
+    try {
+      setRateLimitSummaryLoading(true);
+      const result = await api.getRateLimitSummary({ hours: String(USAGE_LOOKBACK_HOURS) });
+      if (result && typeof result === 'object') {
+        const record = result as Record<string, unknown>;
+        setRateLimitSummary({
+          total_throttle_events: typeof record.total_throttle_events === 'number' ? record.total_throttle_events : 0,
+          period: typeof record.period === 'string' ? record.period : '24h',
+          top_throttled_entities: Array.isArray(record.top_throttled_entities)
+            ? (record.top_throttled_entities as Array<{ entity: string; rejections: number; last_rejected_at: string | null }>)
+            : [],
+          policy_headroom: Array.isArray(record.policy_headroom)
+            ? (record.policy_headroom as Array<{ policy_id: string; resource_type: string | null; utilization_pct: number; total_denials: number; total_decisions: number }>)
+            : [],
+        });
+      }
+    } catch {
+      // Summary is non-critical; silently ignore failures
+      setRateLimitSummary(null);
+    } finally {
+      setRateLimitSummaryLoading(false);
+    }
+  }, []);
+
   const loadPolicies = useCallback(async (signal?: AbortSignal) => {
     try {
       setLoading(true);
@@ -405,6 +438,7 @@ export default function ResourceGovernorPage() {
       await Promise.all([
         refreshScopeContext(),
         loadRateLimitEvents(),
+        loadRateLimitSummary(),
       ]);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
@@ -414,7 +448,7 @@ export default function ResourceGovernorPage() {
     } finally {
       setLoading(false);
     }
-  }, [loadRateLimitEvents, refreshScopeContext]);
+  }, [loadRateLimitEvents, loadRateLimitSummary, refreshScopeContext]);
 
   const policies = useMemo(() => {
     let filtered = allPolicies;
@@ -733,14 +767,14 @@ export default function ResourceGovernorPage() {
     const policyId = String(policy.id);
     if (deletingPolicyId === policyId) return;
 
-    const result = await privilegedAction({
+    const approval = await promptPrivilegedAction({
       title: `Delete policy "${policy.name}"?`,
       message: 'This will remove the resource governance policy. This action cannot be undone.',
       confirmText: 'Delete',
       requirePassword: true,
     });
 
-    if (!result) return;
+    if (!approval) return;
 
     try {
       setDeletingPolicyId(policyId);
@@ -996,32 +1030,28 @@ export default function ResourceGovernorPage() {
             <CardContent className="grid gap-4">
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-1">
-                  <Label htmlFor="resolution-user-id">User ID or name</Label>
-                  <Input
-                    id="resolution-user-id"
-                    placeholder="Search by name or enter ID..."
-                    list="user-suggestions"
-                    value={resolutionUserId}
-                    onChange={(event) => {
-                      const val = event.target.value;
-                      setResolutionUserId(val);
-                      // Debounced user search for suggestions
-                      if (val.length >= 2 && !/^\d+$/.test(val)) {
-                        api.getUsers({ search: val, limit: '5' }).then((users) => {
-                          setUserSuggestions(
-                            (Array.isArray(users) ? users : []).map((u: { id: number; username: string }) => ({
-                              id: u.id, username: u.username,
-                            }))
-                          );
-                        }).catch(() => {});
-                      }
-                    }}
-                  />
-                  <datalist id="user-suggestions">
-                    {userSuggestions.map((u) => (
-                      <option key={u.id} value={String(u.id)}>{u.username} (ID: {u.id})</option>
-                    ))}
-                  </datalist>
+                  <Label htmlFor="resolution-user-id">User</Label>
+                  {scopeUsers.length > 0 ? (
+                    <Select
+                      id="resolution-user-id"
+                      value={resolutionUserId}
+                      onChange={(event) => setResolutionUserId(event.target.value)}
+                    >
+                      <option value="">Select a user...</option>
+                      {scopeUsers.map((user) => (
+                        <option key={user.id} value={String(user.id)}>
+                          {user.username || user.email || `User ${user.id}`} (ID: {user.id})
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      id="resolution-user-id"
+                      placeholder="e.g., 42"
+                      value={resolutionUserId}
+                      onChange={(event) => setResolutionUserId(event.target.value)}
+                    />
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="resolution-resource-type">Resource Type</Label>
@@ -1106,6 +1136,104 @@ export default function ResourceGovernorPage() {
             </CardContent>
           </Card>
 
+          {/* Rate Limit Analytics Summary */}
+          {rateLimitSummary && (rateLimitSummary.total_throttle_events > 0 || rateLimitSummary.policy_headroom.length > 0) ? (
+            <Card data-testid="rate-limit-analytics-card">
+              <CardHeader>
+                <CardTitle>Rate Limit Analytics</CardTitle>
+                <CardDescription>
+                  Throttle summary and policy utilization for the last {rateLimitSummary.period}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-3 mb-4">
+                  <div className="rounded-lg bg-muted/50 p-4 text-center">
+                    <div className="text-2xl font-bold tabular-nums" data-testid="total-throttle-events">
+                      {rateLimitSummary.total_throttle_events}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Total Throttle Events</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-4 text-center">
+                    <div className="text-2xl font-bold tabular-nums">
+                      {rateLimitSummary.top_throttled_entities.length}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Affected Entities</div>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-4 text-center">
+                    <div className="text-2xl font-bold tabular-nums">
+                      {rateLimitSummary.policy_headroom.length}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Active Policies</div>
+                  </div>
+                </div>
+
+                {rateLimitSummary.top_throttled_entities.length > 0 ? (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-medium mb-2">Top Throttled Entities</h4>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Entity</TableHead>
+                          <TableHead className="text-right">Rejections</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rateLimitSummary.top_throttled_entities.slice(0, 5).map((entity, index) => (
+                          <TableRow key={`${entity.entity}-${index}`}>
+                            <TableCell className="font-medium">{entity.entity}</TableCell>
+                            <TableCell className="text-right tabular-nums">{entity.rejections}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
+
+                {rateLimitSummary.policy_headroom.length > 0 ? (
+                  <div>
+                    <h4 className="text-sm font-medium mb-2">Policy Utilization</h4>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Policy</TableHead>
+                          <TableHead>Resource</TableHead>
+                          <TableHead className="text-right">Denials</TableHead>
+                          <TableHead className="text-right">Utilization</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rateLimitSummary.policy_headroom.slice(0, 5).map((policy, index) => (
+                          <TableRow key={`${policy.policy_id}-${index}`}>
+                            <TableCell className="font-mono text-sm">{policy.policy_id}</TableCell>
+                            <TableCell>
+                              {policy.resource_type ? (
+                                <Badge variant="outline">
+                                  {policy.resource_type.replaceAll('_', ' ')}
+                                </Badge>
+                              ) : '--'}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{policy.total_denials}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              <Badge variant={policy.utilization_pct > 50 ? 'destructive' : policy.utilization_pct > 20 ? 'secondary' : 'default'}>
+                                {policy.utilization_pct.toFixed(1)}%
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : rateLimitSummaryLoading ? (
+            <Card>
+              <CardContent className="py-6">
+                <div className="text-sm text-muted-foreground text-center">Loading rate limit analytics...</div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
@@ -1115,10 +1243,26 @@ export default function ResourceGovernorPage() {
                     Recent rate-limit rejections by user/role and policy over the last {USAGE_LOOKBACK_HOURS} hours.
                   </CardDescription>
                 </div>
-                <Badge variant="outline" className="text-xs">
-                  {rateLimitEventsSourceLabel}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {!rateLimitEventsLoading && rateLimitEvents.length > 0 ? (
+                    <Badge variant="destructive" className="text-xs" data-testid="throttle-event-count">
+                      {rateLimitEvents.reduce((sum, e) => sum + (e.rejections24h ?? 0), 0)} rejections
+                    </Badge>
+                  ) : null}
+                  <Badge variant="outline" className="text-xs">
+                    {rateLimitEventsSourceLabel}
+                  </Badge>
+                </div>
               </div>
+              {!rateLimitEventsLoading && rateLimitEvents.length > 0 ? (
+                <Link
+                  href="/audit?action=rate_limit"
+                  className="mt-1 inline-block text-xs text-primary hover:underline"
+                  data-testid="throttle-audit-link"
+                >
+                  View in audit log
+                </Link>
+              ) : null}
             </CardHeader>
             <CardContent className="grid gap-4">
               {rateLimitEventsLoading ? (

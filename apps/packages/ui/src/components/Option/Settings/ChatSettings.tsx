@@ -33,6 +33,7 @@ import {
   QUICK_CHAT_DEFAULT_PROJECT_DOCS_NAMESPACE,
   toQuickChatDocsMediaIdsInputValue
 } from "@/components/Common/QuickChatHelper/docs-rag-profile"
+import { ComposerStyleSettings } from "@/components/Chat/composer/settings/ComposerStyleSettings"
 
 const SELECT_CLASSNAME = "w-[200px]"
 export const ChatSettings = () => {
@@ -481,6 +482,10 @@ export const ChatSettings = () => {
         </p>
         <div className="border-b border-border mt-3" />
       </div>
+
+      <ComposerStyleSettings />
+
+      <div className="border-b border-border" />
 
       <SettingRow
         label={t("generalSettings.settings.copilotResumeLastChat.label")}

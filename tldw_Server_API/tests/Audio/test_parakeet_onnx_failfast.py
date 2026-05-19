@@ -4,6 +4,7 @@ import importlib.machinery
 import sys
 import types
 
+import numpy as np
 import pytest
 
 # Stub heavyweight audio deps before importing transcription library modules.
@@ -72,3 +73,37 @@ def test_speech_to_text_parakeet_onnx_failure_fails_fast(monkeypatch, tmp_path):
             whisper_model="parakeet-onnx",
             selected_source_lang="en",
         )
+
+
+@pytest.mark.unit
+def test_speech_to_text_parakeet_onnx_error_sentinel_fails_fast(monkeypatch, tmp_path):
+    """Parakeet ONNX error sentinel text should not be converted into transcript segments."""
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"\x00" * 2048)
+
+    fake_librosa = types.SimpleNamespace(
+        get_duration=lambda path: 1.0,
+        load=lambda path, sr=16000, mono=True: (np.zeros(1600, dtype=np.float32), sr),
+    )
+    monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo as nemo_mod
+
+    sentinel = (
+        "[Error: Transcription failed: Required inputs (['waveforms_lens']) "
+        "are missing from input feed (['waveforms']).]"
+    )
+    monkeypatch.setattr(
+        nemo_mod,
+        "transcribe_with_parakeet",
+        lambda *_args, **_kwargs: sentinel,
+    )
+
+    with pytest.raises(atlib.STTTranscriptionError, match="waveforms_lens") as exc_info:
+        atlib.speech_to_text_parakeet(
+            str(audio_file),
+            variant="onnx",
+            selected_source_lang="en",
+            vad_filter=False,
+        )
+    assert str(exc_info.value) == sentinel  # nosec B101

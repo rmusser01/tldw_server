@@ -16,9 +16,10 @@ import { Input } from '@/components/ui/input';
 import { ArrowLeft, Users, UserPlus, Trash2, Shield, Building2, Pencil } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Team, TeamMember, User } from '@/types';
+import { CardSkeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
 import { UserPicker } from '@/components/users/UserPicker';
-import { CardSkeleton } from '@/components/ui/skeleton';
+import { logger } from '@/lib/logger';
 
 export default function TeamDetailPage() {
   const params = useParams();
@@ -99,7 +100,7 @@ export default function TeamDetailPage() {
         }, {} as Record<number, string>)
       );
     } catch (err: unknown) {
-      console.error('Failed to load team data:', err);
+      logger.error('Failed to load team data', { component: 'TeamDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to load team data');
     } finally {
       setLoading(false);
@@ -149,7 +150,7 @@ export default function TeamDetailPage() {
       void loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err ?? 'Failed to add member');
-      console.error('Failed to add member:', err);
+      logger.error('Failed to add member', { component: 'TeamDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(msg);
     } finally {
       setAddingMember(false);
@@ -174,7 +175,7 @@ export default function TeamDetailPage() {
       void loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to remove member';
-      console.error('Failed to remove member:', err);
+      logger.error('Failed to remove member', { component: 'TeamDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(msg);
     } finally {
       setRemovingMemberId((current) => (current === userId ? null : current));
@@ -192,7 +193,7 @@ export default function TeamDetailPage() {
       void loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update member role';
-      console.error('Failed to update member role:', err);
+      logger.error('Failed to update member role', { component: 'TeamDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(msg);
     } finally {
       setUpdatingMemberRoleId((current) => (current === member.user_id ? null : current));
@@ -218,6 +219,7 @@ export default function TeamDetailPage() {
       void loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to update team';
+      logger.error('Failed to update team', { component: 'TeamDetailPage', error: err instanceof Error ? err.message : String(err) });
       setEditTeamError(msg);
     } finally {
       setUpdatingTeam(false);
@@ -242,7 +244,7 @@ export default function TeamDetailPage() {
       router.push(team.org_id ? `/teams?org=${team.org_id}` : '/teams');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete team';
-      console.error('Failed to delete team:', err);
+      logger.error('Failed to delete team', { component: 'TeamDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(msg);
     } finally {
       setDeletingTeam(false);

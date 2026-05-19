@@ -113,7 +113,7 @@ def _resolve_tokenizer_sample_rate(tokenizer: Any, fallback: int) -> int:
         try:
             if value:
                 return int(value)
-        except Exception:
+        except Exception:  # nosec B112
             continue
     return fallback
 
@@ -124,7 +124,7 @@ def _resolve_tokenizer_frame_rate(tokenizer: Any) -> Optional[float]:
         try:
             if value:
                 return float(value)
-        except Exception:
+        except Exception:  # nosec B112
             continue
     return None
 
@@ -147,7 +147,7 @@ def _load_qwen3_tokenizer(model_id: str, allow_download: bool) -> Any:
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=f"qwen-tts package not available: {exc}",
+            detail="qwen-tts package not available",
         ) from exc
 
     for name in ("Qwen3TTSTokenizer", "QwenTTSTokenizer", "TTSTokenizer"):
@@ -192,7 +192,7 @@ def _normalize_tokens(tokens: Any) -> tuple[list[int], Optional[float]]:
 
 
 def _serialize_tokens(tokens: list[int], token_format: str) -> Any:
-    if token_format == "base64":
+    if token_format == "base64":  # nosec B105
         token_bytes = np.asarray(tokens, dtype=np.int32).tobytes()
         return base64.b64encode(token_bytes).decode("ascii")
     return tokens

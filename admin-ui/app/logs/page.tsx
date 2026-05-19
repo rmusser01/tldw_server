@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 import { api } from '@/lib/api-client';
+import { useSearchParams } from 'next/navigation';
 import { useUrlPagination } from '@/lib/use-url-state';
 import { formatDateTime } from '@/lib/format';
 import { ExportMenu } from '@/components/ui/export-menu';
@@ -131,6 +132,7 @@ const areFiltersEqual = (left: LogFilters, right: LogFilters) => (
 
 function LogsPageContent() {
   const { page, pageSize, setPage, setPageSize, resetPagination } = useUrlPagination();
+  const searchParams = useSearchParams();
   const [logs, setLogs] = useState<SystemLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -147,9 +149,10 @@ function LogsPageContent() {
   const [service, setService] = useState('');
   const [query, setQuery] = useState('');
   const [regexMode, setRegexMode] = useState(false);
-  const [requestId, setRequestId] = useState('');
+  const [requestId, setRequestId] = useState(() => searchParams.get('request_id') ?? '');
   const [orgId, setOrgId] = useState('');
   const [userId, setUserId] = useState('');
+  const requestIdParam = searchParams.get('request_id') ?? '';
   const clearLogFilters = useCallback(() => {
     setStart('');
     setEnd('');
@@ -193,6 +196,10 @@ function LogsPageContent() {
     }, 300);
     return () => window.clearTimeout(handle);
   }, [filters, resetPagination]);
+
+  useEffect(() => {
+    setRequestId(requestIdParam);
+  }, [requestIdParam]);
 
   const validationError = useMemo(() => {
     const issues: string[] = [];
@@ -293,7 +300,7 @@ function LogsPageContent() {
               <h1 className="text-2xl font-bold">System Logs</h1>
               <p className="text-muted-foreground">Query recent logs aggregated across workers.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <ExportMenu
                 onExport={(format: ExportFormat) => {
                   exportData({

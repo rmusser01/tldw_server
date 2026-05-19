@@ -79,7 +79,7 @@ const apiMock = api as unknown as ApiMock;
 
 beforeEach(() => {
   confirmMock.mockResolvedValue(true);
-  privilegedActionMock.mockResolvedValue(true);
+  privilegedActionMock.mockResolvedValue({ reason: 'test audit reason', adminPassword: '' });
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
 

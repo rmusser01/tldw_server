@@ -86,7 +86,7 @@ describe("FilterBuilder preview panel", () => {
       />
     )
 
-    expect(screen.getByText("0 ingestable, 0 filtered from 0 sample items.")).toBeInTheDocument()
+    expect(screen.getByText("Found 0 articles (0 skipped) out of 0 sample items.")).toBeInTheDocument()
     expect(screen.getByText("No sample candidates available.")).toBeInTheDocument()
   })
 

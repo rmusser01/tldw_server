@@ -44,6 +44,13 @@ describe("frontend CI workflow networking", () => {
     }
   })
 
+  it("forces the smoke gate to build the production frontend artifact explicitly", () => {
+    const workflow = readWorkflow("frontend-ux-gates.yml")
+    const jobBlock = getJobBlock(workflow, "smoke-gate")
+
+    expect(jobBlock).toContain("run: bun run build:prod")
+  })
+
   it("pins advanced-mode browser API settings for the frontend E2E tiers", () => {
     const workflow = readWorkflow("frontend-e2e-tiers.yml")
 

@@ -1,4 +1,6 @@
 import type { Prompt } from "@/db/dexie/types"
+import type { ChatModelSettings } from "@/store/model"
+import type { ActorSettings } from "@/types/actor"
 import type { Character } from "@/types/character"
 import type { RagPinnedResult } from "@/utils/rag-format"
 import type { PresetKey } from "./ParameterPresets"
@@ -9,11 +11,58 @@ export type StartupTemplatePromptSource =
   | "prompt-library"
   | "prompt-studio"
 
+export type StartupTemplateBundleSource =
+  | "startup-template"
+  | "role-play-setup"
+
+export type StartupTemplateRolePlayIdentity = {
+  kind: "character" | "persona"
+  id: string | number
+  name: string
+}
+
+export type StartupTemplateRolePlayBehavior = {
+  source: "template" | "custom" | "modified-template"
+  templateId: string | null
+  templateTitle: string | null
+  templateCategory: string | null
+  systemPrompt: string
+  modified: boolean
+}
+
+export type StartupTemplateRolePlayGeneration = {
+  presetKey: PresetKey
+  settings: Partial<ChatModelSettings>
+}
+
+export type StartupTemplateRolePlayContext = {
+  ragPinnedCount: number
+  ragPinnedResultIds: string[]
+}
+
+export type StartupTemplateRolePlayMetadata = {
+  source: "role-play-setup"
+  identity: StartupTemplateRolePlayIdentity | null
+  behavior: StartupTemplateRolePlayBehavior | null
+  scene: ActorSettings | null
+  generation: StartupTemplateRolePlayGeneration | null
+  context: StartupTemplateRolePlayContext | null
+}
+
+export type RolePlaySetupPreviewDescription = {
+  identity: string
+  behavior: string
+  scene: string
+  generation: string
+  context: string
+}
+
 export type StartupTemplateBundle = {
   id: string
   name: string
   createdAt: number
   updatedAt: number
+  source: StartupTemplateBundleSource
   selectedModel: string | null
   systemPrompt: string
   selectedSystemPromptId: string | null
@@ -23,10 +72,12 @@ export type StartupTemplateBundle = {
   presetKey: PresetKey
   character: Character | null
   ragPinnedResults: RagPinnedResult[]
+  rolePlay: StartupTemplateRolePlayMetadata | null
 }
 
 export type StartupTemplateCreateInput = {
   name: string
+  source?: StartupTemplateBundleSource
   selectedModel: string | null
   systemPrompt: string
   selectedSystemPromptId?: string | null
@@ -36,6 +87,7 @@ export type StartupTemplateCreateInput = {
   presetKey?: PresetKey
   character?: Character | null
   ragPinnedResults?: RagPinnedResult[]
+  rolePlay?: StartupTemplateRolePlayMetadata | null
 }
 
 export type StartupTemplatePromptResolution = {
@@ -47,6 +99,13 @@ export type StartupTemplatePromptResolution = {
 
 const MAX_TEMPLATE_NAME_LENGTH = 80
 const FALLBACK_TEMPLATE_NAME = "New startup template"
+
+const PRESET_LABELS: Record<PresetKey, string> = {
+  creative: "Creative",
+  balanced: "Balanced",
+  precise: "Precise",
+  custom: "Custom"
+}
 
 const nowTimestamp = () => Date.now()
 
@@ -71,13 +130,17 @@ const normalizePromptSource = (
   return "none"
 }
 
+const normalizeBundleSource = (value: unknown): StartupTemplateBundleSource =>
+  value === "role-play-setup" ? "role-play-setup" : "startup-template"
+
+const isPresetKey = (value: unknown): value is PresetKey =>
+  value === "creative" ||
+  value === "balanced" ||
+  value === "precise" ||
+  value === "custom"
+
 const normalizePresetKey = (value: unknown): PresetKey => {
-  if (
-    value === "creative" ||
-    value === "balanced" ||
-    value === "precise" ||
-    value === "custom"
-  ) {
+  if (isPresetKey(value)) {
     return value
   }
   return "custom"
@@ -131,6 +194,148 @@ const normalizeCharacter = (value: unknown): Character | null => {
   return value as Character
 }
 
+const normalizeRolePlayIdentity = (
+  value: unknown
+): StartupTemplateRolePlayIdentity | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (record.kind !== "character" && record.kind !== "persona") return null
+  const id = record.id
+  const name = normalizeString(record.name).trim()
+  if (!(typeof id === "string" || typeof id === "number")) return null
+  if (!String(id).trim() || !name) return null
+  return {
+    kind: record.kind,
+    id,
+    name
+  }
+}
+
+const normalizeRolePlayBehavior = (
+  value: unknown
+): StartupTemplateRolePlayBehavior | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (
+    record.source !== "template" &&
+    record.source !== "custom" &&
+    record.source !== "modified-template"
+  ) {
+    return null
+  }
+  const systemPrompt = normalizeString(record.systemPrompt).trim()
+  const templateId = normalizeNullableString(record.templateId)
+  const templateTitle = normalizeNullableString(record.templateTitle)
+  if (record.source === "template" && !templateId && !templateTitle) return null
+  if (record.source !== "template" && !systemPrompt && !templateTitle) return null
+
+  return {
+    source: record.source,
+    templateId,
+    templateTitle,
+    templateCategory: normalizeNullableString(record.templateCategory),
+    systemPrompt,
+    modified: Boolean(record.modified)
+  }
+}
+
+const normalizeActorSettings = (value: unknown): ActorSettings | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (typeof record.isEnabled !== "boolean") return null
+  if (!Array.isArray(record.aspects)) return null
+  if (typeof record.notes !== "string") return null
+  return value as ActorSettings
+}
+
+const normalizeRolePlaySettings = (
+  value: unknown
+): Partial<ChatModelSettings> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const settings: Partial<ChatModelSettings> = {}
+  const writableSettings = settings as Record<string, unknown>
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      typeof entry === "string" ||
+      typeof entry === "boolean" ||
+      (typeof entry === "number" && Number.isFinite(entry))
+    ) {
+      writableSettings[key] = entry
+    }
+  }
+  return settings
+}
+
+const normalizeRolePlayGeneration = (
+  value: unknown
+): StartupTemplateRolePlayGeneration | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (!isPresetKey(record.presetKey)) return null
+  return {
+    presetKey: record.presetKey,
+    settings: normalizeRolePlaySettings(record.settings)
+  }
+}
+
+const normalizeRolePlayContext = (
+  value: unknown
+): StartupTemplateRolePlayContext | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  const rawCount = record.ragPinnedCount
+  const ids = Array.isArray(record.ragPinnedResultIds)
+    ? record.ragPinnedResultIds
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter(Boolean)
+    : []
+  const count =
+    typeof rawCount === "number" && Number.isFinite(rawCount) && rawCount > 0
+      ? Math.floor(rawCount)
+      : ids.length
+  if (count <= 0 && ids.length === 0) return null
+  return {
+    ragPinnedCount: Math.max(count, ids.length),
+    ragPinnedResultIds: ids
+  }
+}
+
+const normalizeRolePlayMetadata = (
+  value: unknown
+): StartupTemplateRolePlayMetadata | null => {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  if (record.source !== "role-play-setup") return null
+
+  const identity = normalizeRolePlayIdentity(record.identity)
+  const behavior = normalizeRolePlayBehavior(record.behavior)
+  const scene = normalizeActorSettings(record.scene)
+  const generation = normalizeRolePlayGeneration(record.generation)
+  const context = normalizeRolePlayContext(record.context)
+
+  if (!identity && !behavior && !scene && !generation && !context) return null
+
+  return {
+    source: "role-play-setup",
+    identity,
+    behavior,
+    scene,
+    generation,
+    context
+  }
+}
+
+const resolveStoredBundleSource = (
+  requestedSource: unknown,
+  rolePlay: StartupTemplateRolePlayMetadata | null,
+  character: Character | null
+): StartupTemplateBundleSource => {
+  if (normalizeBundleSource(requestedSource) !== "role-play-setup") {
+    return "startup-template"
+  }
+  return rolePlay || character ? "role-play-setup" : "startup-template"
+}
+
 export const sanitizeStartupTemplateName = (
   value: string,
   fallback = FALLBACK_TEMPLATE_NAME
@@ -169,11 +374,14 @@ export const createStartupTemplateBundle = (
   }
 ): StartupTemplateBundle => {
   const now = options?.now ?? nowTimestamp()
+  const character = normalizeCharacter(input.character)
+  const rolePlay = normalizeRolePlayMetadata(input.rolePlay)
   return {
     id: options?.id ?? createTemplateId(),
     name: sanitizeStartupTemplateName(input.name),
     createdAt: now,
     updatedAt: now,
+    source: resolveStoredBundleSource(input.source, rolePlay, character),
     selectedModel:
       typeof input.selectedModel === "string" && input.selectedModel.trim().length > 0
         ? input.selectedModel
@@ -188,8 +396,9 @@ export const createStartupTemplateBundle = (
     promptTitle: normalizeNullableString(input.promptTitle),
     promptSource: normalizePromptSource(input.promptSource),
     presetKey: normalizePresetKey(input.presetKey),
-    character: normalizeCharacter(input.character),
-    ragPinnedResults: normalizeRagPinnedResults(input.ragPinnedResults)
+    character,
+    ragPinnedResults: normalizeRagPinnedResults(input.ragPinnedResults),
+    rolePlay
   }
 }
 
@@ -209,12 +418,15 @@ export const normalizeStartupTemplateBundle = (
     typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
       ? record.updatedAt
       : createdAt
+  const character = normalizeCharacter(record.character)
+  const rolePlay = normalizeRolePlayMetadata(record.rolePlay)
 
   return {
     id,
     name: sanitizeStartupTemplateName(normalizeString(record.name)),
     createdAt,
     updatedAt,
+    source: resolveStoredBundleSource(record.source, rolePlay, character),
     selectedModel: normalizeNullableString(record.selectedModel),
     systemPrompt: normalizeString(record.systemPrompt),
     selectedSystemPromptId: normalizeNullableString(record.selectedSystemPromptId),
@@ -226,8 +438,9 @@ export const normalizeStartupTemplateBundle = (
     promptTitle: normalizeNullableString(record.promptTitle),
     promptSource: normalizePromptSource(record.promptSource),
     presetKey: normalizePresetKey(record.presetKey),
-    character: normalizeCharacter(record.character),
-    ragPinnedResults: normalizeRagPinnedResults(record.ragPinnedResults)
+    character,
+    ragPinnedResults: normalizeRagPinnedResults(record.ragPinnedResults),
+    rolePlay
   }
 }
 
@@ -266,6 +479,79 @@ export const removeStartupTemplateBundle = (
   existing: StartupTemplateBundle[],
   id: string
 ): StartupTemplateBundle[] => existing.filter((entry) => entry.id !== id)
+
+export const isRolePlayRelevantBundle = (
+  template: StartupTemplateBundle
+): boolean => {
+  if (template.source === "role-play-setup") return true
+  if (template.character) return true
+  if (!template.rolePlay) return false
+
+  return Boolean(
+    template.rolePlay.identity ||
+      template.rolePlay.behavior ||
+      template.rolePlay.scene ||
+      template.rolePlay.context
+  )
+}
+
+const formatRolePlayIdentity = (template: StartupTemplateBundle): string => {
+  const identity = template.rolePlay?.identity
+  if (identity) {
+    const label = identity.kind === "persona" ? "Persona" : "Character"
+    return `${label}: ${identity.name || identity.id}`
+  }
+  if (template.character?.name) return `Character: ${template.character.name}`
+  return "None"
+}
+
+const formatRolePlayBehavior = (template: StartupTemplateBundle): string => {
+  const behavior = template.rolePlay?.behavior
+  if (!behavior) {
+    return template.systemPrompt.trim().length > 0 ? "Custom behavior" : "No behavior"
+  }
+  if (behavior.templateTitle) {
+    return behavior.modified
+      ? `${behavior.templateTitle} modified`
+      : behavior.templateTitle
+  }
+  if (behavior.source === "modified-template") return "Modified template"
+  if (behavior.source === "custom") return "Custom behavior"
+  return "Behavior template"
+}
+
+const formatRolePlayScene = (template: StartupTemplateBundle): string =>
+  template.rolePlay?.scene?.isEnabled ? "Scene: active" : "No scene"
+
+const formatRolePlayGeneration = (template: StartupTemplateBundle): string => {
+  const presetKey = template.rolePlay?.generation?.presetKey ?? template.presetKey
+  return PRESET_LABELS[presetKey] ?? "Custom"
+}
+
+const formatPinnedCount = (count: number): string => {
+  if (count <= 0) return "No pinned sources"
+  if (count === 1) return "1 pinned source"
+  return `${count} pinned sources`
+}
+
+const formatRolePlayContext = (template: StartupTemplateBundle): string => {
+  const metadataCount = template.rolePlay?.context?.ragPinnedCount
+  const count =
+    typeof metadataCount === "number" && Number.isFinite(metadataCount)
+      ? metadataCount
+      : template.ragPinnedResults.length
+  return formatPinnedCount(count)
+}
+
+export const describeRolePlaySetupPreview = (
+  template: StartupTemplateBundle
+): RolePlaySetupPreviewDescription => ({
+  identity: formatRolePlayIdentity(template),
+  behavior: formatRolePlayBehavior(template),
+  scene: formatRolePlayScene(template),
+  generation: formatRolePlayGeneration(template),
+  context: formatRolePlayContext(template)
+})
 
 export const resolveStartupTemplatePrompt = (
   template: StartupTemplateBundle,

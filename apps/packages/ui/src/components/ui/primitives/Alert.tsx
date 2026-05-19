@@ -10,8 +10,8 @@ export interface AlertProps {
   variant?: AlertVariant
   /** Optional title displayed prominently */
   title?: React.ReactNode
-  /** Alert content/message */
-  children: React.ReactNode
+  /** Optional alert content/message */
+  children?: React.ReactNode
   /** Custom icon (defaults to variant-appropriate icon) */
   icon?: React.ReactNode
   /** Primary action button */
@@ -20,6 +20,7 @@ export interface AlertProps {
     onClick: () => void
     loading?: boolean
     disabled?: boolean
+    variant?: React.ComponentProps<typeof Button>["variant"]
   }
   /** Secondary action (text link style) */
   secondaryAction?: {
@@ -30,6 +31,12 @@ export interface AlertProps {
   dismissible?: boolean
   /** Callback when dismissed */
   onDismiss?: () => void
+  /** Accessible label for the dismiss button */
+  dismissLabel?: string
+  /** ARIA role for alert urgency */
+  role?: "alert" | "status"
+  /** Live-region politeness for status-style alerts */
+  "aria-live"?: "off" | "polite" | "assertive"
   /** Additional CSS classes */
   className?: string
   /** Test ID for testing */
@@ -91,6 +98,9 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
       secondaryAction,
       dismissible = false,
       onDismiss,
+      dismissLabel = "Dismiss",
+      role,
+      "aria-live": ariaLive,
       className,
       "data-testid": dataTestId,
     },
@@ -98,6 +108,11 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
   ) => {
     const config = variantConfig[variant]
     const DefaultIcon = config.icon
+    const hasContent = React.Children.toArray(children).some((child) => child !== "")
+    const defaultsToStatus = variant === "info" || variant === "success"
+    const resolvedRole = role ?? (defaultsToStatus ? "status" : "alert")
+    const resolvedAriaLive =
+      ariaLive ?? (resolvedRole === "status" ? "polite" : undefined)
 
     return (
       <div
@@ -107,8 +122,10 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
           config.container,
           className
         )}
-        role="alert"
+        role={resolvedRole}
+        aria-live={resolvedAriaLive}
         data-testid={dataTestId}
+        data-ds-component="Alert"
       >
         <span
           className={cn("mt-0.5 flex-shrink-0", config.text)}
@@ -121,15 +138,18 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
           {title && (
             <p className={cn("text-sm font-medium", config.text)}>{title}</p>
           )}
-          <div className={cn("text-sm", config.text, title && "mt-1")}>
-            {children}
-          </div>
+          {hasContent && (
+            <div className={cn("text-sm", config.text, title && "mt-1")}>
+              {children}
+            </div>
+          )}
 
           {(action || secondaryAction) && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {action && (
                 <Button
                   size="sm"
+                  variant={action.variant}
                   onClick={action.onClick}
                   loading={action.loading}
                   disabled={action.disabled}
@@ -162,7 +182,7 @@ export const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
               "flex-shrink-0 rounded p-1 transition-colors duration-150 hover:bg-surface2",
               config.text
             )}
-            aria-label="Dismiss"
+            aria-label={dismissLabel}
           >
             <X className="size-4" />
           </button>

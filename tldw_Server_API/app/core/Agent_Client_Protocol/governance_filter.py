@@ -10,14 +10,20 @@ Unanswered permission requests are automatically denied after
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import time
 import uuid
 from contextlib import suppress
+from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
+from tldw_Server_API.app.core.Agent_Client_Protocol.policy_conditions import (
+    PolicyConditions,
+    evaluate_conditions,
+)
 from tldw_Server_API.app.core.Agent_Client_Protocol.permission_tiers import determine_permission_tier
 from tldw_Server_API.app.core.Agent_Client_Protocol.tool_gate import ToolGate, ToolGateResult
 
@@ -57,10 +63,16 @@ class GovernanceFilter:
         self,
         bus: SessionEventBus,
         default_timeout_sec: int = 300,
+        policy_snapshot: Any | None = None,
+        session_metadata: dict[str, Any] | None = None,
+        permission_decision_service: Any | None = None,
     ) -> None:
         self._bus = bus
         self._default_timeout_sec = default_timeout_sec
         self._pending: dict[str, _PendingEntry] = {}
+        self._snapshot = policy_snapshot
+        self._session_metadata = session_metadata or {}
+        self._perm_service = permission_decision_service
 
     # ------------------------------------------------------------------
     # Properties
@@ -70,6 +82,57 @@ class GovernanceFilter:
     def pending_count(self) -> int:
         """Number of tool calls awaiting a permission decision."""
         return len(self._pending)
+
+    # ------------------------------------------------------------------
+    # MCPHub snapshot policy check
+    # ------------------------------------------------------------------
+
+    def _check_snapshot_policy(self, tool_name: str) -> str | None:
+        """Check the MCPHub policy snapshot for a tool-level decision.
+
+        Returns:
+            ``"_deny"`` if the tool is explicitly denied,
+            ``"auto"`` if the tool is explicitly allowed,
+            the tier string if a ``tool_tier_overrides`` pattern matches,
+            or ``None`` if the snapshot has no opinion (fall through to
+            existing tier heuristics).
+        """
+        if self._snapshot is None:
+            return None
+
+        doc = getattr(self._snapshot, "resolved_policy_document", None)
+        if not doc or not isinstance(doc, dict):
+            return None
+
+        conditions = PolicyConditions.from_dict(doc.get("conditions"))
+        if not conditions.is_empty():
+            resource_labels = self._session_metadata.get("labels", {})
+            ancestry_chain = self._session_metadata.get("ancestry_chain", [])
+            source_ip = self._session_metadata.get("client_ip")
+            if not evaluate_conditions(
+                conditions,
+                resource_labels=resource_labels,
+                ancestry_chain=ancestry_chain,
+                source_ip=source_ip,
+            ):
+                return None  # Conditions failed, policy doesn't apply
+
+        # 1. Check denied_tools (highest priority)
+        for pattern in doc.get("denied_tools", []):
+            if fnmatch.fnmatch(tool_name, pattern):
+                return "_deny"
+
+        # 2. Check allowed_tools
+        for pattern in doc.get("allowed_tools", []):
+            if fnmatch.fnmatch(tool_name, pattern):
+                return "auto"
+
+        # 3. Check tool_tier_overrides (pattern -> tier mapping)
+        for pattern, tier in doc.get("tool_tier_overrides", {}).items():
+            if fnmatch.fnmatch(tool_name, pattern):
+                return tier
+
+        return None
 
     # ------------------------------------------------------------------
     # Pipeline entry point
@@ -90,10 +153,68 @@ class GovernanceFilter:
             return
 
         tool_name: str = event.payload.get("tool_name", "")
-        # Use the adapter-provided tier if present; fall back to re-resolving
-        tier = event.payload.get("permission_tier") or determine_permission_tier(tool_name)
-
         approval_future = event.metadata.get("_approval_future")
+
+        # --- MCPHub snapshot check (unified hierarchy) ---
+        snapshot_tier = self._check_snapshot_policy(tool_name)
+        if snapshot_tier == "_deny":
+            deny_event = AgentEvent(
+                session_id=event.session_id,
+                kind=AgentEventKind.TOOL_RESULT,
+                payload={
+                    "tool_call_id": event.payload.get("tool_call_id", ""),
+                    "error": f"Tool '{tool_name}' denied by policy",
+                },
+                metadata={"governance_action": "denied_by_snapshot"},
+            )
+            await self._bus.publish(deny_event)
+            if approval_future is not None and not approval_future.done():
+                approval_future.set_result(("deny", f"Tool '{tool_name}' denied by policy"))
+            return
+
+        # --- Check persisted permission decisions (step 4 in hierarchy) ---
+        if self._perm_service is not None and snapshot_tier is None:
+            session_id = event.session_id
+            user_id = self._session_metadata.get("user_id")
+            if user_id is not None:
+                persisted = self._perm_service.check(user_id, tool_name, session_id)
+                if persisted == "allow":
+                    logger.info(
+                        "Governance: persisted decision auto-approved tool '{}'",
+                        tool_name,
+                    )
+                    if approval_future is not None and not approval_future.done():
+                        approval_future.set_result(("approve", None))
+                    if approval_future is not None:
+                        return
+                    await self._bus.publish(event)
+                    return
+                if persisted == "deny":
+                    logger.info(
+                        "Governance: persisted decision denied tool '{}'",
+                        tool_name,
+                    )
+                    deny_event = AgentEvent(
+                        session_id=event.session_id,
+                        kind=AgentEventKind.TOOL_RESULT,
+                        payload={
+                            "tool_call_id": event.payload.get("tool_call_id", ""),
+                            "error": f"Tool '{tool_name}' denied by remembered decision",
+                        },
+                        metadata={"governance_action": "denied_by_persisted_decision"},
+                    )
+                    await self._bus.publish(deny_event)
+                    if approval_future is not None and not approval_future.done():
+                        approval_future.set_result(
+                            ("deny", f"Tool '{tool_name}' denied by remembered decision")
+                        )
+                    return
+
+        if snapshot_tier is not None:
+            tier = snapshot_tier
+        else:
+            # Use the adapter-provided tier if present; fall back to re-resolving
+            tier = event.payload.get("permission_tier") or determine_permission_tier(tool_name)
         internal_only = approval_future is not None
 
         if tier == "auto":
@@ -142,6 +263,9 @@ class GovernanceFilter:
         request_id: str,
         decision: str,
         reason: str | None = None,
+        *,
+        remember: bool = False,
+        scope: str = "session",
     ) -> None:
         """Handle a human decision for a held tool call.
 
@@ -153,6 +277,12 @@ class GovernanceFilter:
             ``"approve"`` or ``"deny"``.
         reason:
             Optional human-supplied reason (used in deny error message).
+        remember:
+            If ``True`` and a :class:`PermissionDecisionService` is attached,
+            persist the decision for future auto-application.
+        scope:
+            ``"session"`` (default) or ``"global"``.  Only used when
+            *remember* is ``True``.
         """
         entry = self._pending.pop(request_id, None)
         if entry is None:
@@ -167,6 +297,27 @@ class GovernanceFilter:
             entry.timeout_task.cancel()
 
         held_event = entry.event
+
+        # Persist the decision when "remember" is requested
+        if remember and self._perm_service is not None:
+            user_id = self._session_metadata.get("user_id")
+            tool_name = held_event.payload.get("tool_name", "")
+            if user_id is not None and tool_name:
+                self._perm_service.persist(
+                    user_id=user_id,
+                    tool_pattern=tool_name,
+                    decision="allow" if decision == "approve" else "deny",
+                    scope=scope,
+                    session_id=held_event.session_id,
+                    reason=reason,
+                )
+                logger.info(
+                    "Governance: persisted remembered decision for tool '{}' "
+                    "(decision={}, scope={})",
+                    tool_name,
+                    decision,
+                    scope,
+                )
 
         # Resolve the approval future if one was attached
         if entry.approval_future is not None and not entry.approval_future.done():

@@ -35,8 +35,8 @@ type RouteErrorBoundaryState = {
 const DEFAULT_CHAT_PATH = "/"
 const DEFAULT_SETTINGS_PATH = "/settings/tldw"
 export const ROUTE_ERROR_FIXTURE_QUERY_KEY = "__forceRouteError"
-const BACKEND_RECOVERY_TITLE = "Can't reach your tldw server"
-const BACKEND_RECOVERY_MESSAGE =
+const BACKEND_RECOVERY_FALLBACK_TITLE = "Can't reach your tldw server"
+const BACKEND_RECOVERY_FALLBACK_MESSAGE =
   "The current route could not reach your configured tldw server. Check that the server is running and reachable from this browser."
 
 type StoredTldwConfig = {
@@ -55,8 +55,10 @@ const toBackendRecoveryDetails = (
   classification: BackendUnreachableClassification,
   serverUrl?: string
 ): BackendUnavailableRecoveryDetails => ({
-  title: BACKEND_RECOVERY_TITLE,
-  message: BACKEND_RECOVERY_MESSAGE,
+  title: classification.title || BACKEND_RECOVERY_FALLBACK_TITLE,
+  message: classification.message || BACKEND_RECOVERY_FALLBACK_MESSAGE,
+  fixHint: classification.fixHint,
+  subtype: classification.subtype,
   method: classification.method,
   path: classification.path,
   serverUrl,

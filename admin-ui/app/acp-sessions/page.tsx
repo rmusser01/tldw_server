@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
@@ -14,12 +14,18 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Pause, Play, RefreshCw, MessageSquare, XCircle, Wifi, WifiOff, Gauge } from 'lucide-react';
 import { ExportMenu } from '@/components/ui/export-menu';
-import { exportData, type ExportFormat } from '@/lib/export';
-import { RefreshCw, MessageSquare, XCircle, Wifi, WifiOff } from 'lucide-react';
+import { exportACPSessions, ExportFormat } from '@/lib/export';
 import { AccessibleIconButton } from '@/components/ui/accessible-icon-button';
 import { api, ApiError } from '@/lib/api-client';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatTokens } from '@/lib/format';
+import { formatDistanceToNow } from 'date-fns';
+
+type UserInfo = { id: number; username?: string; email?: string };
 
 interface ACPSession {
   session_id: string;
@@ -37,6 +43,12 @@ interface ACPSession {
   };
   tags: string[];
   has_websocket: boolean;
+  model: string | null;
+  estimated_cost_usd: number | null;
+  token_budget?: number | null;
+  auto_terminate_at_budget?: boolean;
+  budget_exhausted?: boolean;
+  budget_remaining?: number | null;
   agent_budget?: number | null;
 }
 
@@ -62,11 +74,54 @@ export default function ACPSessionsPage() {
     agentType: '',
     userId: '',
   });
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const loadingRef = useRef(false);
+  const latestRequestIdRef = useRef(0);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [userMap, setUserMap] = useState<Record<number, UserInfo>>({});
   const confirm = useConfirm();
   const toast = useToast();
 
+  // Load user map for resolving IDs to names
+  useEffect(() => {
+    let cancelled = false;
+    const loadUsers = async () => {
+      try {
+        const items: UserInfo[] = [];
+        let page = 1;
+        let pages = 1;
+
+        while (!cancelled && page <= pages) {
+          const response = await api.getUsersPage({ page: String(page), limit: '200' });
+          items.push(...(Array.isArray(response?.items) ? response.items : []));
+          pages = Math.max(1, response?.pages ?? 1);
+          if (!response?.items?.length) {
+            break;
+          }
+          page += 1;
+        }
+
+        if (cancelled) return;
+        const map: Record<number, UserInfo> = {};
+        items.forEach((u) => { map[u.id] = u; });
+        setUserMap(map);
+      } catch {
+        // Best-effort — keep numeric IDs as fallback
+      }
+    };
+    void loadUsers();
+    return () => { cancelled = true; };
+  }, []);
+
+  const resolveUserLabel = (userId: number) => {
+    const info = userMap[userId];
+    return info?.username || info?.email || String(userId);
+  };
+
   const loadSessions = useCallback(async () => {
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
+    loadingRef.current = true;
     setLoading(true);
     setError('');
     try {
@@ -75,13 +130,19 @@ export default function ACPSessionsPage() {
       if (appliedFilters.agentType) params.agent_type = appliedFilters.agentType;
       if (appliedFilters.userId) params.user_id = appliedFilters.userId;
       const response = await api.getACPSessions(params) as ACPSessionListResponse;
+      if (latestRequestIdRef.current !== requestId) return;
       setSessions(response.sessions || []);
       setTotal(response.total || 0);
+      setLastRefreshed(new Date());
     } catch (err) {
+      if (latestRequestIdRef.current !== requestId) return;
       const message = err instanceof ApiError ? err.message : 'Failed to load ACP sessions';
       setError(message);
     } finally {
-      setLoading(false);
+      if (latestRequestIdRef.current === requestId) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, [appliedFilters]);
 
@@ -89,12 +150,30 @@ export default function ACPSessionsPage() {
     loadSessions();
   }, [loadSessions]);
 
-  // Auto-refresh every 15 seconds
+  // Auto-refresh: 15-second interval, paused when tab is not visible
   useEffect(() => {
-    if (!autoRefresh) return;
-    const id = setInterval(() => { void loadSessions(); }, 15_000);
-    return () => clearInterval(id);
-  }, [autoRefresh, loadSessions]);
+    if (!autoRefreshEnabled) return;
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible' && !loadingRef.current) {
+        void loadSessions();
+      }
+    }, 15_000);
+
+    return () => clearInterval(intervalId);
+  }, [autoRefreshEnabled, loadSessions]);
+
+  // Re-render the "Last updated X ago" text every 15 seconds so it stays fresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!lastRefreshed) return;
+    const tickId = setInterval(() => setTick((t) => t + 1), 15_000);
+    return () => clearInterval(tickId);
+  }, [lastRefreshed]);
+
+  const lastUpdatedLabel = lastRefreshed
+    ? `Updated ${formatDistanceToNow(lastRefreshed, { addSuffix: true })}`
+    : null;
 
   const handleApplyFilters = useCallback(() => {
     setAppliedFilters({
@@ -123,6 +202,44 @@ export default function ACPSessionsPage() {
     }
   }, [confirm, toast, loadSessions]);
 
+  // -- Set Budget dialog state --
+  const [budgetDialogOpen, setBudgetDialogOpen] = useState(false);
+  const [budgetSessionId, setBudgetSessionId] = useState<string | null>(null);
+  const [budgetValue, setBudgetValue] = useState('');
+  const [budgetAutoTerminate, setBudgetAutoTerminate] = useState(true);
+  const [budgetSaving, setBudgetSaving] = useState(false);
+
+  const openBudgetDialog = useCallback((session: ACPSession) => {
+    setBudgetSessionId(session.session_id);
+    setBudgetValue(session.token_budget != null ? String(session.token_budget) : '');
+    setBudgetAutoTerminate(session.auto_terminate_at_budget ?? true);
+    setBudgetDialogOpen(true);
+  }, []);
+
+  const handleSaveBudget = useCallback(async () => {
+    if (!budgetSessionId) return;
+    const parsed = parseInt(budgetValue, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      toast.error('Token budget must be a positive number');
+      return;
+    }
+    setBudgetSaving(true);
+    try {
+      await api.setSessionBudget(budgetSessionId, {
+        token_budget: parsed,
+        auto_terminate_at_budget: budgetAutoTerminate,
+      });
+      toast.success('Token budget updated');
+      setBudgetDialogOpen(false);
+      loadSessions();
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Failed to set budget';
+      toast.error(message);
+    } finally {
+      setBudgetSaving(false);
+    }
+  }, [budgetSessionId, budgetValue, budgetAutoTerminate, toast, loadSessions]);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
@@ -138,12 +255,57 @@ export default function ACPSessionsPage() {
     }
   };
 
-  const formatTokens = (count: number) => {
-    if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-    if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
-    return String(count);
+  const formatCost = (usd: number | null | undefined): string => {
+    if (usd == null) return '\u2014';
+    return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
   };
 
+  const getBudgetDisplay = (session: ACPSession) => {
+    if (session.token_budget == null) {
+      return <span className="text-xs text-muted-foreground">No budget</span>;
+    }
+    const used = session.usage.total_tokens;
+    const budget = session.token_budget;
+    const pct = budget > 0 ? Math.min((used / budget) * 100, 100) : 0;
+
+    if (session.budget_exhausted) {
+      return (
+        <div className="flex flex-col gap-0.5 min-w-[80px]" data-testid="budget-exhausted">
+          <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Exhausted</Badge>
+          <span className="text-[10px] text-muted-foreground">
+            {formatTokens(used)} / {formatTokens(budget)}
+          </span>
+        </div>
+      );
+    }
+
+    const barColor =
+      pct > 80 ? 'bg-red-500' :
+      pct > 60 ? 'bg-yellow-500' :
+      'bg-green-500';
+
+    const textColor =
+      pct > 80 ? 'text-red-600' :
+      pct > 60 ? 'text-yellow-600' :
+      'text-green-600';
+
+    return (
+      <div className="flex flex-col gap-0.5 min-w-[80px]" data-testid="budget-progress">
+        <div className="flex items-center gap-1">
+          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+          </div>
+          <span className={`text-[10px] font-medium ${textColor}`}>{Math.round(pct)}%</span>
+        </div>
+        <span className="text-[10px] text-muted-foreground">
+          {formatTokens(used)} / {formatTokens(budget)}
+          {session.auto_terminate_at_budget && (
+            <span title="Auto-terminates when budget is exhausted"> (auto)</span>
+          )}
+        </span>
+      </div>
+    );
+  };
   return (
     <PermissionGuard variant="route" requireAuth role="admin">
       <ResponsiveLayout>
@@ -153,31 +315,36 @@ export default function ACPSessionsPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl font-bold">ACP Sessions</h1>
-                {autoRefresh && (
+                {autoRefreshEnabled && (
                   <Badge variant="default" className="bg-green-600 animate-pulse text-xs">Live</Badge>
                 )}
               </div>
               <p className="text-muted-foreground">Monitor and manage Agent Client Protocol sessions across all users</p>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className="text-xs"
-              >
-                Auto-refresh: {autoRefresh ? 'ON' : 'OFF'}
-              </Button>
+              {lastUpdatedLabel && (
+                <span className="text-xs text-muted-foreground" data-testid="last-updated-label">
+                  {lastUpdatedLabel}
+                </span>
+              )}
               <ExportMenu
-                onExport={(format: ExportFormat) => {
-                  exportData({
-                    data: sessions as unknown as Record<string, unknown>[],
-                    filename: 'acp-sessions',
-                    format,
-                  });
-                }}
+                onExport={(format: ExportFormat) => exportACPSessions(sessions, format)}
                 disabled={sessions.length === 0}
               />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setAutoRefreshEnabled((prev) => !prev)}
+                aria-label={autoRefreshEnabled ? 'Pause auto-refresh' : 'Resume auto-refresh'}
+                data-testid="auto-refresh-toggle"
+                title={autoRefreshEnabled ? 'Pause auto-refresh' : 'Resume auto-refresh'}
+              >
+                {autoRefreshEnabled ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+              </Button>
               <AccessibleIconButton
                 icon={RefreshCw}
                 label="Refresh"
@@ -254,6 +421,7 @@ export default function ACPSessionsPage() {
                         <TableHead title="Estimated at blended $3/M tokens — actual cost varies by model">
                           Est. Cost <span className="text-muted-foreground cursor-help">&#9432;</span>
                         </TableHead>
+                        <TableHead>Budget</TableHead>
                         <TableHead>WS</TableHead>
                         <TableHead>Created</TableHead>
                         <TableHead>Actions</TableHead>
@@ -270,7 +438,7 @@ export default function ACPSessionsPage() {
                           </TableCell>
                           <TableCell>
                             <Link href={`/users/${session.user_id}`} className="text-primary hover:underline">
-                              User {session.user_id}
+                              {resolveUserLabel(session.user_id)}
                             </Link>
                           </TableCell>
                           <TableCell>
@@ -308,12 +476,18 @@ export default function ACPSessionsPage() {
                               </span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right font-mono text-sm">
-                            {(() => {
-                              // Rough estimate: $0.003/1K tokens (blended input/output average)
-                              const cost = session.usage.total_tokens * 0.000003;
-                              return cost > 0 ? `$${cost.toFixed(4)}` : '—';
-                            })()}
+                          <TableCell>
+                            <span className="text-xs font-mono" title={session.model || undefined}>
+                              {formatCost(session.estimated_cost_usd)}
+                            </span>
+                            {session.model && (
+                              <div className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={session.model}>
+                                {session.model}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {getBudgetDisplay(session)}
                           </TableCell>
                           <TableCell>
                             {session.has_websocket ? (
@@ -326,13 +500,22 @@ export default function ACPSessionsPage() {
                           <TableCell>
                             <div className="flex gap-1">
                               {session.status === 'active' && (
-                                <AccessibleIconButton
-                                  icon={XCircle}
-                                  label="Close session"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleCloseSession(session.session_id)}
-                                />
+                                <>
+                                  <AccessibleIconButton
+                                    icon={Gauge}
+                                    label="Set budget"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => openBudgetDialog(session)}
+                                  />
+                                  <AccessibleIconButton
+                                    icon={XCircle}
+                                    label="Close session"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleCloseSession(session.session_id)}
+                                  />
+                                </>
                               )}
                             </div>
                           </TableCell>
@@ -344,6 +527,46 @@ export default function ACPSessionsPage() {
               )}
             </CardContent>
           </Card>
+          {/* Set Budget Dialog */}
+          <Dialog open={budgetDialogOpen} onOpenChange={setBudgetDialogOpen}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Set Token Budget</DialogTitle>
+                <DialogDescription>
+                  Set a token budget for session {budgetSessionId?.slice(0, 12)}...
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="budget-tokens">Token Budget</Label>
+                  <Input
+                    id="budget-tokens"
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 100000"
+                    value={budgetValue}
+                    onChange={(e) => setBudgetValue(e.target.value)}
+                    data-testid="budget-input"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="budget-auto-terminate"
+                    checked={budgetAutoTerminate}
+                    onCheckedChange={(checked) => setBudgetAutoTerminate(checked === true)}
+                    data-testid="budget-auto-terminate"
+                  />
+                  <Label htmlFor="budget-auto-terminate">Auto-terminate when budget is exhausted</Label>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setBudgetDialogOpen(false)}>Cancel</Button>
+                <Button size="sm" onClick={handleSaveBudget} disabled={budgetSaving} loading={budgetSaving} loadingText="Saving...">
+                  Set Budget
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </ResponsiveLayout>
     </PermissionGuard>

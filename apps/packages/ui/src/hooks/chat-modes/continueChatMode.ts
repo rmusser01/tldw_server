@@ -12,6 +12,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 type ContinueChatModeParams = {
   selectedModel: string
@@ -144,12 +145,12 @@ export const continueChatMode = async (
   history: ChatHistory,
   signal: AbortSignal,
   params: ContinueChatModeParams
-) => {
+): Promise<ChatSubmitResult> => {
   console.log("Using continueChatMode")
   const lastMessage = messages[messages.length - 1]
   const assistantMessageId = lastMessage?.id
 
-  await runChatPipeline(
+  return runChatPipeline(
     continueChatModeDefinition,
     "",
     "",

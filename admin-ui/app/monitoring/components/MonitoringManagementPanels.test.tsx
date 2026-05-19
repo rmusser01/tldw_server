@@ -39,6 +39,10 @@ vi.mock('./NotificationsPanel', () => ({
   ),
 }));
 
+vi.mock('./ErrorBreakdownPanel', () => ({
+  default: () => <div data-testid="error-breakdown-panel">error-breakdown</div>,
+}));
+
 vi.mock('./SystemStatusPanel', () => ({
   default: ({
     systemStatus,
@@ -116,6 +120,7 @@ describe('MonitoringManagementPanels', () => {
     expect(screen.getByTestId('alert-rules-panel').textContent).toBe('rules:1');
     expect(screen.getByTestId('alerts-panel').textContent).toBe('alerts:1');
     expect(screen.getByTestId('watchlists-panel').textContent).toBe('watchlists:1');
+    expect(screen.getByTestId('error-breakdown-panel')).toBeInTheDocument();
     expect(screen.getByTestId('notifications-panel').textContent).toBe('notifications:1');
     expect(screen.getByTestId('system-status-panel').textContent).toBe('status:1');
     expect(

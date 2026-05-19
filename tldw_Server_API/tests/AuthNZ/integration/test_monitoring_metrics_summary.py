@@ -71,13 +71,14 @@ async def test_metrics_summary_uses_boolean_revoked_filter(monkeypatch):
 
     await pool.execute(
         """
-        INSERT INTO api_keys (user_id, key_hash, key_prefix, status)
-        VALUES (?, ?, ?, 'active')
+        INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
+        VALUES (?, ?, ?, ?, 'active')
         """,
         (
             user_id,
             f"metrics_api_key_hash_{uuid.uuid4().hex}",
             f"metrics_key_{uuid.uuid4().hex[:10]}",
+            "read",
         ),
     )
 

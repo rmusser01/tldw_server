@@ -16,6 +16,8 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminTokenDecodeRequest,
     AdminTokenDecodeResponse,
     AuditLogResponse,
+    ErrorBreakdownResponse,
+    RateLimitSummaryResponse,
     SecurityAlertStatusResponse,
     SystemLogsResponse,
     SystemStatsResponse,
@@ -66,15 +68,6 @@ async def debug_decode_token(
     """Decode a JWT or API token without verifying its signature."""
     result = await admin_system_service.debug_decode_token(payload.token.get_secret_value())
     return AdminTokenDecodeResponse(**result)
-
-
-@router.get("/billing/analytics")
-async def get_billing_analytics(
-    principal: AuthPrincipal = Depends(get_auth_principal),
-    db=Depends(get_db_transaction),
-) -> dict:
-    """Get billing analytics: MRR, subscriber counts, churn rate."""
-    return await admin_system_service.get_billing_analytics(db)
 
 
 @router.get("/dependencies/health")
@@ -162,7 +155,18 @@ async def get_audit_log(
     )
 
 
-@router.get("/audit-log/export")
+@router.get(
+    "/audit-log/export",
+    responses={
+        200: {
+            "description": "Audit log export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_audit_log(
     user_id: int | None = None,
     action: str | None = None,
@@ -229,3 +233,25 @@ async def list_system_logs(
         offset=offset,
         principal=principal,
     )
+
+
+@router.get("/errors/breakdown", response_model=ErrorBreakdownResponse)
+async def get_error_breakdown(
+    hours: int = Query(24, ge=1, le=168, description="Lookback period in hours"),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db=Depends(get_db_transaction),
+) -> ErrorBreakdownResponse:
+    """Aggregate recent errors from audit log grouped by action and status code."""
+    return await admin_system_service.get_error_breakdown(
+        principal=principal,
+        db=db,
+        hours=hours,
+    )
+
+
+@router.get("/rate-limits/summary", response_model=RateLimitSummaryResponse)
+async def get_rate_limit_summary(
+    hours: int = Query(24, ge=1, le=168, description="Lookback period in hours"),
+) -> RateLimitSummaryResponse:
+    """Aggregate rate-limit throttle events and policy headroom."""
+    return await admin_system_service.get_rate_limit_summary(hours=hours)

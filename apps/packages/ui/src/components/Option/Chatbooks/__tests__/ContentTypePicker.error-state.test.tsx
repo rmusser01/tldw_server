@@ -38,6 +38,16 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const expectInsideDesignSystemAlert = (text: string | RegExp) => {
+  const node = screen.getByText(text)
+  const alert = node.closest('[data-ds-component="Alert"]')
+  expect(alert).toHaveAttribute(
+    "data-ds-component",
+    "Alert"
+  )
+  return alert
+}
+
 describe("ContentTypePicker load error state", () => {
   const originalMatchMedia = window.matchMedia
 
@@ -93,6 +103,7 @@ describe("ContentTypePicker load error state", () => {
     )
 
     expect(screen.getByText("Unable to load items")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Unable to load items")
     expect(screen.getByText(/GET \[server-endpoint\]/i)).toBeInTheDocument()
     expect(screen.getByText(/\[redacted-path\]/i)).toBeInTheDocument()
     expect(
@@ -102,5 +113,31 @@ describe("ContentTypePicker load error state", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(refetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("marks include-all hints as polite status notices", () => {
+    vi.mocked(useQuery).mockReturnValue({
+      data: { items: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: refetchMock
+    } as any)
+
+    render(
+      <ContentTypePicker
+        typeKey="note"
+        label="Notes"
+        includeAll={true}
+        onIncludeAllChange={vi.fn()}
+        selectedIds={[]}
+        onSelectionChange={vi.fn()}
+        fetcher={vi.fn()}
+      />
+    )
+
+    const hintAlert = expectInsideDesignSystemAlert("All {{label}} will be included.")
+    expect(hintAlert).toHaveAttribute("role", "status")
+    expect(hintAlert).toHaveAttribute("aria-live", "polite")
   })
 })

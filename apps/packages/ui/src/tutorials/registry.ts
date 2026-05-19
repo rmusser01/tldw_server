@@ -37,6 +37,17 @@ export interface TutorialStep {
 /**
  * A complete tutorial definition
  */
+export interface TutorialSequence {
+  /** Explicit next tutorial in a multi-page sequence */
+  nextTutorialId: string
+  /** Route to navigate to before starting the next tutorial */
+  nextRoute?: string
+  /** i18n key for a continue/progression label */
+  nextLabelKey?: string
+  /** Fallback progression label */
+  nextLabelFallback?: string
+}
+
 export interface TutorialDefinition {
   /** Unique identifier for this tutorial */
   id: string
@@ -56,6 +67,8 @@ export interface TutorialDefinition {
   steps: TutorialStep[]
   /** IDs of other tutorials that should be completed first (optional) */
   prerequisites?: string[]
+  /** Optional sequence metadata for multi-page tutorial flows */
+  sequence?: TutorialSequence
   /** Priority for ordering in the tutorial list (lower = higher priority) */
   priority?: number
 }
@@ -78,6 +91,14 @@ import { notesTutorials } from "./definitions/notes"
 import { flashcardsTutorials } from "./definitions/flashcards"
 import { worldBooksTutorials } from "./definitions/world-books"
 import { gettingStartedTutorials } from "./definitions/getting-started"
+import { moderationTutorials } from "./definitions/moderation"
+import { mcpHubTutorials } from "./definitions/mcp-hub"
+import { quizTutorials } from "./definitions/quiz"
+import { ttsTutorials } from "./definitions/tts"
+import { sttTutorials } from "./definitions/stt"
+import { watchlistsTutorials } from "./definitions/watchlists"
+import { monitoringTutorials } from "./definitions/monitoring"
+import { documentWorkspaceTutorials } from "./definitions/document-workspace"
 
 /**
  * Central registry of all available tutorials
@@ -93,7 +114,15 @@ export const TUTORIAL_REGISTRY: TutorialDefinition[] = [
   ...evaluationsTutorials,
   ...notesTutorials,
   ...flashcardsTutorials,
-  ...worldBooksTutorials
+  ...worldBooksTutorials,
+  ...documentWorkspaceTutorials,
+  ...moderationTutorials,
+  ...mcpHubTutorials,
+  ...quizTutorials,
+  ...ttsTutorials,
+  ...sttTutorials,
+  ...watchlistsTutorials,
+  ...monitoringTutorials
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,12 +163,15 @@ const LEGACY_ROUTE_ALIASES: Record<string, string> = {
   "/options/media": "/media",
   "/options/knowledge": "/knowledge",
   "/options/characters": "/characters",
-  "/options/workspace-playground": "/workspace-playground",
+  "/options/workspace-playground": "/research-studio",
+  "/workspace-playground": "/research-studio",
+  "/workspace-studio": "/research-studio",
   "/options/prompts": "/prompts",
   "/options/evaluations": "/evaluations",
   "/options/notes": "/notes",
   "/options/flashcards": "/flashcards",
-  "/options/world-books": "/world-books"
+  "/options/world-books": "/world-books",
+  "/options/document-workspace": "/document-workspace"
 }
 
 const PREFIX_ROUTE_ALIASES: Array<{ pattern: RegExp; canonical: string }> = [
@@ -224,6 +256,37 @@ export function normalizeTutorialRoute(routeLike: string): string {
  */
 type GetTutorialsForRouteOptions = {
   ignoreRuntimeSuppression?: boolean
+  completedTutorialIds?: CompletedTutorialIds
+  includeLocked?: boolean
+}
+
+type CompletedTutorialIds = readonly string[] | ReadonlySet<string>
+
+const getCompletedTutorialSet = (
+  completedTutorialIds: CompletedTutorialIds = []
+): ReadonlySet<string> =>
+  completedTutorialIds instanceof Set
+    ? completedTutorialIds
+    : new Set(completedTutorialIds)
+
+const sortTutorialsByPriority = (
+  tutorials: readonly TutorialDefinition[]
+): TutorialDefinition[] =>
+  [...tutorials].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
+
+export function areTutorialPrerequisitesMet(
+  tutorial: TutorialDefinition,
+  completedTutorialIds: CompletedTutorialIds = []
+): boolean {
+  const prerequisites = tutorial.prerequisites ?? []
+  if (prerequisites.length === 0) {
+    return true
+  }
+
+  const completedTutorials = getCompletedTutorialSet(completedTutorialIds)
+  return prerequisites.every((prerequisiteId) =>
+    completedTutorials.has(prerequisiteId)
+  )
 }
 
 export function getTutorialsForRoute(
@@ -237,9 +300,15 @@ export function getTutorialsForRoute(
   const matches = TUTORIAL_REGISTRY.filter((tutorial) =>
     matchRoute(tutorial.routePattern, pathname)
   )
+  const completedSet = getCompletedTutorialSet(options.completedTutorialIds)
+  const eligibleMatches = options.includeLocked
+    ? matches
+    : matches.filter((tutorial) =>
+        areTutorialPrerequisitesMet(tutorial, completedSet)
+      )
 
   // Sort by priority (lower priority number = higher in list)
-  return matches.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
+  return sortTutorialsByPriority(eligibleMatches)
 }
 
 /**
@@ -259,13 +328,19 @@ export function getTutorialById(
  * @returns The primary tutorial (first one with "basics" in ID, or first tutorial)
  */
 export function getPrimaryTutorialForRoute(
-  pathname: string
+  pathname: string,
+  options: GetTutorialsForRouteOptions = {}
 ): TutorialDefinition | undefined {
-  const tutorials = getTutorialsForRoute(pathname)
+  const tutorials = getTutorialsForRoute(pathname, options)
   if (tutorials.length === 0) return undefined
 
-  // Prefer tutorials with "basics" or "overview" in the ID
-  const basicsTutorial = tutorials.find(
+  const topPriority = tutorials[0].priority ?? 100
+  const topPriorityTutorials = tutorials.filter(
+    (tutorial) => (tutorial.priority ?? 100) === topPriority
+  )
+
+  // Prefer basics/overview only within the highest-priority group.
+  const basicsTutorial = topPriorityTutorials.find(
     (t) => t.id.includes("basics") || t.id.includes("overview")
   )
 
@@ -277,8 +352,11 @@ export function getPrimaryTutorialForRoute(
  * @param pathname - The current route pathname
  * @returns True if at least one tutorial is available
  */
-export function hasTutorialsForRoute(pathname: string): boolean {
-  return getTutorialsForRoute(pathname).length > 0
+export function hasTutorialsForRoute(
+  pathname: string,
+  options: GetTutorialsForRouteOptions = {}
+): boolean {
+  return getTutorialsForRoute(pathname, options).length > 0
 }
 
 /**
@@ -286,6 +364,42 @@ export function hasTutorialsForRoute(pathname: string): boolean {
  * @param pathname - The current route pathname
  * @returns Number of available tutorials
  */
-export function getTutorialCountForRoute(pathname: string): number {
-  return getTutorialsForRoute(pathname).length
+export function getTutorialCountForRoute(
+  pathname: string,
+  options: GetTutorialsForRouteOptions = {}
+): number {
+  return getTutorialsForRoute(pathname, options).length
+}
+
+/**
+ * Resolve the next eligible tutorial in a sequence after a tutorial completes.
+ */
+export function getNextTutorialInSequence(
+  completedTutorialId: string,
+  completedTutorialIds: CompletedTutorialIds = []
+): TutorialDefinition | undefined {
+  const completedTutorials = new Set(completedTutorialIds)
+  completedTutorials.add(completedTutorialId)
+  const currentTutorial = getTutorialById(completedTutorialId)
+  const explicitNextId = currentTutorial?.sequence?.nextTutorialId
+
+  if (explicitNextId) {
+    const explicitNextTutorial = getTutorialById(explicitNextId)
+    if (
+      explicitNextTutorial &&
+      !completedTutorials.has(explicitNextTutorial.id) &&
+      areTutorialPrerequisitesMet(explicitNextTutorial, completedTutorials)
+    ) {
+      return explicitNextTutorial
+    }
+  }
+
+  return sortTutorialsByPriority(
+    TUTORIAL_REGISTRY.filter(
+      (tutorial) =>
+        !completedTutorials.has(tutorial.id) &&
+        (tutorial.prerequisites ?? []).includes(completedTutorialId) &&
+        areTutorialPrerequisitesMet(tutorial, completedTutorials)
+    )
+  )[0]
 }

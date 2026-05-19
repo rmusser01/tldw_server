@@ -1,7 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -146,8 +146,12 @@ const renderPage = () => {
     </QueryClientProvider>
   )
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const isNotesSearchPath = (request: { path?: string } | undefined) =>
+  /\/api\/v1\/notes\/search\/?\?/.test(String(request?.path || ""))
+const getSearchCalls = () =>
+  mockBgRequest.mock.calls.filter(([request]) =>
+    isNotesSearchPath(request as { path?: string })
+  )
 
 describe("NotesManagerPage stage 11 search filtering", () => {
   beforeEach(() => {
@@ -162,7 +166,7 @@ describe("NotesManagerPage stage 11 search filtering", () => {
       if (path.startsWith("/api/v1/notes/?")) {
         return { items: [], pagination: { total_items: 0, total_pages: 1 } }
       }
-      if (path.startsWith("/api/v1/notes/search/?")) {
+      if (isNotesSearchPath(request)) {
         return { items: [], pagination: { total_items: 0, total_pages: 1 } }
       }
       if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
@@ -177,9 +181,13 @@ describe("NotesManagerPage stage 11 search filtering", () => {
     })
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("shows search input", () => {
     renderPage()
-    expect(screen.getByPlaceholderText("Search titles & content...")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("Search notes... (use quotes for exact match)")).toBeInTheDocument()
   })
 
   it("opens search tips popover with phrase and AND guidance", async () => {
@@ -192,7 +200,7 @@ describe("NotesManagerPage stage 11 search filtering", () => {
       ).toBeInTheDocument()
     })
     expect(
-      screen.getByText("Text query + selected keywords are combined with AND.")
+      screen.getByText("Text query + selected tags are combined with AND.")
     ).toBeInTheDocument()
   })
 
@@ -214,64 +222,62 @@ describe("NotesManagerPage stage 11 search filtering", () => {
   })
 
   it("debounces rapid typing and issues only one final search request", async () => {
+    vi.useFakeTimers()
     renderPage()
-    const input = screen.getByPlaceholderText("Search titles & content...")
+    const input = screen.getByPlaceholderText("Search notes... (use quotes for exact match)")
 
-    fireEvent.change(input, { target: { value: "a" } })
-    fireEvent.change(input, { target: { value: "al" } })
-    fireEvent.change(input, { target: { value: "alpha" } })
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "a" } })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "al" } })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "alpha" } })
+      await Promise.resolve()
+    })
 
-    const searchCallsBefore = mockBgRequest.mock.calls.filter(([request]) =>
-      String(request?.path || "").startsWith("/api/v1/notes/search/?")
-    )
-    expect(searchCallsBefore.length).toBe(0)
+    expect(getSearchCalls()).toHaveLength(0)
 
-    await sleep(250)
-    const searchCallsNearDebounce = mockBgRequest.mock.calls.filter(([request]) =>
-      String(request?.path || "").startsWith("/api/v1/notes/search/?")
-    )
-    expect(searchCallsNearDebounce.length).toBe(0)
+    await act(async () => {
+      vi.advanceTimersByTime(349)
+      await Promise.resolve()
+    })
+    expect(getSearchCalls()).toHaveLength(0)
 
-    await waitFor(
-      () => {
-        const searchCalls = mockBgRequest.mock.calls.filter(([request]) =>
-          String(request?.path || "").startsWith("/api/v1/notes/search/?")
-        )
-        expect(searchCalls.length).toBe(1)
-      },
-      { timeout: 1500 }
-    )
+    await act(async () => {
+      vi.advanceTimersByTime(1)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
 
-    const finalSearchCall = mockBgRequest.mock.calls.find(([request]) =>
-      String(request?.path || "").includes("/api/v1/notes/search/?")
-    )
+    expect(getSearchCalls()).toHaveLength(1)
+
+    const finalSearchCall = getSearchCalls()[0]
     expect(String(finalSearchCall?.[0]?.path || "")).toContain("query=alpha")
   })
 
   it("sends search requests for search queries", async () => {
+    vi.useFakeTimers()
     renderPage()
-    const input = screen.getByPlaceholderText("Search titles & content...")
+    const input = screen.getByPlaceholderText("Search notes... (use quotes for exact match)")
 
     fireEvent.change(input, { target: { value: "alpha" } })
-    await waitFor(
-      () => {
-        const searchCalls = mockBgRequest.mock.calls.filter(([request]) =>
-          String(request?.path || "").startsWith("/api/v1/notes/search/?")
-        )
-        expect(searchCalls.length).toBe(1)
-      },
-      { timeout: 1500 }
-    )
+    await act(async () => {
+      vi.advanceTimersByTime(350)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getSearchCalls()).toHaveLength(1)
 
     fireEvent.change(input, { target: { value: "alpha beta" } })
-    await waitFor(
-      () => {
-        const searchCalls = mockBgRequest.mock.calls.filter(([request]) =>
-          String(request?.path || "").startsWith("/api/v1/notes/search/?")
-        )
-        expect(searchCalls.length).toBe(2)
-      },
-      { timeout: 1500 }
-    )
+    await act(async () => {
+      vi.advanceTimersByTime(350)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getSearchCalls()).toHaveLength(2)
   })
 })

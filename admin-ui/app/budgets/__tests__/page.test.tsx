@@ -8,7 +8,7 @@ import { api } from '@/lib/api-client';
 
 const setPaginationValuesMock = vi.hoisted(() => vi.fn());
 const clearPaginationMock = vi.hoisted(() => vi.fn());
-const confirmMock = vi.hoisted(() => vi.fn());
+const promptPrivilegedActionMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
@@ -28,8 +28,8 @@ vi.mock('@/components/OrgContextSwitcher', () => ({
   OrgContextSwitcher: () => <div data-testid="org-switcher" />,
 }));
 
-vi.mock('@/components/ui/confirm-dialog', () => ({
-  useConfirm: () => confirmMock,
+vi.mock('@/components/ui/privileged-action-dialog', () => ({
+  usePrivilegedActionDialog: () => promptPrivilegedActionMock,
 }));
 
 vi.mock('@/components/ui/toast', () => ({
@@ -81,7 +81,7 @@ const budgetRow = {
 };
 
 beforeEach(() => {
-  confirmMock.mockResolvedValue(true);
+  promptPrivilegedActionMock.mockResolvedValue({ reason: 'test', adminPassword: '' });
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
 
@@ -171,7 +171,7 @@ describe('BudgetsPage', () => {
     await user.click(screen.getByRole('button', { name: /save budget/i }));
 
     await waitFor(() => {
-      expect(confirmMock).toHaveBeenCalled();
+      expect(promptPrivilegedActionMock).toHaveBeenCalled();
     });
     await waitFor(() => {
       expect(apiMock.updateBudget).toHaveBeenCalledWith(

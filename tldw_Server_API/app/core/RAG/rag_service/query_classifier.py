@@ -335,7 +335,10 @@ async def classify_query(
         )
 
     except Exception as exc:
-        logger.warning(f"LLM query classification failed ({exc!r}), falling back to heuristic")
+        logger.warning(
+            "LLM query classification failed ({exc_type}), falling back to heuristic",
+            exc_type=type(exc).__name__,
+        )
         return _heuristic_classify(query, chat_history)
 
 
@@ -439,7 +442,10 @@ async def reformulate_query(
         return query
 
     except Exception as exc:
-        logger.warning(f"Query reformulation failed ({exc!r}), returning original query")
+        logger.warning(
+            "Query reformulation failed ({exc_type}), returning original query",
+            exc_type=type(exc).__name__,
+        )
         return query
 
 

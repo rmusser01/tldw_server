@@ -113,3 +113,74 @@ def test_embeddings_abtest_events_sse_smoke_heartbeat_and_done(monkeypatch):
             os.unlink(eval_db_path)
         except Exception:
             _ = None
+
+
+@pytest.mark.asyncio
+async def test_embeddings_abtest_events_treats_cancelled_as_terminal(monkeypatch):
+    import asyncio
+
+    from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified as unified_mod
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Streaming import streams as streams_mod
+
+    class _DBStub:
+        def get_abtest(self, test_id, created_by=None):
+            _ = created_by
+            return {
+                "test_id": test_id,
+                "status": "cancelled",
+                "stats_json": json.dumps({"progress": {"phase": 1.0}}),
+            }
+
+    class _SvcStub:
+        def __init__(self):
+            self.db = _DBStub()
+
+    class _FakeSSEStream:
+        def __init__(self, *args, **kwargs):
+            _ = (args, kwargs)
+            self.frames = []
+            self.done_called = False
+
+        async def send_json(self, payload):
+            self.frames.append(f"data: {json.dumps(payload)}\n\n")
+
+        async def error(self, code, message):
+            raise AssertionError(f"Unexpected SSE error: {code} {message}")
+
+        async def done(self):
+            self.done_called = True
+            self.frames.append("data: [DONE]\n\n")
+
+        async def iter_sse(self):
+            sent = 0
+            idle_loops = 0
+            while True:
+                while sent < len(self.frames):
+                    frame = self.frames[sent]
+                    sent += 1
+                    yield frame
+                if self.done_called:
+                    return
+                idle_loops += 1
+                if idle_loops > 5:
+                    raise AssertionError("SSE stream did not terminate for cancelled status")
+                await asyncio.sleep(0)
+
+    monkeypatch.setattr(unified_mod, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
+    monkeypatch.setattr(streams_mod, "SSEStream", _FakeSSEStream)
+
+    response = await unified_mod.stream_embeddings_abtest_events(
+        test_id="abt_cancelled",
+        user_ctx="tenant-user",
+        _=None,
+        current_user=User(id="tenant-user", username="tester", email=None, is_active=True),
+    )
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+
+    payload = "".join(chunks)
+    assert '"status": "cancelled"' in payload
+    assert "data: [DONE]" in payload

@@ -113,4 +113,18 @@ describe("SchedulePicker contextual help", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }))
     expect(onChange).toHaveBeenCalledWith("0 9 * * *")
   })
+
+  it("lets users configure every-N-hour cadence without custom cron", async () => {
+    const onChange = vi.fn()
+    render(<SchedulePicker value={null} onChange={onChange} />)
+
+    fireEvent.mouseDown(screen.getByRole("combobox"))
+    fireEvent.click(await screen.findByText("Every N hours/minutes"))
+    expect(screen.getByLabelText("Interval unit")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Interval value"), { target: { value: "5" } })
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith("0 */5 * * *")
+    })
+  })
 })

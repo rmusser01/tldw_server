@@ -1,6 +1,8 @@
 import React from "react"
+import { existsSync, readFileSync } from "node:fs"
+import path from "node:path"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ---------------------------------------------------------------------------
@@ -9,6 +11,10 @@ import userEvent from "@testing-library/user-event"
 const getTranscriptionModelsMock = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ all_models: [] })
 )
+
+const capabilityMocks = vi.hoisted(() => ({
+  useServerCapabilities: vi.fn(),
+}))
 
 // react-i18next
 vi.mock("react-i18next", () => ({
@@ -38,8 +44,23 @@ vi.mock("antd", () => ({
       ) : null,
     { confirm: vi.fn(), destroyAll: vi.fn() }
   ),
-  Button: ({ children, onClick, disabled, type, ...props }: any) => (
-    <button onClick={onClick} disabled={disabled} data-type={type} {...props}>
+  Button: ({
+    children,
+    onClick,
+    disabled,
+    type,
+    danger,
+    size,
+    ...props
+  }: any) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      data-type={type}
+      data-danger={danger ? "true" : undefined}
+      data-size={size}
+      {...props}
+    >
       {children}
     </button>
   ),
@@ -59,6 +80,8 @@ vi.mock("antd", () => ({
     placeholder,
     allowClear,
     popupMatchSelectWidth,
+    showSearch,
+    loading,
     ...props
   }: any) => {
     const selectProps: any = { ...props }
@@ -103,6 +126,25 @@ vi.mock("antd", () => ({
       </React.Fragment>
     )
   },
+  Segmented: ({ options, value, onChange, ...props }: any) => (
+    <div role="group" {...props}>
+      {options?.map((option: any) => {
+        const optionValue =
+          typeof option === "object" ? option.value : option
+        const label = typeof option === "object" ? option.label : option
+        return (
+          <button
+            key={optionValue}
+            type="button"
+            aria-pressed={value === optionValue}
+            onClick={() => onChange?.(optionValue)}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  ),
   Radio: Object.assign(
     ({ children, value, ...props }: any) => (
       <label>
@@ -122,6 +164,24 @@ vi.mock("antd", () => ({
     </div>
   ),
   Tooltip: ({ children }: any) => <>{children}</>,
+  Alert: ({
+    message,
+    description,
+    action,
+    children,
+    icon,
+    type,
+    showIcon,
+    ...props
+  }: any) => (
+    <div role="alert" data-alert-type={type} {...props}>
+      {showIcon ? icon : null}
+      {message ? <span>{message}</span> : null}
+      {description ? <p>{description}</p> : null}
+      {children}
+      {action}
+    </div>
+  ),
   Input: Object.assign(
     (props: any) => <input {...props} />,
     {
@@ -130,6 +190,7 @@ vi.mock("antd", () => ({
         onChange,
         onKeyDown,
         placeholder,
+        autoSize,
         ...props
       }: any) => (
         <textarea
@@ -145,7 +206,11 @@ vi.mock("antd", () => ({
   Tag: ({ children, ...props }: any) => <span {...props}>{children}</span>,
   Typography: {
     Title: ({ children, ...props }: any) => <div {...props}>{children}</div>,
-    Text: ({ children, ...props }: any) => <span {...props}>{children}</span>,
+    Text: ({ children, strong, ...props }: any) => (
+      <span data-strong={strong ? "true" : undefined} {...props}>
+        {children}
+      </span>
+    ),
   },
   Progress: ({ percent, ...props }: any) => (
     <div data-testid="progress" data-percent={percent} {...props} />
@@ -158,6 +223,7 @@ vi.mock("lucide-react", () => {
     "ArrowLeft",
     "ArrowRight",
     "ChevronDown",
+    "ChevronRight",
     "Minimize2",
     "XCircle",
     "Info",
@@ -171,6 +237,7 @@ vi.mock("lucide-react", () => {
     "X",
     "Plus",
     "Check",
+    "CheckCircle",
     "Circle",
     "Loader2",
     "Video",
@@ -181,11 +248,17 @@ vi.mock("lucide-react", () => {
     "MessageSquare",
     "RefreshCw",
     "Trash2",
+    "Search",
+    "Download",
   ]
   const mocks: Record<string, any> = {}
   for (const name of iconNames) {
     mocks[name] = (props: any) => (
-      <span data-icon={name} aria-hidden={props?.["aria-hidden"]} />
+      <span
+        data-icon={name}
+        aria-hidden={props?.["aria-hidden"]}
+        className={props?.className}
+      />
     )
   }
   return mocks
@@ -213,10 +286,42 @@ vi.mock(
   "@/components/Common/QuickIngest/QueueTab/FileDropZone",
   () => ({
     FileDropZone: ({ onFilesAdded }: any) => (
-      <div data-testid="file-drop-zone">FileDropZone</div>
+      <div data-testid="file-drop-zone">
+        FileDropZone
+        <button
+          type="button"
+          onClick={() =>
+            onFilesAdded?.([
+              {
+                name: "large-audio.mp3",
+                size: 45 * 1024 * 1024,
+                type: "audio/mpeg",
+              },
+            ])
+          }
+        >
+          Add large audio file
+        </button>
+      </div>
     ),
     default: ({ onFilesAdded }: any) => (
-      <div data-testid="file-drop-zone">FileDropZone</div>
+      <div data-testid="file-drop-zone">
+        FileDropZone
+        <button
+          type="button"
+          onClick={() =>
+            onFilesAdded?.([
+              {
+                name: "large-audio.mp3",
+                size: 45 * 1024 * 1024,
+                type: "audio/mpeg",
+              },
+            ])
+          }
+        >
+          Add large audio file
+        </button>
+      </div>
     ),
   })
 )
@@ -239,6 +344,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   },
 }))
 
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => capabilityMocks.useServerCapabilities(),
+}))
+
 vi.mock("@/components/Common/QuickIngest/FloatingProgressWidget", () => ({
   FloatingProgressWidget: () => null,
 }))
@@ -248,6 +357,11 @@ let uuidCounter = 0
 beforeEach(() => {
   uuidCounter = 0
   getTranscriptionModelsMock.mockReset().mockResolvedValue({ all_models: [] })
+  capabilityMocks.useServerCapabilities.mockReset()
+  capabilityMocks.useServerCapabilities.mockReturnValue({
+    capabilities: { ffmpegAvailable: true },
+    loading: false,
+  })
 })
 vi.stubGlobal(
   "crypto",
@@ -262,6 +376,7 @@ vi.stubGlobal(
 import {
   IngestWizardProvider,
   useIngestWizard,
+  type IngestWizardState,
 } from "@/components/Common/QuickIngest/IngestWizardContext"
 import { AddContentStep } from "@/components/Common/QuickIngest/AddContentStep"
 import { WizardConfigureStep } from "@/components/Common/QuickIngest/WizardConfigureStep"
@@ -297,7 +412,20 @@ const ContextSpy: React.FC = () => {
 const InnerWizardContent: React.FC<{
   onClose: () => void
   isStepVisible?: boolean
-}> = ({ onClose, isStepVisible = true }) => {
+  isOnlineForIngest?: boolean
+  connectionRecoveryMessage?: string
+  isCheckingConnection?: boolean
+  onRetryConnection?: () => void
+  onQuickProcess?: () => void
+}> = ({
+  onClose,
+  isStepVisible = true,
+  isOnlineForIngest = true,
+  connectionRecoveryMessage,
+  isCheckingConnection,
+  onRetryConnection,
+  onQuickProcess,
+}) => {
   const ctx = useIngestWizard()
   const { currentStep } = ctx.state
 
@@ -312,11 +440,26 @@ const InnerWizardContent: React.FC<{
         <span>Processing</span>
         <span>Results</span>
       </nav>
-      {currentStep === 1 && <AddContentStep />}
+      {currentStep === 1 && (
+        <AddContentStep
+          isOnlineForIngest={isOnlineForIngest}
+          connectionRecoveryMessage={connectionRecoveryMessage}
+          isCheckingConnection={isCheckingConnection}
+          onRetryConnection={onRetryConnection}
+          onQuickProcess={onQuickProcess}
+        />
+      )}
       {currentStep === 2 && (
         <WizardConfigureStep isStepVisible={isStepVisible} />
       )}
-      {currentStep === 3 && <ReviewStep />}
+      {currentStep === 3 && (
+        <ReviewStep
+          isOnlineForIngest={isOnlineForIngest}
+          connectionRecoveryMessage={connectionRecoveryMessage}
+          isCheckingConnection={isCheckingConnection}
+          onRetryConnection={onRetryConnection}
+        />
+      )}
       {currentStep === 4 && <ProcessingStep />}
       {currentStep === 5 && <WizardResultsStep onClose={onClose} />}
     </div>
@@ -324,13 +467,34 @@ const InnerWizardContent: React.FC<{
 }
 
 // Final testable wrapper
-const WizardTestHarness: React.FC<{ onClose: () => void }> = ({
+const WizardTestHarness: React.FC<{
+  onClose: () => void
+  isOnlineForIngest?: boolean
+  connectionRecoveryMessage?: string
+  isCheckingConnection?: boolean
+  onRetryConnection?: () => void
+  onQuickProcess?: () => void
+  initialState?: Partial<IngestWizardState>
+}> = ({
   onClose,
+  isOnlineForIngest,
+  connectionRecoveryMessage,
+  isCheckingConnection,
+  onRetryConnection,
+  onQuickProcess,
+  initialState,
 }) => {
   return (
-    <IngestWizardProvider>
+    <IngestWizardProvider initialState={initialState}>
       <ContextSpy />
-      <InnerWizardContent onClose={onClose} />
+      <InnerWizardContent
+        onClose={onClose}
+        isOnlineForIngest={isOnlineForIngest}
+        connectionRecoveryMessage={connectionRecoveryMessage}
+        isCheckingConnection={isCheckingConnection}
+        onRetryConnection={onRetryConnection}
+        onQuickProcess={onQuickProcess}
+      />
     </IngestWizardProvider>
   )
 }
@@ -357,21 +521,67 @@ const ReopenableConfigStepHarness: React.FC<{ onClose: () => void }> = ({
   )
 }
 
+/**
+ * Expand the "Advanced options" collapsible in the configure step.
+ * Must be called after navigating to step 2 (configure).
+ * No-ops if already expanded (toggle shows "Hide advanced options").
+ */
+const expandAdvancedOptions = async (user: ReturnType<typeof userEvent.setup>) => {
+  const collapsed = screen.queryByText("Advanced options")
+  if (collapsed) {
+    await user.click(collapsed)
+  }
+  // If already expanded ("Hide advanced options" is showing), nothing to do.
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("QuickIngestWizardModal — full wizard flow integration", () => {
+  it("hydrates playlist preflight seed from typed open detail", () => {
+    const candidates = [
+      path.resolve(__dirname, "../IngestWizardContext.tsx"),
+      path.resolve(process.cwd(), "src/components/Common/QuickIngest/IngestWizardContext.tsx"),
+      path.resolve(
+        process.cwd(),
+        "../packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx"
+      ),
+      path.resolve(
+        process.cwd(),
+        "apps/packages/ui/src/components/Common/QuickIngest/IngestWizardContext.tsx"
+      )
+    ]
+    const contextPath = candidates.find((candidate) => existsSync(candidate))
+    expect(contextPath).toBeTruthy()
+    const source = readFileSync(contextPath!, "utf8")
+
+    expect(source).toContain("playlistPreflightSeed")
+    expect(source).toContain("SET_PLAYLIST_PREFLIGHT_SEED")
+  })
+
   let onClose: () => void
 
   beforeEach(() => {
     onClose = vi.fn()
     ctxRef = null
+    useQuickIngestSessionStore.setState({
+      session: null,
+      triggerSummary: { count: 0, label: null, hadFailure: false },
+    })
   })
 
   // -------------------------------------------------------------------------
   // Step 1: Add Content
   // -------------------------------------------------------------------------
+  it("Step 1 — explains what first-time users can add and where it appears", () => {
+    render(<WizardTestHarness onClose={onClose} />)
+
+    expect(screen.getByText(/Add URLs or files/i)).toBeInTheDocument()
+    expect(screen.getByText(/Media/i)).toBeInTheDocument()
+    expect(screen.getByText(/Knowledge/i)).toBeInTheDocument()
+  })
+
   it("Step 1 — renders at step 1 and allows adding a URL", async () => {
     const user = userEvent.setup()
     render(<WizardTestHarness onClose={onClose} />)
@@ -410,6 +620,130 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     const configureButton = screen.getByText(/Configure 1 items/i)
     expect(configureButton).toBeTruthy()
     expect(configureButton).not.toBeDisabled()
+  })
+
+  it("Step 1 — blocks quick processing while disconnected and shows recovery", async () => {
+    const user = userEvent.setup()
+    const retryConnection = vi.fn()
+    const onQuickProcess = vi.fn()
+
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        isOnlineForIngest={false}
+        connectionRecoveryMessage="Cannot reach your tldw server. Retry connection from this dialog or open Health & diagnostics."
+        onRetryConnection={retryConnection}
+        onQuickProcess={onQuickProcess}
+      />
+    )
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/offline-article")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    expect(screen.getByText(/server offline/i)).toBeInTheDocument()
+    expect(screen.getByText(/cannot reach your tldw server/i)).toBeInTheDocument()
+
+    const processButton = screen.getByRole("button", {
+      name: /use defaults & process/i,
+    })
+    expect(processButton).toBeDisabled()
+
+    const retryButton = screen.getByRole("button", { name: /retry connection/i })
+    await user.click(retryButton)
+    expect(retryConnection).toHaveBeenCalledTimes(1)
+
+    const configureButton = screen.getByRole("button", {
+      name: /configure 1 items/i,
+    })
+    expect(configureButton).not.toBeDisabled()
+    await user.click(processButton)
+    expect(onQuickProcess).not.toHaveBeenCalled()
+  })
+
+  it("Step 1 — renders large-file guidance with the design-system alert", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    await user.click(
+      screen.getByRole("button", { name: /Add large audio file/i })
+    )
+
+    const warning = await screen.findByText(/Large file/i)
+    const alert = warning.closest('[data-ds-component="Alert"]')
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("role", "status")
+    expect(alert).toHaveAttribute("aria-live", "polite")
+  })
+
+  it("Step 1 — renders FFmpeg media warnings with design-system state primitives", async () => {
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { ffmpegAvailable: false },
+      loading: false,
+    })
+
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://youtube.com/watch?v=test123")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    const warning = await screen.findByText(/FFmpeg is not installed/i)
+    expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+
+    const badge = screen
+      .getByText("Video")
+      .closest('[data-ds-component="Badge"]')
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveAttribute("data-ds-variant", "warning")
+    expect(badge?.querySelector('[data-icon="AlertTriangle"]')).toHaveClass(
+      "mr-0.5"
+    )
+  })
+
+  it("Step 1 — warns when pasted URLs are duplicates after normalization", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(
+      textarea,
+      "https://EXAMPLE.com/article/?utm_source=newsletter#comments\nhttps://example.com/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    expect(
+      screen.getByText("https://EXAMPLE.com/article/?utm_source=newsletter#comments")
+    ).toBeTruthy()
+    expect(screen.getByText("https://example.com/article")).toBeTruthy()
+    expect(screen.getAllByText(/Already queued/i).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("Step 1 — renders detected media labels with the design-system badge", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/test-article")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    const badge = await screen.findByText("Web page")
+    const badgeRoot = badge.closest('[data-ds-component="Badge"]')
+    expect(badgeRoot).toBeInTheDocument()
+    expect(badgeRoot).toHaveAttribute("data-ds-variant", "info")
+  })
+
+  it("Step 1 — summarizes mixed valid and invalid URL paste results", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/valid\nnot-a-url")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    expect(screen.getByText(/1 valid \/ 1 invalid/i)).toBeInTheDocument()
+    expect(screen.getByText(/Invalid URL format/i)).toBeInTheDocument()
   })
 
   // -------------------------------------------------------------------------
@@ -495,6 +829,51 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(startButton).toBeTruthy()
   })
 
+  it("Step 3 — blocks final processing while disconnected and allows going back", async () => {
+    const user = userEvent.setup()
+    const retryConnection = vi.fn()
+    render(
+      <WizardTestHarness
+        onClose={onClose}
+        isOnlineForIngest={false}
+        connectionRecoveryMessage="Cannot reach your tldw server. Retry connection from this dialog or open Health & diagnostics."
+        onRetryConnection={retryConnection}
+      />
+    )
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/review-offline")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByRole("button", { name: /Configure 1 items/i }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /standard preset/i })
+      ).toBeTruthy()
+    })
+
+    await user.click(screen.getByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+    const offlineTitle = screen.getByText(/server offline/i)
+    expect(offlineTitle).toBeInTheDocument()
+    expect(
+      offlineTitle.closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(screen.getByText(/cannot reach your tldw server/i)).toBeInTheDocument()
+
+    const startButton = screen.getByRole("button", { name: /start processing/i })
+    expect(startButton).toBeDisabled()
+
+    await user.click(screen.getByRole("button", { name: /retry connection/i }))
+    expect(retryConnection).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole("button", { name: /back to settings/i }))
+    expect(screen.getByRole("button", { name: /standard preset/i })).toBeTruthy()
+  })
+
   // -------------------------------------------------------------------------
   // Step 3 -> Step 4: Start Processing
   // -------------------------------------------------------------------------
@@ -546,6 +925,110 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     // Cancel All button should be present
     expect(screen.getByText("Cancel All")).toBeTruthy()
+  })
+
+  it("Step 4 — shows durable collection tracking and exports failed URLs", async () => {
+    const user = userEvent.setup()
+    const originalClipboard = navigator.clipboard
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    try {
+      useQuickIngestSessionStore.getState().createDraftSession({
+        lifecycle: "processing",
+        tracking: {
+          mode: "webui-direct",
+          sessionId: "qi-test",
+          batchId: "batch-1",
+          collectionId: "7",
+          plannedItemIds: ["11", "12"],
+          jobIds: [501, 502],
+          jobIdToCollectionItemId: {
+            "501": "11",
+            "502": "12",
+          },
+          durableMode: "durable_collection",
+          startedAt: 1234,
+        },
+      })
+
+      render(
+        <WizardTestHarness
+          onClose={onClose}
+          initialState={{
+            currentStep: 4,
+            highestStep: 4,
+            queueItems: [
+              {
+                id: "talk-1",
+                kind: "url",
+                url: "https://example.com/fail",
+                detectedType: "video",
+                icon: "Video",
+                fileSize: 0,
+                validation: { valid: true },
+              },
+              {
+                id: "talk-2",
+                kind: "url",
+                url: "https://example.com/processing",
+                detectedType: "video",
+                icon: "Video",
+                fileSize: 0,
+                validation: { valid: true },
+              },
+            ],
+            processingState: {
+              status: "running",
+              elapsed: 42,
+              estimatedRemaining: 120,
+              perItemProgress: [
+                {
+                  id: "talk-1",
+                  status: "failed",
+                  progressPercent: 100,
+                  currentStage: "processing",
+                  estimatedRemaining: 0,
+                  error: "Timed out while downloading",
+                },
+                {
+                  id: "talk-2",
+                  status: "processing",
+                  progressPercent: 50,
+                  currentStage: "processing",
+                  estimatedRemaining: 120,
+                },
+              ],
+            },
+          }}
+        />
+      )
+
+      const trackingPanel = screen.getByTestId("quick-ingest-run-tracking")
+      expect(trackingPanel).toHaveTextContent("Durable collection tracking")
+      expect(trackingPanel).toHaveTextContent("Collection 7")
+      expect(trackingPanel).toHaveTextContent("2 planned items")
+      expect(trackingPanel).toHaveTextContent("2 jobs")
+
+      await user.click(
+        screen.getByRole("button", { name: "Export failed items list" })
+      )
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(
+          expect.stringContaining("https://example.com/fail")
+        )
+      })
+      expect(writeText.mock.calls[0]?.[0]).toContain("Timed out while downloading")
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      })
+    }
   })
 
   // -------------------------------------------------------------------------
@@ -640,6 +1123,111 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it("Step 5 — renders skipped duplicates separately and includes them in the summary", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    await user.type(textarea, "https://example.com/article")
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("https://example.com/article")).toBeTruthy()
+    })
+
+    await user.click(screen.getByText(/Configure 1 items/i))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /standard preset/i })
+      ).toBeTruthy()
+    })
+
+    await user.click(screen.getByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+
+    await user.click(screen.getByText("Start Processing"))
+
+    await waitFor(() => {
+      expect(screen.getByRole("list")).toBeTruthy()
+    })
+
+    expect(ctxRef).not.toBeNull()
+
+    ctxRef!.setResults([
+      {
+        id: "test-success-1",
+        status: "ok",
+        outcome: "ingested",
+        url: "https://example.com/article",
+        type: "web",
+        title: "Fresh Article",
+      },
+      {
+        id: "test-skipped-1",
+        status: "ok",
+        outcome: "skipped",
+        url: "https://example.com/duplicate",
+        type: "web",
+        title: "Existing Article",
+        message: "This item already exists in your library. Use the ‘Deep’ preset to overwrite.",
+      },
+      {
+        id: "test-error-1",
+        status: "error",
+        outcome: "failed",
+        url: "https://example.com/error",
+        type: "web",
+        title: "Broken Article",
+        error: "Upload failed",
+      },
+    ])
+
+    ctxRef!.updateProcessingState({
+      status: "complete",
+      perItemProgress: [
+        {
+          id: "test-success-1",
+          status: "complete",
+          progressPercent: 100,
+          currentStage: "done",
+          estimatedRemaining: 0,
+        },
+        {
+          id: "test-skipped-1",
+          status: "complete",
+          progressPercent: 100,
+          currentStage: "done",
+          estimatedRemaining: 0,
+        },
+        {
+          id: "test-error-1",
+          status: "failed",
+          progressPercent: 100,
+          currentStage: "failed",
+          estimatedRemaining: 0,
+          error: "Upload failed",
+        },
+      ],
+      elapsed: 2.5,
+    })
+
+    ctxRef!.goNext()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("wizard-results-step")).toBeTruthy()
+    })
+
+    expect(screen.getByText("Skipped existing (1)")).toBeTruthy()
+    expect(screen.getByText("Existing Article")).toBeTruthy()
+    expect(
+      screen.getByText(/1 succeeded.*1 skipped.*1 failed/i)
+    ).toBeTruthy()
+  })
+
   // -------------------------------------------------------------------------
   // Full flow with multiple items
   // -------------------------------------------------------------------------
@@ -658,12 +1246,79 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
 
     // Both items should appear
     await waitFor(() => {
-      expect(screen.getByText("https://example.com/page1")).toBeTruthy()
-      expect(screen.getByText("https://example.com/page2")).toBeTruthy()
+      expect(screen.getAllByText("https://example.com/page1").length).toBeGreaterThan(0)
+      expect(screen.getAllByText("https://example.com/page2").length).toBeGreaterThan(0)
     })
 
     // The configure button should reference 2 items
     expect(screen.getByText(/Configure 2 items/i)).toBeTruthy()
+  })
+
+  it("captures shared conference metadata for a 34-talk batch and shows it in review", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    const urls = Array.from(
+      { length: 34 },
+      (_, index) => `https://youtube.com/watch?v=conference-talk-${index + 1}`
+    ).join("\n")
+
+    fireEvent.change(textarea, { target: { value: urls } })
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Configure 34 items/i)).toBeTruthy()
+    })
+
+    await user.type(screen.getByLabelText("Collection name"), "Strange Loop 2012")
+    await user.type(screen.getByLabelText("Conference name"), "Strange Loop")
+    await user.type(screen.getByLabelText("Event year"), "2012")
+    await user.type(screen.getByLabelText("Shared tags"), "conference, clojure")
+
+    await user.click(screen.getByText(/Configure 34 items/i))
+    await user.click(await screen.findByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+    expect(screen.getByText(/34 selected/i)).toBeTruthy()
+    expect(screen.getByText(/Strange Loop 2012/i)).toBeTruthy()
+    expect(screen.getByText("Strange Loop")).toBeTruthy()
+    expect(screen.getAllByText("2012").length).toBeGreaterThan(0)
+    expect(screen.getByText(/conference, clojure/i)).toBeTruthy()
+  })
+
+  it("allows overriding one talk title and speaker inside a conference batch", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={onClose} />)
+
+    const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
+    fireEvent.change(textarea, {
+      target: {
+        value:
+          "https://youtube.com/watch?v=talk-1\nhttps://youtube.com/watch?v=talk-2",
+      },
+    })
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Configure 2 items/i)).toBeTruthy()
+    })
+
+    await user.type(screen.getByLabelText("Collection name"), "Strange Loop 2012")
+    await user.type(screen.getByLabelText("Conference name"), "Strange Loop")
+    await user.type(screen.getByLabelText("Title override for item 1"), "Simplicity Matters")
+    await user.type(screen.getByLabelText("Speaker for item 1"), "Rich Hickey")
+
+    await user.click(screen.getByText(/Configure 2 items/i))
+    await user.click(await screen.findByText("Next"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Ready to Process")).toBeTruthy()
+    })
+    expect(screen.getByText("Simplicity Matters")).toBeTruthy()
+    expect(screen.getByText(/Rich Hickey/i)).toBeTruthy()
   })
 
   // -------------------------------------------------------------------------
@@ -766,13 +1421,108 @@ describe("QuickIngestWizardModal — real configure step", () => {
       name: /ingestion options – analysis/i,
     })
     expect(analysisToggle).toBeInTheDocument()
+    expect(screen.getByText("Next")).toBeInTheDocument()
+
+    // Advanced controls are hidden by default
+    expect(screen.queryByTitle("Captions toggle")).not.toBeInTheDocument()
+    expect(screen.queryByText("Review before saving")).not.toBeInTheDocument()
+
+    // Expand advanced options to reveal them
+    await expandAdvancedOptions(user)
     expect(screen.getByText("Review before saving")).toBeInTheDocument()
     expect(screen.getByTitle("Captions toggle")).toBeInTheDocument()
-    expect(screen.getByText("Next")).toBeInTheDocument()
 
     await user.click(analysisToggle)
 
     expect(screen.getByText(/using custom settings/i)).toBeInTheDocument()
+  })
+
+  it("shows Auto chunking controls by default when chunking is enabled", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("group", { name: /chunking mode/i })
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByLabelText("Auto chunking goal")).toHaveValue("balanced")
+    expect(
+      screen.getByLabelText("Use AI to improve chunk boundaries")
+    ).not.toBeChecked()
+  })
+
+  it("reveals Manual chunking controls and hides them when switching back to Auto", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+
+    await user.click(await screen.findByRole("button", { name: "Manual" }))
+
+    expect(screen.getByLabelText("Chunk method")).toBeInTheDocument()
+    expect(screen.getByLabelText("Chunk size")).toBeInTheDocument()
+    expect(screen.getByLabelText("Chunk overlap")).toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText("Chunk size"))
+    await user.type(screen.getByLabelText("Chunk size"), "900")
+
+    expect(ctxRef).not.toBeNull()
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.common.chunking_mode).toBe("manual")
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBe(900)
+    })
+
+    await user.click(screen.getByRole("button", { name: "Auto" }))
+
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.common.chunking_mode).toBe("auto")
+    })
+    expect(screen.queryByLabelText("Chunk method")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Chunk size")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Chunk overlap")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Auto chunking goal")).toHaveValue("balanced")
+    expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBeUndefined()
+  })
+
+  it("clamps Manual chunking numbers before storing advanced values", async () => {
+    const user = userEvent.setup()
+    render(<WizardTestHarness onClose={vi.fn()} />)
+
+    await user.type(
+      screen.getByPlaceholderText(/https:\/\/example\.com/i),
+      "https://example.com/library/article"
+    )
+    await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
+    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(await screen.findByRole("button", { name: "Manual" }))
+
+    await user.clear(screen.getByLabelText("Chunk size"))
+    await user.type(screen.getByLabelText("Chunk size"), "0")
+    await user.clear(screen.getByLabelText("Chunk overlap"))
+    await user.type(screen.getByLabelText("Chunk overlap"), "-5")
+
+    await waitFor(() => {
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_size).toBe(1)
+      expect(ctxRef!.state.presetConfig.advancedValues?.chunk_overlap).toBe(0)
+    })
   })
 
   it("keeps review mode anchored to remote storage and leaves audio defaults available for video-only batches", async () => {
@@ -785,6 +1535,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
     )
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
     await user.click(screen.getByText(/Configure 1 items/i))
+
+    await expandAdvancedOptions(user)
 
     const audioLanguageInput = await screen.findByTitle("Audio language")
     const diarizationToggle = screen.getByLabelText("Audio diarization toggle")
@@ -822,6 +1574,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByText(/Configure 1 items/i))
 
+    await expandAdvancedOptions(user)
+
     const audioLanguageInput = await screen.findByTitle("Audio language")
     const diarizationToggle = screen.getByLabelText("Audio diarization toggle")
     const transcriptionModelSelect = screen.getByLabelText("Transcription model")
@@ -848,6 +1602,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
     })
 
     await user.click(screen.getByText(/Configure 1 items/i))
+
+    await expandAdvancedOptions(user)
 
     const audioLanguageSelect = await screen.findByLabelText("Audio language")
     await user.selectOptions(audioLanguageSelect, "en-US")
@@ -877,6 +1633,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
     })
 
     await user.click(screen.getByText(/Configure 1 items/i))
+
+    await expandAdvancedOptions(user)
 
     const audioLanguageSelect = await screen.findByLabelText("Audio language")
     await user.selectOptions(audioLanguageSelect, "en-US")
@@ -918,6 +1676,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByText(/Configure 1 items/i))
 
+    await expandAdvancedOptions(user)
+
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
       typeDefaults: {
@@ -955,6 +1715,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
     })
 
     await user.click(screen.getByText(/Configure 1 items/i))
+
+    await expandAdvancedOptions(user)
 
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
@@ -1005,9 +1767,12 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByText(/Configure 1 items/i))
 
+    await expandAdvancedOptions(user)
+
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
       common: {
+        ...ctxRef!.state.presetConfig.common,
         perform_analysis: false,
       },
       typeDefaults: {
@@ -1043,6 +1808,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
     })
 
     await user.click(screen.getByText(/Configure 1 items/i))
+
+    await expandAdvancedOptions(user)
 
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
@@ -1086,6 +1853,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
     })
 
     await user.click(screen.getByText(/Configure 1 items/i))
+
+    await expandAdvancedOptions(user)
 
     const transcriptionModelSelect = await screen.findByLabelText(
       "Transcription model"
@@ -1133,6 +1902,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByText(/Configure 1 items/i))
 
+    await expandAdvancedOptions(user)
+
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
       advancedValues: {
@@ -1176,6 +1947,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByText(/Configure 1 items/i))
 
+    await expandAdvancedOptions(user)
+
     expect(ctxRef).not.toBeNull()
     ctxRef!.setCustomOptions({
       advancedValues: {
@@ -1218,6 +1991,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByText(/Configure 1 items/i))
 
+    await expandAdvancedOptions(user)
+
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "whisper-large-v3" })).toBeTruthy()
     })
@@ -1225,6 +2000,8 @@ describe("QuickIngestWizardModal — real configure step", () => {
 
     await user.click(screen.getByRole("button", { name: /hide configure step/i }))
     await user.click(screen.getByRole("button", { name: /show configure step/i }))
+
+    await expandAdvancedOptions(user)
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "parakeet-standard" })).toBeTruthy()

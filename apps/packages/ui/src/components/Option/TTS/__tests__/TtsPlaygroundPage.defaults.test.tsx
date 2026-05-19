@@ -37,7 +37,8 @@ vi.mock("@/services/tts", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback || _key
-  })
+  }),
+  Trans: ({ defaults }: { defaults: string }) => <>{defaults}</>
 }))
 
 vi.mock("@/hooks/useTtsProviderData", () => ({
@@ -127,5 +128,25 @@ describe("TtsPlaygroundPage defaults", () => {
     expect(screen.getByText(/Current provider:/).textContent).toContain(
       "tldw Server (Local)"
     )
+  })
+
+  it("renders the Text to Speech page heading", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Text to Speech" })
+    ).toBeInTheDocument()
   })
 })

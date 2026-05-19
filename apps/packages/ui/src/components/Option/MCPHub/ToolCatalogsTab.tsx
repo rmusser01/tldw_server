@@ -1,56 +1,152 @@
-import { useEffect, useMemo, useState } from "react"
-import { Alert, Card, Empty, Space, Tag, Typography } from "antd"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Button, Card, Empty, Space, Tag, Typography } from "antd"
+import { useQueryClient } from "@tanstack/react-query"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
+  describeExternalServerDiscoveryRefreshFailure,
   getToolRegistrySummary,
+  listExternalServers,
+  refreshExternalServerDiscovery,
+  type McpHubExternalServer,
   type McpHubToolRegistryEntry,
   type McpHubToolRegistryModule
 } from "@/services/tldw/mcp-hub"
+import { useMcpTools } from "@/hooks/useMcpTools"
 
-import { getPathScopeLabel, getToolEntriesByModule } from "./policyHelpers"
+import { getManagedExternalServers, getPathScopeLabel, getToolEntriesByModule } from "./policyHelpers"
+import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
-export const ToolCatalogsTab = () => {
+type ToolCatalogsTabProps = {
+  onAddServer?: () => void
+}
+
+const describeLoadFailure = (reason: unknown, fallback: string) => {
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message
+  }
+  if (typeof reason === "string" && reason.trim()) {
+    return reason
+  }
+  return fallback
+}
+
+export const ToolCatalogsTab = ({ onAddServer }: ToolCatalogsTabProps = {}) => {
+  const queryClient = useQueryClient()
+  const latestLoadRequestId = useRef(0)
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
+  const [externalServers, setExternalServers] = useState<McpHubExternalServer[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [serverInventoryError, setServerInventoryError] = useState<string | null>(null)
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
+  const managedExternalServers = useMemo(
+    () => getManagedExternalServers(externalServers),
+    [externalServers]
+  )
+  const mcpTools = useMcpTools()
+  const chatEnabledToolCount = Number(mcpTools.toolCounts?.chatEnabled ?? 0)
+  const hasExecutableChatTools =
+    mcpTools.toolsAvailable === null
+      ? null
+      : chatEnabledToolCount > 0 || mcpTools.chatTools.length > 0
+  const showExecutableAccessGuidance =
+    groupedModules.length > 0 && hasExecutableChatTools === false
+  const serverInventoryUnavailable = Boolean(serverInventoryError)
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setErrorMessage(null)
-      try {
-        const summary = await getToolRegistrySummary()
-        if (!cancelled) {
-          setEntries(Array.isArray(summary?.entries) ? summary.entries : [])
-          setModules(Array.isArray(summary?.modules) ? summary.modules : [])
-        }
-      } catch {
-        if (!cancelled) {
+  const loadRegistrySummary = useCallback(async (options: { clearOnError?: boolean } = {}) => {
+    const requestId = ++latestLoadRequestId.current
+    const clearOnError = options.clearOnError !== false
+    setLoading(true)
+    setErrorMessage(null)
+    try {
+      const [summaryResult, serverResult] = await Promise.allSettled([
+        getToolRegistrySummary(),
+        listExternalServers()
+      ])
+      if (requestId !== latestLoadRequestId.current) return
+      if (summaryResult.status === "fulfilled") {
+        setEntries(Array.isArray(summaryResult.value?.entries) ? summaryResult.value.entries : [])
+        setModules(Array.isArray(summaryResult.value?.modules) ? summaryResult.value.modules : [])
+      } else {
+        if (clearOnError) {
           setEntries([])
           setModules([])
-          setErrorMessage("Failed to load tool registry metadata.")
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+        setErrorMessage("Failed to load tool registry metadata.")
       }
-    }
-    void load()
-    return () => {
-      cancelled = true
+      if (serverResult.status === "fulfilled") {
+        setExternalServers(Array.isArray(serverResult.value) ? serverResult.value : [])
+        setServerInventoryError(null)
+      } else {
+        setServerInventoryError(
+          describeLoadFailure(serverResult.reason, "Failed to load managed server inventory.")
+        )
+      }
+    } catch {
+      if (requestId !== latestLoadRequestId.current) return
+      if (clearOnError) {
+        setEntries([])
+        setModules([])
+      }
+      setErrorMessage("Failed to load tool registry metadata.")
+    } finally {
+      if (requestId === latestLoadRequestId.current) {
+        setLoading(false)
+      }
     }
   }, [])
 
+  useEffect(() => {
+    void loadRegistrySummary()
+  }, [loadRegistrySummary])
+
+  const handleRefreshTools = async () => {
+    setRefreshing(true)
+    setErrorMessage(null)
+    try {
+      const refreshResult = await refreshExternalServerDiscovery()
+      await invalidateMcpRuntimeQueries(queryClient)
+      await loadRegistrySummary({ clearOnError: false })
+      if (!refreshResult.ok) {
+        setErrorMessage(`Failed to refresh tool discovery: ${describeExternalServerDiscoveryRefreshFailure(refreshResult)}`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(`Failed to refresh tool discovery: ${msg}`)
+    } finally {
+      setRefreshing(false)
+    }
+  }
   return (
     <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-      <Typography.Text type="secondary">
-        Registry-backed tool metadata powers both the catalog view and the guided policy editor.
-      </Typography.Text>
+      <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
+        <Typography.Text type="secondary">
+          Registry-backed tool metadata powers both the catalog view and the guided policy editor.
+        </Typography.Text>
+        <Button onClick={handleRefreshTools} loading={refreshing}>
+          Refresh Tools
+        </Button>
+      </Space>
       {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
+      {showExecutableAccessGuidance ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Tools are registered but not executable in chat"
+          description="Review profile assignments and disabled tool settings before testing these tools in Chat."
+        />
+      ) : null}
+      {serverInventoryError ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Could not load server inventory"
+          description={`${serverInventoryError} Tool Catalog guidance may be incomplete until the server list loads.`}
+        />
+      ) : null}
 
       {groupedModules.length > 0 ? (
         groupedModules.map((module) => (
@@ -131,7 +227,46 @@ export const ToolCatalogsTab = () => {
         ))
       ) : (
         <Card loading={loading}>
-          <Empty description="No registry metadata available yet" />
+          <Empty
+            description={
+              <Space orientation="vertical" size={4}>
+                <Typography.Text type="secondary">
+                  {serverInventoryUnavailable
+                    ? "Server inventory unavailable"
+                    : managedExternalServers.length > 0
+                      ? "No tools discovered yet"
+                      : "No managed MCP servers yet"}
+                </Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  {serverInventoryUnavailable ? (
+                    "Retry loading server inventory before deciding whether to add a server or refresh discovery."
+                  ) : managedExternalServers.length > 0 ? (
+                    "Managed servers are configured, but no registry tools are available yet. Refresh discovery after creating or editing a server."
+                  ) : (
+                    "Add a managed server before looking for tool catalog entries."
+                  )}
+                </Typography.Text>
+              </Space>
+            }
+          >
+            {serverInventoryUnavailable ? (
+              <Button
+                type="primary"
+                onClick={() => void loadRegistrySummary({ clearOnError: false })}
+                loading={loading}
+              >
+                Retry server inventory
+              </Button>
+            ) : managedExternalServers.length > 0 ? (
+              <Button type="primary" onClick={handleRefreshTools} loading={refreshing}>
+                Refresh discovery
+              </Button>
+            ) : (
+              <Button type="primary" onClick={onAddServer}>
+                Add Server
+              </Button>
+            )}
+          </Empty>
         </Card>
       )}
     </Space>

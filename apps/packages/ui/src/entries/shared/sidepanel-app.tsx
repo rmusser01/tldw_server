@@ -2,6 +2,10 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { useSidepanelInit } from "~/hooks/useSidepanelInit"
 import { platformConfig } from "@/config/platform"
+import {
+  BuddyShellHost,
+  BuddyShellRenderContextProvider
+} from "@/components/Common/PersonaBuddy"
 import { QuickChatHelperButton } from "@/components/Common/QuickChatHelper"
 import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
 import { AppShell } from "./AppShell"
@@ -45,19 +49,26 @@ export const SidepanelApp: React.FC = () => {
   )
 
   return (
-    <AppShell
-      router={Router}
-      direction={direction}
-      emptyDescription={t("common:noData", { defaultValue: "No data" })}
-      suspendWhenHidden={platformConfig.features.suspendSidepanelWhenHidden}
-      includeAntdApp={platformConfig.features.includeAntdApp}
-      extras={extras}
-    >
-      <SidepanelRouteShell />
-      <React.Suspense fallback={null}>
-        <WorkflowIntegrationHost justChatPath="/" autoShow={false} />
-      </React.Suspense>
-    </AppShell>
+    <BuddyShellRenderContextProvider>
+      <AppShell
+        router={Router}
+        direction={direction}
+        emptyDescription={t("common:noData", { defaultValue: "No data" })}
+        suspendWhenHidden={platformConfig.features.suspendSidepanelWhenHidden}
+        includeAntdApp={platformConfig.features.includeAntdApp}
+        extras={
+          <>
+            {extras}
+            <BuddyShellHost root="sidepanel" />
+          </>
+        }
+      >
+        <SidepanelRouteShell />
+        <React.Suspense fallback={null}>
+          <WorkflowIntegrationHost justChatPath="/" autoShow={false} />
+        </React.Suspense>
+      </AppShell>
+    </BuddyShellRenderContextProvider>
   )
 }
 

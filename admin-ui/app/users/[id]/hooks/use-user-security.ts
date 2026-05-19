@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { PrivilegedActionOptions, PrivilegedActionResult } from '@/components/ui/privileged-action-dialog';
 import { api } from '@/lib/api-client';
 import type { AuditLog } from '@/types';
+import { logger } from '@/lib/logger';
 
 export type MfaStatus = {
   enabled: boolean;
@@ -156,7 +157,7 @@ export function useUserSecurity({
         setSecurityError('Failed to load security controls.');
       }
     } catch (error) {
-      console.error('Failed to load security controls:', error);
+      logger.error('Failed to load security controls', { component: 'useUserSecurity', error: error instanceof Error ? error.message : String(error) });
       setSecurityError('Failed to load security controls.');
       setMfaStatus(null);
       setSessions([]);
@@ -187,7 +188,7 @@ export function useUserSecurity({
       });
       setLoginHistory(mapped.slice(0, 20));
     } catch (error) {
-      console.error('Failed to load login history:', error);
+      logger.error('Failed to load login history', { component: 'useUserSecurity', error: error instanceof Error ? error.message : String(error) });
       setLoginHistory([]);
       setLoginHistoryError('Failed to load login history.');
     } finally {

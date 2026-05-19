@@ -28,6 +28,16 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .audit_metadata import build_run_completion_audit_metadata
+from .image_store import ImageStoreValidationError, SandboxImageStore
+from .limits import build_limit_audit_metadata, limit_event_actions
+from .macos_diagnostics import collect_macos_diagnostics, probe_helper
+from .macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperClient,
+    MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
 from .models import (
     RunPhase,
     RunSpec,
@@ -37,19 +47,37 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
-from .macos_diagnostics import collect_macos_diagnostics
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
-from .runtime_capabilities import RuntimePreflightResult, collect_runtime_preflights
 from .runners.docker_runner import DockerRunner, docker_available
 from .runners.firecracker_runner import FirecrackerRunner, firecracker_available, firecracker_real_enabled
 from .runners.lima_runner import LimaRunner, lima_available
 from .runners.seatbelt_runner import SeatbeltRunner
 from .runners.vz_linux_runner import VZLinuxRunner
 from .runners.vz_macos_runner import VZMacOSRunner
+from .runners.worktree_runner import WorktreeRunner, worktree_available
+from .runtime_capabilities import (
+    RuntimePreflightResult,
+    collect_runtime_preflights,
+    normalize_runtime_reasons,
+    runtime_isolation_metadata,
+    runtime_isolation_warnings,
+    runtime_implementation_state,
+    runtime_network_policy_effective_support,
+    runtime_network_policy_metadata,
+    runtime_reason_details_for_codes,
+    runtime_session_contract_metadata,
+)
 from .snapshots import SnapshotManager
 from .store import get_store_mode
 from .streams import get_hub
+from .vz_reconciliation import (
+    ORPHAN_STATUSES,
+    REASON_OWNED_ORPHAN,
+    REASON_UNKNOWN_OWNERSHIP,
+    STATUS_OWNED_ORPHAN,
+    collect_vz_reconciliation,
+)
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -85,6 +113,28 @@ except Exception:
 
 _SANDBOX_WORKSPACE_FALLBACK_LOCKS: dict[str, threading.Lock] = {}
 _SANDBOX_WORKSPACE_FALLBACK_LOCKS_GUARD = threading.Lock()
+_RUNTIME_OPERATOR_ACTION_PRIORITY = {
+    "check_helper": 0,
+    "configure_template": 1,
+    "prepare_host": 2,
+    "adjust_request_policy": 3,
+    "inspect_reasons": 4,
+    "use_different_runtime": 5,
+}
+
+
+class SandboxReconciliationRepairError(RuntimeError):
+    def __init__(self, reason: str, status_code: int = 503) -> None:
+        self.reason = reason
+        self.status_code = int(status_code)
+        super().__init__(reason)
+
+
+class SandboxImageStoreCleanupError(RuntimeError):
+    def __init__(self, reason: str, status_code: int = 400) -> None:
+        self.reason = reason
+        self.status_code = int(status_code)
+        super().__init__(reason)
 
 
 def _get_sandbox_workspace_thread_lock(lock_path: str) -> threading.Lock:
@@ -279,10 +329,11 @@ class SandboxService:
         spec: RunSpec,
         workspace_path: str | None,
     ) -> RunStatus:
-        preflight = VZLinuxRunner().preflight(network_policy=spec.network_policy)
+        runner = VZLinuxRunner(session_control_store=self._orch)
+        preflight = runner.preflight(network_policy=spec.network_policy)
         if not preflight.available:
             raise SandboxPolicy.RuntimeUnavailable(RuntimeType.vz_linux, reasons=list(preflight.reasons or []))
-        return VZLinuxRunner().start_run(run_id, spec, workspace_path)
+        return runner.start_run(run_id, spec, workspace_path)
 
     def _start_vz_macos_run_with_execution_preflight(
         self,
@@ -310,6 +361,22 @@ class SandboxService:
             runtime_preflights={RuntimeType.seatbelt: preflight},
         )
         return SeatbeltRunner().start_run(run_id, spec, workspace_path)
+
+    def _start_worktree_run_with_execution_preflight(
+        self,
+        run_id: str,
+        spec: RunSpec,
+        workspace_path: str | None,
+    ) -> RunStatus:
+        preflight = WorktreeRunner().preflight(network_policy=spec.network_policy)
+        if not preflight.available:
+            raise SandboxPolicy.RuntimeUnavailable(RuntimeType.worktree, reasons=list(preflight.reasons or []))
+        self.policy._require_trust_level_supported(
+            RuntimeType.worktree,
+            spec.trust_level or TrustLevel.standard,
+            runtime_preflights={RuntimeType.worktree: preflight},
+        )
+        return WorktreeRunner().start_run(run_id, spec, workspace_path)
 
     def _effective_claim_lease_seconds(self) -> int:
         try:
@@ -353,6 +420,12 @@ class SandboxService:
                     runtime=RuntimeType.vz_macos,
                     available=False,
                     reasons=["vz_macos_unavailable"],
+                ),
+                RuntimeType.worktree: RuntimePreflightResult(
+                    runtime=RuntimeType.worktree,
+                    available=bool(worktree_available()),
+                    reasons=[] if worktree_available() else ["worktree_unavailable"],
+                    supported_trust_levels=["trusted", "standard"],
                 ),
             }
 
@@ -747,6 +820,9 @@ class SandboxService:
         max_mem_mb = self.policy.cfg.max_mem_mb
         max_upload_mb = self.policy.cfg.max_upload_mb
         max_log_bytes = self.policy.cfg.max_log_bytes
+        vz_linux_max_log_bytes = min(max_log_bytes, VZLinuxRunner.max_helper_output_bytes)
+        max_artifact_file_bytes = self.policy.cfg.max_artifact_file_bytes
+        max_artifact_total_bytes = self.policy.cfg.max_artifact_total_bytes
         workspace_cap_mb = self.policy.cfg.workspace_cap_mb
         artifact_ttl_hours = self.policy.cfg.artifact_ttl_hours
         supported_spec_versions = list(self.policy.cfg.supported_spec_versions or ["1.0"])
@@ -801,32 +877,77 @@ class SandboxService:
         vz_linux_preflight = runtime_preflights.get(RuntimeType.vz_linux)
         vz_macos_preflight = runtime_preflights.get(RuntimeType.vz_macos)
         seatbelt_preflight = runtime_preflights.get(RuntimeType.seatbelt)
+        worktree_preflight = runtime_preflights.get(RuntimeType.worktree)
         lima_enforcement_ready = dict((lima_preflight.enforcement_ready if lima_preflight else {}) or {})
         # Allowlist enforcement is not implemented for Lima runtime execution.
         lima_enforcement_ready["allowlist"] = False
-        lima_host = dict((lima_preflight.host if lima_preflight else {}) or {})
+        if lima_preflight is not None:
+            lima_preflight = RuntimePreflightResult(
+                runtime=lima_preflight.runtime,
+                available=lima_preflight.available,
+                reasons=list(lima_preflight.reasons or []),
+                execution_mode=lima_preflight.execution_mode,
+                supported_trust_levels=list(
+                    lima_preflight.supported_trust_levels or []
+                ),
+                host=dict(lima_preflight.host or {}),
+                enforcement_ready=lima_enforcement_ready,
+            )
 
-        def _preflight_fields(preflight: RuntimePreflightResult | None) -> dict[str, object]:
+        def _preflight_fields(
+            runtime: RuntimeType,
+            preflight: RuntimePreflightResult | None,
+        ) -> dict[str, object]:
             enforcement_ready = dict((preflight.enforcement_ready if preflight else {}) or {})
+            reasons = list((preflight.reasons if preflight else []) or [])
+            normalized_reasons = normalize_runtime_reasons(reasons)
+            isolation = runtime_isolation_metadata(runtime)
+            network_contract = runtime_network_policy_metadata(runtime)
+            session_contract = runtime_session_contract_metadata(runtime)
+            effective_network_support = runtime_network_policy_effective_support(
+                runtime,
+                enforcement_ready,
+            )
             return {
                 "available": bool(preflight.available) if preflight is not None else False,
-                "reasons": list((preflight.reasons if preflight else []) or []),
+                "reasons": reasons,
+                "normalized_reasons": normalized_reasons,
+                "normalized_reason_details": SandboxService._runtime_reason_details_payload(
+                    [str(reason) for reason in normalized_reasons]
+                ),
                 "supported_trust_levels": list((preflight.supported_trust_levels if preflight else []) or []),
-                "strict_deny_all_supported": bool(enforcement_ready.get("deny_all")),
-                "strict_allowlist_supported": bool(enforcement_ready.get("allowlist")),
+                "strict_deny_all_supported": effective_network_support["deny_all"],
+                "strict_allowlist_supported": effective_network_support["allowlist"],
                 "enforcement_ready": enforcement_ready,
                 "host": dict((preflight.host if preflight else {}) or {}),
+                "boundary_class": isolation.boundary_class,
+                "vm_grade_isolation": isolation.vm_grade_isolation,
+                "untrusted_eligible": isolation.untrusted_eligible,
+                "isolation_warnings": runtime_isolation_warnings(runtime),
+                "network_policy_contract": network_contract.as_dict(),
+                "session_contract": session_contract.as_dict(),
             }
+
+        docker_fields = _preflight_fields(RuntimeType.docker, docker_preflight)
+        firecracker_fields = _preflight_fields(
+            RuntimeType.firecracker,
+            firecracker_preflight,
+        )
+        lima_fields = _preflight_fields(RuntimeType.lima, lima_preflight)
 
         return [
             {
                 "name": "docker",
+                "implementation_state": runtime_implementation_state(RuntimeType.docker),
+                **docker_fields,
                 "available": bool(docker_preflight.available) if docker_preflight is not None else bool(docker_available()),
                 "default_images": images,
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -841,80 +962,73 @@ class SandboxService:
                         else bool(docker_available())
                     )
                 ),
-                "egress_allowlist_supported": bool(egress_supported),
+                "egress_allowlist_supported": bool(docker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": (
                     "Granular egress allowlist (CIDR, hostname) enforced via host iptables (DOCKER-USER) with DNS pinning"
-                    if bool(egress_supported and granular)
-                    else ("Egress allowlist enforced as deny-all (network=none)" if bool(egress_supported) else None)
+                    if bool(docker_fields["strict_allowlist_supported"] and granular)
+                    else (
+                        "Docker allowlist enforcement is configured without granular enforcement; "
+                        "allowlist is not advertised because execution would fall back to deny-all"
+                        if bool(egress_supported)
+                        else None
+                    )
                 ),
             },
             {
                 "name": "firecracker",
+                "implementation_state": runtime_implementation_state(RuntimeType.firecracker),
+                **firecracker_fields,
                 "available": bool(firecracker_preflight.available) if firecracker_preflight is not None else bool(firecracker_available()),
                 "default_images": images,  # firecracker images will differ; placeholder for UX
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
                 "artifact_ttl_hours": artifact_ttl_hours,
                 "supported_spec_versions": supported_spec_versions,
                 "interactive_supported": False,
-                # Only advertise allowlist support when explicit Firecracker enforcement is enabled
-                "egress_allowlist_supported": bool(
-                    is_truthy(
-                        str(
-                            os.getenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT")
-                            or getattr(app_settings, "SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "")
-                        ).strip().lower()
-                    )
-                ),
+                "egress_allowlist_supported": bool(firecracker_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
-                "notes": (
-                    "Granular egress allowlist enforced via VM tap/bridge + host firewall (planned)"
-                    if bool(
-                        is_truthy(
-                            str(
-                                os.getenv("SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT")
-                                or getattr(app_settings, "SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT", "")
-                            ).strip().lower()
-                        )
-                    )
-                    else "Allowlist enforcement uses deny-all fallback currently; granular Firecracker egress isolation planned"
-                ),
+                "notes": "Allowlist enforcement is scaffold/planned and is not advertised as effective support",
             },
             {
                 "name": "lima",
+                "implementation_state": runtime_implementation_state(RuntimeType.lima),
+                **lima_fields,
                 "available": bool(lima_preflight.available) if lima_preflight is not None else bool(lima_available()),
                 "default_images": ["ubuntu:24.04"],  # Lima uses distro images
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
                 "artifact_ttl_hours": artifact_ttl_hours,
                 "supported_spec_versions": supported_spec_versions,
                 "interactive_supported": False,  # Not implemented for Lima yet
-                "egress_allowlist_supported": bool(lima_enforcement_ready.get("allowlist")),
-                "strict_deny_all_supported": bool(lima_enforcement_ready.get("deny_all")),
-                "strict_allowlist_supported": bool(lima_enforcement_ready.get("allowlist")),
-                "enforcement_ready": lima_enforcement_ready,
-                "host": lima_host,
+                "egress_allowlist_supported": bool(lima_fields["strict_allowlist_supported"]),
                 "store_mode": store_mode,
                 "notes": "Full VM isolation via Lima; recommended for macOS",
             },
             {
                 "name": "vz_linux",
+                "implementation_state": runtime_implementation_state(RuntimeType.vz_linux),
                 "default_images": ["ubuntu-24.04"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
-                "max_log_bytes": max_log_bytes,
+                "max_log_bytes": vz_linux_max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -924,15 +1038,18 @@ class SandboxService:
                 "egress_allowlist_supported": False,
                 "store_mode": store_mode,
                 "notes": "Linux guest VM via Virtualization.framework on Apple silicon hosts",
-                **_preflight_fields(vz_linux_preflight),
+                **_preflight_fields(RuntimeType.vz_linux, vz_linux_preflight),
             },
             {
                 "name": "vz_macos",
+                "implementation_state": runtime_implementation_state(RuntimeType.vz_macos),
                 "default_images": ["macos-15"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -942,15 +1059,18 @@ class SandboxService:
                 "egress_allowlist_supported": False,
                 "store_mode": store_mode,
                 "notes": "macOS guest VM via Virtualization.framework on Apple silicon hosts",
-                **_preflight_fields(vz_macos_preflight),
+                **_preflight_fields(RuntimeType.vz_macos, vz_macos_preflight),
             },
             {
                 "name": "seatbelt",
+                "implementation_state": runtime_implementation_state(RuntimeType.seatbelt),
                 "default_images": ["host-local"],
                 "max_cpu": max_cpu,
                 "max_mem_mb": max_mem_mb,
                 "max_upload_mb": max_upload_mb,
                 "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
                 "queue_max_length": queue_max_length,
                 "queue_ttl_sec": queue_ttl_sec,
                 "workspace_cap_mb": workspace_cap_mb,
@@ -960,14 +1080,529 @@ class SandboxService:
                 "egress_allowlist_supported": False,
                 "store_mode": store_mode,
                 "notes": "Host-local seatbelt process isolation for trusted macOS workflows with best-effort deny-all networking; not VM-grade isolation",
-                **_preflight_fields(seatbelt_preflight),
+                **_preflight_fields(RuntimeType.seatbelt, seatbelt_preflight),
+            },
+            {
+                "name": "worktree",
+                "implementation_state": runtime_implementation_state(RuntimeType.worktree),
+                "default_images": ["host-local"],
+                "max_cpu": max_cpu,
+                "max_mem_mb": max_mem_mb,
+                "max_upload_mb": max_upload_mb,
+                "max_log_bytes": max_log_bytes,
+                "max_artifact_file_bytes": max_artifact_file_bytes,
+                "max_artifact_total_bytes": max_artifact_total_bytes,
+                "queue_max_length": queue_max_length,
+                "queue_ttl_sec": queue_ttl_sec,
+                "workspace_cap_mb": workspace_cap_mb,
+                "artifact_ttl_hours": artifact_ttl_hours,
+                "supported_spec_versions": supported_spec_versions,
+                "interactive_supported": False,
+                "egress_allowlist_supported": False,
+                "store_mode": store_mode,
+                "notes": (
+                    "Host-local git worktree isolation for trusted and standard "
+                    "workflows; not VM-grade isolation and not suitable for "
+                    "untrusted workloads"
+                ),
+                **_preflight_fields(RuntimeType.worktree, worktree_preflight),
             },
         ]
 
-    def macos_diagnostics(self) -> dict[str, object]:
-        return collect_macos_diagnostics()
+    def runtime_diagnostics_summary(self) -> dict[str, object]:
+        """Return a read-only operator summary derived from runtime discovery."""
+        runtime_rows = [self._runtime_diagnostics_item(row) for row in self.feature_discovery()]
+        ready = [row for row in runtime_rows if row["readiness"] == "ready"]
+        host_gated = [row for row in runtime_rows if row["readiness"] == "host_gated"]
+        scaffold = [row for row in runtime_rows if row["readiness"] == "scaffold"]
+        unavailable = [
+            row
+            for row in runtime_rows
+            if row["readiness"] in {"unavailable", "unsupported", "not_applicable"}
+        ]
+        host_local_warning_runtimes = [
+            str(row["name"])
+            for row in runtime_rows
+            if "host_local_boundary" in set(row.get("isolation_warnings") or [])
+        ]
+        repair_supported_runtimes = [
+            str(row["name"])
+            for row in runtime_rows
+            if bool(row.get("repair_supported"))
+        ]
+        return {
+            "source": "feature_discovery",
+            "summary": {
+                "total": len(runtime_rows),
+                "ready": len(ready),
+                "unavailable": len(unavailable),
+                "host_gated": len(host_gated),
+                "scaffold": len(scaffold),
+                "host_local_warning_runtimes": sorted(host_local_warning_runtimes),
+                "repair_supported_runtimes": sorted(repair_supported_runtimes),
+            },
+            "runtimes": runtime_rows,
+        }
 
-    def _audit_run_completion(self, *, user_id: str | int | None, run_id: str, status: RunStatus, spec_version: str, session_id: str | None) -> None:
+    @staticmethod
+    def _runtime_diagnostics_item(row: dict[str, object]) -> dict[str, object]:
+        """Project one discovery row into the admin diagnostics shape."""
+
+        session_contract = dict(row.get("session_contract") or {})
+        normalized_reasons = [str(reason) for reason in row.get("normalized_reasons") or []]
+        normalized_reason_details = SandboxService._runtime_reason_details_payload(
+            normalized_reasons
+        )
+        readiness = SandboxService._runtime_readiness(row)
+        repair_state = str(session_contract.get("repair_state") or "").strip().lower()
+        return {
+            "name": str(row.get("name") or ""),
+            "available": bool(row.get("available")),
+            "implementation_state": row.get("implementation_state"),
+            "readiness": readiness,
+            "reasons": [str(reason) for reason in row.get("reasons") or []],
+            "normalized_reasons": normalized_reasons,
+            "normalized_reason_details": normalized_reason_details,
+            "boundary_class": row.get("boundary_class"),
+            "vm_grade_isolation": bool(row.get("vm_grade_isolation")),
+            "untrusted_eligible": bool(row.get("untrusted_eligible")),
+            "isolation_warnings": [str(warning) for warning in row.get("isolation_warnings") or []],
+            "strict_deny_all_supported": bool(row.get("strict_deny_all_supported")),
+            "strict_allowlist_supported": bool(row.get("strict_allowlist_supported")),
+            "session_reuse_model": session_contract.get("reuse_model"),
+            "requires_live_health_check": bool(session_contract.get("requires_live_health_check")),
+            "repair_supported": repair_state in {"supported", "host_gated"},
+            "recommended_action": SandboxService._runtime_recommended_action(
+                readiness,
+                normalized_reason_details,
+            ),
+        }
+
+    @staticmethod
+    def _runtime_readiness(row: dict[str, object]) -> str:
+        """Classify current runtime readiness from availability and roadmap state."""
+
+        if bool(row.get("available")):
+            return "ready"
+        implementation_state = str(row.get("implementation_state") or "").strip().lower()
+        if implementation_state in {"host_gated", "scaffold", "unsupported", "not_applicable"}:
+            return implementation_state
+        return "unavailable"
+
+    @staticmethod
+    def _runtime_reason_details_payload(
+        normalized_reasons: list[str],
+    ) -> list[dict[str, str | bool]]:
+        """Return serialized runtime reason details for normalized reason codes."""
+
+        return [
+            details.as_dict()
+            for details in runtime_reason_details_for_codes(normalized_reasons)
+        ]
+
+    @staticmethod
+    def _runtime_recommended_action(
+        readiness: str,
+        normalized_reason_details: list[dict[str, str | bool]],
+    ) -> str:
+        """Map runtime reason metadata to an operator next action."""
+
+        if readiness == "ready":
+            return "none"
+        best_action = ""
+        best_rank = len(_RUNTIME_OPERATOR_ACTION_PRIORITY) + 1
+        for detail in normalized_reason_details:
+            action = str(detail.get("operator_action") or "").strip()
+            rank = _RUNTIME_OPERATOR_ACTION_PRIORITY.get(action)
+            if rank is not None and rank < best_rank:
+                best_action = action
+                best_rank = rank
+        if best_action:
+            return best_action
+        if readiness in {"scaffold", "unsupported", "not_applicable"}:
+            return "use_different_runtime"
+        return "inspect_reasons"
+
+    def macos_diagnostics(self) -> dict[str, object]:
+        return collect_macos_diagnostics(self._orch)
+
+    def plan_macos_image_store_cleanup(self) -> dict[str, object]:
+        payload = self.macos_diagnostics()
+        image_store = payload.get("image_store")
+        if not isinstance(image_store, dict):
+            image_store = {}
+
+        items = [item for item in list(image_store.get("items") or []) if isinstance(item, dict)]
+        actions: list[dict[str, object]] = []
+        reasons: list[str] = []
+        summary: dict[str, int] = {
+            "total_candidates": 0,
+            "planned_actions": 0,
+            "blocked_live_matches": 0,
+            "planning_only_run_manifests": 0,
+            "inactive_runs": 0,
+            "legacy_run_directories": 0,
+        }
+        action_types = {
+            "planning_only_run_manifest": "remove_run_manifest",
+            "inactive_run": "remove_run_directory",
+            "legacy_run_directory": "remove_legacy_run_directory",
+        }
+        summary_keys = {
+            "planning_only_run_manifest": "planning_only_run_manifests",
+            "inactive_run": "inactive_runs",
+            "legacy_run_directory": "legacy_run_directories",
+        }
+
+        for item in items:
+            gc_reason = str(item.get("gc_reason") or "").strip()
+            if not gc_reason:
+                continue
+            action_type = action_types.get(gc_reason)
+            if action_type is None:
+                continue
+
+            summary["total_candidates"] += 1
+            summary[summary_keys[gc_reason]] += 1
+
+            if item.get("matched_vm_id"):
+                summary["blocked_live_matches"] += 1
+                if "live_vm_matches_blocked_cleanup" not in reasons:
+                    reasons.append("live_vm_matches_blocked_cleanup")
+                continue
+
+            actions.append(
+                {
+                    "type": action_type,
+                    "run_id": str(item.get("run_id") or ""),
+                    "template_id": item.get("template_id"),
+                    "run_manifest_path": item.get("run_manifest_path"),
+                    "run_manifest_present": item.get("run_manifest_present"),
+                    "gc_reason": gc_reason,
+                    "gc_path": item.get("gc_path"),
+                    "matched_vm_id": item.get("matched_vm_id"),
+                    "matched_reconciliation_status": item.get("matched_reconciliation_status"),
+                    "matched_reconciliation_reason": item.get("matched_reconciliation_reason"),
+                    "status": "planned",
+                }
+            )
+
+        summary["planned_actions"] = len(actions)
+        return {
+            "dry_run": True,
+            "image_store": {
+                "configured": bool(image_store.get("configured")),
+                "root_path": image_store.get("root_path"),
+                "registered_templates": int(image_store.get("registered_templates") or 0),
+                "run_manifests": int(image_store.get("run_manifests") or 0),
+                "gc_candidates": int(image_store.get("gc_candidates") or 0),
+                "items": items,
+                "reasons": list(image_store.get("reasons") or []),
+            },
+            "summary": summary,
+            "actions": actions,
+            "reasons": reasons,
+        }
+
+    def cleanup_macos_image_store(
+        self,
+        *,
+        dry_run: bool = True,
+        confirm_all: bool = False,
+        action_types: list[str] | None = None,
+        run_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        plan = self.plan_macos_image_store_cleanup()
+        summary = dict(plan.get("summary") or {})
+        summary["deleted_actions"] = 0
+        actions = [dict(action) for action in list(plan.get("actions") or []) if isinstance(action, dict)]
+        image_store = plan.get("image_store")
+        if not isinstance(image_store, dict):
+            image_store = {}
+
+        allowed_action_types = {
+            str(action_type).strip()
+            for action_type in list(action_types or [])
+            if str(action_type).strip()
+        }
+        allowed_run_ids = {
+            str(run_id).strip()
+            for run_id in list(run_ids or [])
+            if str(run_id).strip()
+        }
+        if allowed_action_types:
+            actions = [
+                action for action in actions if str(action.get("type") or "").strip() in allowed_action_types
+            ]
+        if allowed_run_ids:
+            actions = [
+                action for action in actions if str(action.get("run_id") or "").strip() in allowed_run_ids
+            ]
+        summary["planned_actions"] = len(actions)
+        has_filters = bool(allowed_action_types or allowed_run_ids)
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "image_store": dict(image_store),
+                "summary": summary,
+                "actions": actions,
+                "reasons": list(plan.get("reasons") or []),
+            }
+
+        if not has_filters and not confirm_all:
+            raise SandboxImageStoreCleanupError(
+                "image_store_cleanup_confirmation_required",
+                400,
+            )
+
+        root_path = str(image_store.get("root_path") or "").strip()
+        if not root_path:
+            return {
+                "dry_run": False,
+                "image_store": dict(image_store),
+                "summary": summary,
+                "actions": actions,
+                "reasons": list(plan.get("reasons") or []),
+            }
+
+        try:
+            store = SandboxImageStore(root_path=root_path)
+        except (ImageStoreValidationError, OSError, ValueError) as exc:
+            logger.warning("image_store_cleanup_unavailable root={} error={}", root_path, exc)
+            raise SandboxImageStoreCleanupError("image_store_cleanup_unavailable", 503) from exc
+        deleted_actions = 0
+        for action in actions:
+            run_id = str(action.get("run_id") or "").strip()
+            gc_reason = str(action.get("gc_reason") or "").strip()
+            if not run_id or not gc_reason:
+                continue
+            try:
+                deleted = store.cleanup_run_candidate(run_id=run_id, reason=gc_reason)
+            except (ImageStoreValidationError, OSError, ValueError) as exc:
+                logger.warning(
+                    "image_store_cleanup_action_failed run_id={} gc_reason={} error={}",
+                    run_id,
+                    gc_reason,
+                    exc,
+                )
+                action["status"] = "error"
+                action["error"] = str(exc)
+                continue
+            action["status"] = "deleted" if deleted else "already_absent"
+            if deleted:
+                deleted_actions += 1
+
+        summary["deleted_actions"] = deleted_actions
+        return {
+            "dry_run": False,
+            "image_store": dict(image_store),
+            "summary": summary,
+            "actions": actions,
+            "reasons": list(plan.get("reasons") or []),
+        }
+
+    def repair_macos_reconciliation(
+        self,
+        *,
+        delete_stale_session_controls: bool = True,
+        delete_unhealthy_session_controls: bool = True,
+        terminate_orphaned_vms: bool = False,
+        dry_run: bool = True,
+    ) -> dict[str, object]:
+        helper_status = probe_helper()
+        report = collect_vz_reconciliation(
+            self._orch,
+            active_session_checker=lambda sid: self._active_session_run_count(sid) > 0,
+        )
+        reasons = [str(reason) for reason in list(report.get("reasons") or [])]
+        blocking_reasons = {
+            "macos_virtualization_helper_unavailable",
+            "macos_virtualization_helper_protocol_mismatch",
+        }
+        if not dry_run:
+            for reason in reasons:
+                if reason in blocking_reasons:
+                    raise SandboxReconciliationRepairError(reason, 503)
+
+        report_items = [item for item in list(report.get("items") or []) if isinstance(item, dict)]
+        stale_items = [item for item in report_items if str(item.get("status") or "").strip() == "stale_session"]
+        unhealthy_items = [item for item in report_items if str(item.get("status") or "").strip() == "unhealthy_vm"]
+        skipped_items = [item for item in report_items if str(item.get("status") or "").strip() == "skipped_active_session"]
+        orphaned_items = [
+            item for item in report_items if str(item.get("status") or "").strip() in ORPHAN_STATUSES
+        ]
+        actions: list[dict[str, object]] = []
+        summary: dict[str, int] = {
+            "stale_session_controls": len(stale_items),
+            "unhealthy_session_controls": len(unhealthy_items),
+            "deleted_session_controls": 0,
+            "skipped_active_sessions": len(skipped_items),
+            "orphaned_vms": len(orphaned_items),
+            "terminated_orphaned_vms": 0,
+        }
+        helper_client: MacOSVirtualizationHelperClient | None = None
+
+        def _action_context(source: dict[str, object]) -> dict[str, object]:
+            keys = (
+                "run_id",
+                "template_id",
+                "planning_source",
+                "run_manifest_path",
+                "run_manifest_present",
+                "persisted_template_id",
+                "helper_template_id",
+                "template_id_matches_persisted",
+            )
+            return {key: source.get(key) for key in keys if key in source and source.get(key) is not None}
+
+        for item in report_items:
+            status = str(item.get("status") or "").strip()
+            session_id = str(item.get("session_id") or "").strip()
+            vm_id = str(item.get("vm_id") or "").strip()
+            reason = str(item.get("reason") or "").strip()
+
+            if status == "skipped_active_session":
+                action = {
+                    "type": "delete_session_control",
+                    "session_id": session_id or None,
+                    "vm_id": vm_id or None,
+                    "status": "skipped",
+                    "reason": reason or "active_session",
+                    **_action_context(item),
+                }
+                logger.info("Skipping VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            if status in ORPHAN_STATUSES:
+                if not terminate_orphaned_vms or not vm_id:
+                    continue
+
+                termination_eligible = (
+                    (status == STATUS_OWNED_ORPHAN and bool(item.get("termination_eligible")))
+                    or (status == "orphaned_vm" and bool(item.get("termination_eligible")) and reason == REASON_OWNED_ORPHAN)
+                )
+                if not termination_eligible:
+                    action = {
+                        "type": "skip_orphaned_vm",
+                        "session_id": None,
+                        "vm_id": vm_id,
+                        "status": "skipped",
+                        "reason": reason or REASON_UNKNOWN_OWNERSHIP,
+                        "termination_eligible": False,
+                        **_action_context(item),
+                    }
+                    logger.info("Skipping VZ reconciliation orphan repair action: {}", action)
+                    actions.append(action)
+                    continue
+
+                action_status = "planned"
+                if not dry_run:
+                    try:
+                        if helper_client is None:
+                            helper_client = MacOSVirtualizationHelperClient()
+                        terminated = bool(helper_client.terminate_vm(vm_id))
+                    except MacOSVirtualizationHelperUnavailable as exc:
+                        reason_code = str(exc) or "macos_virtualization_helper_unavailable"
+                        logger.info("VZ reconciliation repair orphan termination blocked: {}", reason_code)
+                        raise SandboxReconciliationRepairError(reason_code, 503) from exc
+                    except MacOSVirtualizationHelperProtocolError as exc:
+                        reason_code = "macos_virtualization_helper_protocol_mismatch"
+                        logger.info("VZ reconciliation repair orphan termination blocked: {}", reason_code)
+                        raise SandboxReconciliationRepairError(reason_code, 503) from exc
+                    except MacOSVirtualizationHelperFailure as exc:
+                        logger.info(
+                            "VZ reconciliation repair orphan termination helper failure for vm_id={}: {}",
+                            vm_id,
+                            exc.error_code,
+                        )
+                        raise SandboxReconciliationRepairError(exc.error_code, 503) from exc
+                    except Exception as exc:
+                        logger.exception("VZ reconciliation repair orphan termination failed for vm_id={}", vm_id)
+                        raise SandboxReconciliationRepairError("vz_orphan_vm_termination_failed", 503) from exc
+                    if terminated:
+                        summary["terminated_orphaned_vms"] += 1
+                        action_status = "terminated"
+                    else:
+                        action_status = "missing"
+
+                action = {
+                    "type": "terminate_orphaned_vm",
+                    "session_id": None,
+                    "vm_id": vm_id,
+                    "status": action_status,
+                    "reason": reason or None,
+                    "termination_eligible": True,
+                    **_action_context(item),
+                }
+                logger.info("VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            should_delete = (
+                (status == "stale_session" and delete_stale_session_controls)
+                or (status == "unhealthy_vm" and delete_unhealthy_session_controls)
+            )
+            if not should_delete or not session_id:
+                continue
+
+            if self._active_session_run_count(session_id) > 0:
+                summary["skipped_active_sessions"] += 1
+                action = {
+                    "type": "delete_session_control",
+                    "session_id": session_id,
+                    "vm_id": vm_id or None,
+                    "status": "skipped",
+                    "reason": "active_session",
+                    **_action_context(item),
+                }
+                logger.info("Skipping VZ reconciliation repair action: {}", action)
+                actions.append(action)
+                continue
+
+            action_status = "planned"
+            if not dry_run:
+                try:
+                    deleted = bool(self._orch.delete_vz_session_control(session_id))
+                except Exception as exc:
+                    logger.exception("VZ reconciliation repair delete failed for session_id={}", session_id)
+                    raise SandboxReconciliationRepairError("vz_session_control_delete_failed", 503) from exc
+                if deleted:
+                    summary["deleted_session_controls"] += 1
+                    action_status = "deleted"
+                else:
+                    action_status = "missing"
+
+            action = {
+                "type": "delete_session_control",
+                "session_id": session_id,
+                "vm_id": vm_id or None,
+                "status": action_status,
+                "reason": reason or None,
+                **_action_context(item),
+            }
+            logger.info("VZ reconciliation repair action: {}", action)
+            actions.append(action)
+
+        return {
+            "dry_run": bool(dry_run),
+            "helper": helper_status,
+            "summary": summary,
+            "actions": actions,
+            "reasons": reasons,
+        }
+
+    def _audit_run_completion(
+        self,
+        *,
+        user_id: str | int | None,
+        run_id: str,
+        status: RunStatus,
+        spec_version: str,
+        session_id: str | None,
+        spec: RunSpec | None = None,
+    ) -> None:
         """Log a completion audit event in a fire-and-forget manner."""
         try:
             uid_int = None
@@ -1001,13 +1636,15 @@ class SandboxService:
                             dur_ms = max(0.0, (status.finished_at - status.started_at).total_seconds() * 1000.0)
                     except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
                         dur_ms = None
-                    # Include reason_code for non-success outcomes when available
-                    reason_code = None
-                    try:
-                        if outcome in ("timeout", "failed"):
-                            reason_code = (status.message or None)
-                    except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS:
-                        reason_code = None
+                    metadata = build_run_completion_audit_metadata(
+                        status=status,
+                        spec_version=spec_version,
+                        requested_runtime=(spec.runtime if spec else None),
+                        trust_level=(spec.trust_level if spec else None),
+                        network_policy=(spec.network_policy if spec else None),
+                        capture_patterns=(spec.capture_patterns if spec else None),
+                    )
+                    limit_metadata = build_limit_audit_metadata(status.resource_usage)
                     await svc.log_event(
                         event_type=AuditEventType.API_RESPONSE,
                         category=AuditEventCategory.API_CALL,
@@ -1018,16 +1655,20 @@ class SandboxService:
                         action="run",
                         result=("success" if outcome == "success" else outcome),
                         duration_ms=dur_ms,
-                        metadata={
-                            "runtime": status.runtime.value if status.runtime else None,
-                            "base_image": status.base_image,
-                            "image_digest": status.image_digest,
-                            "policy_hash": status.policy_hash,
-                            "exit_code": status.exit_code,
-                            "spec_version": spec_version,
-                            "reason_code": reason_code,
-                        },
+                        metadata=metadata,
                     )
+                    for action in limit_event_actions(status.resource_usage):
+                        await svc.log_event(
+                            event_type=AuditEventType.API_RESPONSE,
+                            category=AuditEventCategory.API_CALL,
+                            severity=AuditSeverity.WARNING,
+                            context=ctx,
+                            resource_type="sandbox.run",
+                            resource_id=run_id,
+                            action=action,
+                            result="limited",
+                            metadata=limit_metadata,
+                        )
                 finally:
                     await svc.stop()
 
@@ -1399,7 +2040,7 @@ class SandboxService:
                             if not status.policy_hash:
                                 status.policy_hash = compute_policy_hash(self.policy.cfg)
                             # Audit completion
-                            self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                            self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Background docker execution failed: {e}")
                             self._mark_run_failed(status, reason="docker_failed")
@@ -1448,7 +2089,7 @@ class SandboxService:
                     self._orch.update_run(status.id, status)
                     # Audit completion (sync path)
                     with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Docker execution failed; marking run failed. Error: {e}")
                 self._mark_run_failed(status, reason="docker_failed")
@@ -1491,7 +2132,7 @@ class SandboxService:
                                 self._orch.store_artifacts(status.id, real.artifacts)
                             self._orch.update_run(status.id, status)
                             with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
                         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Firecracker background execution failed: {e}")
                             self._mark_run_failed(status, reason="firecracker_failed")
@@ -1532,7 +2173,7 @@ class SandboxService:
                         self._orch.store_artifacts(status.id, real.artifacts)
                     self._orch.update_run(status.id, status)
                     with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Firecracker execution failed; marking run failed. Error: {e}")
                 try:
@@ -1582,7 +2223,7 @@ class SandboxService:
                                 self._orch.store_artifacts(status.id, real.artifacts)
                             self._orch.update_run(status.id, status)
                             with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                                self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
                         except (SandboxPolicy.RuntimeUnavailable, SandboxPolicy.PolicyUnsupported) as e:
                             logger.warning(f"Lima execution preflight rejected run: {e}")
                             try:
@@ -1643,7 +2284,7 @@ class SandboxService:
                         self._orch.store_artifacts(status.id, real.artifacts)
                     self._orch.update_run(status.id, status)
                     with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
-                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id)
+                        self._audit_run_completion(user_id=user_id, run_id=status.id, status=status, spec_version=spec_version, session_id=spec.session_id, spec=spec)
             except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Lima execution failed; marking run failed. Error: {e}")
                 try:
@@ -1686,6 +2327,17 @@ class SandboxService:
                 start_run_fn=self._start_seatbelt_run_with_execution_preflight,
                 policy_failed_reason="seatbelt_policy_failed",
                 failed_reason="seatbelt_failed",
+                policy_exceptions=(SandboxPolicy.RuntimeUnavailable, SandboxPolicy.PolicyUnsupported),
+            )
+        elif execute_enabled and spec.runtime == RuntimeType.worktree:
+            ws = self._orch.get_session_workspace_path(spec.session_id) if spec.session_id else None
+            return self._execute_single_runtime_scaffold(
+                status=status,
+                spec=spec,
+                workspace_path=ws,
+                start_run_fn=self._start_worktree_run_with_execution_preflight,
+                policy_failed_reason="worktree_policy_failed",
+                failed_reason="worktree_failed",
                 policy_exceptions=(SandboxPolicy.RuntimeUnavailable, SandboxPolicy.PolicyUnsupported),
             )
         else:
@@ -1754,6 +2406,8 @@ class SandboxService:
                 cancelled = VZLinuxRunner.cancel_run(run_id)
             elif st.runtime == RuntimeType.vz_macos:
                 cancelled = VZMacOSRunner.cancel_run(run_id)
+            elif st.runtime == RuntimeType.worktree:
+                cancelled = WorktreeRunner.cancel_run(run_id)
         except _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"cancel_run failed: {e}")
             cancelled = False
@@ -1886,9 +2540,27 @@ class SandboxService:
         session_root = os.path.dirname(ws_path) if os.path.basename(ws_path) == "workspace" else ws_path
         shutil.rmtree(session_root, ignore_errors=True)
 
+    def _cleanup_vz_session_control(self, session_id: str) -> None:
+        control = self._orch.get_vz_session_control(session_id)
+        if not isinstance(control, dict):
+            return
+        runtime = str(control.get("runtime") or "").strip().lower()
+        vm_id = str(control.get("vm_id") or "").strip()
+        if runtime in {RuntimeType.vz_linux.value, RuntimeType.vz_macos.value} and vm_id:
+            try:
+                terminated = bool(MacOSVirtualizationHelperClient().terminate_vm(vm_id))
+            except MacOSVirtualizationHelperFailure as exc:
+                if exc.error_code not in {"vm_not_found", "already_terminated"}:
+                    raise
+                terminated = False
+            if not terminated:
+                logger.info("{} session vm {} already absent during cleanup", runtime, vm_id)
+        self._orch.delete_vz_session_control(session_id)
+
     def _destroy_session_serialized(self, session_id: str) -> bool:
         ws = self._orch.get_session_workspace_path(session_id)
         if not ws:
+            self._cleanup_vz_session_control(session_id)
             destroyed = bool(self._orch.destroy_session(session_id))
             if destroyed:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
@@ -1898,6 +2570,7 @@ class SandboxService:
 
         destroyed = False
         with self._workspace_operation_lock(session_id, ws):
+            self._cleanup_vz_session_control(session_id)
             destroyed = bool(self._orch.destroy_session(session_id, remove_workspace_tree=False))
             if destroyed:
                 with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):

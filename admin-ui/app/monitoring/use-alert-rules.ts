@@ -3,6 +3,7 @@ import {
   DEFAULT_ALERT_RULE_DRAFT,
   validateAlertRuleDraft,
 } from '@/lib/monitoring-alerts';
+import { logger } from '@/lib/logger';
 import type {
   AlertRule,
   AlertRuleDraft,
@@ -94,7 +95,7 @@ export const useAlertRules = ({
           setAlertRules(normalizeAlertRulesPayload(payload));
         }
       } catch (error) {
-        console.error('Failed to load alert rules:', error);
+        logger.error('Failed to load alert rules', { component: 'useAlertRules', error: error instanceof Error ? error.message : String(error) });
         if (!cancelled) {
           setError?.(
             error instanceof Error && error.message
@@ -150,7 +151,7 @@ export const useAlertRules = ({
       setAlertRuleDraft(DEFAULT_ALERT_RULE_DRAFT);
       setSuccess('Alert rule added');
     } catch (error) {
-      console.error('Failed to create alert rule:', error);
+      logger.error('Failed to create alert rule', { component: 'useAlertRules', error: error instanceof Error ? error.message : String(error) });
       setError?.(
         error instanceof Error && error.message
           ? error.message
@@ -168,7 +169,7 @@ export const useAlertRules = ({
       setAlertRules((prev) => prev.filter((item) => item.id !== rule.id));
       setSuccess('Alert rule deleted');
     } catch (error) {
-      console.error('Failed to delete alert rule:', error);
+      logger.error('Failed to delete alert rule', { component: 'useAlertRules', error: error instanceof Error ? error.message : String(error) });
       setError?.(
         error instanceof Error && error.message
           ? error.message

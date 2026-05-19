@@ -54,6 +54,7 @@ from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_heade
 from tldw_Server_API.app.api.v1.utils.profile_errors import (
     classify_profile_update_skips,
 )
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import (
     get_db_pool,
@@ -138,15 +139,9 @@ def _principal_user_id(principal: AuthPrincipal) -> int:
 
 
 def _principal_primary_role(principal: AuthPrincipal) -> str:
-    roles = {
-        str(role).strip().lower()
-        for role in (principal.roles or [])
-        if str(role).strip()
-    }
+    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
     permissions = {
-        str(permission).strip().lower()
-        for permission in (principal.permissions or [])
-        if str(permission).strip()
+        str(permission).strip().lower() for permission in (principal.permissions or []) if str(permission).strip()
     }
     if "admin" in roles or "*" in permissions or "system.configure" in permissions:
         return "admin"
@@ -310,15 +305,8 @@ async def _emit_user_profile_audit_event(
         )
 
         audit_service = await get_or_create_audit_service_for_user_id(user_id)
-        correlation_id = (
-            request.headers.get("X-Correlation-ID")
-            or getattr(request.state, "correlation_id", None)
-        )
-        request_id = (
-            request.headers.get("X-Request-ID")
-            or getattr(request.state, "request_id", None)
-            or ""
-        )
+        correlation_id = request.headers.get("X-Correlation-ID") or getattr(request.state, "correlation_id", None)
+        request_id = request.headers.get("X-Request-ID") or getattr(request.state, "request_id", None) or ""
         ctx = AuditContext(
             user_id=str(user_id),
             correlation_id=correlation_id,
@@ -342,25 +330,31 @@ async def _emit_user_profile_audit_event(
                 "skipped_count": skipped_count,
             },
         )
-    except _USERS_AUDIT_EXCEPTIONS as exc:
-        logger.debug("User profile audit emission skipped: {}", exc)
+    except _USERS_AUDIT_EXCEPTIONS:
+        logger.debug("User profile audit emission skipped")
+
 
 #######################################################################################################################
 #
 # Router Configuration
 
-router = APIRouter(
-    prefix="/users",
-    tags=["users"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter(prefix="/users", tags=["users"], responses={404: {"description": "Not found"}})
 
 
 #######################################################################################################################
 #
 # User Profile Endpoints
 
-@router.get("/profile/catalog", response_model=UserProfileCatalogResponse)
+
+@router.get(
+    "/profile/catalog",
+    response_model=UserProfileCatalogResponse,
+    responses={
+        status.HTTP_304_NOT_MODIFIED: {
+            "description": "User profile catalog not modified (ETag match).",
+        },
+    },
+)
 async def get_user_profile_catalog(
     principal: AuthPrincipal = Depends(get_auth_principal),
     if_none_match: Optional[str] = Header(None),
@@ -386,18 +380,10 @@ async def get_user_profile_catalog(
 
 @router.get("/me/profile", response_model=UserProfileResponse, response_model_exclude_none=True)
 async def get_current_user_profile_view(
-    sections: Optional[str] = Query(
-        None, description="Comma-separated list of sections to include"
-    ),
-    include_sources: bool = Query(
-        False, description="Include per-field source attribution"
-    ),
-    include_raw: bool = Query(
-        False, description="Admin-only; include raw stored overrides"
-    ),
-    mask_secrets: bool = Query(
-        True, description="Mask secret values in the response"
-    ),
+    sections: Optional[str] = Query(None, description="Comma-separated list of sections to include"),
+    include_sources: bool = Query(False, description="Include per-field source attribution"),
+    include_raw: bool = Query(False, description="Admin-only; include raw stored overrides"),
+    mask_secrets: bool = Query(True, description="Mask secret values in the response"),
     principal: AuthPrincipal = Depends(get_auth_principal),
     session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> UserProfileResponse:
@@ -553,17 +539,17 @@ async def get_current_user_profile(
     return DeprecatedUserResponse(
         warning="deprecated_endpoint",
         successor=successor,
-        id=user_context['id'],
-        uuid=user_context.get('uuid') or None,
-        username=user_context['username'],
-        email=user_context.get('email') or "",
-        role=user_context.get('role', 'user'),
-        is_active=user_context.get('is_active', True),
-        is_verified=user_context.get('is_verified', False),
-        created_at=user_context.get('created_at', datetime.utcnow()),
-        last_login=user_context.get('last_login'),
-        storage_quota_mb=user_context.get('storage_quota_mb', 5120),
-        storage_used_mb=user_context.get('storage_used_mb', 0.0)
+        id=user_context["id"],
+        uuid=user_context.get("uuid") or None,
+        username=user_context["username"],
+        email=user_context.get("email") or "",
+        role=user_context.get("role", "user"),
+        is_active=user_context.get("is_active", True),
+        is_verified=user_context.get("is_verified", False),
+        created_at=user_context.get("created_at", datetime.utcnow()),
+        last_login=user_context.get("last_login"),
+        storage_quota_mb=user_context.get("storage_quota_mb", 5120),
+        storage_used_mb=user_context.get("storage_used_mb", 0.0),
     )
 
 
@@ -603,7 +589,7 @@ async def update_user_profile(
         user_id = int(user_context["id"])
         updates_made = False
 
-        if request.email and request.email != user_context.get('email'):
+        if request.email and request.email != user_context.get("email"):
             # Update email
             # Use Postgres-style placeholders; test adapters and SQLite shims
             # normalize `$N` to `?` automatically.
@@ -620,52 +606,47 @@ async def update_user_profile(
                 )
 
             updates_made = True
-            user_context['email'] = request.email.lower()
+            user_context["email"] = request.email.lower()
             logger.info(f"Updated email for user {user_context['username']} (ID: {user_id})")
 
         if not updates_made:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No updates provided"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No updates provided")
 
         # Return updated user info
         return DeprecatedUserResponse(
             warning="deprecated_endpoint",
             successor=successor,
-            id=user_context['id'],
-            uuid=user_context.get('uuid') or None,
-            username=user_context['username'],
-            email=user_context.get('email') or "",
-            role=user_context.get('role', 'user'),
-            is_active=user_context.get('is_active', True),
-            is_verified=user_context.get('is_verified', False),
-            created_at=user_context.get('created_at', datetime.utcnow()),
-            last_login=user_context.get('last_login'),
-            storage_quota_mb=user_context.get('storage_quota_mb', 5120),
-            storage_used_mb=user_context.get('storage_used_mb', 0.0)
+            id=user_context["id"],
+            uuid=user_context.get("uuid") or None,
+            username=user_context["username"],
+            email=user_context.get("email") or "",
+            role=user_context.get("role", "user"),
+            is_active=user_context.get("is_active", True),
+            is_verified=user_context.get("is_verified", False),
+            created_at=user_context.get("created_at", datetime.utcnow()),
+            last_login=user_context.get("last_login"),
+            storage_quota_mb=user_context.get("storage_quota_mb", 5120),
+            storage_used_mb=user_context.get("storage_used_mb", 0.0),
         )
 
     except HTTPException:
         raise
     except _USERS_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to update user profile: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update profile"
-        ) from e
+        logger.error("Failed to update user profile")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update profile") from e
 
 
 #######################################################################################################################
 #
 # Password Management
 
+
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(
     request: PasswordChangeRequest,
     principal: AuthPrincipal = Depends(get_auth_principal),
     password_service: PasswordService = Depends(get_password_service_dep),
-    db=Depends(get_db_transaction)
+    db=Depends(get_db_transaction),
 ) -> MessageResponse:
     """
     Change user password
@@ -695,45 +676,27 @@ async def change_password(
                 user_row = dict(fetched_row)
                 if not password_hash and user_row.get("password_hash"):
                     password_hash = str(user_row.get("password_hash"))
-        except _USERS_ENDPOINT_EXCEPTIONS as repo_exc:
-            logger.debug("User repo lookup skipped for password change: {}", repo_exc)
+        except _USERS_ENDPOINT_EXCEPTIONS:
+            logger.debug("User repo lookup skipped for password change")
 
         username = str(
-            user_row.get("username")
-            or user_context.get("username")
-            or principal.username
-            or f"user-{user_id}"
+            user_row.get("username") or user_context.get("username") or principal.username or f"user-{user_id}"
         )
 
         if not password_hash:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         # Verify current password
-        is_valid, _ = password_service.verify_password(
-            request.current_password,
-            password_hash
-        )
+        is_valid, _ = password_service.verify_password(request.current_password, password_hash)
         if not is_valid:
             logger.warning(f"Failed password change attempt for user {username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Current password is incorrect"
-            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
 
         # Validate new password strength
         try:
-            password_service.validate_password_strength(
-                request.new_password,
-                username
-            )
+            password_service.validate_password_strength(request.new_password, username)
         except WeakPasswordError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
-            ) from e
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
         # Hash new password
         new_hash = password_service.hash_password(request.new_password)
@@ -758,18 +721,14 @@ async def change_password(
 
         logger.info(f"Password changed for user {username} (ID: {user_id})")
 
-        return MessageResponse(
-            message="Password changed successfully",
-            details={"user_id": user_id}
-        )
+        return MessageResponse(message="Password changed successfully", details={"user_id": user_id})
 
     except HTTPException:
         raise
     except _USERS_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to change password: {e}")
+        logger.error("Failed to change password")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to change password"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to change password"
         ) from e
 
 
@@ -777,14 +736,13 @@ async def change_password(
 #
 # API Key Management (per-user)
 
+
 @router.get(
     "/api-keys",
     response_model=list[APIKeyMetadata],
     dependencies=[Depends(require_api_key_scope("read"))],
 )
-async def list_api_keys(
-    principal: AuthPrincipal = Depends(get_auth_principal)
-) -> list[APIKeyMetadata]:
+async def list_api_keys(principal: AuthPrincipal = Depends(get_auth_principal)) -> list[APIKeyMetadata]:
     """List active API keys for the current user (metadata only)."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
@@ -801,21 +759,29 @@ async def list_api_keys(
     dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def create_api_key(
-    payload: APIKeyCreateRequest,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal)
+    payload: APIKeyCreateRequest, request: Request, principal: AuthPrincipal = Depends(get_auth_principal)
 ) -> APIKeyCreateResponse:
     """Create a new API key for the current user and return the key once."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    result = await api_mgr.create_api_key(
-        user_id=user_id,
-        name=payload.name,
-        description=payload.description,
-        scope=payload.scope,
-        expires_in_days=payload.expires_in_days,
-    )
+    try:
+        result = await api_mgr.create_api_key(
+            user_id=user_id,
+            name=payload.name,
+            description=payload.description,
+            scope=payload.scope,
+            expires_in_days=payload.expires_in_days,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     return APIKeyCreateResponse(**result)
 
 
@@ -843,29 +809,37 @@ class SelfVirtualAPIKeyRequest(BaseModel):
     dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def create_virtual_api_key(
-    payload: SelfVirtualAPIKeyRequest,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal)
+    payload: SelfVirtualAPIKeyRequest, request: Request, principal: AuthPrincipal = Depends(get_auth_principal)
 ) -> APIKeyCreateResponse:
     """Create a constrained (virtual/burnable) API key for the current user."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    result = await api_mgr.create_virtual_key(
-        user_id=user_id,
-        name=payload.name,
-        description=payload.description,
-        expires_in_days=payload.expires_in_days,
-        allowed_endpoints=payload.allowed_endpoints,
-        budget_day_tokens=payload.budget_day_tokens,
-        budget_month_tokens=payload.budget_month_tokens,
-        budget_day_usd=payload.budget_day_usd,
-        budget_month_usd=payload.budget_month_usd,
-        allowed_methods=payload.allowed_methods,
-        allowed_paths=payload.allowed_paths,
-        max_calls=payload.max_calls,
-        max_runs=payload.max_runs,
-    )
+    try:
+        result = await api_mgr.create_virtual_key(
+            user_id=user_id,
+            name=payload.name,
+            description=payload.description,
+            expires_in_days=payload.expires_in_days,
+            allowed_endpoints=payload.allowed_endpoints,
+            budget_day_tokens=payload.budget_day_tokens,
+            budget_month_tokens=payload.budget_month_tokens,
+            budget_day_usd=payload.budget_day_usd,
+            budget_month_usd=payload.budget_month_usd,
+            allowed_methods=payload.allowed_methods,
+            allowed_paths=payload.allowed_paths,
+            max_calls=payload.max_calls,
+            max_runs=payload.max_runs,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     return APIKeyCreateResponse(**result)
 
 
@@ -875,20 +849,27 @@ async def create_virtual_api_key(
     dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def rotate_api_key(
-    key_id: int,
-    payload: APIKeyRotateRequest,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal)
+    key_id: int, payload: APIKeyRotateRequest, request: Request, principal: AuthPrincipal = Depends(get_auth_principal)
 ) -> APIKeyCreateResponse:
     """Rotate an API key (revoke old; create new) and return the new key once."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    result = await api_mgr.rotate_api_key(
-        key_id=key_id,
-        user_id=user_id,
-        expires_in_days=payload.expires_in_days,
-    )
+    try:
+        result = await api_mgr.rotate_api_key(
+            key_id=key_id,
+            user_id=user_id,
+            expires_in_days=payload.expires_in_days,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     return APIKeyCreateResponse(**result)
 
 
@@ -898,15 +879,26 @@ async def rotate_api_key(
     dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def revoke_api_key(
-    key_id: int,
-    request: Request,
-    principal: AuthPrincipal = Depends(get_auth_principal)
+    key_id: int, request: Request, principal: AuthPrincipal = Depends(get_auth_principal)
 ) -> MessageResponse:
     """Revoke an API key for the current user."""
     user_context = await _require_principal_active_verified(principal)
     user_id = int(user_context["id"])
     api_mgr = await get_api_key_manager()
-    success = await api_mgr.revoke_api_key(key_id=key_id, user_id=user_id)
+    try:
+        success = await api_mgr.revoke_api_key(
+            key_id=key_id,
+            user_id=user_id,
+            actor_user_id=_principal_user_id(principal),
+            actor_subject=principal.subject,
+            actor_kind=principal.kind,
+            actor_roles=list(principal.roles or []),
+        )
+    except MandatoryAuditWriteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Mandatory audit persistence unavailable",
+        ) from exc
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
     return MessageResponse(message="API key revoked")
@@ -916,10 +908,11 @@ async def revoke_api_key(
 #
 # Session Management
 
+
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_user_sessions(
     principal: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> list[SessionResponse]:
     """
     List all active sessions for the current user.
@@ -945,7 +938,7 @@ async def list_user_sessions(
 async def revoke_session(
     session_id: int,
     principal: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> MessageResponse:
     """
     Revoke a specific session.
@@ -979,7 +972,7 @@ async def revoke_session(
 @router.post("/sessions/revoke-all", response_model=MessageResponse)
 async def revoke_all_sessions(
     principal: AuthPrincipal = Depends(get_auth_principal),
-    session_manager: SessionManager = Depends(get_session_manager_dep)
+    session_manager: SessionManager = Depends(get_session_manager_dep),
 ) -> MessageResponse:
     """
     Revoke all sessions for the current user.
@@ -1007,10 +1000,11 @@ async def revoke_all_sessions(
 #
 # Storage Management
 
+
 @router.get("/storage", response_model=StorageQuotaResponse)
 async def get_storage_quota(
     principal: AuthPrincipal = Depends(get_auth_principal),
-    storage_service: StorageQuotaService = Depends(get_storage_service_dep)
+    storage_service: StorageQuotaService = Depends(get_storage_service_dep),
 ) -> StorageQuotaResponse:
     """
     Get storage quota information for current user
@@ -1024,30 +1018,29 @@ async def get_storage_quota(
         user_id = int(user_context["id"])
         # Get storage info from service
         storage_info = await storage_service.calculate_user_storage(
-            user_id,
-            update_database=False  # Don't update unless explicitly requested
+            user_id, update_database=False  # Don't update unless explicitly requested
         )
 
         return StorageQuotaResponse(
             user_id=user_id,
-            storage_used_mb=storage_info['total_mb'],
-            storage_quota_mb=storage_info['quota_mb'],
-            available_mb=storage_info['available_mb'],
-            usage_percentage=storage_info['usage_percentage']
+            storage_used_mb=storage_info["total_mb"],
+            storage_quota_mb=storage_info["quota_mb"],
+            available_mb=storage_info["available_mb"],
+            usage_percentage=storage_info["usage_percentage"],
         )
 
-    except _USERS_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to get storage quota: {e}")
+    except _USERS_ENDPOINT_EXCEPTIONS:
+        logger.error("Failed to get storage quota")
         if user_context is None:
             user_context = await _resolve_user_context(
                 principal,
                 allow_missing=is_single_user_principal(principal),
             )
-        quota = float(user_context.get('storage_quota_mb', 5120))
-        used = float(user_context.get('storage_used_mb', 0.0))
+        quota = float(user_context.get("storage_quota_mb", 5120))
+        used = float(user_context.get("storage_used_mb", 0.0))
         # Return from database values if calculation fails
         return StorageQuotaResponse(
-            user_id=int(user_context['id']),
+            user_id=int(user_context["id"]),
             storage_used_mb=used,
             storage_quota_mb=quota,
             available_mb=max(0, quota - used),
@@ -1058,7 +1051,7 @@ async def get_storage_quota(
 @router.post("/storage/recalculate", response_model=StorageQuotaResponse)
 async def recalculate_storage(
     principal: AuthPrincipal = Depends(get_auth_principal),
-    storage_service: StorageQuotaService = Depends(get_storage_service_dep)
+    storage_service: StorageQuotaService = Depends(get_storage_service_dep),
 ) -> StorageQuotaResponse:
     """
     Recalculate storage usage for current user
@@ -1073,26 +1066,22 @@ async def recalculate_storage(
         user_id = int(user_context["id"])
         username = str(user_context.get("username") or _principal_username(principal, user_id))
         # Recalculate and update database
-        storage_info = await storage_service.calculate_user_storage(
-            user_id,
-            update_database=True
-        )
+        storage_info = await storage_service.calculate_user_storage(user_id, update_database=True)
 
         logger.info(f"Recalculated storage for user {username}: {storage_info['total_mb']:.2f}MB")
 
         return StorageQuotaResponse(
             user_id=user_id,
-            storage_used_mb=storage_info['total_mb'],
-            storage_quota_mb=storage_info['quota_mb'],
-            available_mb=storage_info['available_mb'],
-            usage_percentage=storage_info['usage_percentage']
+            storage_used_mb=storage_info["total_mb"],
+            storage_quota_mb=storage_info["quota_mb"],
+            available_mb=storage_info["available_mb"],
+            usage_percentage=storage_info["usage_percentage"],
         )
 
     except _USERS_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to recalculate storage: {e}")
+        logger.error("Failed to recalculate storage")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to recalculate storage"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to recalculate storage"
         ) from e
 
 

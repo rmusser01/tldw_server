@@ -105,7 +105,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     return { apiBaseHost, apiVersion: storedVersion, xApiKey: storedKey || undefined, apiBearer: storedBearer || undefined, theme: storedTheme, csrfToken: null };
   });
 
-  // Initialize axios baseURL and theme on mount
+  // Initialize API baseURL and theme on mount
   useEffect(() => {
     const current = computeBaseURL(config.apiBaseHost, config.apiVersion);
     if (getApiBaseUrl() !== current) {
@@ -115,7 +115,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist config changes and update axios baseURL
+  // Persist config changes and update API baseURL
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setRuntimeApiKey(config.xApiKey);
@@ -129,7 +129,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // localStorage may be unavailable in some contexts
     }
-    // Apply axios base URL
+    // Apply API base URL
     const nextBase = computeBaseURL(config.apiBaseHost, config.apiVersion);
     api.defaults.baseURL = nextBase;
     // Apply theme

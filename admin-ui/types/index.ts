@@ -9,6 +9,7 @@ export interface User {
   roles?: string[];
   is_active: boolean;
   is_verified: boolean;
+  mfa_enabled: boolean;
   storage_quota_mb: number;
   storage_used_mb: number;
   created_at: string;
@@ -113,6 +114,36 @@ export interface ApiKeyMutationResponse {
   key_prefix?: string;
 }
 
+export interface ApiKeyDailySnapshot {
+  date: string;
+  requests: number;
+  tokens: number;
+  cost_usd: number;
+}
+
+export interface ApiKeyUsageSummary {
+  key_id: string;
+  request_count: number;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  estimated_cost_usd: number;
+  last_used_at: string | null;
+  daily_snapshots: ApiKeyDailySnapshot[];
+}
+
+export interface ApiKeyUsageTopItem {
+  key_id: string;
+  request_count: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  last_used_at: string | null;
+}
+
+export interface ApiKeyUsageTopResponse {
+  items: ApiKeyUsageTopItem[];
+}
+
 export interface Role {
   id: number;
   name: string;
@@ -135,6 +166,7 @@ export interface AuditLog {
   details?: Record<string, unknown>;
   ip_address?: string;
   username?: string;
+  request_id?: string;
   raw?: Record<string, unknown>;
 }
 
@@ -347,6 +379,44 @@ export interface SecurityAlertStatus {
   }[];
 }
 
+export interface CompliancePosture {
+  overall_score: number;
+  mfa_adoption_pct: number;
+  mfa_enabled_count: number;
+  total_users: number;
+  key_rotation_compliance_pct: number;
+  keys_needing_rotation: number;
+  keys_total: number;
+  rotation_threshold_days: number;
+  audit_logging_enabled: boolean;
+}
+
+export type SystemDependencyStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
+
+export interface SystemDependencyItem {
+  name: string;
+  status: SystemDependencyStatus;
+  latency_ms: number;
+  error: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface SystemDependenciesResponse {
+  items: SystemDependencyItem[];
+  checked_at: string;
+}
+
+export interface DependencyUptimeStats {
+  dependency_name: string;
+  days: number;
+  total_checks: number;
+  healthy_checks: number;
+  uptime_pct: number;
+  avg_latency_ms: number;
+  downtime_minutes: number;
+  sparkline: number[];
+}
+
 export interface EffectivePermissionsResponse {
   user_id: number;
   permissions: string[];
@@ -375,6 +445,21 @@ export interface VoiceCommand {
   description?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface VoiceCommandValidationStep {
+  name: string;
+  passed: boolean;
+  message: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface VoiceCommandValidationResponse {
+  command_id: string;
+  command_name: string;
+  action_type: VoiceActionType;
+  valid: boolean;
+  steps: VoiceCommandValidationStep[];
 }
 
 export interface VoiceSession {
@@ -432,7 +517,9 @@ export interface VoiceAnalyticsSummary {
   usage_by_day: VoiceAnalytics[];
 }
 
-export type { IncidentEvent, IncidentItem, IncidentsResponse } from './incidents';
+export type { IncidentEvent, IncidentItem, IncidentNotifyResponse, IncidentsResponse } from './incidents';
+export type { WebhookItem, WebhookCreateResponse, WebhookListResponse, WebhookDeliveryItem, WebhookDeliveryListResponse } from './webhooks';
+export type { EmailDeliveryStatus, EmailDeliveryItem, EmailDeliveryListResponse } from './email-deliveries';
 
 // ============================================
 // Billing & Subscription Types
@@ -459,6 +546,7 @@ export interface Plan {
 export interface Subscription {
   id: string;
   org_id: number;
+  org_name?: string;
   plan_id: string;
   plan?: Plan;
   stripe_subscription_id: string;
@@ -467,8 +555,17 @@ export interface Subscription {
   current_period_end: string;
   trial_end?: string;
   cancel_at?: string;
+  cancel_at_period_end?: boolean;
   created_at: string;
   updated_at: string;
+  // Computed lifecycle fields
+  days_since_created?: number | null;
+  days_past_due?: number;
+  days_until_period_end?: number | null;
+  usage_pct?: number | null;
+  at_risk?: boolean;
+  at_risk_reasons?: string[];
+  billing_cycle?: string;
 }
 
 export interface OrgUsageSummary {
@@ -492,6 +589,22 @@ export interface Invoice {
   period_start: string;
   period_end: string;
   created_at: string;
+}
+
+export interface PlanDistributionEntry {
+  plan_name: string;
+  count: number;
+}
+
+export interface BillingAnalytics {
+  mrr_cents: number;
+  subscriber_count: number;
+  active_count: number;
+  trialing_count: number;
+  past_due_count: number;
+  canceled_count: number;
+  plan_distribution: PlanDistributionEntry[];
+  trial_conversion_rate_pct: number;
 }
 
 export interface FeatureRegistryEntry {
@@ -544,4 +657,23 @@ export interface AdminWebhookTestResult {
   status_code: number | null;
   latency_ms: number | null;
   error: string | null;
+}
+
+export interface ComplianceReportSchedule {
+  id: string;
+  frequency: 'daily' | 'weekly' | 'monthly';
+  recipients: string[];
+  format: 'html' | 'json';
+  enabled: boolean;
+  created_at: string | null;
+  last_sent_at: string | null;
+}
+
+export interface DigestPreference {
+  id?: string;
+  user_id: string;
+  email: string;
+  frequency: 'daily' | 'weekly' | 'off';
+  enabled: boolean;
+  created_at?: string;
 }

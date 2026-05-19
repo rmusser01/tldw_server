@@ -18,15 +18,16 @@ Thread-safe with RLock + WAL mode. Foreign keys enabled.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from loguru import logger
+from tldw_Server_API.app.core.DB_Management.db_path_utils import ensure_trusted_database_parent_dir
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
@@ -309,9 +310,15 @@ class ActivationRun:
 
 class GuardianDB:
     def __init__(self, db_path: str) -> None:
-        self.db_path = db_path
+        if db_path == ":memory:":
+            self.db_path = db_path
+        else:
+            resolved_db_path = ensure_trusted_database_parent_dir(
+                Path(db_path),
+                label="guardian database",
+            )
+            self.db_path = str(resolved_db_path)
         self._lock = threading.RLock()
-        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         self._ensure_schema()
         self._migrate_schema()
 
@@ -1901,6 +1908,27 @@ class GuardianDB:
                 params.extend([limit, offset])
                 rows = conn.execute(query, params).fetchall()
                 return [self._row_to_self_monitoring_alert(r) for r in rows]
+            finally:
+                conn.close()
+
+    def count_self_monitoring_alerts(
+        self,
+        user_id: str,
+        rule_id: str | None = None,
+        unread_only: bool = False,
+    ) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                query = "SELECT COUNT(*) as cnt FROM self_monitoring_alerts WHERE user_id = ?"
+                params: list[Any] = [str(user_id)]
+                if rule_id:
+                    query += " AND rule_id = ?"
+                    params.append(rule_id)
+                if unread_only:
+                    query += " AND is_read = 0"
+                row = conn.execute(query, params).fetchone()
+                return int(row["cnt"]) if row else 0
             finally:
                 conn.close()
 

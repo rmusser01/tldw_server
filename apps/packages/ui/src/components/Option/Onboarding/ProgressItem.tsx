@@ -7,9 +7,11 @@ export type ProgressStatus = "idle" | "checking" | "success" | "error" | "empty"
 interface ProgressItemProps {
   label: string
   status: ProgressStatus
+  /** Optional override for the status text shown next to the label */
+  statusText?: string
 }
 
-export const ProgressItem = ({ label, status }: ProgressItemProps) => {
+export const ProgressItem = ({ label, status, statusText }: ProgressItemProps) => {
   const { t } = useTranslation(["settings", "common"])
 
   return (
@@ -48,7 +50,12 @@ export const ProgressItem = ({ label, status }: ProgressItemProps) => {
       </span>
       {status === "checking" && (
         <span className="text-xs text-text-subtle animate-pulse">
-          {t("common:checking", "Checking...")}
+          {statusText || t("common:checking", "Checking...")}
+        </span>
+      )}
+      {status === "success" && statusText && (
+        <span className="text-xs text-success">
+          {statusText}
         </span>
       )}
       {status === "empty" && (

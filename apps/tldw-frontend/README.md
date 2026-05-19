@@ -65,6 +65,17 @@ When you use the repository quickstart Docker + WebUI flow, the default browser 
 
 Set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL` only when you intentionally need an advanced/custom-host networking path, such as LAN/mobile access, a reverse proxy, or a custom domain where the browser should call a non-default API host directly.
 
+## Branch-Aware Build Profiles
+
+Frontend artifact scripts are branch-aware by default:
+
+- `main` builds production artifacts.
+- Any other branch builds development artifacts.
+- Use `bun run build:prod` or `bun run compile:prod` when you need a production artifact from a non-`main` branch.
+- Use `bun run build:dev` or `bun run compile:dev` when you need a development artifact explicitly.
+
+The production profile forces the quickstart WebUI path. The development profile forces the advanced/custom-host path, so local feature branches keep the browser-visible API configuration developers expect.
+
 ### repo2txt Route
 
 The web app exposes the shared repo2txt options UI at:
@@ -140,7 +151,10 @@ From `apps/tldw-frontend/` (scripts live in `apps/tldw-frontend/package.json`; u
 - `lint` – run ESLint against the codebase.
 - `test` – run Vitest unit tests (for example, auth error mapping).
 - `test:integration` – start the backend (optional) and run frontend tests + smoke checks (runs `Helper_Scripts/run-frontend-integration.sh` for flags and env).
-- `build` – Next.js production build.
+- `build` – branch-aware artifact build. On `main` it produces the production quickstart artifact; on other branches it produces the development artifact.
+- `build:prod` / `build:dev` – explicit production or development artifact overrides.
+- `compile` – branch-aware webpack validation build using the same profile contract.
+- `compile:prod` / `compile:dev` – explicit webpack profile overrides.
 
 ## Integration Test Harness
 

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatsCardSkeleton } from '@/components/ui/skeleton';
 import type { DashboardUIStats } from '@/lib/dashboard';
@@ -10,23 +11,34 @@ import {
   ArrowUpRight,
   Building2,
   Clock3,
+  Coins,
   Cpu,
+  Database,
   HardDrive,
   Minus,
+  Monitor,
+  Plug,
   Users,
   Wallet,
   Workflow,
   XCircle,
 } from 'lucide-react';
 
+export type RealtimeStats = {
+  active_sessions: number;
+  tokens_today: { prompt: number; completion: number; total: number };
+};
+
 type StatsGridProps = {
   loading: boolean;
   stats: DashboardUIStats;
   storagePercentage: number;
   operationalKpis: DashboardOperationalKpis;
+  realtimeStats?: RealtimeStats | null;
+  cacheHitRatePct?: number | null;
 };
 
-const CARD_COUNT = 8;
+const CARD_COUNT = 12;
 
 function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -108,17 +120,44 @@ const formatLiveValue = (value: number | null): string => (
   value === null ? 'unavailable' : `${value}`
 );
 
+const formatCompactNumber = (value: number): string => {
+  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return `${value}`;
+};
+
+const formatCacheHitRateKpi = (value: number | null | undefined): string => {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
+  return `${value.toFixed(1)}%`;
+};
+
 const buildStatsLiveSummary = (
   stats: DashboardUIStats,
   storagePercentage: number,
-  operationalKpis: DashboardOperationalKpis
-): string => (
-  `Dashboard metrics updated. ${stats.users} total users, ${stats.activeUsers} active users, ` +
-  `${stats.organizations} organizations, ${stats.enabledProviders} enabled providers, ` +
-  `${storagePercentage.toFixed(0)} percent storage used, ` +
-  `error rate ${formatLiveValue(operationalKpis.errorRatePct)} percent, ` +
-  `queue depth ${formatLiveValue(operationalKpis.queueDepth)}.`
-);
+  operationalKpis: DashboardOperationalKpis,
+  realtimeStats?: RealtimeStats | null,
+  cacheHitRatePct?: number | null,
+): string => {
+  const cacheLabel = cacheHitRatePct !== null && cacheHitRatePct !== undefined
+    ? `cache hit rate ${cacheHitRatePct.toFixed(1)} percent, `
+    : '';
+  const base =
+    `Dashboard metrics updated. ${stats.users} total users, ${stats.activeUsers} active users, ` +
+    `${stats.organizations} organizations, ${stats.enabledProviders} enabled providers, ` +
+    `${storagePercentage.toFixed(0)} percent storage used, ` +
+    `${cacheLabel}` +
+    `error rate ${formatLiveValue(operationalKpis.errorRatePct)} percent, ` +
+    `queue depth ${formatLiveValue(operationalKpis.queueDepth)}.`;
+  if (realtimeStats) {
+    return (
+      base +
+      ` ${realtimeStats.active_sessions} active sessions, ` +
+      `${formatCompactNumber(realtimeStats.tokens_today.total)} tokens consumed.`
+    );
+  }
+  return base;
+};
 
 const LATENCY_UNAVAILABLE_TOOLTIP =
   'Latency p95 unavailable. Backend must expose http_request_duration_seconds histogram at /metrics/text.';
@@ -128,6 +167,8 @@ export const StatsGrid = ({
   stats,
   storagePercentage,
   operationalKpis,
+  realtimeStats,
+  cacheHitRatePct,
 }: StatsGridProps) => (
   <div
     className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
@@ -137,7 +178,7 @@ export const StatsGrid = ({
     data-testid="dashboard-stats-live-region"
   >
     <p className="sr-only">
-      {loading ? 'Dashboard metrics loading.' : buildStatsLiveSummary(stats, storagePercentage, operationalKpis)}
+      {loading ? 'Dashboard metrics loading.' : buildStatsLiveSummary(stats, storagePercentage, operationalKpis, realtimeStats, cacheHitRatePct)}
     </p>
     {loading ? (
       Array.from({ length: CARD_COUNT }).map((_, index) => (
@@ -195,12 +236,12 @@ export const StatsGrid = ({
             </div>
             <div className="mt-2">
               <div
+                className="h-2 w-full rounded-full bg-gray-200"
                 role="progressbar"
                 aria-valuenow={Math.round(storagePercentage)}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-label={`Storage usage: ${storagePercentage.toFixed(0)}%`}
-                className="h-2 w-full rounded-full bg-gray-200"
               >
                 <div
                   className={`h-2 rounded-full ${
@@ -213,7 +254,49 @@ export const StatsGrid = ({
               <p className="mt-1 text-xs text-muted-foreground">
                 {storagePercentage.toFixed(0)}% used
               </p>
+              <Link
+                href="/data-ops"
+                className="mt-1 inline-block text-xs text-primary hover:underline"
+                data-testid="storage-detail-link"
+              >
+                View details
+              </Link>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
+            <Monitor className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {realtimeStats ? realtimeStats.active_sessions : 'N/A'}
+            </div>
+            <p className="text-xs text-muted-foreground">ACP agent sessions</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Token Consumption</CardTitle>
+            <Coins className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {realtimeStats
+                ? formatCompactNumber(realtimeStats.tokens_today.total)
+                : 'N/A'}
+            </div>
+            {realtimeStats ? (
+              <p className="text-xs text-muted-foreground">
+                {formatCompactNumber(realtimeStats.tokens_today.prompt)} prompt /{' '}
+                {formatCompactNumber(realtimeStats.tokens_today.completion)} completion
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">prompt / completion</p>
+            )}
           </CardContent>
         </Card>
 
@@ -250,6 +333,13 @@ export const StatsGrid = ({
               label="previous day"
               preferLower
             />
+            <Link
+              href="/audit?action=error"
+              className="inline-block text-xs text-primary hover:underline"
+              data-testid="error-drilldown-link"
+            >
+              View errors
+            </Link>
           </CardContent>
         </Card>
 
@@ -291,43 +381,42 @@ export const StatsGrid = ({
           </CardContent>
         </Card>
 
-        {stats.activeAcpSessions != null && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.activeAcpSessions}</div>
-              <p className="text-xs text-muted-foreground">ACP agent sessions</p>
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Cache Hit Rate</CardTitle>
+            <Database className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="text-2xl font-bold">{formatCacheHitRateKpi(cacheHitRatePct)}</div>
+            <p className="text-xs text-muted-foreground">RAG cache hit rate</p>
+          </CardContent>
+        </Card>
 
-        {stats.tokensToday && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Tokens Today</CardTitle>
-              <Cpu className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCompact(stats.tokensToday.total)}</div>
-              <p className="text-xs text-muted-foreground">
-                {formatCompact(stats.tokensToday.prompt)} prompt · {formatCompact(stats.tokensToday.completion)} completion
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {stats.mcpInvocationsToday != null && (
+        {stats.mcpInvocationsToday != null ? (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">MCP Calls</CardTitle>
-              <Workflow className="h-4 w-4 text-muted-foreground" />
+              <Plug className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatCompact(stats.mcpInvocationsToday)}</div>
               <p className="text-xs text-muted-foreground">Tool invocations today</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">MCP Tool Invocations</CardTitle>
+              <Plug className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent className="space-y-1">
+              <div
+                className="text-2xl font-bold"
+                title="Requires MCP telemetry"
+              >
+                N/A
+              </div>
+              <p className="text-xs text-muted-foreground">Requires MCP telemetry</p>
             </CardContent>
           </Card>
         )}

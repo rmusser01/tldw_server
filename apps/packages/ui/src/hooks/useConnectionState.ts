@@ -20,7 +20,8 @@ export const useConnectionActions = () =>
     setConfigPartial: s.setConfigPartial,
     testConnectionFromOnboarding: s.testConnectionFromOnboarding,
     setDemoMode: s.setDemoMode,
-    markFirstRunComplete: s.markFirstRunComplete
+    markFirstRunComplete: s.markFirstRunComplete,
+    setUserPersona: s.setUserPersona
   }))
 
 export const useKnowledgeStatus = () =>

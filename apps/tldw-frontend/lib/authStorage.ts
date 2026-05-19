@@ -99,6 +99,10 @@ export const getApiBearer = (): string | null => {
   return normalizeBearerValue(readStoredLocalValue("accessToken"));
 };
 
+export const hasEnvApiAuth = (): boolean =>
+  normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null) !== null ||
+  normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER || null) !== null;
+
 export const clearRuntimeAuth = (): void => {
   runtimeApiKey = null;
   runtimeApiBearer = null;

@@ -1,6 +1,7 @@
 import React from "react"
 import { Button, Modal } from "antd"
 import type { MessageInstance } from "antd/es/message/interface"
+import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ArtifactType, GeneratedArtifact } from "@/types/workspace"
 import {
@@ -108,7 +109,7 @@ export interface UseArtifactExportDeps {
     content: string
     mode: "append" | "replace"
   }) => void
-  t: (key: string, fallback?: string, opts?: Record<string, any>) => string
+  t: TFunction
 }
 
 export function useArtifactExport(deps: UseArtifactExportDeps) {

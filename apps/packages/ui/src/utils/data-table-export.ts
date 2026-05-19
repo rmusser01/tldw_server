@@ -63,54 +63,42 @@ export function exportDataTableToJSON(table: DataTable): Blob {
 }
 
 /**
- * Export table data to Excel format using SheetJS
- * Note: Requires xlsx library to be installed
+ * Export table data to Excel format using ExcelJS
  */
 export async function exportToExcel(table: DataTable): Promise<Blob> {
-  // Dynamic import to avoid bundling xlsx if not used
-  const XLSX = await import("xlsx")
+  // Dynamic import to avoid bundling exceljs if not used
+  const ExcelJS = await import("exceljs")
 
   const columns = table.columns
   const rows = table.rows
 
-  // Build worksheet data
-  const wsData: any[][] = []
+  const workbook = new ExcelJS.Workbook()
+  const sheetName = table.name.slice(0, 31).replace(/[\\/*?[\]]/g, "_")
+  const worksheet = workbook.addWorksheet(sheetName)
 
-  // Header row
-  wsData.push(columns.map((col) => col.name))
-
-  // Data rows
-  rows.forEach((row) => {
-    const rowData = columns.map((col) => {
-      const value = row[col.name] ?? row[col.id] ?? ""
-      return formatCellValueForExcel(value, col)
-    })
-    wsData.push(rowData)
-  })
-
-  // Create worksheet
-  const ws = XLSX.utils.aoa_to_sheet(wsData)
-
-  // Set column widths based on content
-  const colWidths = columns.map((col, i) => {
+  // Set up columns with headers and widths
+  worksheet.columns = columns.map((col) => {
     let maxWidth = col.name.length
     rows.forEach((row) => {
       const value = row[col.name] ?? row[col.id] ?? ""
       const cellWidth = String(value).length
       if (cellWidth > maxWidth) maxWidth = cellWidth
     })
-    return { wch: Math.min(maxWidth + 2, 50) }
+    return { header: col.name, key: col.name, width: Math.min(maxWidth + 2, 50) }
   })
-  ws["!cols"] = colWidths
 
-  // Create workbook
-  const wb = XLSX.utils.book_new()
-  const sheetName = table.name.slice(0, 31).replace(/[\\/*?[\]]/g, "_")
-  XLSX.utils.book_append_sheet(wb, ws, sheetName)
+  // Add data rows
+  rows.forEach((row) => {
+    const rowData: Record<string, any> = {}
+    columns.forEach((col) => {
+      rowData[col.name] = formatCellValueForExcel(row[col.name] ?? row[col.id] ?? "", col)
+    })
+    worksheet.addRow(rowData)
+  })
 
-  // Write to array buffer
-  const wbout = XLSX.write(wb, { type: "array", bookType: "xlsx" })
-  return new Blob([wbout], {
+  // Write to buffer
+  const buffer = await workbook.xlsx.writeBuffer()
+  return new Blob([new Uint8Array(buffer)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   })
 }

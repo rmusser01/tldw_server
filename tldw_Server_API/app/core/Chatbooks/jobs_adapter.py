@@ -89,21 +89,25 @@ class ChatbooksJobsAdapter:
         self._jm = _jobs_manager()
 
     def apply_export_status(self, job, job_row: dict[str, Any] | None = None) -> None:
+        if getattr(job, "status", None) == ExportStatus.CANCELLED:
+            return
         if job_row is None:
             job_row = self._get_job(job.job_id, job_type="export")
         if job_row is None:
             return
         mapped = _map_export_status(job_row.get("status"))
-        if mapped and job.status not in {ExportStatus.COMPLETED, ExportStatus.FAILED}:
+        if mapped and job.status not in {ExportStatus.COMPLETED, ExportStatus.FAILED, ExportStatus.CANCELLED}:
             job.status = mapped
 
     def apply_import_status(self, job, job_row: dict[str, Any] | None = None) -> None:
+        if getattr(job, "status", None) == ImportStatus.CANCELLED:
+            return
         if job_row is None:
             job_row = self._get_job(job.job_id, job_type="import")
         if job_row is None:
             return
         mapped = _map_import_status(job_row.get("status"))
-        if mapped and job.status not in {ImportStatus.COMPLETED, ImportStatus.FAILED}:
+        if mapped and job.status not in {ImportStatus.COMPLETED, ImportStatus.FAILED, ImportStatus.CANCELLED}:
             job.status = mapped
 
     def map_jobs(

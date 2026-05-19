@@ -5,6 +5,7 @@
 import asyncio
 import os
 import re
+import sqlite3
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional
@@ -18,6 +19,7 @@ import asyncpg
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseError,
@@ -52,6 +54,56 @@ _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
     ConnectionError,
     TimeoutError,
     asyncpg.PostgresError,
+)
+
+SQLITE_REQUIRED_API_KEYS_COLUMNS = frozenset(
+    {
+        "id",
+        "user_id",
+        "key_hash",
+        "key_id",
+        "key_prefix",
+        "name",
+        "description",
+        "scope",
+        "status",
+        "created_at",
+        "expires_at",
+        "last_used_at",
+        "last_used_ip",
+        "usage_count",
+        "rate_limit",
+        "allowed_ips",
+        "metadata",
+        "rotated_from",
+        "rotated_to",
+        "revoked_at",
+        "revoked_by",
+        "revoke_reason",
+        "is_virtual",
+        "parent_key_id",
+        "org_id",
+        "team_id",
+        "llm_budget_day_tokens",
+        "llm_budget_month_tokens",
+        "llm_budget_day_usd",
+        "llm_budget_month_usd",
+        "llm_allowed_endpoints",
+        "llm_allowed_providers",
+        "llm_allowed_models",
+    }
+)
+SQLITE_REQUIRED_API_KEY_AUDIT_COLUMNS = frozenset(
+    {
+        "id",
+        "api_key_id",
+        "action",
+        "user_id",
+        "ip_address",
+        "user_agent",
+        "details",
+        "created_at",
+    }
 )
 
 #######################################################################################################################
@@ -181,6 +233,77 @@ def _apply_single_user_fallback(url: str, auth_mode: Optional[str] = None) -> st
 
     return url
 
+
+def should_enforce_sqlite_schema_strictness(sqlite_fs_path: Optional[str]) -> bool:
+    """Return True when persisted SQLite schema drift should fail fast."""
+    if not sqlite_fs_path or sqlite_fs_path == ":memory:":
+        return False
+    if is_test_mode() or is_explicit_pytest_runtime():
+        return False
+    return True
+
+
+def _sqlite_missing_required_columns(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    required_columns: frozenset[str],
+) -> list[str]:
+    # SECURITY: table_name must be a trusted, hardcoded value.
+    # PRAGMA does not support parameterized queries.
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    present_columns = {row[1] for row in rows}
+    return sorted(required_columns - present_columns)
+
+
+def _sqlite_table_info_by_name(conn: sqlite3.Connection, table_name: str) -> dict[str, tuple]:
+    # SECURITY: table_name must be a trusted, hardcoded value.
+    # PRAGMA does not support parameterized queries.
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1]: row for row in rows}
+
+
+def validate_required_sqlite_api_key_schema(sqlite_fs_path: Optional[str]) -> None:
+    """Raise when persisted SQLite API-key schema drift is detected."""
+    if not sqlite_fs_path or sqlite_fs_path == ":memory:":
+        return
+
+    with sqlite3.connect(sqlite_fs_path) as conn:
+        api_key_table_info = _sqlite_table_info_by_name(conn, "api_keys")
+        missing_api_key_cols = _sqlite_missing_required_columns(
+            conn,
+            table_name="api_keys",
+            required_columns=SQLITE_REQUIRED_API_KEYS_COLUMNS,
+        )
+        if missing_api_key_cols:
+            raise RuntimeError(
+                "SQLite api_keys schema missing required columns: "
+                + ", ".join(missing_api_key_cols)
+            )
+
+        scope_info = api_key_table_info.get("scope")
+        if scope_info is None:
+            raise RuntimeError(
+                "SQLite api_keys schema missing 'scope' column"
+            )
+        scope_default = scope_info[4]
+        if scope_default is not None:
+            raise RuntimeError(
+                "SQLite api_keys.scope must not define a default; "
+                f"found {scope_default}"
+            )
+
+        missing_audit_cols = _sqlite_missing_required_columns(
+            conn,
+            table_name="api_key_audit_log",
+            required_columns=SQLITE_REQUIRED_API_KEY_AUDIT_COLUMNS,
+        )
+        if missing_audit_cols:
+            raise RuntimeError(
+                "SQLite api_key_audit_log schema missing required columns: "
+                + ", ".join(missing_audit_cols)
+            )
+
 #######################################################################################################################
 #
 # Database Pool Manager
@@ -301,6 +424,15 @@ class DatabasePool:
             pytest_active = False
         return test_mode or pytest_active
 
+    @property
+    def backend_type(self) -> str:
+        """Return the configured AuthNZ database backend without exposing internals."""
+        if self.pool is not None:
+            return "postgres"
+        if self._initialized:
+            return "sqlite"
+        return "postgres" if self._should_use_postgres() else "sqlite"
+
     @staticmethod
     def _resolve_sqlite_paths(url: str) -> tuple[str, bool, Optional[str]]:
         """Resolve sqlite connection string, uri flag, and filesystem path.
@@ -413,12 +545,21 @@ class DatabasePool:
                 if self._sqlite_fs_path and self._sqlite_fs_path != ":memory:":
                     logger.info(f"SQLite schema harmonization: ensuring AuthNZ tables at {self._sqlite_fs_path}")
                     await asyncio.to_thread(ensure_authnz_tables, Path(self._sqlite_fs_path))
+                    if should_enforce_sqlite_schema_strictness(self._sqlite_fs_path):
+                        await asyncio.to_thread(
+                            validate_required_sqlite_api_key_schema,
+                            self._sqlite_fs_path,
+                        )
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as migration_error:
+                if should_enforce_sqlite_schema_strictness(self._sqlite_fs_path):
+                    raise
                 logger.debug(f"SQLite migration harmonization skipped: {migration_error}")
 
         except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to create SQLite schema: {e}")
-            # Don't raise - schema might already exist
+            if should_enforce_sqlite_schema_strictness(self._sqlite_fs_path):
+                raise
+            # Don't raise in permissive contexts - schema might already exist
 
     @asynccontextmanager
     async def transaction(self):
@@ -436,6 +577,8 @@ class DatabasePool:
                 raise ConnectionPoolExhaustedError() from None
             except HTTPException:
                 # Re-raise HTTP exceptions unchanged
+                raise
+            except MandatoryAuditWriteError:
                 raise
             except (DuplicateUserError, WeakPasswordError, InvalidRegistrationCodeError, RegistrationError, DuplicateOrganizationError, DuplicateTeamError, DuplicateRoleError, DuplicatePermissionError):
                 # Re-raise registration exceptions unchanged
@@ -481,6 +624,8 @@ class DatabasePool:
                 raise TransactionError("SQLite transaction", str(e)) from e
             except HTTPException:
                 # Re-raise HTTP exceptions unchanged
+                raise
+            except MandatoryAuditWriteError:
                 raise
             except (DuplicateUserError, WeakPasswordError, InvalidRegistrationCodeError, RegistrationError, DuplicateOrganizationError, DuplicateTeamError, DuplicateRoleError, DuplicatePermissionError):
                 # Re-raise registration exceptions unchanged

@@ -68,6 +68,7 @@ jobs:
         run: |
           bunx vitest run \
             src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability.test.tsx \
+            src/components/Notes/__tests__/NotesManagerPage.stage1.editor-reliability-followup.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage11.search-filtering.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage32.delete-undo.test.tsx \
             src/components/Notes/__tests__/NotesManagerPage.stage39.organization-model.test.tsx \
@@ -85,6 +86,8 @@ jobs:
       DISABLE_HEAVY_STARTUP: "1"
       MINIMAL_TEST_APP: "1"
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: "0"
+      # Match the main CI workaround for protobuf/opentelemetry import-time conflicts.
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8

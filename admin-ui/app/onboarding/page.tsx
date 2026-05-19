@@ -53,6 +53,7 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
               }`}
+              aria-hidden="true"
             >
               {currentStep > step.number ? <Check className="h-4 w-4" /> : step.number}
             </div>
@@ -60,12 +61,13 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
               className={`text-sm ${
                 currentStep >= step.number ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'
               }`}
+              aria-current={currentStep === step.number ? 'step' : undefined}
             >
               {step.label}
             </span>
           </div>
           {idx < STEPS.length - 1 && (
-            <div className="mx-2 h-px w-12 bg-gray-300 dark:bg-gray-600" />
+            <div className="mx-2 h-px w-12 bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
           )}
         </div>
       ))}
@@ -138,9 +140,7 @@ function OnboardingPageContent() {
       } finally {
         if (sequence === slugCheckSequence.current) {
           setSlugChecking(false);
-          if (slugCheckPromise.current === requestPromise) {
-            slugCheckPromise.current = null;
-          }
+          slugCheckPromise.current = null;
         }
       }
     })();
@@ -296,7 +296,7 @@ function OnboardingPageContent() {
         <div>
           <h2 className="mb-4 text-lg font-semibold">Select a Plan</h2>
           {loading ? (
-            <p>Loading plans...</p>
+            <p role="status" aria-live="polite">Loading plans...</p>
           ) : plans.length === 0 ? (
             <p>No plans available.</p>
           ) : (

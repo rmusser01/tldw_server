@@ -5,12 +5,14 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import SplitResult, urlsplit
 
 from loguru import logger
 
 from .files import atomic_write
 
 _ENV_KEY_RE = re.compile(r"^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
+_RAW_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SENSITIVE_TOKENS = ("KEY", "SECRET", "TOKEN", "PASSWORD")
 
 
@@ -63,11 +65,15 @@ def _format_env_value(value: str) -> str:
     if not needs_quotes:
         return value
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f"\"{escaped}\""
+    return f'"{escaped}"'
 
 
-def _format_env_line(key: str, value: str, export: bool = False) -> str:
+def _format_env_line(key: str, value: str, export: bool = False, raw_values: bool = False) -> str:
     prefix = "export " if export else ""
+    if raw_values:
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"Env value for {key} cannot contain newline characters in raw mode")
+        return f"{prefix}{key}={value}"
     return f"{prefix}{key}={_format_env_value(value)}"
 
 
@@ -81,6 +87,15 @@ def _parse_line(line: str) -> ParsedEnvLine:
     return ParsedEnvLine(raw=line, key=key, value=value, export=export_prefix)
 
 
+def _parse_raw_line(line: str) -> ParsedEnvLine:
+    if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+        return ParsedEnvLine(raw=line, key=None, value=None, export=False)
+    key, value = line.split("=", 1)
+    if not _RAW_ENV_KEY_RE.match(key):
+        return ParsedEnvLine(raw=line, key=None, value=None, export=False)
+    return ParsedEnvLine(raw=line, key=key, value=value, export=False)
+
+
 def _backup_env(path: Path, content: str) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     backup = path.with_name(f"{path.name}.{timestamp}.bak")
@@ -89,6 +104,7 @@ def _backup_env(path: Path, content: str) -> Path:
         backup = path.with_name(f"{path.name}.{timestamp}.{counter}.bak")
         counter += 1
     atomic_write(backup, content)
+    _chmod_600(backup)
     return backup
 
 
@@ -99,13 +115,17 @@ def _chmod_600(path: Path) -> None:
         logger.debug(f"chmod on {path} ignored: {exc}")
 
 
-def load_env(path: Path) -> dict[str, str]:
+def load_env(path: Path, *, raw_values: bool = False) -> dict[str, str]:
     if not path.exists():
         return {}
     content = path.read_text(encoding="utf-8")
     values: dict[str, str] = {}
-    for line in content.splitlines():
-        parsed = _parse_line(line)
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        if raw_values and "\r" in line:
+            raise ValueError(f"Invalid carriage return in env file {path}:{line_number}")
+        parsed = _parse_raw_line(line) if raw_values else _parse_line(line)
+        if raw_values and parsed.key is None and line.strip() and not line.lstrip().startswith("#"):
+            raise ValueError(f"Invalid raw env line in {path}:{line_number}")
         if parsed.key:
             values[parsed.key] = parsed.value or ""
     return values
@@ -124,13 +144,45 @@ def mask_value(value: str) -> str:
     return "*" * (len(value) - 4) + value[-4:]
 
 
+def _fallback_mask_url_credentials(value: str) -> str:
+    marker = "://"
+    marker_index = value.find(marker)
+    if marker_index < 0:
+        return value
+    authority_start = marker_index + len(marker)
+    at_index = value.find("@", authority_start)
+    if at_index < 0:
+        return value
+    userinfo = value[authority_start:at_index]
+    username = userinfo.split(":", 1)[0]
+    credentials = f"{username}:********" if username else "********"
+    return f"{value[:authority_start]}{credentials}{value[at_index:]}"
+
+
+def _mask_url_credentials(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return _fallback_mask_url_credentials(value)
+    if not parsed.scheme or not parsed.netloc or parsed.password is None:
+        return _fallback_mask_url_credentials(value)
+
+    if "@" not in parsed.netloc:
+        return _fallback_mask_url_credentials(value)
+    userinfo, hostinfo = parsed.netloc.rsplit("@", 1)
+    username = userinfo.split(":", 1)[0]
+    credentials = f"{username}:********" if username else "********"
+    netloc = f"{credentials}@{hostinfo}"
+    return SplitResult(parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment).geturl()
+
+
 def mask_env_values(values: dict[str, str]) -> dict[str, str]:
     masked: dict[str, str] = {}
     for key, value in values.items():
         if is_sensitive_key(key):
             masked[key] = mask_value(value)
         else:
-            masked[key] = value
+            masked[key] = _mask_url_credentials(value)
     return masked
 
 
@@ -149,11 +201,14 @@ def ensure_env(
     *,
     updates: dict[str, str | None] | None = None,
     defaults: dict[str, str | None] | None = None,
+    remove_keys: set[str] | frozenset[str] | tuple[str, ...] | list[str] | None = None,
     dry_run: bool = False,
+    raw_values: bool = False,
 ) -> EnvUpdateResult:
     """Create or update a .env file idempotently with backups."""
     updates = updates or {}
     defaults = defaults or {}
+    remove_keys_set = set(remove_keys or ())
     updates_clean = {k: v for k, v in updates.items() if v is not None}
     defaults_clean = {k: v for k, v in defaults.items() if v not in (None, "")}
 
@@ -161,7 +216,7 @@ def ensure_env(
     existed = path.exists()
     content = path.read_text(encoding="utf-8") if existed else ""
     lines = content.splitlines() if content else []
-    parsed = [_parse_line(line) for line in lines]
+    parsed = [_parse_raw_line(line) if raw_values else _parse_line(line) for line in lines]
 
     last_index: dict[str, int] = {}
     for idx, entry in enumerate(parsed):
@@ -179,20 +234,30 @@ def ensure_env(
             continue
         if last_index.get(entry.key) != idx:
             continue
+        if entry.key in remove_keys_set:
+            updated_keys.append(entry.key)
+            continue
         if entry.key in updates_clean:
-            rendered.append(_format_env_line(entry.key, str(updates_clean[entry.key]), export=entry.export))
+            rendered.append(
+                _format_env_line(
+                    entry.key,
+                    str(updates_clean[entry.key]),
+                    export=entry.export,
+                    raw_values=raw_values,
+                )
+            )
             updated_keys.append(entry.key)
             continue
         rendered.append(entry.raw)
 
     for key, value in updates_clean.items():
         if key not in existing_keys:
-            rendered.append(_format_env_line(key, str(value)))
+            rendered.append(_format_env_line(key, str(value), raw_values=raw_values))
             added_keys.append(key)
 
     for key, value in defaults_clean.items():
         if key not in existing_keys and key not in updates_clean:
-            rendered.append(_format_env_line(key, str(value)))
+            rendered.append(_format_env_line(key, str(value), raw_values=raw_values))
             added_keys.append(key)
 
     new_content = "\n".join(rendered).rstrip("\n") + "\n" if rendered else ""

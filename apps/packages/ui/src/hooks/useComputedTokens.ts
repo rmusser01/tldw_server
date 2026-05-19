@@ -1,16 +1,16 @@
 import { useMemo } from "react"
-import type { ThemeColorTokens } from "@/themes/types"
+import type { ThemeRgbTokenKey } from "@/themes/types"
 import { useTheme } from "@/hooks/useTheme"
 import { getComputedTokens } from "@/themes/runtime-tokens"
 
 /**
- * Returns memoized hex color values for all semantic theme tokens.
+ * Returns memoized hex color values for all semantic RGB theme tokens.
  * Recomputes when the active theme tokens change.
  *
  * Use this in React components that feed colors into JS APIs
  * (Cytoscape, Chart.js, Canvas, etc.) that cannot use CSS classes.
  */
-export function useComputedTokens(): Record<keyof ThemeColorTokens, string> {
+export function useComputedTokens(): Record<ThemeRgbTokenKey, string> {
   const { tokens } = useTheme()
 
   return useMemo(() => {

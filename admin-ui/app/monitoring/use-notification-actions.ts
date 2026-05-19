@@ -8,6 +8,7 @@ import type {
   NotificationSettings,
   RecentNotification,
 } from './types';
+import { logger } from '@/lib/logger';
 
 type SetState<T> = (next: T | ((prev: T) => T)) => void;
 
@@ -49,7 +50,7 @@ export const useNotificationActions = ({
       setSuccess('Notification settings saved');
       return true;
     } catch (err: unknown) {
-      console.error('Failed to save notification settings:', err);
+      logger.error('Failed to save notification settings', { component: 'useNotificationActions', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to save notification settings');
       return false;
     } finally {
@@ -74,7 +75,7 @@ export const useNotificationActions = ({
         // Ignore reload errors
       }
     } catch (err: unknown) {
-      console.error('Failed to send test notification:', err);
+      logger.error('Failed to send test notification', { component: 'useNotificationActions', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to send test notification');
     }
   }, [apiClient, setError, setRecentNotifications, setSuccess]);

@@ -4,11 +4,35 @@ import {
   Select,
   Button
 } from "antd"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives"
+import { FirstRunBanner } from "@/components/PersonaGarden/FirstRunBanner"
+import { useFirstRunCheck } from "@/hooks/useFirstRunCheck"
 import { ModelRecommendationsPanel } from "./ModelRecommendationsPanel"
-import type { ModelRecommendationAction } from "./model-recommendations"
+import type {
+  ModelRecommendation,
+  ModelRecommendationAction
+} from "./model-recommendations"
 import { toText } from "./hooks/utils"
-import type { TFunction } from "i18next"
+
+const CHAT_NUDGE_DISMISSED_KEY = "assistant_nudge_dismissed_chat"
+
+const readChatNudgeDismissedState = (): boolean => {
+  try {
+    return localStorage.getItem(CHAT_NUDGE_DISMISSED_KEY) === "true"
+  } catch (error) {
+    console.warn("Failed to read assistant chat nudge dismissal state", error)
+    return false
+  }
+}
+
+const persistChatNudgeDismissedState = (): void => {
+  try {
+    localStorage.setItem(CHAT_NUDGE_DISMISSED_KEY, "true")
+  } catch (error) {
+    console.warn("Failed to persist assistant chat nudge dismissal state", error)
+  }
+}
 
 export type PlaygroundComposerNoticesProps = {
   modeAnnouncement: string | null
@@ -34,7 +58,7 @@ export type PlaygroundComposerNoticesProps = {
     onAction?: () => void
     actionLabel?: string
   }>
-  visibleModelRecommendations: any[]
+  visibleModelRecommendations: ModelRecommendation[]
   sessionInsightsTotalTokens: number
   jsonMode: boolean
   isConnectionReady: boolean
@@ -42,7 +66,7 @@ export type PlaygroundComposerNoticesProps = {
   isProMode: boolean
   selectedModel: string | null | undefined
   systemPrompt: string | null | undefined
-  selectedCharacter: any
+  selectedCharacter: unknown
   ragPinnedResultsLength: number
   startupTemplateDraftName: string
   setStartupTemplateDraftName: (name: string) => void
@@ -61,8 +85,43 @@ export type PlaygroundComposerNoticesProps = {
   handleModelRecommendationAction: (action: ModelRecommendationAction) => void
   dismissModelRecommendation: (id: string) => void
   getModelRecommendationActionLabel: (action: ModelRecommendationAction) => string
-  wrapComposerProfile: (id: string, element: React.ReactElement) => React.ReactElement
-  t: TFunction
+  wrapComposerProfile: (id: string, element: React.ReactNode) => React.ReactNode
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
+}
+
+/**
+ * Thin wrapper around the chat-surface nudge banner dismiss state.
+ * Keeps localStorage reads inside a hook so the memo boundary on the
+ * outer component does not break.
+ */
+function ChatFirstRunNudge() {
+  const { shouldShowSetup, resumeStep, loading } = useFirstRunCheck()
+  const navigate = useNavigate()
+  const [dismissed, setDismissed] = React.useState(readChatNudgeDismissedState)
+
+  const handleDismiss = React.useCallback(() => {
+    persistChatNudgeDismissedState()
+    setDismissed(true)
+  }, [])
+
+  const handleNavigate = React.useCallback(() => {
+    navigate("/persona")
+  }, [navigate])
+
+  if (loading || dismissed || (!shouldShowSetup && !resumeStep)) {
+    return null
+  }
+
+  return (
+    <div className="mt-1">
+      <FirstRunBanner
+        variant={resumeStep ? "resume" : "nudge"}
+        resumeStep={resumeStep}
+        onResume={handleNavigate}
+        onDismiss={handleDismiss}
+      />
+    </div>
+  )
 }
 
 export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerNotices(
@@ -72,7 +131,6 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
     modeAnnouncement,
     characterPendingApply,
     selectedCharacterGreeting,
-    selectedCharacterName,
     compareModeActive,
     compareSelectedModels,
     compareSelectedModelLabels,
@@ -113,6 +171,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
 
   return (
     <>
+      <ChatFirstRunNudge />
       {modeAnnouncement && (
         <div
           role="status"
@@ -186,7 +245,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
                   "{{count}} models",
                   {
                     count: compareSelectedModels.length
-                  } as any
+                  }
                 )
               )}
             </span>
@@ -401,7 +460,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
           <span>
             {t(
               "playground:composer.jsonModeHint",
-              "JSON mode is active. Responses should be valid JSON objects."
+              "JSON output is active (developer). Responses will be formatted as JSON objects."
             )}
           </span>
           <button
@@ -416,37 +475,72 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
           </button>
         </div>
       )}
-      {isConnectionReady &&
-        connectionUxState === "connected_degraded" && (
-          <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-2 text-xs text-warn">
+      {!isConnectionReady && (
+        <Alert
+          variant="info"
+          role="status"
+          aria-live="polite"
+          data-testid="playground-composer-disconnected-notice"
+          className="mt-1"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
             <span>
               {t(
-                "playground:composer.providerDegraded",
-                "Provider connectivity is degraded. Responses may be slower or fail intermittently."
+                "playground:composer.disconnectedNotice",
+                "You're offline \u2014 connect to a tldw server to start chatting."
               )}
             </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={openModelApiSelector}
-                className="rounded border border-warn/40 bg-surface px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/10"
-              >
-                {t(
-                  "playground:composer.providerDegradedSwitchModel",
-                  "Switch model"
-                )}
-              </button>
-              <Link
-                to="/settings/health"
-                className="text-[11px] font-medium text-warn underline hover:text-warn"
-              >
-                {t(
-                  "settings:healthSummary.diagnostics",
-                  "Health & diagnostics"
-                )}
-              </Link>
-            </div>
+            <Link
+              to="/settings/tldw"
+              className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text"
+            >
+              {t(
+                "playground:composer.disconnectedOpenSettings",
+                "Open settings"
+              )}
+            </Link>
           </div>
+        </Alert>
+      )}
+      {isConnectionReady &&
+        connectionUxState === "connected_degraded" && (
+          <Alert
+            variant="warning"
+            role="status"
+            aria-live="polite"
+            data-testid="playground-composer-degraded-notice"
+            className="mt-1"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-warn">
+              <span>
+                {t(
+                  "playground:composer.providerDegraded",
+                  "Provider connectivity is degraded. Responses may be slower or fail intermittently."
+                )}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openModelApiSelector}
+                  className="rounded border border-warn/40 bg-surface px-2 py-0.5 text-[11px] font-medium text-warn hover:bg-warn/10"
+                >
+                  {t(
+                    "playground:composer.providerDegradedSwitchModel",
+                    "Switch model"
+                  )}
+                </button>
+                <Link
+                  to="/settings/health"
+                  className="text-[11px] font-medium text-warn underline hover:text-warn"
+                >
+                  {t(
+                    "settings:healthSummary.diagnostics",
+                    "Health & diagnostics"
+                  )}
+                </Link>
+              </div>
+            </div>
+          </Alert>
         )}
       {isProMode && (
         <div

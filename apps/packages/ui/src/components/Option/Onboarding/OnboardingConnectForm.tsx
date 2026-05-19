@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, useReducer } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef, useReducer, type ReactNode } from "react"
 import { Input, Button, Tooltip, message, Select } from "antd"
 import type { InputRef } from "antd"
 import {
@@ -10,13 +10,18 @@ import {
   User,
   Lock,
   AlertCircle,
+  Info,
   ExternalLink,
   Copy,
   ChevronDown,
   ChevronRight,
   Sparkles,
   ArrowRight,
+  ArrowLeft,
   RefreshCw,
+  MessageSquare,
+  Shield,
+  BookOpen,
 } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
@@ -36,6 +41,7 @@ import {
   useConnectionState,
   useConnectionActions,
 } from "@/hooks/useConnectionState"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useConnectionStore } from "@/store/connection"
 import { useDemoMode } from "@/context/demo-mode"
 import { requestQuickIngestIntro } from "@/utils/quick-ingest-open"
@@ -43,11 +49,21 @@ import { openSidepanelForActiveTab } from "@/utils/sidepanel"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { cn } from "@/libs/utils"
+import { setSetting } from "@/services/settings/registry"
+import { HEADER_SHORTCUT_SELECTION_SETTING } from "@/services/settings/ui-settings"
+import { getDefaultShortcutsForPersona } from "@/components/Layouts/header-shortcut-items"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { getProviderDisplayName, normalizeProviderKey } from "@/utils/provider-registry"
+import { getDesignSystemState } from "@/design-system"
 import {
   trackOnboardingFirstIngestSuccess,
   trackOnboardingSuccessReached
 } from "@/utils/onboarding-ingestion-telemetry"
+import {
+  buildCharacterOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  type OnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
 import {
   validateApiKey,
   validateMultiUserAuth,
@@ -56,6 +72,7 @@ import {
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
+import { CharacterChatOnboardingLane } from "./CharacterChatOnboardingLane"
 import { ProgressItem, type ProgressStatus } from "./ProgressItem"
 
 type AuthMode = "single-user" | "multi-user"
@@ -161,12 +178,76 @@ function connectionUiReducer(
 }
 
 interface Props {
+  entryIntent?: OnboardingEntryIntent | null
   onFinish?: () => void
+  returnTo?: string | null
 }
 
 const QUICK_INGEST_OPEN_DELAY_MS = 120
-const QUICK_INGEST_OPEN_RETRY_INTERVAL_MS = 120
-const QUICK_INGEST_OPEN_MAX_ATTEMPTS = 25
+const LOCALHOST_PROBE_URL = "http://localhost:8000/health"
+const LOCALHOST_PROBE_TIMEOUT_MS = 2_000
+const TROUBLESHOOTING_URL =
+  "https://github.com/rmusser01/tldw/blob/main/Docs/Getting_Started/TROUBLESHOOTING.md"
+
+type IntentStepsProps = {
+  testId: string
+  icon: ReactNode
+  title: string
+  steps: string[]
+  primaryLabel: string
+  onPrimaryClick: () => void
+  secondaryLabel: string
+  onSecondaryClick: () => void
+  backLabel: string
+  onBackClick: () => void
+}
+
+function IntentSteps({
+  testId,
+  icon,
+  title,
+  steps,
+  primaryLabel,
+  onPrimaryClick,
+  secondaryLabel,
+  onSecondaryClick,
+  backLabel,
+  onBackClick,
+}: IntentStepsProps) {
+  return (
+    <div data-testid={testId} className="rounded-xl border border-border/60 bg-surface2/30 p-5">
+      <div className="mb-4 flex items-center gap-2">
+        {icon}
+        <span className="text-sm font-semibold text-text">{title}</span>
+      </div>
+      <div className="space-y-2.5">
+        {steps.map((step, index) => (
+          <div key={step} className="flex items-start gap-2.5">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+              {index + 1}
+            </span>
+            <span className="text-sm text-text">{step}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center gap-2">
+        <Button type="primary" onClick={onPrimaryClick}>
+          {primaryLabel}
+          <ArrowRight className="ml-1 h-4 w-4" />
+        </Button>
+        <Button onClick={onSecondaryClick}>{secondaryLabel}</Button>
+        <button
+          type="button"
+          onClick={onBackClick}
+          className="ml-auto flex items-center gap-1 text-xs text-text-muted hover:text-text"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          {backLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 /**
  * Single-step onboarding form for the new UX redesign.
@@ -176,10 +257,16 @@ const QUICK_INGEST_OPEN_MAX_ATTEMPTS = 25
  * - Granular error messages
  * - All fields on one page (no multi-step wizard)
  */
-export function OnboardingConnectForm({ onFinish }: Props) {
+export function OnboardingConnectForm({
+  entryIntent,
+  onFinish,
+  returnTo
+}: Props) {
   const { t } = useTranslation(["settings", "common"])
   const navigate = useNavigate()
   const { setDemoEnabled } = useDemoMode()
+  const { capabilities } = useServerCapabilities()
+  const familyGuardrailsAvailable = Boolean(capabilities?.hasGuardian)
   const connectionState = useConnectionState()
   const actions = useConnectionActions()
   const hostPermissionPromptKeyRef = useRef<string | null>(null)
@@ -220,6 +307,11 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     showSuccess,
     hasRunConnectionTest,
   } = uiState
+
+  // Post-connection guided flow: when user selects an intent, show persona-specific steps
+  const [selectedIntent, setSelectedIntent] = useState<"chat" | "family" | "research" | null>(null)
+  const isCharacterChatEntry =
+    entryIntent === CHARACTER_CHAT_ONBOARDING_INTENT
 
   const {
     data: availableModels = [],
@@ -342,7 +434,38 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
         if (!cfg?.serverUrl) {
           const fallback = await getTldwServerURL()
-          if (fallback) setServerUrl(fallback)
+          if (fallback) {
+            setServerUrl(fallback)
+          } else if (isExtensionRuntime()) {
+            // B1: Auto-probe localhost when no URL is configured (extension only)
+            // Use a normal CORS-mode fetch so we can distinguish a running server
+            // (which may reject CORS with a TypeError) from a truly unreachable
+            // host (which also throws TypeError but after an abort timeout).
+            const probeController = new AbortController()
+            const probeTimer = setTimeout(
+              () => probeController.abort(),
+              LOCALHOST_PROBE_TIMEOUT_MS
+            )
+            try {
+              const resp = await fetch(LOCALHOST_PROBE_URL, {
+                signal: probeController.signal,
+              })
+              clearTimeout(probeTimer)
+              if (resp.ok) {
+                setServerUrl("http://localhost:8000")
+              }
+            } catch (err) {
+              clearTimeout(probeTimer)
+              // A CORS rejection throws TypeError but the abort signal is NOT
+              // triggered. An unreachable host times out and the signal IS aborted.
+              if (err instanceof TypeError && !probeController.signal.aborted) {
+                // Likely a CORS rejection — server is present but CORS not
+                // configured for this origin. Still pre-fill the URL.
+                setServerUrl("http://localhost:8000")
+              }
+              // AbortError or truly unreachable — leave URL empty for manual entry
+            }
+          }
         }
       } catch {
         // Ignore config load errors
@@ -441,7 +564,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
       case "cors_blocked":
         return t(
           "settings:onboarding.errors.cors",
-          "Cross-origin request blocked. If running the WebUI separately from the API, add your browser's origin to ALLOWED_ORIGINS in .env"
+          "Your browser can't reach the server due to security settings. If you manage the server, add your browser's origin to ALLOWED_ORIGINS in the server's .env file. Otherwise, ask your server administrator for help."
         )
       case "ssl_error":
         return t(
@@ -770,19 +893,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
       navigate(path)
       if (options?.openQuickIngestIntro && typeof window !== "undefined") {
         window.setTimeout(() => {
-          let attempts = 0
-          const dispatchWhenReady = () => {
-            const triggerReady = Boolean(
-              document.querySelector('[data-testid="open-quick-ingest"]')
-            )
-            if (triggerReady || attempts >= QUICK_INGEST_OPEN_MAX_ATTEMPTS) {
-              requestQuickIngestIntro()
-              return
-            }
-            attempts += 1
-            window.setTimeout(dispatchWhenReady, QUICK_INGEST_OPEN_RETRY_INTERVAL_MS)
-          }
-          dispatchWhenReady()
+          requestQuickIngestIntro()
         }, QUICK_INGEST_OPEN_DELAY_MS)
       }
     },
@@ -790,14 +901,27 @@ export function OnboardingConnectForm({ onFinish }: Props) {
   )
 
   const handleOpenIngestFlow = useCallback(async () => {
+    try {
+      await actions.setUserPersona("researcher")
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] setUserPersona failed", err)
+    }
+    try {
+      const researcherShortcuts = getDefaultShortcutsForPersona("researcher")
+      await setSetting(HEADER_SHORTCUT_SELECTION_SETTING, researcherShortcuts)
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to persist researcher shortcuts", err)
+    }
     await finishAndNavigate("/media", { openQuickIngestIntro: true })
-  }, [finishAndNavigate])
+  }, [actions, finishAndNavigate])
+
+  const handleResearchGetStarted = handleOpenIngestFlow
 
   const handleOpenMediaFlow = useCallback(async () => {
     await finishAndNavigate("/media")
   }, [finishAndNavigate])
 
-  const handleOpenChatFlow = useCallback(async () => {
+  const handleGoToChat = useCallback(async () => {
     try {
       await openSidepanelForActiveTab()
     } catch (err) {
@@ -806,9 +930,65 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     await finishAndNavigate("/chat")
   }, [finishAndNavigate])
 
+  const handleOpenChatFlow = useCallback(async () => {
+    try {
+      await actions.setUserPersona("explorer")
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] setUserPersona failed", err)
+    }
+    // Explorer persona sees all features — no shortcut filtering needed
+    await handleGoToChat()
+  }, [actions, handleGoToChat])
+
   const handleOpenSettingsFlow = useCallback(async () => {
     await finishAndNavigate("/settings/tldw")
   }, [finishAndNavigate])
+
+  const handleCreateCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "create"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleImportCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "import"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleChooseCharacterModelFlow = useCallback(async () => {
+    await finishAndNavigate("/settings/model?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
+  const handleStartCharacterChatFlow = useCallback(async () => {
+    try {
+      await openSidepanelForActiveTab()
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to open sidepanel", err)
+    }
+    await finishAndNavigate("/chat?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
+  const handleOpenFamilyFlow = useCallback(async () => {
+    try {
+      await actions.setUserPersona("family")
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] setUserPersona failed", err)
+    }
+    try {
+      const familyShortcuts = getDefaultShortcutsForPersona("family")
+      await setSetting(HEADER_SHORTCUT_SELECTION_SETTING, familyShortcuts)
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to persist family shortcuts", err)
+    }
+    await finishAndNavigate("/settings/family-guardrails")
+  }, [actions, finishAndNavigate])
 
   // Copy server command
   const handleCopyCommand = useCallback(
@@ -836,6 +1016,22 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     quickIngestLastRun.status === "success" && quickIngestLastRun.successCount > 0
   const hasFailedIngest = quickIngestLastRun.status === "error"
   const shouldPrioritizeMedia = hasSuccessfulIngest
+  const setupState = getDesignSystemState("setup_required")
+  const authRequiredState = getDesignSystemState("auth_required")
+  const unavailableState = getDesignSystemState("unavailable")
+  const retryingState = getDesignSystemState("retrying")
+  const readyState = getDesignSystemState("ready")
+  const loadingState = getDesignSystemState("loading")
+  const activeErrorState =
+    errorKind === "auth_invalid" ? authRequiredState : unavailableState
+  const progressHeaderState = isConnecting
+    ? retryingState
+    : errorKind
+      ? activeErrorState
+      : progress.serverReachable === "success" &&
+          progress.authentication === "success"
+        ? readyState
+        : loadingState
   const primarySourcePreview = useMemo(() => {
     const label = quickIngestLastRun.primarySourceLabel
     if (!label) return null
@@ -881,11 +1077,21 @@ export function OnboardingConnectForm({ onFinish }: Props) {
         data-ingest-status={quickIngestLastRun.status}
       >
         <div className="mb-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <span className="inline-flex rounded-full border border-state-ready/30 bg-state-ready/10 px-2 py-0.5 text-xs font-semibold text-state-ready">
+              {readyState.label}
+            </span>
+          </div>
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-success/10">
             <Check className="size-7 text-success" />
           </div>
           <h2 className="text-2xl font-semibold text-text tracking-tight">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.titleCharacterChat",
+                  "You're connected. Set up character chat."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.titlePostIngest",
                   "Connected and ingest is working. Continue to verification."
@@ -896,7 +1102,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                 )}
           </h2>
           <p className="mt-2 text-sm text-text-muted">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.subtitleCharacterChat",
+                  "Create or import a character, choose a model, then start chatting."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.subtitlePostIngest",
                   "Great start. Next, verify the result in Media, then ask Chat for a summary."
@@ -906,6 +1117,109 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                   "Follow this sequence to complete your first-value loop: ingest -> verify -> ask."
                 )}
           </p>
+        </div>
+
+        {/* Intent selector — route to persona-appropriate next step */}
+        <div data-testid="intent-selector" className="mb-6">
+          {isCharacterChatEntry ? (
+            <CharacterChatOnboardingLane
+              onCreateCharacter={handleCreateCharacterFlow}
+              onImportCharacter={handleImportCharacterFlow}
+              onChooseModel={handleChooseCharacterModelFlow}
+              onStartCharacterChat={handleStartCharacterChatFlow}
+            />
+          ) : selectedIntent == null ? (
+            <>
+              <p className="mb-3 text-sm font-medium text-text-muted">
+                {t("settings:onboarding.success.intentTitle", "What would you like to do first?")}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={handleOpenChatFlow}
+                  className="flex flex-col items-start gap-2 rounded-xl border border-border/60 bg-surface2/30 p-4 text-left transition-colors hover:border-primary/50 hover:bg-surface2"
+                >
+                  <MessageSquare className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-medium text-text">
+                    {t("settings:onboarding.success.intentChat", "Chat with AI")}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {t("settings:onboarding.success.intentChatDesc", "Start a conversation with your configured models.")}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => familyGuardrailsAvailable && setSelectedIntent("family")}
+                  disabled={!familyGuardrailsAvailable}
+                  className={cn(
+                    "flex flex-col items-start gap-2 rounded-xl border border-border/60 bg-surface2/30 p-4 text-left transition-colors",
+                    familyGuardrailsAvailable
+                      ? "hover:border-primary/50 hover:bg-surface2"
+                      : "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <Shield className={cn("h-5 w-5", familyGuardrailsAvailable ? "text-primary" : "text-text-subtle")} />
+                  <span className="text-sm font-medium text-text">
+                    {t("settings:onboarding.success.intentFamily", "Set up family safety")}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {familyGuardrailsAvailable
+                      ? t("settings:onboarding.success.intentFamilyDesc", "Create family profiles and content safety rules.")
+                      : t("settings:onboarding.success.intentFamilyUnavailable", "Not available on this server.")}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedIntent("research")}
+                  className="flex flex-col items-start gap-2 rounded-xl border border-border/60 bg-surface2/30 p-4 text-left transition-colors hover:border-primary/50 hover:bg-surface2"
+                >
+                  <BookOpen className="h-5 w-5 text-primary" />
+                  <span className="text-sm font-medium text-text">
+                    {t("settings:onboarding.success.intentResearch", "Research my documents")}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {t("settings:onboarding.success.intentResearchDesc", "Import documents and ask questions about them.")}
+                  </span>
+                </button>
+              </div>
+            </>
+          ) : selectedIntent === "family" ? (
+            <IntentSteps
+              testId="intent-steps-family"
+              icon={<Shield className="h-5 w-5 text-primary" />}
+              title={t("settings:onboarding.success.familyStepsTitle", "Your next steps")}
+              steps={[
+                t("settings:onboarding.success.familyStep1", "Set up family profiles in the Family Guardrails wizard"),
+                t("settings:onboarding.success.familyStep2", "Review content safety rules in Content Controls"),
+                t("settings:onboarding.success.familyStep3", "Test your rules with a sample message"),
+              ]}
+              primaryLabel={t("settings:onboarding.success.getStarted", "Get Started")}
+              onPrimaryClick={handleOpenFamilyFlow}
+              secondaryLabel={t("settings:onboarding.success.skipToChat", "Skip, go to chat")}
+              onSecondaryClick={handleGoToChat}
+              backLabel={t("settings:onboarding.success.backToChoices", "Back")}
+              onBackClick={() => setSelectedIntent(null)}
+            />
+          ) : (
+            <IntentSteps
+              testId="intent-steps-research"
+              icon={<BookOpen className="h-5 w-5 text-primary" />}
+              title={t("settings:onboarding.success.researchStepsTitle", "Your next steps")}
+              steps={[
+                t("settings:onboarding.success.researchStep1", "Import your first document via Quick Ingest"),
+                t("settings:onboarding.success.researchStep2", "Browse your library in Media"),
+                t("settings:onboarding.success.researchStep3", "Ask questions about it in Chat"),
+              ]}
+              primaryLabel={t("settings:onboarding.success.getStarted", "Get Started")}
+              onPrimaryClick={handleOpenIngestFlow}
+              secondaryLabel={t("settings:onboarding.success.skipToChat", "Skip, go to chat")}
+              onSecondaryClick={handleGoToChat}
+              backLabel={t("settings:onboarding.success.backToChoices", "Back")}
+              onBackClick={() => setSelectedIntent(null)}
+            />
+          )}
         </div>
 
         <div className="mb-6 rounded-2xl border border-border/70 bg-surface p-4">
@@ -1206,6 +1520,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     <div className="mx-auto w-full max-w-2xl rounded-3xl border border-border/70 bg-surface/95 p-8 shadow-lg shadow-black/5 backdrop-blur">
       {/* Header */}
       <div className="mb-8">
+        <span className="mb-3 inline-flex rounded-full border border-state-setupRequired/30 bg-state-setupRequired/10 px-2 py-0.5 text-xs font-semibold text-state-setupRequired">
+          {setupState.label}
+        </span>
         <h2 className="text-2xl font-semibold text-text tracking-tight">
           {t("settings:onboarding.title", "Welcome to tldw Assistant")}
         </h2>
@@ -1345,26 +1662,57 @@ export function OnboardingConnectForm({ onFinish }: Props) {
             <button
               type="button"
               onClick={() => setAuthMode("multi-user")}
-              disabled={isConnecting}
+              disabled={isConnecting || isExtensionRuntime()}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors",
-                authMode === "multi-user"
+                authMode === "multi-user" && !isExtensionRuntime()
                   ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border/70 text-text-muted hover:bg-surface2"
+                  : isExtensionRuntime()
+                    ? "border-border/40 text-text-subtle cursor-not-allowed opacity-60"
+                    : "border-border/70 text-text-muted hover:bg-surface2"
               )}
+              title={isExtensionRuntime() ? t("settings:onboarding.authMode.extensionApiKeyOnly", "The extension only supports API key authentication") : undefined}
             >
               <User className="size-4" />
               {t("settings:onboarding.authMode.multi", "Login")}
             </button>
           </div>
+          {/* Auth-mode-aware contextual hint */}
+          <p className="mt-1.5 text-xs text-text-muted" data-testid="onboarding-auth-mode-hint">
+            {authMode === "single-user"
+              ? t(
+                  "settings:onboarding.authMode.singleHint",
+                  "Single-user mode: paste your API key to connect. Best for personal or local setups."
+                )
+              : t(
+                  "settings:onboarding.authMode.multiHint",
+                  "Multi-user mode: log in with the credentials your administrator provided."
+                )}
+          </p>
+          {/* B2: Multi-user mode notice for extension context */}
+          {authMode === "multi-user" && isExtensionRuntime() && (
+            <div
+              className="mt-2 flex items-start gap-2 rounded-xl border border-amber-300/40 bg-amber-50 px-3 py-2 dark:border-amber-500/30 dark:bg-amber-950/30"
+              data-testid="onboarding-multi-user-extension-notice"
+              role="note"
+            >
+              <Info className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <p className="text-xs text-amber-800 dark:text-amber-300">
+                {t(
+                  "settings:onboarding.authMode.multiUserExtensionNotice",
+                  "Multi-user mode detected. The browser extension currently supports API key authentication only. Ask your admin for an API key."
+                )}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Auth Fields */}
-        {authMode === "single-user" ? (
+        {/* Auth Fields — extension always uses API key, even if server is multi-user */}
+        {authMode === "single-user" || (authMode === "multi-user" && isExtensionRuntime()) ? (
           <div>
             <label className="mb-1.5 flex items-center gap-2 text-sm font-medium text-text">
               <Key className="size-4" />
-              {t("settings:onboarding.apiKey.label", "API Key")}
+              {t("settings:onboarding.apiKey.label", "Paste your API key")}
             </label>
             <Input.Password
               data-testid="onboarding-api-key"
@@ -1401,7 +1749,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
               <p className="mt-1 text-xs text-text-subtle">
                 {t(
                   "settings:onboarding.apiKeyHelp",
-                  "Docker quickstart? The WebUI connects automatically, and no key is needed there. For API or extension access, run: make show-api-key. Local install? Check your .env file for SINGLE_USER_API_KEY."
+                  "Find your API key by running `make show-api-key` or checking your .env file for SINGLE_USER_API_KEY. Docker quickstart users connect automatically."
                 )}
               </p>
             )}
@@ -1613,6 +1961,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                     </p>
                   )}
                 </div>
+                <p className="text-xs text-text-subtle" data-testid="onboarding-multi-user-hint">
+                  {t(
+                    "settings:onboarding.multiUserHelp",
+                    "Ask your administrator for your username and password. If you don't have an account yet, contact your server admin."
+                  )}
+                </p>
               </div>
             )}
           </div>
@@ -1628,15 +1982,31 @@ export function OnboardingConnectForm({ onFinish }: Props) {
           >
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-primary">
               {isConnecting && <Loader2 className="size-3 animate-spin" />}
+              <span>{progressHeaderState.label}</span>
+              <span aria-hidden="true">·</span>
               {t("settings:onboarding.progress.title", "Connection Status")}
             </div>
             <ProgressItem
               label={t("settings:onboarding.progress.server", "Server reachable")}
               status={progress.serverReachable}
+              statusText={
+                progress.serverReachable === "checking"
+                  ? t("settings:onboarding.progress.serverChecking", "Checking server...")
+                  : progress.serverReachable === "success"
+                    ? t("settings:onboarding.progress.serverOk", "Reachable")
+                    : undefined
+              }
             />
             <ProgressItem
               label={t("settings:onboarding.progress.auth", "Authentication")}
               status={progress.authentication}
+              statusText={
+                progress.authentication === "checking"
+                  ? t("settings:onboarding.progress.authChecking", "Validating credentials...")
+                  : progress.authentication === "success"
+                    ? t("settings:onboarding.progress.authOk", "Connected!")
+                    : undefined
+              }
             />
             <ProgressItem
               label={t("settings:onboarding.progress.knowledge", "Knowledge index")}
@@ -1651,6 +2021,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
               <div>
+                <div className="mb-1 inline-flex rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">
+                  {activeErrorState.label}
+                </div>
                 <div className="text-sm font-medium text-danger">
                   {t("settings:onboarding.connectionFailed", "Connection failed")}
                 </div>
@@ -1666,6 +2039,20 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                 )}
               </div>
             </div>
+            {/* B4: Troubleshooting docs link */}
+            <a
+              href={TROUBLESHOOTING_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-1 text-xs text-danger/80 underline decoration-danger/40 underline-offset-2 hover:text-danger"
+              data-testid="onboarding-troubleshooting-link"
+            >
+              {t(
+                "settings:onboarding.errors.troubleshootingLink",
+                "Having trouble? See setup guide"
+              )}
+              <ExternalLink className="size-3" />
+            </a>
           </div>
         )}
 

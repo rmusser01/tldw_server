@@ -101,8 +101,8 @@ def _ensure_stream_metrics_registered() -> None:
             )
         )
         _STREAM_METRICS_REGISTERED = True
-    except _STREAMING_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Stream metrics registration failed or already registered: {e}")
+    except _STREAMING_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Stream metrics registration failed or already registered")
 
 
 class SSEStream:
@@ -327,6 +327,8 @@ class SSEStream:
 
     async def _enqueue(self, line: str, *, force: bool = False) -> None:
         # Blocking (default) backpressure policy; force=True drops oldest to ensure termination frames.
+        if self._closed and not force:
+            return
         enq_ts = time.monotonic()
         if not force:
             await self._queue.put((line, enq_ts))
@@ -541,5 +543,5 @@ def _parse_float_env(name: str) -> Optional[float]:
     try:
         return float(raw)
     except _STREAMING_NONCRITICAL_EXCEPTIONS:
-        logger.debug(f"Invalid float in env {name}={raw}")
+        logger.debug("Invalid float in stream env")
         return None

@@ -580,11 +580,15 @@ class SessionManager:
         if not path:
             return False
         try:
-            # If the resolved path is a symlink, follow it to the target file
-            # so that we persist to the intended location (test expectation).
             try:
-                if path.exists() and path.is_symlink():
-                    path = path.resolve()
+                if path.is_symlink():
+                    raise RuntimeError(f"Session encryption key path {path} must not be a symlink")
+                if path.exists():
+                    existing_stat = os.stat(path, follow_symlinks=False)
+                    if not stat.S_ISREG(existing_stat.st_mode):
+                        raise RuntimeError(f"Session encryption key path {path} is not a regular file")
+            except FileNotFoundError:
+                pass
             except OSError as exc:
                 raise RuntimeError(f"Unable to inspect existing session key at {path}: {exc}") from exc
 
@@ -738,7 +742,8 @@ class SessionManager:
         """Return the tldw_Server_API/Config_Files path for the key."""
         try:
             api_root = Path(__file__).resolve().parent.parent.parent.parent
-            return (api_root / "Config_Files" / "session_encryption.key").resolve()
+            config_dir = (api_root / "Config_Files").resolve()
+            return config_dir / "session_encryption.key"
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS:
             return None
 
@@ -748,7 +753,8 @@ class SessionManager:
             project_root = core_settings.get("PROJECT_ROOT") if core_settings else None
             if not project_root:
                 return None
-            return (Path(project_root) / "Config_Files" / "session_encryption.key").resolve()
+            config_dir = (Path(project_root) / "Config_Files").resolve()
+            return config_dir / "session_encryption.key"
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS:
             return None
 

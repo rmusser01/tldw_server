@@ -106,8 +106,10 @@ def search_crossref(
         total = int(message.get("total-results") or 0)
         items = [_normalize_item(it) for it in items_raw]
         return items, total, None
-    except Exception as e:
-        return None, 0, f"Crossref error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "Crossref request timed out."
+    except Exception:
+        return None, 0, "Crossref request failed."
 
 
 def get_crossref_by_doi(doi: str) -> tuple[dict | None, str | None]:
@@ -122,5 +124,7 @@ def get_crossref_by_doi(doi: str) -> tuple[dict | None, str | None]:
         data = r.json() or {}
         msg = (data.get("message") or {})
         return _normalize_item(msg), None
-    except Exception as e:
-        return None, f"Crossref error: {str(e)}"
+    except TimeoutError:
+        return None, "Crossref request timed out."
+    except Exception:
+        return None, "Crossref request failed."

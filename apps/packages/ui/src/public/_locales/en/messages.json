@@ -47,17 +47,26 @@
   "contextCustom": {
     "message": "Custom"
   },
+  "contextMenuAIActions": {
+    "message": "AI Actions"
+  },
+  "contextMenuSave": {
+    "message": "Save"
+  },
+  "contextMenuProcess": {
+    "message": "Process"
+  },
   "contextNarrateSelection": {
-    "message": "Narrate selection"
+    "message": "Read Aloud"
   },
   "contextNarrateSelectionNoSelection": {
-    "message": "Select text first to narrate."
+    "message": "Select text first to read aloud."
   },
   "contextSendToTldw": {
-    "message": "Send to tldw_server"
+    "message": "Save to Library"
   },
   "contextProcessLocalTldw": {
-    "message": "Process with tldw_server (don’t store)"
+    "message": "Analyze without Saving"
   },
   "contextTranscribeMedia": {
     "message": "Transcribe Video/Audio"
@@ -67,6 +76,21 @@
   },
   "contextSaveToNotes": {
     "message": "Save to Notes"
+  },
+  "contextSaveToClipper": {
+    "message": "Save to Clipper"
+  },
+  "contextSaveToClipperNoSelection": {
+    "message": "Select text first to save to Clipper."
+  },
+  "contextSaveToClipperOpeningSidebar": {
+    "message": "Opening sidebar to save clip..."
+  },
+  "contextSaveToClipperDeliveryFailed": {
+    "message": "Could not open the sidebar to save this clip. Check that the tldw Assistant sidebar is allowed on this site and try again."
+  },
+  "contextSaveToClipperRestrictedPage": {
+    "message": "This page is restricted, so the clipper cannot capture it."
   },
   "contextSaveToCompanion": {
     "message": "Save to Companion"
@@ -93,10 +117,10 @@
     "message": "Could not open the sidebar to save this note. Check that the tldw Assistant sidebar is allowed on this site and try again."
   },
   "contextCopilotPopup": {
-    "message": "Contextual action"
+    "message": "AI Popup"
   },
   "contextCopilotPopupNoSelection": {
-    "message": "Select text first to use contextual action."
+    "message": "Select text first to use AI Popup."
   },
   "contextCopilotPopupNoTab": {
     "message": "No active tab found for contextual action."
@@ -3318,7 +3342,7 @@
     "message": "Close chat tab"
   },
   "playground_actor_title": {
-    "message": "Scene Director (Actor)"
+    "message": "Optional scene context"
   },
   "playground_actor_help": {
     "message": "Configure per-chat scene context: roles, mood, world, goals, and notes."
@@ -4105,5 +4129,11 @@
   "relativeTimeDaysAgoShort": {
     "message": "{{count}}d ago",
     "description": "Relative time label"
+  },
+  "ftueNotificationTitle": {
+    "message": "You're all set!"
+  },
+  "ftueNotificationMessage": {
+    "message": "Right-click on any page to use AI actions. Click the tldw icon to open the sidebar for chat."
   }
 }

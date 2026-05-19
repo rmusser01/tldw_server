@@ -34,13 +34,38 @@ def _seed_review_db() -> tuple[str, int, int]:
             "extractor": "heuristic",
             "extractor_version": "v1",
             "chunk_hash": chunk_hash,
-        }
+        },
+        {
+            "media_id": media_id,
+            "chunk_index": 0,
+            "span_start": None,
+            "span_end": None,
+            "claim_text": "B.",
+            "confidence": 0.8,
+            "extractor": "heuristic",
+            "extractor_version": "v1",
+            "chunk_hash": chunk_hash,
+        },
+        {
+            "media_id": media_id,
+            "chunk_index": 0,
+            "span_start": None,
+            "span_end": None,
+            "claim_text": "C.",
+            "confidence": 0.8,
+            "extractor": "heuristic",
+            "extractor_version": "v1",
+            "chunk_hash": chunk_hash,
+        },
     ])
-    row = db.execute_query("SELECT id FROM Claims WHERE media_id = ? AND deleted = 0", (media_id,)).fetchone()
+    row = db.execute_query(
+        "SELECT id FROM Claims WHERE media_id = ? AND deleted = 0 ORDER BY id ASC LIMIT 1",
+        (media_id,),
+    ).fetchone()
     claim_id = int(row["id"]) if isinstance(row, dict) else int(row[0])
     db.execute_query(
-        "UPDATE Claims SET reviewer_id = ?, review_status = 'pending' WHERE id = ?",
-        (1, claim_id),
+        "UPDATE Claims SET reviewer_id = ?, review_status = 'pending' WHERE media_id = ?",
+        (1, media_id),
         commit=True,
     )
     db.close_connection()
@@ -115,6 +140,27 @@ def test_claims_review_flow():
             assert r.status_code == 200, r.text
             queue = r.json()
             assert any(int(item["id"]) == claim_id for item in queue)
+
+            r_queue_legacy = client.get("/api/v1/claims/review-queue?limit=1&offset=0")
+            assert r_queue_legacy.status_code == 200, r_queue_legacy.text
+            assert isinstance(r_queue_legacy.json(), list)
+
+            r_queue_page = client.get(
+                "/api/v1/claims/review-queue?limit=2&offset=0&envelope=true"
+            )
+            assert r_queue_page.status_code == 200, r_queue_page.text
+            queue_page = r_queue_page.json()
+            assert len(queue_page["items"]) == 2
+            assert queue_page["pagination"] == {
+                "mode": "offset",
+                "limit": 2,
+                "offset": 0,
+                "total": None,
+                "has_more": True,
+                "next_offset": 2,
+            }
+            assert queue_page["has_more"] is True
+            assert queue_page["next_offset"] == 2
 
             payload = {
                 "status": "approved",

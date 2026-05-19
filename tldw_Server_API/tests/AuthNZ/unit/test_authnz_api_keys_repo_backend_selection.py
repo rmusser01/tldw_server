@@ -119,6 +119,48 @@ async def test_mark_key_expired_postgres_backend_selection_uses_dollar_params():
 
 
 @pytest.mark.asyncio
+async def test_upsert_primary_key_sqlite_uses_stable_key_identifier_when_available():
+    conn = _SqliteConnWithPgTrap(rowcount=1)
+    repo = AuthnzApiKeysRepo(db_pool=_PoolStub(conn, postgres=False))
+
+    await repo.upsert_primary_key(
+        user_id=7,
+        key_hash="salted-hash",
+        key_identifier="abcdef123456",
+        key_prefix="tldw_abc...",
+        name="primary",
+        description="primary key",
+        scope="admin",
+    )
+
+    query, params = conn.execute_calls[0]
+    assert "where key_id = ?" in query.lower()
+    assert params[0] == "abcdef123456"
+    assert params[3] == "abcdef123456"
+
+
+@pytest.mark.asyncio
+async def test_upsert_primary_key_postgres_uses_stable_key_identifier_when_available():
+    conn = _PostgresConnWithSqliteTrap()
+    repo = AuthnzApiKeysRepo(db_pool=_PoolStub(conn, postgres=True))
+
+    await repo.upsert_primary_key(
+        user_id=7,
+        key_hash="salted-hash",
+        key_identifier="abcdef123456",
+        key_prefix="tldw_abc...",
+        name="primary",
+        description="primary key",
+        scope="admin",
+    )
+
+    query, params = conn.execute_calls[0]
+    assert "where key_id = $8" in query.lower()
+    assert "on conflict" not in query.lower()
+    assert params[-1] == "abcdef123456"
+
+
+@pytest.mark.asyncio
 async def test_insert_audit_log_sqlite_backend_selection_uses_execute():
     conn = _SqliteConnWithPgTrap(rowcount=1)
     repo = AuthnzApiKeysRepo(db_pool=_PoolStub(conn, postgres=False))

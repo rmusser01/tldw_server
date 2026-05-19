@@ -213,7 +213,8 @@ describe("WorldBooksManager bulk operations stage-3 move workflow", () => {
 
     render(<WorldBooksManager />)
 
-    await user.click(screen.getAllByRole("button", { name: "Manage entries" })[0])
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     const keywordsHeader = await screen.findByRole("columnheader", { name: "Keywords" })
     const tableWrapper = keywordsHeader.closest(".ant-table-wrapper")
     expect(tableWrapper).not.toBeNull()

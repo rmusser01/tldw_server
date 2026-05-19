@@ -61,9 +61,8 @@ class FederatedManagedGrantRepo:
         try:
             return {key: row[key] for key in row.keys()}
         except Exception as row_keys_error:
-            logger.debug(
+            logger.bind(error_type=type(row_keys_error).__name__).debug(
                 "Managed grant row key materialization failed; falling back to dict(row)",
-                exc_info=row_keys_error,
             )
         return dict(row)
 

@@ -9,27 +9,27 @@ import hmac
 import io
 import json
 import os
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.retention_policies import (
     RETENTION_POLICIES,
     apply_retention_overrides,
     upsert_retention_override,
 )
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.admin_retention_preview_counts import (
     count_retention_window,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.DB_Backups import (
     create_backup,
     create_incremental_backup,
@@ -174,8 +174,10 @@ def _resolve_dataset_db_path(dataset: str, user_id: int | None) -> tuple[str, in
         parsed = urlparse(url)
         scheme = (parsed.scheme or "").lower()
         if scheme.startswith("sqlite") or scheme.startswith("file") or not scheme:
-            fs_path = parsed.path or url
+            fs_path = unquote(parsed.path or url)
             if fs_path.startswith("//"):
+                fs_path = fs_path[1:]
+            if re.match(r"^/[A-Za-z]:/", fs_path):
                 fs_path = fs_path[1:]
             if fs_path in {":memory:", "/:memory:"}:
                 return ":memory:", None
@@ -362,7 +364,9 @@ def _effective_retention_days(policy_key: str, requested_days: int) -> int:
             if effective_days < primary_days:
                 effective_days = primary_days
         except Exception as retention_floor_error:
-            logger.debug("Failed to apply privilege snapshot retention floor", exc_info=retention_floor_error)
+            logger.bind(error_type=type(retention_floor_error).__name__).debug(
+                "Failed to apply privilege snapshot retention floor"
+            )
     return effective_days
 
 
@@ -384,7 +388,7 @@ def _retention_preview_secret() -> bytes:
     if not secret_seed:
         raise RuntimeError("preview_signature_secret_unavailable")
     pepper = getattr(settings, "API_KEY_PEPPER", None) or ""
-    salt = f"{pepper}|retention-preview|{_RETENTION_PREVIEW_SCHEMA_VERSION}".encode("utf-8")
+    salt = f"{pepper}|retention-preview|{_RETENTION_PREVIEW_SCHEMA_VERSION}".encode()
     return hashlib.pbkdf2_hmac(
         "sha256",
         str(secret_seed).encode("utf-8"),

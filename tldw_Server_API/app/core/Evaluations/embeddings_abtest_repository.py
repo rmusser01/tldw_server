@@ -25,6 +25,8 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, selectinload, sessionmaker
 
+from tldw_Server_API.app.core.DB_Management.db_path_utils import resolve_trusted_database_path
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -659,7 +661,10 @@ class EmbeddingsABTestStore:
 
 
 def _sqlite_url_from_path(path: str) -> str:
-    location = Path(path).expanduser().resolve()
+    location = resolve_trusted_database_path(
+        path,
+        label="embeddings A/B test database",
+    )
     return f"sqlite:///{location}"
 
 

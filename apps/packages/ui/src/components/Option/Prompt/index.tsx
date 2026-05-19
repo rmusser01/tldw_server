@@ -14,7 +14,7 @@ import {
   Pagination,
   type InputRef
 } from "antd"
-import { Computer, Zap, Star, StarOff, UploadCloud, Download, Trash2, Pen, Undo2, AlertTriangle, Layers, Cloud, Clipboard, Copy, Keyboard, FolderPlus, Play, LayoutGrid, List } from "lucide-react"
+import { Computer, Zap, Star, StarOff, UploadCloud, Download, Trash2, Pen, Undo2, AlertTriangle, Layers, Cloud, Clipboard, Copy, Keyboard, FolderPlus, Play, LayoutGrid, List, Bookmark, BookmarkPlus, X } from "lucide-react"
 import { PromptActionsMenu } from "./PromptActionsMenu"
 import { SyncStatusBadge } from "./SyncStatusBadge"
 import { PromptBulkActionBar } from "./PromptBulkActionBar"
@@ -56,6 +56,10 @@ import {
 import {
   type TagMatchMode
 } from "./custom-prompts-utils"
+import {
+  buildSyncBatchPlan,
+  type SyncBatchTask
+} from "./sync-batch-utils"
 // filterCopilotPrompts moved to usePromptInteractions hook
 import {
   filterTrashPromptsByName,
@@ -111,6 +115,11 @@ const StudioTabContainer = React.lazy(() =>
     default: module.StudioTabContainer
   }))
 )
+const VersionHistoryDrawer = React.lazy(() =>
+  import("./Studio/Prompts/VersionHistoryDrawer").then((module) => ({
+    default: module.VersionHistoryDrawer
+  }))
+)
 
 type SegmentType = "custom" | "copilot" | "studio" | "trash"
 
@@ -141,7 +150,9 @@ const PROMPTS_CUSTOM_SORT_STORAGE_KEY = "tldw-prompts-custom-sort-v1"
 const PROMPTS_TABLE_DENSITY_STORAGE_KEY = "tldw-prompts-table-density-v1"
 const PROMPTS_VIEW_MODE_STORAGE_KEY = "tldw-prompts-view-mode-v1"
 const PROMPTS_GALLERY_DENSITY_STORAGE_KEY = "tldw-prompts-gallery-density-v1"
+export const PROMPTS_COPILOT_HELP_STORAGE_KEY = "tldw-prompts-copilot-help-dismissed-v1"
 const PROMPTS_MOBILE_BREAKPOINT_PX = 768
+const EMPTY_TRASH_CONFIRM_TOKEN = "DELETE"
 
 const readPromptSortState = (): PromptSortState => {
   if (typeof window === "undefined") {
@@ -212,8 +223,8 @@ export const PromptBody = () => {
   // Get initial segment from URL param
   const initialSegment = getSegmentFromParam(searchParams.get("tab"))
 
-  // Track if we've processed the initial prompt deep-link
-  const deepLinkProcessedRef = useRef(false)
+  // Track the last processed prompt deep-link so later prompt links still work.
+  const lastProcessedPromptIdRef = useRef<string | null>(null)
 
   // Handle ?project= filter for showing prompts from a specific project
   const projectFilter = searchParams.get("project")
@@ -228,6 +239,10 @@ export const PromptBody = () => {
   const [tagFilter, setTagFilter] = useState<string[]>([])
   const [tagMatchMode, setTagMatchMode] = useState<TagMatchMode>("any")
   const [syncFilter, setSyncFilter] = useState<string>("all")
+  const [filterPresetSaving, setFilterPresetSaving] = useState(false)
+  const [filterPresetName, setFilterPresetName] = useState("")
+  const [filterChangeCount, setFilterChangeCount] = useState(0)
+  const filterSignatureInitializedRef = useRef(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [resultsPerPage, setResultsPerPage] = useState(20)
   const [tableDensity, setTableDensity] = useState<PromptTableDensity>(() =>
@@ -249,8 +264,21 @@ export const PromptBody = () => {
       : false
   )
   const [trashSearchText, setTrashSearchText] = useState("")
+  const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false)
+  const [emptyTrashConfirmText, setEmptyTrashConfirmText] = useState("")
+  const emptyTrashSubmittingRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [savedView, setSavedView] = useState<PromptSavedView>("all")
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false)
+  const [historyPromptId, setHistoryPromptId] = useState<number | null>(null)
+  const [copilotHelpDismissed, setCopilotHelpDismissed] = useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem(PROMPTS_COPILOT_HELP_STORAGE_KEY) === "true"
+    } catch {
+      return false
+    }
+  })
   const { presets: filterPresets, savePreset: saveFilterPreset, deletePreset: deleteFilterPreset } = useFilterPresets()
   const { shouldShow: shouldShowHint, dismiss: dismissHint, markShown: markHintShown } = useContextualHints()
 
@@ -336,6 +364,32 @@ export const PromptBody = () => {
     setSelectedRowKeys: bulk.setSelectedRowKeys
   })
 
+  const openEmptyTrashConfirm = React.useCallback(() => {
+    emptyTrashSubmittingRef.current = false
+    setEmptyTrashConfirmText("")
+    setEmptyTrashConfirmOpen(true)
+  }, [])
+
+  const closeEmptyTrashConfirm = React.useCallback(() => {
+    emptyTrashSubmittingRef.current = false
+    setEmptyTrashConfirmOpen(false)
+    setEmptyTrashConfirmText("")
+  }, [])
+
+  const handleEmptyTrashConfirm = React.useCallback(() => {
+    if (
+      emptyTrashConfirmText !== EMPTY_TRASH_CONFIRM_TOKEN ||
+      editor.isEmptyingTrash ||
+      emptyTrashSubmittingRef.current
+    ) {
+      return
+    }
+    emptyTrashSubmittingRef.current = true
+    setEmptyTrashConfirmOpen(false)
+    setEmptyTrashConfirmText("")
+    editor.emptyTrashMutation()
+  }, [editor.emptyTrashMutation, editor.isEmptyingTrash, emptyTrashConfirmText])
+
   const interactions = usePromptInteractions({
     queryClient,
     isOnline,
@@ -371,6 +425,8 @@ export const PromptBody = () => {
     selectedSegment, setSelectedSegment,
     hasStudio
   } = interactions
+  const selectedSegmentRef = useRef(selectedSegment)
+  selectedSegmentRef.current = selectedSegment
 
   // --- Effects ---
 
@@ -392,7 +448,38 @@ export const PromptBody = () => {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [normalizedSearchText, projectFilter, typeFilter, collections.collectionFilter, tagFilter, tagMatchMode])
+  }, [
+    normalizedSearchText,
+    projectFilter,
+    typeFilter,
+    syncFilter,
+    usageFilter,
+    savedView,
+    collections.collectionFilter,
+    tagFilter,
+    tagMatchMode,
+  ])
+
+  const filterSignature = React.useMemo(
+    () =>
+      JSON.stringify({
+        typeFilter,
+        syncFilter,
+        usageFilter,
+        tagFilter,
+        tagMatchMode,
+        savedView
+      }),
+    [typeFilter, syncFilter, usageFilter, tagFilter, tagMatchMode, savedView]
+  )
+
+  useEffect(() => {
+    if (!filterSignatureInitializedRef.current) {
+      filterSignatureInitializedRef.current = true
+      return
+    }
+    setFilterChangeCount((count) => Math.min(3, count + 1))
+  }, [filterSignature])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -460,8 +547,14 @@ export const PromptBody = () => {
   // Handle ?prompt= deep-link for opening a specific prompt
   useEffect(() => {
     const promptId = searchParams.get("prompt")
-    if (!promptId || deepLinkProcessedRef.current) return
+    if (!promptId) {
+      lastProcessedPromptIdRef.current = null
+      return
+    }
+    if (lastProcessedPromptIdRef.current === promptId) return
     if (status !== "success" || !Array.isArray(data)) return
+
+    const source = searchParams.get("source")
 
     const clearPromptParam = () => {
       const newParams = new URLSearchParams(searchParams)
@@ -502,7 +595,7 @@ export const PromptBody = () => {
       })
     }
 
-    deepLinkProcessedRef.current = true
+    lastProcessedPromptIdRef.current = promptId
 
     // First try local prompt IDs.
     const localPromptRecord = data.find((p: any) => p.id === promptId)
@@ -511,7 +604,6 @@ export const PromptBody = () => {
       return
     }
 
-    const source = searchParams.get("source")
     const parsedServerPromptId = Number(promptId)
     const isServerPromptLink =
       Number.isInteger(parsedServerPromptId) &&
@@ -539,8 +631,18 @@ export const PromptBody = () => {
       })
     }
 
+    const notifyImportedButUnavailable = (description: string) => {
+      notification.warning({
+        message: t("managePrompts.notification.sharedPromptImportedUnavailable", {
+          defaultValue: "Prompt imported but couldn't be opened"
+        }),
+        description
+      })
+    }
+
     if (isOnline && isServerPromptLink) {
       clearPromptParam()
+      const segmentAtStart = selectedSegmentRef.current
       void (async () => {
         const syncResult = await pullFromStudio(parsedServerPromptId)
         if (!syncResult.success) {
@@ -566,37 +668,41 @@ export const PromptBody = () => {
               item?.serverId === parsedServerPromptId
           )
           if (!importedPrompt) {
-            notification.warning({
-              message: t("managePrompts.notification.promptNotFound", {
-                defaultValue: "Prompt not found"
-              }),
-              description: t("managePrompts.notification.sharedPromptImportMissing", {
+            notifyImportedButUnavailable(
+              t("managePrompts.notification.sharedPromptImportedMissingLocalDesc", {
                 defaultValue:
-                  "The shared prompt was fetched, but could not be loaded locally."
+                  "The shared prompt was imported, but it could not be located in local prompts yet. Refresh and try again."
+              })
+            )
+            return
+          }
+
+          if (selectedSegmentRef.current !== segmentAtStart) {
+            notification.info({
+              message: t("managePrompts.notification.sharedPromptImported", {
+                defaultValue: "Shared prompt imported"
+              }),
+              description: t("managePrompts.notification.sharedPromptSegmentChanged", {
+                defaultValue:
+                  "The prompt was imported but you navigated away. Switch back to the Custom tab to view it."
               })
             })
             return
           }
+
           notification.success({
             message: t("managePrompts.notification.sharedPromptImported", {
               defaultValue: "Shared prompt imported"
-            }),
-            description: t("managePrompts.notification.sharedPromptImportedDesc", {
-              defaultValue:
-                "The prompt was pulled from the server and opened in your workspace."
             })
           })
           openPromptDrawer(importedPrompt)
         } catch {
-          notification.warning({
-            message: t("managePrompts.notification.promptNotFound", {
-              defaultValue: "Prompt not found"
-            }),
-            description: t("managePrompts.notification.sharedPromptImportMissing", {
+          notifyImportedButUnavailable(
+            t("managePrompts.notification.sharedPromptImportedRefreshFailedDesc", {
               defaultValue:
-                "The shared prompt was fetched, but could not be loaded locally."
+                "The shared prompt was imported, but local prompts could not be refreshed. Refresh the page and try again."
             })
-          })
+          )
         }
       })()
       return
@@ -604,7 +710,6 @@ export const PromptBody = () => {
 
     clearPromptParam()
     if (!isOnline && isServerPromptLink) {
-      deepLinkProcessedRef.current = true
       notification.warning({
         message: t("managePrompts.notification.promptNotFound", {
           defaultValue: "Prompt not found"
@@ -822,24 +927,55 @@ export const PromptBody = () => {
   }
 
   const handleLoadFilterPreset = React.useCallback((preset: FilterPreset) => {
+    setCurrentPage(1)
     setTypeFilter(preset.typeFilter as any)
     setSyncFilter(preset.syncFilter as any)
+    setUsageFilter(preset.usageFilter || "all")
     setTagFilter(preset.tagFilter)
     setTagMatchMode(preset.tagMatchMode)
     setSavedView(preset.savedView)
   }, [])
 
+  const buildCurrentFilterPreset = React.useCallback(
+    () => ({
+      typeFilter,
+      syncFilter,
+      usageFilter,
+      tagFilter: [...tagFilter],
+      tagMatchMode,
+      savedView,
+    }),
+    [typeFilter, syncFilter, usageFilter, tagFilter, tagMatchMode, savedView]
+  )
+
   const handleSaveFilterPreset = React.useCallback(
     (name: string) => {
-      saveFilterPreset(name, {
-        typeFilter,
-        syncFilter,
-        tagFilter,
-        tagMatchMode,
-        savedView,
-      })
+      saveFilterPreset(name, buildCurrentFilterPreset())
     },
-    [typeFilter, syncFilter, tagFilter, tagMatchMode, savedView, saveFilterPreset]
+    [buildCurrentFilterPreset, saveFilterPreset]
+  )
+
+  const handleToolbarFilterPresetSave = React.useCallback(
+    () => {
+      const trimmed = filterPresetName.trim()
+      if (!trimmed) return
+      if (
+        filterPresets.some((preset) => preset.name.toLowerCase() === trimmed.toLowerCase())
+      ) {
+        notification.warning({
+          message: t("managePrompts.filterPresets.duplicateName", {
+            defaultValue: "A preset with this name already exists."
+          })
+        })
+        return
+      }
+      handleSaveFilterPreset(trimmed)
+      setFilterPresetName("")
+      setFilterPresetSaving(false)
+      markHintShown("filter-presets")
+      dismissHint("filter-presets")
+    },
+    [dismissHint, filterPresetName, filterPresets, handleSaveFilterPreset, markHintShown, t]
   )
 
   const handleCustomPromptTableQueryChange = React.useCallback(
@@ -872,6 +1008,61 @@ export const PromptBody = () => {
     [currentPage, resultsPerPage]
   )
 
+  const buildPromptRetryTaskById = React.useCallback(
+    (id: string): SyncBatchTask | null => {
+      if (!isOnline) return null
+
+      const promptRecord = getPromptRecordById(id)
+      if (!promptRecord || promptRecord.syncStatus !== "pending") return null
+
+      const plan = buildSyncBatchPlan([
+        {
+          prompt: {
+            id: String(promptRecord.id || id),
+            name: promptRecord.name,
+            title: promptRecord.title,
+            syncStatus: promptRecord.syncStatus,
+            sourceSystem: promptRecord.sourceSystem,
+            serverId: promptRecord.serverId,
+            studioProjectId: promptRecord.studioProjectId
+          },
+          syncStatus: promptRecord.syncStatus
+        }
+      ])
+
+      return plan.tasks[0] || null
+    },
+    [getPromptRecordById, isOnline]
+  )
+
+  const canRetryPromptSync = React.useCallback(
+    (row: PromptRowVM) => {
+      if (sync.batchSyncState.running) return false
+      if (row.syncStatus !== "pending" || row.sourceSystem === "copilot") {
+        return false
+      }
+      return buildPromptRetryTaskById(row.id) !== null
+    },
+    [buildPromptRetryTaskById, sync.batchSyncState.running]
+  )
+
+  const handleRetryPromptSyncById = React.useCallback(
+    (id: string) => {
+      if (sync.batchSyncState.running) return
+      const task = buildPromptRetryTaskById(id)
+      if (!task) return
+      void sync.runBatchSync([task])
+    },
+    [buildPromptRetryTaskById, sync.batchSyncState.running, sync.runBatchSync]
+  )
+
+  const handleRetryPromptSync = React.useCallback(
+    (row: PromptRowVM) => {
+      handleRetryPromptSyncById(row.id)
+    },
+    [handleRetryPromptSyncById]
+  )
+
   const renderCustomPromptTitleMeta = React.useCallback(
     (row: PromptRowVM) => {
       if (!isCompactViewport) return null
@@ -901,13 +1092,26 @@ export const PromptBody = () => {
                     ? () => sync.openConflictResolution(row.id)
                     : undefined
                 }
+                onRetry={
+                  canRetryPromptSync(row)
+                    ? () => handleRetryPromptSync(row)
+                    : undefined
+                }
               />
             </span>
           </Tooltip>
         </div>
       )
     },
-    [formatRelativePromptTime, isCompactViewport, isOnline, sync.openConflictResolution, t]
+    [
+      canRetryPromptSync,
+      formatRelativePromptTime,
+      handleRetryPromptSync,
+      isCompactViewport,
+      isOnline,
+      sync.openConflictResolution,
+      t
+    ]
   )
 
   const renderCustomPromptActions = React.useCallback(
@@ -948,6 +1152,14 @@ export const PromptBody = () => {
                 }
               : undefined
           }
+          onViewHistory={
+            row.serverId
+              ? () => {
+                  setHistoryPromptId(row.serverId as number)
+                  setHistoryDrawerOpen(true)
+                }
+              : undefined
+          }
           onPushToServer={
             isOnline && promptRecord
               ? () => {
@@ -980,6 +1192,13 @@ export const PromptBody = () => {
                 }
               : undefined
           }
+          onRetrySync={
+            canRetryPromptSync(row)
+              ? () => {
+                  handleRetryPromptSync(row)
+                }
+              : undefined
+          }
         />
       )
     },
@@ -991,7 +1210,9 @@ export const PromptBody = () => {
       handleUsePromptInChat,
       isFireFoxPrivateMode,
       isOnline,
-      sync
+      sync,
+      canRetryPromptSync,
+      handleRetryPromptSync
     ]
   )
 
@@ -1516,9 +1737,99 @@ export const PromptBody = () => {
                   />
                 </div>
               )}
+              {selectedSegment === "custom" && (
+                <div
+                  className="w-full sm:w-auto"
+                  data-testid="prompts-filter-preset-toolbar"
+                >
+                  {filterPresetSaving ? (
+                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                      <Input
+                        autoFocus
+                        value={filterPresetName}
+                        onChange={(event) => setFilterPresetName(event.target.value)}
+                        onPressEnter={handleToolbarFilterPresetSave}
+                        placeholder={t("managePrompts.filterPresets.namePlaceholder", {
+                          defaultValue: "Preset name"
+                        })}
+                        aria-label={t("managePrompts.filterPresets.nameLabel", {
+                          defaultValue: "Filter preset name"
+                        })}
+                        data-testid="prompts-filter-preset-toolbar-name"
+                        style={{ width: isCompactViewport ? "100%" : 160 }}
+                        maxLength={50}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleToolbarFilterPresetSave}
+                        disabled={!filterPresetName.trim()}
+                        data-testid="prompts-filter-preset-toolbar-confirm"
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/40 px-2 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
+                      >
+                        <BookmarkPlus className="size-4" aria-hidden="true" />
+                        {t("common:save", { defaultValue: "Save" })}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterPresetSaving(false)
+                          setFilterPresetName("")
+                        }}
+                        aria-label={t("common:cancel", { defaultValue: "Cancel" })}
+                        data-testid="prompts-filter-preset-toolbar-cancel"
+                        className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md border border-border text-text-muted hover:bg-surface2 hover:text-text"
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setFilterPresetSaving(true)}
+                      data-testid="prompts-filter-preset-save-toolbar"
+                      className="inline-flex min-h-8 w-full items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-sm font-medium text-text hover:bg-surface2 sm:w-auto"
+                    >
+                      <BookmarkPlus className="size-4" aria-hidden="true" />
+                      {t("managePrompts.filterPresets.saveFilters", {
+                        defaultValue: "Save filters"
+                      })}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </PromptListToolbar>
         </div>
+
+        {filterPresets.length > 0 && (
+          <div
+            className="mb-3 flex flex-wrap items-center gap-2"
+            data-testid="prompts-filter-preset-chips"
+          >
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+              {t("managePrompts.filterPresets.quickLabel", {
+                defaultValue: "Filter presets"
+              })}
+            </span>
+            {filterPresets.slice(0, 5).map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => handleLoadFilterPreset(preset)}
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-bg px-2.5 py-1 text-sm text-text-muted hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                data-testid={`prompts-filter-preset-chip-${preset.id}`}
+              >
+                <Bookmark className="size-3.5" aria-hidden="true" />
+                {preset.name}
+              </button>
+            ))}
+            {filterPresets.length > 5 && (
+              <span className="text-xs text-text-muted">
+                +{filterPresets.length - 5}
+              </span>
+            )}
+          </div>
+        )}
 
         {customPromptsLoading && <Skeleton paragraph={{ rows: 8 }} />}
 
@@ -1527,7 +1838,7 @@ export const PromptBody = () => {
             type="info"
             showIcon
             className="mb-3"
-            message={t("managePrompts.search.localSubset", {
+            title={t("managePrompts.search.localSubset", {
               defaultValue: "Showing synced local matches only"
             })}
             description={t("managePrompts.search.localSubsetDesc", {
@@ -1588,6 +1899,21 @@ export const PromptBody = () => {
           </Suspense>
         )}
 
+        {filterChangeCount >= 3 && shouldShowHint("filter-presets") && (
+          <Suspense fallback={null}>
+            <ContextualHint
+              id="filter-presets"
+              message={t("managePrompts.filterPresets.hint", {
+                defaultValue:
+                  "Save this filter combination as a preset to reuse it later."
+              })}
+              visible={true}
+              onDismiss={dismissHint}
+              onShown={markHintShown}
+            />
+          </Suspense>
+        )}
+
         {status === "success" && Array.isArray(data) && data.length > 0 && viewMode === "table" && (
           <PromptListTable
             rows={customPromptRows}
@@ -1603,6 +1929,8 @@ export const PromptBody = () => {
             onEdit={editor.handleEditPromptById}
             onToggleFavorite={editor.handleTogglePromptFavorite}
             onOpenConflictResolution={sync.openConflictResolution}
+            canRetrySync={canRetryPromptSync}
+            onRetrySync={handleRetryPromptSyncById}
             renderActions={renderCustomPromptActions}
             renderTitleMeta={renderCustomPromptTitleMeta}
             favoriteButtonTestId={(row) => `prompt-favorite-${row.id}`}
@@ -1728,8 +2056,48 @@ export const PromptBody = () => {
         />
       )
     }
+
+    const dismissCopilotHelp = () => {
+      setCopilotHelpDismissed(true)
+      try {
+        window.localStorage.setItem(PROMPTS_COPILOT_HELP_STORAGE_KEY, "true")
+      } catch {
+        // Ignore storage failures in restricted browser modes.
+      }
+    }
+
     return (
-      <div>
+      <div className="space-y-4">
+        {!copilotHelpDismissed && (
+          <div
+            className="flex items-start gap-3 rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-text"
+            data-testid="prompts-copilot-help"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">
+                {t("managePrompts.copilotHelp.title", {
+                  defaultValue: "Copilot prompts"
+                })}
+              </p>
+              <p className="mt-1 text-text-muted">
+                {t("managePrompts.copilotHelp.description", {
+                  defaultValue:
+                    "Copilot prompts are server-provided prompt templates for common tasks. Use them directly, edit the server template, or copy one to Custom when you want a local version."
+                })}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={dismissCopilotHelp}
+              aria-label={t("common:dismiss", { defaultValue: "Dismiss" })}
+              data-testid="prompts-copilot-help-dismiss"
+              className="shrink-0 rounded p-1 text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
         {copilotStatus === "pending" && <Skeleton paragraph={{ rows: 8 }} />}
 
         {copilotStatus === "success" && Array.isArray(copilotData) && copilotData.length === 0 && (
@@ -1760,7 +2128,7 @@ export const PromptBody = () => {
 
         {copilotStatus === "success" && Array.isArray(copilotData) && copilotData.length > 0 && (
           <>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 value={copilotSearchText}
                 onChange={(event) => setCopilotSearchText(event.target.value)}
@@ -1916,19 +2284,7 @@ export const PromptBody = () => {
                   </span>
                 </div>
                 <button
-                  onClick={async () => {
-                    const ok = await confirmDanger({
-                      title: t("managePrompts.trash.emptyConfirmTitle", { defaultValue: "Empty Trash?" }),
-                      content: t("managePrompts.trash.emptyConfirmContent", {
-                        defaultValue: "This will permanently delete {{count}} prompts. This action cannot be undone.",
-                        count: trashCount
-                      }),
-                      okText: t("managePrompts.trash.emptyTrash", { defaultValue: "Empty Trash" }),
-                      cancelText: t("common:cancel", { defaultValue: "Cancel" })
-                    })
-                    if (!ok) return
-                    editor.emptyTrashMutation()
-                  }}
+                  onClick={openEmptyTrashConfirm}
                   disabled={editor.isEmptyingTrash}
                   className="inline-flex items-center gap-1 px-2 py-1 text-sm rounded border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-50">
                   <Trash2 className="size-3" />
@@ -2257,7 +2613,7 @@ export const PromptBody = () => {
   )
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       {/* Screen reader status announcements */}
       <div
         role="status"
@@ -2298,7 +2654,7 @@ export const PromptBody = () => {
           }
         />
       )}
-      <div className="flex gap-0">
+      <div className="flex min-w-0 max-w-full gap-0">
         {/* Sidebar - desktop only */}
         {!isCompactViewport && (
           <PromptSidebar
@@ -2333,7 +2689,7 @@ export const PromptBody = () => {
 
       {/* Mobile segment tabs */}
       {isCompactViewport && (
-      <div className="flex flex-col items-start gap-1 mb-6 px-4">
+      <div className="flex w-full max-w-full flex-col items-start gap-1 overflow-x-auto px-4 pb-1 mb-6">
         <Segmented
           size="large"
           options={[
@@ -2448,6 +2804,14 @@ export const PromptBody = () => {
 
       {renderPromptInspectorPanel()}
 
+      <Suspense fallback={null}>
+        <VersionHistoryDrawer
+          open={historyDrawerOpen}
+          promptId={historyPromptId}
+          onClose={() => setHistoryDrawerOpen(false)}
+        />
+      </Suspense>
+
       <Modal
         title={t("managePrompts.modal.editTitle")}
         open={openCopilotEdit}
@@ -2529,6 +2893,62 @@ export const PromptBody = () => {
             </button>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={t("managePrompts.trash.emptyConfirmTitle", { defaultValue: "Empty Trash?" })}
+        open={emptyTrashConfirmOpen}
+        onCancel={closeEmptyTrashConfirm}
+        onOk={handleEmptyTrashConfirm}
+        okText={t("managePrompts.trash.emptyTrash", { defaultValue: "Empty Trash" })}
+        cancelText={t("common:cancel", { defaultValue: "Cancel" })}
+        okButtonProps={{
+          danger: true,
+          disabled:
+            emptyTrashConfirmText !== EMPTY_TRASH_CONFIRM_TOKEN ||
+            editor.isEmptyingTrash,
+          loading: editor.isEmptyingTrash
+        }}
+        maskClosable={false}
+        data-testid="prompts-empty-trash-confirm-modal"
+      >
+        <div className="space-y-3" data-testid="prompts-empty-trash-confirm">
+          <Alert
+            type="error"
+            showIcon
+            title={t("managePrompts.trash.emptyConfirmWarningTitle", {
+              defaultValue: "This permanently deletes every prompt in trash"
+            })}
+            description={t("managePrompts.trash.emptyConfirmContent", {
+              defaultValue:
+                "This will permanently delete {{count}} prompts. This action cannot be undone.",
+              count: Array.isArray(trashData) ? trashData.length : 0
+            })}
+          />
+          <label
+            className="block text-sm font-medium text-text"
+            htmlFor="prompts-empty-trash-confirm-input"
+          >
+            {t("managePrompts.trash.emptyConfirmTypeLabel", {
+              defaultValue: "Type DELETE to confirm"
+            })}
+          </label>
+          <Input
+            id="prompts-empty-trash-confirm-input"
+            value={emptyTrashConfirmText}
+            onChange={(event) => setEmptyTrashConfirmText(event.target.value)}
+            onPressEnter={handleEmptyTrashConfirm}
+            placeholder={EMPTY_TRASH_CONFIRM_TOKEN}
+            autoComplete="off"
+            data-testid="prompts-empty-trash-confirm-input"
+          />
+          <p className="text-xs text-text-muted">
+            {t("managePrompts.trash.emptyConfirmScope", {
+              defaultValue:
+                "Individual prompt deletes still use the standard confirmation."
+            })}
+          </p>
+        </div>
       </Modal>
 
       <Modal

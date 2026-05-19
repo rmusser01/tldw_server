@@ -245,7 +245,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
 
   it("renders query-only summary with accessible live-region metadata", async () => {
     renderPage()
-    fireEvent.change(screen.getByPlaceholderText("Search titles & content..."), {
+    fireEvent.change(screen.getByPlaceholderText("Search notes... (use quotes for exact match)"), {
       target: { value: "ML" }
     })
 
@@ -263,7 +263,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
 
   it("renders keyword-only summary after applying keyword picker selection", async () => {
     renderPage()
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
     fireEvent.click(screen.getByText(/^research\b/i))
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
@@ -274,13 +274,13 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
       )
     })
     expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
-      "Keywords: research"
+      "Tags: research"
     )
   })
 
   it("renders combined query + keyword summary and preserves clear action labeling", async () => {
     renderPage()
-    fireEvent.change(screen.getByPlaceholderText("Search titles & content..."), {
+    fireEvent.change(screen.getByPlaceholderText("Search notes... (use quotes for exact match)"), {
       target: { value: "ML" }
     })
     await waitFor(() => {
@@ -289,7 +289,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
       )
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
     fireEvent.click(screen.getByText(/^research\b/i))
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
@@ -300,7 +300,7 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
       )
     })
     expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
-      'Query: "ML" + Keywords: research'
+      'Query: "ML" + Tags: research'
     )
     expect(screen.getByLabelText("Clear active note filters")).toBeInTheDocument()
   }, 12000)

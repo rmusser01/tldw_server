@@ -832,8 +832,8 @@ def process_audio_files(
             # Cannot proceed without a temp directory
             return {
                 "processed_count": 0, "errors_count": len(inputs),
-                "errors": [f"Fatal setup error: Failed to create temporary directory: {e}"],
-                "results": [{"input_ref": item, "status": "Error", "error": f"Fatal setup error: {e}", "media_type": "audio"} for item in inputs]
+                "errors": ["Audio setup failed"],
+                "results": [{"input_ref": item, "status": "Error", "error": "Audio setup failed", "media_type": "audio"} for item in inputs]
             }
 
     # Helper to track progress messages
@@ -1330,9 +1330,13 @@ def process_audio_files(
                 update_progress(error_message)
                 logging.error(error_message, exc_info=True) # Log full traceback
                 item_result["status"] = "Error" # Ensure status is Error
-                # Store simplified error message if not already set by inner handlers
-                if not item_result.get("error"):
-                    item_result["error"] = str(item_processing_exc)
+                item_error = str(item_processing_exc)
+                if isinstance(item_processing_exc, ValueError) and item_error.startswith(
+                    ("Downloaded file failed validation:", "Storage quota exceeded.")
+                ):
+                    item_result["error"] = item_error
+                else:
+                    item_result["error"] = "Audio processing failed"
 
             finally:
                 # THIS BLOCK *ALWAYS* EXECUTES FOR THE ITEM, REGARDLESS OF EXCEPTIONS ABOVE
@@ -1359,14 +1363,14 @@ def process_audio_files(
              batch_items_results.append({
                  "input_ref": inputs[k] if k < len(inputs) else "Unknown",
                  "status": "Error",
-                 "error": f"Batch processing aborted due to fatal error: {outer_exc}",
+                 "error": "Audio batch processing failed",
                  "media_type": "audio"
              })
          # Ensure the return dict reflects the fatal error
          return {
             "processed_count": sum(1 for r in batch_items_results if r.get("status") in ["Success", "Warning"]),
             "errors_count": sum(1 for r in batch_items_results if r.get("status") == "Error"),
-            "errors": [f"Fatal batch error: {outer_exc}"] + [r.get("error") for r in batch_items_results if r.get("status") == "Error" and r.get("error")],
+            "errors": ["Audio batch processing failed"] + [r.get("error") for r in batch_items_results if r.get("status") == "Error" and r.get("error")],
             "results": batch_items_results
          }
     finally:
@@ -1919,11 +1923,13 @@ def process_podcast(
 
 
     except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS as e:
-        error_message = f"Error processing podcast {url}: {type(e).__name__} - {str(e)}"
-        update_progress(f"Processing failed: {error_message}")
-        logging.error(error_message, exc_info=True)
+        update_progress("Processing failed: Podcast processing failed")
+        logging.error(
+            f"Error processing podcast {url}: {type(e).__name__} - {str(e)}",
+            exc_info=True,
+        )
         result["status"] = "Error"
-        result["error"] = str(e)
+        result["error"] = "Podcast processing failed"
 
     finally:
         _cleanup_temp_files()

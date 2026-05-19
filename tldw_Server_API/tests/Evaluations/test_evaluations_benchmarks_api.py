@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations import (
     evaluations_unified as eval_unified,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Evaluations.identity import EvaluationIdentity
 
 
 def _build_app():
@@ -34,9 +35,7 @@ def _build_app():
 
     app.dependency_overrides[eval_unified.verify_api_key] = _verify_api_key_override
     app.dependency_overrides[eval_unified.get_eval_request_user] = _get_user_override
-    app.dependency_overrides[eval_unified.check_evaluation_rate_limit] = (
-        _rate_limit_dep_override
-    )
+    app.dependency_overrides[eval_unified.check_evaluation_rate_limit] = _rate_limit_dep_override
     return app
 
 
@@ -101,3 +100,23 @@ def test_benchmark_run_endpoint_exists(monkeypatch):
         )
     assert response.status_code == 200
     assert response.json()["benchmark"] == "bullshit_benchmark"
+
+
+def test_benchmark_manager_preserves_string_user_scope(monkeypatch):
+    captured = {}
+
+    class _Manager:
+        def __init__(self, user_id=None):
+            captured["user_id"] = user_id
+
+    monkeypatch.setattr(benchmarks_ep, "EvaluationManager", _Manager)
+
+    identity = EvaluationIdentity(
+        user_scope="tenant-user",
+        created_by="tenant-user",
+        rate_limit_subject="tenant-user",
+        webhook_user_id="user_tenant-user",
+    )
+
+    _ = benchmarks_ep._get_evaluation_manager_for_user(identity)
+    assert captured["user_id"] == "tenant-user"

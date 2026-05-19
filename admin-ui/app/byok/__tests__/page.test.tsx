@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import ByokDashboardPage from '../page';
 import { api } from '@/lib/api-client';
 
-const confirmMock = vi.hoisted(() => vi.fn());
+const promptPrivilegedActionMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
@@ -25,8 +25,8 @@ vi.mock('@/components/OrgContextSwitcher', () => ({
   OrgContextSwitcher: () => <div data-testid="org-switcher" />,
 }));
 
-vi.mock('@/components/ui/confirm-dialog', () => ({
-  useConfirm: () => confirmMock,
+vi.mock('@/components/ui/privileged-action-dialog', () => ({
+  usePrivilegedActionDialog: () => promptPrivilegedActionMock,
 }));
 
 vi.mock('@/components/ui/toast', () => ({
@@ -213,7 +213,10 @@ describe('ByokDashboardPage', () => {
 
     expect(await screen.findByRole('button', { name: /run validation sweep/i })).toBeInTheDocument();
     expect(screen.getByText('All orgs • provider=openai')).toBeInTheDocument();
-    expect(screen.getByText('12 checked • 10 valid • 1 invalid • 1 errors')).toBeInTheDocument();
+    expect(screen.getByText('12 checked')).toBeInTheDocument();
+    expect(screen.getByText('10 valid')).toBeInTheDocument();
+    expect(screen.getByText('1 invalid')).toBeInTheDocument();
+    expect(screen.getByText('1 errors')).toBeInTheDocument();
     expect(
       screen.queryByText('Validation sweep control is hidden until backend batch validation support is available.')
     ).not.toBeInTheDocument();
@@ -292,10 +295,44 @@ describe('ByokDashboardPage', () => {
     await waitFor(() => {
       expect(apiMock.getByokValidationRun).toHaveBeenCalledWith('run-2');
       expect(screen.getByText('Complete')).toBeInTheDocument();
-      expect(screen.getByText('12 checked • 10 valid • 1 invalid • 1 errors')).toBeInTheDocument();
+      expect(screen.getByText('12 checked')).toBeInTheDocument();
+      expect(screen.getByText('10 valid')).toBeInTheDocument();
+      expect(screen.getByText('1 invalid')).toBeInTheDocument();
+      expect(screen.getByText('1 errors')).toBeInTheDocument();
       expect(toastSuccessMock).toHaveBeenCalled();
     }, { timeout: 5000 });
   }, 10000);
+
+  it('deletes a shared key through privileged action dialog', async () => {
+    promptPrivilegedActionMock.mockResolvedValue({ reason: 'test' });
+    apiMock.deleteSharedProviderKey.mockResolvedValue({});
+    apiMock.getSharedProviderKeys.mockResolvedValue({
+      items: [
+        {
+          scope_type: 'global',
+          scope_id: '*',
+          provider: 'openai',
+          key_hint: 'sk-abc...xyz',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+
+    render(<ByokDashboardPage />);
+
+    const deleteButton = await screen.findByRole('button', { name: /delete/i });
+    fireEvent.click(deleteButton);
+
+    await waitFor(() => {
+      expect(promptPrivilegedActionMock).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Delete Shared Key' }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(apiMock.deleteSharedProviderKey).toHaveBeenCalledWith('global', '*', 'openai');
+    });
+  });
 
   it('does not create fake validation history when create fails', async () => {
     apiMock.getByokValidationRuns.mockResolvedValue({

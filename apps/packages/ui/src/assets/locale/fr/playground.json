@@ -167,6 +167,7 @@
     "providerChangeHelper": "Ouvrez le sélecteur de fournisseur ci-dessous pour passer entre le navigateur, tldw, OpenAI ou Supersonic.",
     "changeProvider": "Changer de fournisseur",
     "title": "Playground TTS",
+    "routeTitle": "Synthèse vocale",
     "subtitle": "Essayez la synthèse vocale et ajustez fournisseurs, modèles et voix.",
     "currentProvider": "Fournisseur actuel",
     "settingsIntro": "Ajustez votre fournisseur TTS, votre modèle et votre voix. Ces réglages sont réutilisés lorsque vous lisez l’audio depuis le chat ou les médias.",

@@ -76,7 +76,11 @@ def show_status(db_path: str):
             print(f"  - v{issue['version']}: {issue['message']}")
 
 
-def migrate(db_path: str, target_version: Optional[int] = None):
+def migrate(
+    db_path: str,
+    target_version: Optional[int] = None,
+    create_backup: bool = True,
+) -> None:
     """Run database migrations"""
     migrator = DatabaseMigrator(db_path)
 
@@ -94,7 +98,7 @@ def migrate(db_path: str, target_version: Optional[int] = None):
     print(f"\nMigrating database from version {current} to {target}...")
 
     try:
-        result = migrator.migrate_to_version(target)
+        result = migrator.migrate_to_version(target, create_backup=create_backup)
 
         if result["status"] == "success":
             print("\n✅ Migration successful!")
@@ -229,7 +233,7 @@ def main():
     if args.command == "status":
         show_status(args.db_path)
     elif args.command == "migrate":
-        migrate(args.db_path, args.version)
+        migrate(args.db_path, args.version, create_backup=not args.no_backup)
     elif args.command == "rollback":
         rollback(args.db_path, args.version)
     elif args.command == "verify":

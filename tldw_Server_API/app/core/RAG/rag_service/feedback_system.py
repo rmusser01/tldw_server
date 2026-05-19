@@ -168,8 +168,8 @@ class FeedbackStore:
                 conn.commit()
                 return True
 
-        except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to store feedback: {e}")
+        except (sqlite3.Error, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to store feedback")
             return False
 
     def get_feedback_for_query(
@@ -344,8 +344,8 @@ class FeedbackAnalyzer:
                     normalized = (relevance - 1) / 4  # Normalize to 0-1
                     score += normalized * 3.0  # Weight of 3
                     weight_sum += 3.0
-                except (TypeError, ValueError, json.JSONDecodeError) as e:
-                    logger.debug(f"Failed to parse relevance feedback value: error={e}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.debug("Failed to parse relevance feedback value")
                     try:
                         get_metrics_registry().increment(
                             "app_warning_events_total",
@@ -360,8 +360,8 @@ class FeedbackAnalyzer:
                     helpful = json.loads(value) if isinstance(value, str) else value
                     score += (1.0 if helpful else 0.0) * 2.0  # Weight of 2
                     weight_sum += 2.0
-                except (TypeError, ValueError, json.JSONDecodeError) as e:
-                    logger.debug(f"Failed to parse helpful feedback value: error={e}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.debug("Failed to parse helpful feedback value")
                     try:
                         get_metrics_registry().increment(
                             "app_warning_events_total",
@@ -383,8 +383,8 @@ class FeedbackAnalyzer:
                     normalized = min(dwell / 30.0, 1.0)
                     score += normalized * 1.5  # Weight of 1.5
                     weight_sum += 1.5
-                except (TypeError, ValueError, json.JSONDecodeError) as e:
-                    logger.debug(f"Failed to parse dwell_time feedback value: error={e}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.debug("Failed to parse dwell_time feedback value")
                     try:
                         get_metrics_registry().increment(
                             "app_warning_events_total",
@@ -421,8 +421,8 @@ class FeedbackAnalyzer:
                 try:
                     score = float(json.loads(value) if isinstance(value, str) else value)
                     relevance_scores.append(score)
-                except (TypeError, ValueError, json.JSONDecodeError) as e:
-                    logger.debug(f"Failed to parse relevance score for query document: error={e}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.debug("Failed to parse relevance score for query document")
 
             elif feedback_type == "helpful":
                 try:
@@ -431,8 +431,8 @@ class FeedbackAnalyzer:
                         perf.helpful_count += 1
                     else:
                         perf.unhelpful_count += 1
-                except (TypeError, ValueError, json.JSONDecodeError) as e:
-                    logger.debug(f"Failed to parse helpful feedback value: error={e}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.debug("Failed to parse helpful feedback value")
 
             elif feedback_type == "click":
                 perf.clicked_results += 1
@@ -441,8 +441,8 @@ class FeedbackAnalyzer:
                 try:
                     dwell = float(json.loads(value) if isinstance(value, str) else value)
                     dwell_times.append(dwell)
-                except (TypeError, ValueError, json.JSONDecodeError) as e:
-                    logger.debug(f"Failed to parse dwell_time feedback value: error={e}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    logger.debug("Failed to parse dwell_time feedback value")
 
         perf.total_results = len(unique_docs)
         perf.avg_relevance = float(np.mean(relevance_scores)) if relevance_scores else 0.0
@@ -481,8 +481,8 @@ class FeedbackAnalyzer:
                         score = float(json.loads(entry["value"]) if isinstance(entry["value"], str) else entry["value"])
                         query_doc_score = (score - 1) / 4  # Normalize to 0-1
                         break
-                    except (TypeError, ValueError, json.JSONDecodeError) as e:
-                        logger.debug(f"Failed to parse relevance score for query document: error={e}")
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        logger.debug("Failed to parse relevance score for query document")
 
             # Combine document and query-specific scores
             combined_score = 0.7 * doc_score + 0.3 * query_doc_score
@@ -591,8 +591,8 @@ class FeedbackSystem:
                     f"Feedback submitted: {feedback_type.value} for doc {document_id} "
                     f"by user {user_id}"
                 )
-        except (TypeError, ValueError, RuntimeError) as e:
-            logger.error(f"Failed to submit feedback: {e}")
+        except (TypeError, ValueError, RuntimeError):
+            logger.error("Failed to submit feedback")
             try:
                 get_metrics_registry().increment(
                     "app_exception_events_total",

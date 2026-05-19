@@ -148,6 +148,8 @@ https://github.com/Arindam200/awesome-ai-apps/tree/main/advance_ai_agents/confer
 https://arxiv.org/pdf/2507.16075
 https://github.com/codelion/optillm/tree/main/optillm/plugins/deep_research
 https://github.com/murtaza-nasir/maestro
+https://github.com/bytedance/deer-flow
+https://news.ycombinator.com/item?id=47778306
 https://eprint.iacr.org/
 https://arxiv.org/abs/2508.14880
 

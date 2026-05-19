@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
+    get_evaluation_identity,
     get_eval_request_user,
     sanitize_error_message,
     verify_api_key,
@@ -21,12 +22,9 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     WebhookTestRequest,
     WebhookTestResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
-)
-from tldw_Server_API.app.core.Evaluations.webhook_identity import (
-    webhook_user_id_from_user,
 )
 from tldw_Server_API.app.core.Evaluations.webhook_manager import (
     WebhookEvent,
@@ -57,7 +55,7 @@ _WEBHOOK_ENDPOINT_EXCEPTIONS = (
 )
 
 
-def _get_webhook_manager_for_user(user_id: int) -> WebhookManager:
+def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
     # In tests, always route through the lazy proxy so patched methods
     # are honored and no real DB access is attempted.
     try:
@@ -66,8 +64,8 @@ def _get_webhook_manager_for_user(user_id: int) -> WebhookManager:
             svc = get_unified_evaluation_service_for_user(user_id)
             svc.webhook_manager = webhook_manager
             return webhook_manager
-    except _WEBHOOK_TESTMODE_EXCEPTIONS as e:
-        logger.debug(f"Test mode detection skipped: {e}")
+    except _WEBHOOK_TESTMODE_EXCEPTIONS:
+        logger.debug("Webhook test mode detection skipped")
     service = get_unified_evaluation_service_for_user(user_id)
     manager = getattr(service, "webhook_manager", None)
     if manager is None:
@@ -104,12 +102,13 @@ def _normalize_webhook_status_record(record: dict[str, Any]) -> dict[str, Any]:
 @webhooks_router.post("/webhooks", response_model=WebhookRegistrationResponse)
 async def register_webhook(
     request: WebhookRegistrationRequest,
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         url = str(request.url)
         events = [WebhookEvent(e.value) if not isinstance(e, WebhookEvent) else e for e in request.events]
         _res = wm.register_webhook(
@@ -126,7 +125,7 @@ async def register_webhook(
             result = _res
         return WebhookRegistrationResponse(**result)
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to register webhook: {e}")
+        logger.error("Failed to register webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to register webhook: {sanitize_error_message(e, 'webhook registration')}"
@@ -135,12 +134,13 @@ async def register_webhook(
 
 @webhooks_router.get("/webhooks", response_model=list[WebhookStatusResponse])
 async def list_webhooks(
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         _res = wm.get_webhook_status(user_id=webhook_user_id)
         try:
             records = await _res if inspect.isawaitable(_res) else _res
@@ -149,7 +149,7 @@ async def list_webhooks(
         normalized = [_normalize_webhook_status_record(w) for w in records]
         return [WebhookStatusResponse(**w) for w in normalized]
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to list webhooks: {e}")
+        logger.error("Failed to list webhooks")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list webhooks: {sanitize_error_message(e, 'listing webhooks')}"
@@ -159,12 +159,13 @@ async def list_webhooks(
 @webhooks_router.delete("/webhooks")
 async def unregister_webhook(
     url: str,
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         _res = wm.unregister_webhook(webhook_user_id, url)
         try:
             if inspect.isawaitable(_res):
@@ -173,7 +174,7 @@ async def unregister_webhook(
             pass
         return {"status": "unregistered", "url": url}
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to unregister webhook: {e}")
+        logger.error("Failed to unregister webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to unregister webhook: {sanitize_error_message(e, 'webhook removal')}"
@@ -183,12 +184,13 @@ async def unregister_webhook(
 @webhooks_router.post("/webhooks/test", response_model=WebhookTestResponse)
 async def test_webhook(
     payload: WebhookTestRequest,
-    user_id: str = Depends(verify_api_key),
+    _user_ctx: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        wm = _get_webhook_manager_for_user(current_user.id)
-        webhook_user_id = webhook_user_id_from_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        wm = _get_webhook_manager_for_user(identity.user_scope)
+        webhook_user_id = identity.webhook_user_id
         _res = wm.test_webhook(user_id=webhook_user_id, url=str(payload.url))
         try:
             result = await _res if inspect.isawaitable(_res) else _res
@@ -200,7 +202,7 @@ async def test_webhook(
             return WebhookTestResponse(**result)
         return WebhookTestResponse(success=bool(result))
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to test webhook: {e}")
+        logger.error("Failed to test webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to test webhook: {sanitize_error_message(e, 'webhook testing')}"

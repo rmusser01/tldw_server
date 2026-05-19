@@ -15,13 +15,9 @@ from uuid import UUID
 from cachetools import LRUCache
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_rate_limit,
-    get_auth_principal,
-    rbac_rate_limit,
-    require_permissions,
-)
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
@@ -56,9 +52,8 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     MEDIA_UPDATE,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.exceptions import (
     FileArtifactsError,
     FileArtifactsValidationError,
@@ -72,10 +67,12 @@ from tldw_Server_API.app.core.File_Artifacts.file_artifacts_service import (
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 router = APIRouter(prefix="/data-tables", tags=["data-tables"])
 
 MAX_CACHED_JOB_MANAGER_INSTANCES = 4
+DATA_TABLE_GENERATION_FAILED_DETAIL = "Data table generation failed"
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
@@ -91,6 +88,27 @@ def _file_artifacts_http_exception(exc: FileArtifactsError) -> HTTPException:
     detail = exc.detail if exc.detail is not None else exc.code
     status_code = file_artifacts_http_status(exc)
     return HTTPException(status_code=status_code, detail=detail)
+
+
+def _mark_data_table_generate_failed(
+    db: Any,
+    *,
+    table_id: int | None,
+    owner_user_id: int | str | None,
+    exc: Exception,
+) -> None:
+    """Best-effort failure marker for partially created data tables."""
+    if table_id is None:
+        return
+    try:
+        db.update_data_table(
+            table_id,
+            status="failed",
+            last_error=DATA_TABLE_GENERATION_FAILED_DETAIL,
+            owner_user_id=owner_user_id,
+        )
+    except Exception:
+        logger.debug("data_tables.generate: failed to mark table as failed")
 
 
 def get_job_manager() -> JobManager:
@@ -393,6 +411,8 @@ def _build_table_detail_response(
             for row in db.list_data_table_sources(table_id, owner_user_id=owner_user_id)
         ]
         source_count = len(sources)
+    total_rows = int(table_row.get("row_count") or 0)
+    rows_has_more = rows_offset + rows_limit < total_rows
     return DataTableDetailResponse(
         table=_table_summary_from_row(
             table_row,
@@ -404,6 +424,13 @@ def _build_table_detail_response(
         sources=sources,
         rows_limit=rows_limit,
         rows_offset=rows_offset,
+        pagination=build_offset_pagination_meta(
+            limit=rows_limit,
+            offset=rows_offset,
+            total=total_rows,
+            count=len(rows),
+            has_more=rows_has_more,
+        ),
     )
 
 
@@ -412,7 +439,7 @@ def _build_table_detail_response(
     response_model=Union[DataTableGenerateResponse, DataTableDetailResponse],
     summary="Submit a data table generation job",
     dependencies=[
-        Depends(require_permissions(MEDIA_CREATE)),
+        Depends(RequirePermission(MEDIA_CREATE)),
         Depends(rbac_rate_limit("data_tables.generate")),
     ],
 )
@@ -538,24 +565,32 @@ async def generate_data_table(
             ),
         )
     except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to submit data table job",
+        ) from exc
     except HTTPException:
         raise
+    except DatabaseError as exc:
+        logger.error("data_tables.generate failed")
+        _mark_data_table_generate_failed(
+            db,
+            table_id=table_id,
+            owner_user_id=owner_user_id,
+            exc=exc,
+        )
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to submit data table job",
+        ) from exc
     except Exception as exc:
-        logger.exception("data_tables.generate failed")
-        if table_id is not None:
-            try:
-                db.update_data_table(
-                    table_id,
-                    status="failed",
-                    last_error=str(exc),
-                    owner_user_id=owner_user_id,
-                )
-            except Exception as update_exc:
-                logger.debug(
-                    "data_tables.generate: failed to mark table as failed: {}",
-                    update_exc,
-                )
+        logger.error("data_tables.generate failed")
+        _mark_data_table_generate_failed(
+            db,
+            table_id=table_id,
+            owner_user_id=owner_user_id,
+            exc=exc,
+        )
         raise HTTPException(status_code=500, detail="Failed to submit data table job") from exc
 
 
@@ -564,7 +599,7 @@ async def generate_data_table(
     response_model=DataTablesListResponse,
     summary="List data tables",
     dependencies=[
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(rbac_rate_limit("data_tables.list")),
     ],
 )
@@ -580,33 +615,39 @@ async def list_data_tables(
 ) -> DataTablesListResponse:
     """List data tables with optional filters and pagination."""
     owner_user_id = _resolve_owner_id(principal, current_user)
-    rows = db.list_data_tables(
-        status=status_filter,
-        search=search,
-        workspace_tag=workspace_tag,
-        limit=limit,
-        offset=offset,
-        owner_user_id=owner_user_id,
-    )
-    total = db.count_data_tables(
-        status=status_filter,
-        search=search,
-        workspace_tag=workspace_tag,
-        owner_user_id=owner_user_id,
-    )
-    table_ids = []
-    for row in rows:
-        try:
-            table_ids.append(int(row.get("id")))
-        except (TypeError, ValueError) as exc:
-            logger.warning(
-                'data_tables.list: invalid table id row_id={} row={} error={}',
-                row.get("id"),
-                row,
-                exc,
-            )
-            continue
-    counts_map = db.get_data_table_counts(table_ids, owner_user_id=owner_user_id)
+    try:
+        rows = db.list_data_tables(
+            status=status_filter,
+            search=search,
+            workspace_tag=workspace_tag,
+            limit=limit,
+            offset=offset,
+            owner_user_id=owner_user_id,
+        )
+        total = db.count_data_tables(
+            status=status_filter,
+            search=search,
+            workspace_tag=workspace_tag,
+            owner_user_id=owner_user_id,
+        )
+        table_ids = []
+        for row in rows:
+            try:
+                table_ids.append(int(row.get("id")))
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    'data_tables.list: invalid table id row_id={} row={} error={}',
+                    row.get("id"),
+                    row,
+                    exc,
+                )
+                continue
+        counts_map = db.get_data_table_counts(table_ids, owner_user_id=owner_user_id)
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to list data tables",
+        ) from exc
     tables = []
     for row in rows:
         table_id = None
@@ -634,6 +675,12 @@ async def list_data_tables(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(tables),
+        ),
     )
 
 
@@ -641,7 +688,7 @@ async def list_data_tables(
     "/{table_uuid}",
     response_model=DataTableDetailResponse,
     summary="Get a data table by UUID",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(check_rate_limit)],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(check_rate_limit)],
 )
 async def get_data_table(
     table_uuid: str,
@@ -655,27 +702,44 @@ async def get_data_table(
 ) -> DataTableDetailResponse:
     """Return a single data table with optional rows and sources."""
     owner_user_id = _resolve_owner_id(principal, current_user)
-    table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
-    if not table_row:
-        raise HTTPException(status_code=404, detail="data_table_not_found")
+    try:
+        table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
+        if not table_row:
+            raise HTTPException(status_code=404, detail="data_table_not_found")
 
-    return _build_table_detail_response(
-        table_row,
-        db,
-        rows_limit=rows_limit,
-        rows_offset=rows_offset,
-        include_rows=include_rows,
-        include_sources=include_sources,
-        owner_user_id=owner_user_id,
-    )
+        return _build_table_detail_response(
+            table_row,
+            db,
+            rows_limit=rows_limit,
+            rows_offset=rows_offset,
+            include_rows=include_rows,
+            include_sources=include_sources,
+            owner_user_id=owner_user_id,
+        )
+    except HTTPException:
+        raise
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to fetch data table",
+        ) from exc
 
 
 @router.get(
     "/{table_uuid}/export",
     response_model=DataTableExportResponse,
+    responses={
+        200: {
+            "description": "Data table export metadata or direct download content.",
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {},
+                "text/csv": {},
+            },
+        },
+    },
     summary="Export a data table",
     dependencies=[
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(rbac_rate_limit("data_tables.export")),
     ],
 )
@@ -694,30 +758,39 @@ async def export_data_table(
 ) -> DataTableExportResponse:
     """Export a data table via file artifacts or direct response."""
     owner_user_id = _resolve_owner_id(principal, current_user)
-    table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
-    if not table_row:
-        raise HTTPException(status_code=404, detail="data_table_not_found")
-    if str(table_row.get("status") or "") != "ready":
-        raise HTTPException(status_code=409, detail="data_table_not_ready")
+    try:
+        table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
+        if not table_row:
+            raise HTTPException(status_code=404, detail="data_table_not_found")
+        if str(table_row.get("status") or "") != "ready":
+            raise HTTPException(status_code=409, detail="data_table_not_ready")
 
-    table_id = int(table_row.get("id"))
-    column_rows = db.list_data_table_columns(table_id, owner_user_id=owner_user_id)
-    if not column_rows:
-        raise HTTPException(status_code=409, detail="data_table_missing_columns")
+        table_id = int(table_row.get("id"))
+        column_rows = db.list_data_table_columns(table_id, owner_user_id=owner_user_id)
+        if not column_rows:
+            raise HTTPException(status_code=409, detail="data_table_missing_columns")
 
-    column_rows = sorted(
-        column_rows,
-        key=lambda row: (int(row.get("position") or 0), int(row.get("id") or 0)),
-    )
-    column_ids = [str(row.get("column_id") or "") for row in column_rows]
-    column_names = [str(row.get("name") or "") for row in column_rows]
-    rows = _collect_export_rows(
-        db,
-        table_id,
-        column_ids=column_ids,
-        column_names=column_names,
-        owner_user_id=owner_user_id,
-    )
+        column_rows = sorted(
+            column_rows,
+            key=lambda row: (int(row.get("position") or 0), int(row.get("id") or 0)),
+        )
+        column_ids = [str(row.get("column_id") or "") for row in column_rows]
+        column_names = [str(row.get("name") or "") for row in column_rows]
+        rows = _collect_export_rows(
+            db,
+            table_id,
+            column_ids=column_ids,
+            column_names=column_names,
+            owner_user_id=owner_user_id,
+        )
+    except HTTPException:
+        raise
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to export data table",
+        ) from exc
+
     structured = {"columns": column_names, "rows": rows}
 
     if download:
@@ -792,7 +865,7 @@ async def export_data_table(
     response_model=DataTableDetailResponse,
     summary="Update data table content",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.update_content")),
     ],
 )
@@ -889,10 +962,6 @@ async def update_data_table_content(
                     "row_json": row_json,
                 }
             )
-    except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
         with db.transaction():
             db.persist_data_table_generation(
                 table_id,
@@ -903,20 +972,29 @@ async def update_data_table_content(
                 last_error=None,
                 owner_user_id=mutation_owner_user_id,
             )
-    except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (InputError, DatabaseError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to update data table content",
+        ) from exc
 
-    updated_row = db.get_data_table(table_id, owner_user_id=mutation_owner_user_id) or table_row
-    rows_limit = max(1, min(len(rows_payload) or 200, 2000))
-    return _build_table_detail_response(
-        updated_row,
-        db,
-        rows_limit=rows_limit,
-        rows_offset=0,
-        include_rows=True,
-        include_sources=True,
-        owner_user_id=owner_user_id,
-    )
+    try:
+        updated_row = db.get_data_table(table_id, owner_user_id=mutation_owner_user_id) or table_row
+        rows_limit = max(1, min(len(rows_payload) or 200, 2000))
+        return _build_table_detail_response(
+            updated_row,
+            db,
+            rows_limit=rows_limit,
+            rows_offset=0,
+            include_rows=True,
+            include_sources=True,
+            owner_user_id=owner_user_id,
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to update data table content",
+        ) from exc
 
 
 @router.patch(
@@ -924,7 +1002,7 @@ async def update_data_table_content(
     response_model=DataTableSummary,
     summary="Update data table metadata",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.update")),
     ],
 )
@@ -937,23 +1015,26 @@ async def update_data_table(
 ) -> DataTableSummary:
     """Update data table metadata such as name and description."""
     owner_user_id = _resolve_owner_id(principal, current_user)
-    table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
-    if not table_row:
-        raise HTTPException(status_code=404, detail="data_table_not_found")
-    table_owner_client_id = str(table_row.get("client_id") or "").strip() or None
-    mutation_owner_user_id = table_owner_client_id or owner_user_id
-    updated = db.update_data_table(
-        int(table_row.get("id")),
-        name=req.name.strip() if req.name is not None else None,
-        description=req.description,
-        owner_user_id=mutation_owner_user_id,
-    )
-    if not updated:
-        raise HTTPException(status_code=500, detail="data_table_update_failed")
-    counts = db.get_data_table_counts([int(updated.get("id"))], owner_user_id=mutation_owner_user_id).get(
-        int(updated.get("id")),
-        {},
-    )
+    try:
+        table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
+        if not table_row:
+            raise HTTPException(status_code=404, detail="data_table_not_found")
+        table_owner_client_id = str(table_row.get("client_id") or "").strip() or None
+        mutation_owner_user_id = table_owner_client_id or owner_user_id
+        updated = db.update_data_table(
+            int(table_row.get("id")),
+            name=req.name.strip() if req.name is not None else None,
+            description=req.description,
+            owner_user_id=mutation_owner_user_id,
+        )
+        if not updated:
+            raise HTTPException(status_code=500, detail="data_table_update_failed")
+        counts = db.get_data_table_counts([int(updated.get("id"))], owner_user_id=mutation_owner_user_id).get(
+            int(updated.get("id")),
+            {},
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update data table") from exc
     return _table_summary_from_row(
         updated,
         column_count=counts.get("column_count"),
@@ -966,7 +1047,7 @@ async def update_data_table(
     response_model=DataTableDeleteResponse,
     summary="Delete a data table",
     dependencies=[
-        Depends(require_permissions(MEDIA_DELETE)),
+        Depends(RequirePermission(MEDIA_DELETE)),
         Depends(rbac_rate_limit("data_tables.delete")),
     ],
 )
@@ -978,17 +1059,20 @@ async def delete_data_table(
 ) -> DataTableDeleteResponse:
     """Delete a data table."""
     owner_user_id = _resolve_owner_id(principal, current_user)
-    table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
-    if not table_row:
-        raise HTTPException(status_code=404, detail="data_table_not_found")
-    table_owner_client_id = str(table_row.get("client_id") or "").strip() or None
-    mutation_owner_user_id = table_owner_client_id or owner_user_id
-    deleted = db.soft_delete_data_table(
-        int(table_row.get("id")),
-        owner_user_id=mutation_owner_user_id,
-    )
-    if not deleted:
-        raise HTTPException(status_code=500, detail="data_table_delete_failed")
+    try:
+        table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
+        if not table_row:
+            raise HTTPException(status_code=404, detail="data_table_not_found")
+        table_owner_client_id = str(table_row.get("client_id") or "").strip() or None
+        mutation_owner_user_id = table_owner_client_id or owner_user_id
+        deleted = db.soft_delete_data_table(
+            int(table_row.get("id")),
+            owner_user_id=mutation_owner_user_id,
+        )
+        if not deleted:
+            raise HTTPException(status_code=500, detail="data_table_delete_failed")
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete data table") from exc
     return DataTableDeleteResponse(success=True)
 
 
@@ -997,7 +1081,7 @@ async def delete_data_table(
     response_model=Union[DataTableGenerateResponse, DataTableDetailResponse],
     summary="Regenerate a data table from stored sources",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.regenerate")),
     ],
 )
@@ -1018,25 +1102,33 @@ async def regenerate_data_table(
     tp = ensure_traceparent(request)
 
     owner_user_id = _resolve_owner_id(principal, current_user)
-    table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
-    if not table_row:
-        raise HTTPException(status_code=404, detail="data_table_not_found")
+    try:
+        table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
+        if not table_row:
+            raise HTTPException(status_code=404, detail="data_table_not_found")
 
-    table_id = int(table_row.get("id"))
-    table_owner_client_id = str(table_row.get("client_id") or "").strip() or None
-    sources_rows = db.list_data_table_sources(table_id, owner_user_id=owner_user_id)
-    job_sources = [
-        {
-            "source_type": row.get("source_type"),
-            "source_id": row.get("source_id"),
-            "title": row.get("title"),
-            "snapshot": _parse_json_value(row.get("snapshot_json")),
-            "retrieval_params": _parse_json_value(row.get("retrieval_params_json")),
-        }
-        for row in sources_rows
-    ]
-    if not job_sources:
-        raise HTTPException(status_code=400, detail="data_table_missing_sources")
+        table_id = int(table_row.get("id"))
+        table_owner_client_id = str(table_row.get("client_id") or "").strip() or None
+        sources_rows = db.list_data_table_sources(table_id, owner_user_id=owner_user_id)
+        job_sources = [
+            {
+                "source_type": row.get("source_type"),
+                "source_id": row.get("source_id"),
+                "title": row.get("title"),
+                "snapshot": _parse_json_value(row.get("snapshot_json")),
+                "retrieval_params": _parse_json_value(row.get("retrieval_params_json")),
+            }
+            for row in sources_rows
+        ]
+        if not job_sources:
+            raise HTTPException(status_code=400, detail="data_table_missing_sources")
+    except HTTPException:
+        raise
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to regenerate data table",
+        ) from exc
 
     prompt_override = req.prompt.strip() if req.prompt is not None else None
     if prompt_override == "":
@@ -1066,13 +1158,19 @@ async def regenerate_data_table(
         request_id=rid,
         trace_id=tp or None,
     )
-    db.update_data_table(
-        table_id,
-        status="queued",
-        generation_model=req.model or table_row.get("generation_model"),
-        prompt=prompt_override,
-        owner_user_id=table_owner_client_id or owner_user_id,
-    )
+    try:
+        db.update_data_table(
+            table_id,
+            status="queued",
+            generation_model=req.model or table_row.get("generation_model"),
+            prompt=prompt_override,
+            owner_user_id=table_owner_client_id or owner_user_id,
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to regenerate data table",
+        ) from exc
 
     if wait_for_completion:
         job_state = await _wait_for_job_completion(
@@ -1084,33 +1182,47 @@ async def regenerate_data_table(
                 status_code=409,
                 detail=job_state.get("error_message") or "data_table_job_failed",
             )
-        table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
-        if not table_row:
-            raise HTTPException(status_code=404, detail="data_table_not_found")
-        response.status_code = status.HTTP_200_OK
-        rows_limit = min(req.max_rows or 2000, 2000)
-        return _build_table_detail_response(
-            table_row,
-            db,
-            rows_limit=rows_limit,
-            rows_offset=0,
-            include_rows=True,
-            include_sources=True,
-            owner_user_id=owner_user_id,
-        )
+        try:
+            table_row = db.get_data_table_by_uuid(table_uuid, owner_user_id=owner_user_id)
+            if not table_row:
+                raise HTTPException(status_code=404, detail="data_table_not_found")
+            response.status_code = status.HTTP_200_OK
+            rows_limit = min(req.max_rows or 2000, 2000)
+            return _build_table_detail_response(
+                table_row,
+                db,
+                rows_limit=rows_limit,
+                rows_offset=0,
+                include_rows=True,
+                include_sources=True,
+                owner_user_id=owner_user_id,
+            )
+        except HTTPException:
+            raise
+        except DatabaseError as exc:
+            raise map_db_error_to_http(
+                exc,
+                default_detail="Failed to regenerate data table",
+            ) from exc
 
-    response.status_code = status.HTTP_202_ACCEPTED
-    counts = db.get_data_table_counts([table_id], owner_user_id=owner_user_id).get(table_id, {})
-    return DataTableGenerateResponse(
-        job_id=int(job.get("id")),
-        job_uuid=job.get("uuid"),
-        status=str(job.get("status") or "queued"),
-        table=_table_summary_from_row(
-            db.get_data_table(table_id, owner_user_id=owner_user_id) or table_row,
-            column_count=counts.get("column_count"),
-            source_count=counts.get("source_count"),
-        ),
-    )
+    try:
+        response.status_code = status.HTTP_202_ACCEPTED
+        counts = db.get_data_table_counts([table_id], owner_user_id=owner_user_id).get(table_id, {})
+        return DataTableGenerateResponse(
+            job_id=int(job.get("id")),
+            job_uuid=job.get("uuid"),
+            status=str(job.get("status") or "queued"),
+            table=_table_summary_from_row(
+                db.get_data_table(table_id, owner_user_id=owner_user_id) or table_row,
+                column_count=counts.get("column_count"),
+                source_count=counts.get("source_count"),
+            ),
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to regenerate data table",
+        ) from exc
 
 
 @router.get(
@@ -1118,7 +1230,7 @@ async def regenerate_data_table(
     response_model=DataTableJobStatus,
     summary="Get data table job status",
     dependencies=[
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(rbac_rate_limit("data_tables.jobs.get")),
     ],
 )
@@ -1160,7 +1272,7 @@ async def get_data_table_job(
     response_model=DataTableJobCancelResponse,
     summary="Cancel a data table job",
     dependencies=[
-        Depends(require_permissions(MEDIA_UPDATE)),
+        Depends(RequirePermission(MEDIA_UPDATE)),
         Depends(rbac_rate_limit("data_tables.jobs.cancel")),
     ],
 )

@@ -18,6 +18,8 @@ class DataSource(Enum):
     CHARACTER_CARDS = "character_cards"
     WEB_CONTENT = "web_content"
     PROMPTS = "prompts"  # Add missing PROMPTS source
+    WORLD_BOOKS = "world_books"
+    DICTIONARIES = "dictionaries"
     SQL = "sql"
     KANBAN = "kanban"
     CLAIMS = "claims"  # Claims table/vector store

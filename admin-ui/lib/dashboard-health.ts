@@ -9,7 +9,7 @@ export const DASHBOARD_SUBSYSTEMS = [
   { key: 'stt', label: 'STT Service' },
   { key: 'embeddings', label: 'Embeddings' },
   { key: 'cache', label: 'RAG Cache' },
-  { key: 'job_queue', label: 'Job Queue' },
+  { key: 'jobQueue', label: 'Job Queue' },
 ] as const;
 
 export type DashboardSubsystemKey = (typeof DASHBOARD_SUBSYSTEMS)[number]['key'];
@@ -18,7 +18,7 @@ export interface DashboardSubsystemHealth {
   status: DashboardHealthStatus;
   checkedAt?: string;
   cacheHitRatePct?: number | null;
-  message?: string;
+  errorMessage?: string | null;
 }
 
 export type DashboardSystemHealth = Record<DashboardSubsystemKey, DashboardSubsystemHealth>;
@@ -32,7 +32,7 @@ export const DEFAULT_DASHBOARD_SYSTEM_HEALTH: DashboardSystemHealth = {
   stt: { status: 'unknown' },
   embeddings: { status: 'unknown' },
   cache: { status: 'unknown' },
-  job_queue: { status: 'unknown' },
+  jobQueue: { status: 'unknown' },
 };
 
 interface BuildDashboardSystemHealthArgs {
@@ -143,15 +143,36 @@ export const normalizeDashboardHealthStatus = (status: unknown): DashboardHealth
   return 'unknown';
 };
 
+const extractErrorMessage = (payload: Record<string, unknown>): string | null => {
+  if (typeof payload.error === 'string' && payload.error.trim()) {
+    return payload.error.trim();
+  }
+  if (typeof payload.message === 'string' && payload.message.trim()) {
+    return payload.message.trim();
+  }
+  if (typeof payload.detail === 'string' && payload.detail.trim()) {
+    return payload.detail.trim();
+  }
+  if (typeof payload.reason === 'string' && payload.reason.trim()) {
+    return payload.reason.trim();
+  }
+  return null;
+};
+
 const resolveSettledStatus = (
   result: PromiseSettledResult<unknown>,
   getStatusFromPayload: (payload: Record<string, unknown>) => DashboardHealthStatus,
   fallbackCheckedAt: string
 ): DashboardSubsystemHealth => {
   if (result.status !== 'fulfilled') {
+    const reason = result.reason;
+    const errorMsg = reason instanceof Error
+      ? reason.message
+      : typeof reason === 'string' ? reason : 'Unreachable';
     return {
       status: 'down',
       checkedAt: fallbackCheckedAt,
+      errorMessage: errorMsg,
     };
   }
 
@@ -163,9 +184,13 @@ const resolveSettledStatus = (
     };
   }
 
+  const status = getStatusFromPayload(payload);
+  const errorMessage = status !== 'healthy' ? extractErrorMessage(payload) : null;
+
   return {
-    status: getStatusFromPayload(payload),
+    status,
     checkedAt: normalizeTimestamp(payload.timestamp, fallbackCheckedAt),
+    errorMessage,
   };
 };
 
@@ -262,19 +287,44 @@ export const buildDashboardSystemHealth = ({
 
   const jobQueueHealth: DashboardSubsystemHealth = (() => {
     if (!jobsStatsResult || jobsStatsResult.status !== 'fulfilled') {
-      return { status: 'unknown', checkedAt: referenceTime };
+      return { status: 'unknown' as DashboardHealthStatus, checkedAt: referenceTime };
     }
+    const rows = Array.isArray(jobsStatsResult.value)
+      ? jobsStatsResult.value
+      : (toRecord(jobsStatsResult.value)?.items as unknown[] ?? []);
     const payload = toRecord(jobsStatsResult.value);
     const failed = typeof payload?.failed === 'number' ? payload.failed : 0;
     const queueDepth = typeof payload?.queue_depth === 'number' ? payload.queue_depth : 0;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      // No row-level stats; fall back to top-level failed / queue_depth counters
+      const status: DashboardHealthStatus =
+        failed > 0 ? 'degraded' :
+        queueDepth > 100 ? 'degraded' :
+        'healthy';
+      return {
+        status,
+        checkedAt: referenceTime,
+        errorMessage: failed > 0 ? `${failed} failed jobs` : queueDepth > 100 ? `Queue depth: ${queueDepth}` : null,
+      };
+    }
+    let quarantined = 0;
+    for (const row of rows) {
+      const rec = toRecord(row);
+      if (rec) {
+        const q = toFiniteNumber(rec.quarantined);
+        if (q !== null) quarantined += q;
+      }
+    }
     const status: DashboardHealthStatus =
-      failed > 0 ? 'degraded' :
-      queueDepth > 100 ? 'degraded' :
-      'healthy';
+      quarantined > 10 ? 'down' : quarantined > 0 ? 'degraded' : failed > 0 ? 'degraded' : queueDepth > 100 ? 'degraded' : 'healthy';
+    const messages: string[] = [];
+    if (quarantined > 0) messages.push(`${quarantined} quarantined job(s)`);
+    if (failed > 0) messages.push(`${failed} failed jobs`);
+    if (queueDepth > 100) messages.push(`Queue depth: ${queueDepth}`);
     return {
       status,
       checkedAt: referenceTime,
-      message: failed > 0 ? `${failed} failed jobs` : queueDepth > 100 ? `Queue depth: ${queueDepth}` : undefined,
+      errorMessage: messages.length > 0 ? messages.join('; ') : null,
     };
   })();
 
@@ -287,6 +337,6 @@ export const buildDashboardSystemHealth = ({
     stt: sttHealth,
     embeddings: embeddingsHealth,
     cache: cacheHealth,
-    job_queue: jobQueueHealth,
+    jobQueue: jobQueueHealth,
   };
 };

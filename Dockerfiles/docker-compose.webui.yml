@@ -22,10 +22,9 @@ services:
         NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: ${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE:-quickstart}
         TLDW_INTERNAL_API_ORIGIN: ${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}
     image: tldw-webui:prod
-    container_name: tldw-webui
     restart: unless-stopped
     ports:
-      - "8080:3000"
+      - "127.0.0.1:8080:3000"
     depends_on:
       app:
         condition: service_healthy

@@ -118,6 +118,17 @@ export const QuizPlayground: React.FC = () => {
   const totalQuizzes = quizCounts?.count ?? 0
   const totalAttempts = attemptCounts?.count ?? 0
 
+  // FTUX: default to "generate" tab when no quizzes exist yet
+  const defaultTabResolved = React.useRef(false)
+  React.useEffect(() => {
+    if (defaultTabResolved.current) return
+    if (quizCounts === undefined) return // still loading
+    defaultTabResolved.current = true
+    if (totalQuizzes === 0 && !initialAssessmentIntent) {
+      setActiveTab("generate")
+    }
+  }, [quizCounts, totalQuizzes, initialAssessmentIntent])
+
   const renderTabLabel = React.useCallback((
     label: string,
     shortLabel: string,
@@ -260,16 +271,19 @@ export const QuizPlayground: React.FC = () => {
             {t("common:search", { defaultValue: "Search" })}
           </Button>
         </div>
-        <Button
-          onClick={handleResetActiveTab}
-          size="small"
-          data-testid="quiz-reset-current-tab"
-        >
-          {t("option:quiz.resetCurrentTab", { defaultValue: "Reset Current Tab" })}
-        </Button>
+        {(totalQuizzes > 0 || totalAttempts > 0) && (
+          <Button
+            onClick={handleResetActiveTab}
+            size="small"
+            data-testid="quiz-reset-current-tab"
+          >
+            {t("option:quiz.resetCurrentTab", { defaultValue: "Reset Current Tab" })}
+          </Button>
+        )}
       </div>
       <div ref={tabsRef}>
         <Tabs
+          data-testid="quiz-playground-tabs"
           className="quiz-tabs [&_.ant-tabs-nav-wrap]:overflow-x-auto [&_.ant-tabs-nav-wrap]:scroll-smooth [&_.ant-tabs-nav-list]:min-w-max [&_.ant-tabs-tab]:px-1 [&_.ant-tabs-tab-btn]:whitespace-nowrap"
           activeKey={activeTab}
           destroyInactiveTabPane={false}
@@ -277,12 +291,12 @@ export const QuizPlayground: React.FC = () => {
           items={[
           {
             key: "take",
-            label: renderTabLabel(
+            label: <span data-testid="quiz-tab-take">{renderTabLabel(
               t("option:quiz.take", { defaultValue: "Take Quiz" }),
               t("option:quiz.takeShort", { defaultValue: "Take" }),
               <PlayCircleOutlined />,
               totalQuizzes
-            ),
+            )}</span>,
             children: (
               <TakeQuizTab
                 key={`take-${tabResetVersion.take}`}
@@ -327,11 +341,15 @@ export const QuizPlayground: React.FC = () => {
           },
           {
             key: "generate",
-            label: renderTabLabel(
-              t("option:quiz.generate", { defaultValue: "Generate" }),
-              t("option:quiz.generateShort", { defaultValue: "Gen" }),
+            label: <span data-testid="quiz-tab-generate">{renderTabLabel(
+              quizCounts !== undefined && totalQuizzes === 0
+                ? t("option:quiz.generateStartHere", { defaultValue: "Generate \u2190 Start here" })
+                : t("option:quiz.generate", { defaultValue: "Generate" }),
+              quizCounts !== undefined && totalQuizzes === 0
+                ? t("option:quiz.generateStartHereShort", { defaultValue: "Gen \u2190" })
+                : t("option:quiz.generateShort", { defaultValue: "Gen" }),
               <ThunderboltOutlined />
-            ),
+            )}</span>,
             children: (
               renderLazyTab(
                 "generate",
@@ -345,11 +363,11 @@ export const QuizPlayground: React.FC = () => {
           },
           {
             key: "create",
-            label: renderTabLabel(
+            label: <span data-testid="quiz-tab-create">{renderTabLabel(
               t("option:quiz.create", { defaultValue: "Create" }),
-              t("option:quiz.createShort", { defaultValue: "Build" }),
+              t("option:quiz.createShort", { defaultValue: "Create" }),
               <EditOutlined />
-            ),
+            )}</span>,
             children: (
               renderLazyTab(
                 "create",
@@ -363,12 +381,12 @@ export const QuizPlayground: React.FC = () => {
           },
           {
             key: "manage",
-            label: renderTabLabel(
+            label: <span data-testid="quiz-tab-manage">{renderTabLabel(
               t("option:quiz.manage", { defaultValue: "Manage" }),
               t("option:quiz.manageShort", { defaultValue: "Manage" }),
               <SettingOutlined />,
               totalQuizzes
-            ),
+            )}</span>,
             children: (
               renderLazyTab(
                 "manage",
@@ -394,12 +412,12 @@ export const QuizPlayground: React.FC = () => {
           },
           {
             key: "results",
-            label: renderTabLabel(
+            label: <span data-testid="quiz-tab-results">{renderTabLabel(
               t("option:quiz.results", { defaultValue: "Results" }),
-              t("option:quiz.resultsShort", { defaultValue: "Stats" }),
+              t("option:quiz.resultsShort", { defaultValue: "Results" }),
               <BarChartOutlined />,
               totalAttempts
-            ),
+            )}</span>,
             children: (
               renderLazyTab(
                 "results",

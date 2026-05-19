@@ -12,7 +12,7 @@
 set -euo pipefail
 
 BINARY_NAME="tldw-agent-acp"
-GITHUB_OWNER="user"          # TODO: replace with actual org/owner when repo is published
+GITHUB_OWNER="rmusser01"     # If the repo isn't public yet, build from source instead (see fallback instructions below)
 GITHUB_REPO="tldw-agent"
 
 # ---------------------------------------------------------------------------
@@ -87,12 +87,13 @@ if [[ "$VERSION" == "latest" ]]; then
         echo "ERROR: Could not determine latest release version."
         echo ""
         echo "This may mean:"
-        echo "  1. The tldw-agent repo has no published releases yet"
+        echo "  1. The tldw-agent repo is not yet public or has no published releases"
         echo "  2. GitHub API rate limit reached (set GITHUB_TOKEN to increase)"
         echo "  3. The repo URL is incorrect"
         echo ""
-        echo "Alternative: Build from source:"
-        echo "  cd ../tldw-agent && go build -o ../tldw_server2/bin/tldw-agent-acp ./cmd/tldw-agent-acp"
+        echo "Alternative: Build from source (requires Go 1.22+):"
+        echo "  git clone https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git ../tldw-agent"
+        echo "  cd ../tldw-agent && mkdir -p \"${INSTALL_DIR}\" && go build -o \"${INSTALL_DIR}/${BINARY_NAME}\" ./cmd/tldw-agent-acp"
         exit 1
     fi
     echo "==> Latest version: ${VERSION}"
@@ -116,7 +117,8 @@ if [[ ! -f "${TARGET}.tmp" ]] || [[ "${HTTP_CODE:-0}" != "200" ]]; then
     rm -f "${TARGET}.tmp"
     echo "ERROR: Download failed (HTTP ${HTTP_CODE:-???})."
     echo ""
-    echo "The binary may not be published yet. Build from source instead:"
+    echo "The binary may not be published yet, or the repo may not be public."
+    echo "Build from source instead:"
     echo "  1. Install Go 1.22+: https://go.dev/dl/"
     echo "  2. Clone the tldw-agent repo:"
     echo "     git clone https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git ../tldw-agent"

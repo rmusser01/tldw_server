@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
     DatabaseBackendFactory,
+    is_factory_managed_backend,
+    release_managed_backend,
 )
 
 DatabaseFactory = Callable[..., object]
@@ -64,20 +66,10 @@ class MediaDbSession:
         release = getattr(self.database, "release_context_connection", None)
         if callable(release):
             release()
-        if not self.owns_backend_resources:
-            return
         close_connection = getattr(self.database, "close_connection", None)
         if callable(close_connection):
             with suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError):
                 close_connection()
-        backend = getattr(self.database, "backend", None)
-        get_pool = getattr(backend, "get_pool", None)
-        if callable(get_pool):
-            with suppress(AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                pool = get_pool()
-                close_all = getattr(pool, "close_all", None)
-                if callable(close_all):
-                    close_all()
 
 
 @dataclass(slots=True)
@@ -154,6 +146,13 @@ class MediaDbFactory:
         """Close any pooled backend resources owned by this factory."""
         backend = self.backend
         if backend is None:
+            return
+        self.backend = None
+        if (
+            getattr(backend, "backend_type", None) == BackendType.SQLITE
+            and is_factory_managed_backend(backend)
+        ):
+            release_managed_backend(backend)
             return
         try:
             backend.get_pool().close_all()

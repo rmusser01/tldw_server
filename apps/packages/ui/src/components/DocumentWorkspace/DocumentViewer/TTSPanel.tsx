@@ -6,7 +6,6 @@ import {
   Play,
   Pause,
   Square,
-  VolumeX,
   Download
 } from "lucide-react"
 import { useDocumentTTS } from "@/hooks/document-workspace/useDocumentTTS"
@@ -214,20 +213,16 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ defaultText }) => {
   return (
     <Popover
       content={content}
-      title={t("option:documentWorkspace.textToSpeech", "Text to Speech")}
+      title={t("option:documentWorkspace.textToSpeechTitle", "Read Aloud")}
       trigger="click"
       placement="bottomRight"
     >
-      <Tooltip title={t("option:documentWorkspace.textToSpeech", "Text to Speech")}>
+      <Tooltip title={t("option:documentWorkspace.textToSpeech", "Read aloud")}>
         <button
           className={`rounded p-1.5 hover:bg-hover ${isActive ? "text-primary" : ""}`}
-          aria-label={t("option:documentWorkspace.textToSpeech", "Text to Speech")}
+          aria-label={t("option:documentWorkspace.textToSpeech", "Read aloud")}
         >
-          {isActive ? (
-            <Volume2 className="h-4 w-4" />
-          ) : (
-            <VolumeX className="h-4 w-4" />
-          )}
+          <Volume2 className="h-4 w-4" />
         </button>
       </Tooltip>
     </Popover>

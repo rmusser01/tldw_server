@@ -68,6 +68,10 @@ class RunCommandModule(BaseModule):
                         "type": "string",
                         "description": "Command chain to execute (example: ls | grep py).",
                     },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": "Legacy alias for idempotencyKey.",
+                    },
                     "idempotencyKey": {
                         "type": "string",
                         "description": "Optional parent idempotency key for nested governed steps.",
@@ -165,15 +169,26 @@ class RunCommandModule(BaseModule):
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name != "run":
             raise ValueError(f"Unknown tool: {tool_name}")
-        unknown = sorted({key for key in arguments.keys()} - {"command", "idempotencyKey"})
+        unknown = sorted({key for key in arguments.keys()} - {"command", "idempotencyKey", "idempotency_key"})
         if unknown:
             raise ValueError(f"unknown arguments: {', '.join(unknown)}")
         command = arguments.get("command")
         if not isinstance(command, str) or not command.strip():
             raise ValueError("command is required")
         idempotency_key = arguments.get("idempotencyKey")
+        legacy_idempotency_key = arguments.get("idempotency_key")
         if idempotency_key is not None and not isinstance(idempotency_key, str):
             raise ValueError("idempotencyKey must be a string")
+        if legacy_idempotency_key is not None and not isinstance(legacy_idempotency_key, str):
+            raise ValueError("idempotency_key must be a string")
+        if (
+            isinstance(idempotency_key, str)
+            and isinstance(legacy_idempotency_key, str)
+            and idempotency_key.strip()
+            and legacy_idempotency_key.strip()
+            and idempotency_key.strip() != legacy_idempotency_key.strip()
+        ):
+            raise ValueError("idempotencyKey and idempotency_key must match when both are provided")
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""

@@ -14,11 +14,10 @@ import {
   Typography
 } from "antd"
 import { X, Minus, Check, Star, Calendar, Undo2 } from "lucide-react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
-import type { Flashcard, FlashcardUpdate } from "@/services/flashcards"
+import type { DeckReviewPromptSide, Flashcard, FlashcardUpdate } from "@/services/flashcards"
 import { getSetting, setSetting } from "@/services/settings/registry"
 import { FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING } from "@/services/settings/ui-settings"
 import { trackFlashcardsShortcutHintTelemetry } from "@/utils/flashcards-shortcut-hint-telemetry"
@@ -28,6 +27,7 @@ import {
   useCramQueueQuery,
   useReviewQuery,
   useReviewFlashcardMutation,
+  useEndFlashcardReviewSessionMutation,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
   useUpdateFlashcardMutation,
@@ -47,7 +47,12 @@ import {
   FlashcardEditDrawer,
   FlashcardStudyAssistantPanel
 } from "../components"
+import { RecentStudySessions } from "../components/RecentStudySessions"
 import { calculateIntervals } from "../utils/calculateIntervals"
+import {
+  formatFlashcardLongDateTime,
+  formatFlashcardRelativeTime
+} from "../utils/date-display"
 import { formatCardType } from "../utils/model-type-labels"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
 import { buildReviewUndoState } from "../utils/review-undo"
@@ -59,9 +64,15 @@ import {
 } from "../utils/error-taxonomy"
 import type { StudyAssistantRespondRequest } from "@/services/flashcards"
 import { trackFlashcardsErrorRecoveryTelemetry } from "@/utils/flashcards-error-recovery-telemetry"
+import { FeatureHint } from "@/components/Common/FeatureHint"
+import { StudySuggestionsPanel } from "@/components/StudySuggestions/StudySuggestionsPanel"
+import {
+  parseStudySuggestionTargetId,
+  type StudySuggestionActionRequest,
+  type StudySuggestionActionResponse
+} from "@/services/studySuggestions"
+import { buildQuizAssessmentRouteFromFlashcards } from "@/services/tldw/quiz-flashcards-handoff"
 import { useFlashcardsShortcutHintDensity } from "../hooks/useFlashcardsShortcutHintDensity"
-
-dayjs.extend(relativeTime)
 
 const { Text, Title } = Typography
 
@@ -101,6 +112,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   forceShowWorkspaceItems = false
 }) => {
   const { t } = useTranslation(["option", "common"])
+  const navigate = useNavigate()
   const message = useAntdMessage()
   const reportUiError = React.useCallback(
     (error: unknown, operation: string, fallback: string) => {
@@ -143,7 +155,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   )
   const [isReloadingFailedCard, setIsReloadingFailedCard] = React.useState(false)
   const [isReviewOnboardingDismissed, setIsReviewOnboardingDismissed] = React.useState(false)
+  const [activeReviewSessionId, setActiveReviewSessionId] = React.useState<number | null>(null)
+  const [selectedStudySessionId, setSelectedStudySessionId] = React.useState<number | null>(null)
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
+  const [sessionReviewPromptSide, setSessionReviewPromptSide] = React.useState<DeckReviewPromptSide | null>(null)
 
   // Undo state - stores the last reviewed card for potential re-rating
   const [lastReviewedCard, setLastReviewedCard] = React.useState<Flashcard | null>(null)
@@ -152,6 +167,17 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const undoTimeoutRef = React.useRef<number | null>(null)
   const undoIntervalRef = React.useRef<number | null>(null)
   const autoRevealAnswerRef = React.useRef(false)
+  const activeReviewSessionIdRef = React.useRef<number | null>(null)
+  const previousActiveCardUuidRef = React.useRef<string | null>(null)
+  const previousReviewScopeKeyRef = React.useRef<string | null>(null)
+  const completeReviewSessionRef = React.useRef<(
+    reason: "manual" | "auto" | "scope_change",
+    options?: {
+      revealSnapshot?: boolean
+      sessionId?: number | null
+    }
+  ) => Promise<void>>()
+  const autoEndSessionAttemptedRef = React.useRef<number | null>(null)
 
   // Auto-track answer time - stores the timestamp when answer was revealed
   const answerStartTimeRef = React.useRef<number | null>(null)
@@ -185,7 +211,14 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const analyticsSummaryQuery = useReviewAnalyticsSummaryQuery(reviewDeckId, directPathVisibilityOptions)
   const hasCardsQuery = useHasCardsQuery(directPathVisibilityOptions)
   const nextDueQuery = useNextDueQuery(reviewDeckId, directPathVisibilityOptions)
+  const endReviewSessionMutation = useEndFlashcardReviewSessionMutation()
   const nextDueInfo = nextDueQuery.data
+  const nextDueRelativeLabel = nextDueInfo?.nextDueAt
+    ? formatFlashcardRelativeTime(nextDueInfo.nextDueAt)
+    : null
+  const nextDueAbsoluteLabel = nextDueInfo?.nextDueAt
+    ? formatFlashcardLongDateTime(nextDueInfo.nextDueAt)
+    : null
   const cramQueue = cramQueueQuery.data || []
   const cramQueueCard =
     reviewMode === "cram" && cramQueueIndex < cramQueue.length
@@ -203,6 +236,14 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     reviewMode === "cram" ? cramQueue.length : dueCountsQuery.data?.total ?? 0
   const isCramMode = reviewMode === "cram"
   const showTopBarCreateCta = !activeCard
+  const reviewScopeKey = React.useMemo(
+    () => [
+      reviewMode,
+      reviewDeckId != null ? `deck:${reviewDeckId}` : "global",
+      cramTagFilter ? `tag:${cramTagFilter}` : "untagged"
+    ].join(":"),
+    [cramTagFilter, reviewDeckId, reviewMode]
+  )
   const activeCardSource = React.useMemo(
     () => (activeCard ? getFlashcardSourceMeta(activeCard) : null),
     [activeCard]
@@ -282,6 +323,27 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     if (!reviewDeckId) return undefined
     return availableDecks.find((d) => d.id === reviewDeckId)?.name ?? `Deck ${reviewDeckId}`
   }, [availableDecks, reviewDeckId])
+  const selectedDeck = React.useMemo(
+    () => (reviewDeckId ? availableDecks.find((deck) => deck.id === reviewDeckId) ?? null : null),
+    [availableDecks, reviewDeckId]
+  )
+  const isPromptSideLockedToFront = activeCard?.model_type === "cloze"
+  const effectivePromptSide: DeckReviewPromptSide =
+    isPromptSideLockedToFront
+      ? "front"
+      : sessionReviewPromptSide ?? selectedDeck?.review_prompt_side ?? "front"
+  const promptLabel =
+    effectivePromptSide === "back"
+      ? t("option:flashcards.back", { defaultValue: "Back" })
+      : t("option:flashcards.front", { defaultValue: "Front" })
+  const promptContent =
+    effectivePromptSide === "back" ? activeCard?.back ?? "" : activeCard?.front ?? ""
+  const answerLabel =
+    effectivePromptSide === "back"
+      ? t("option:flashcards.front", { defaultValue: "Front" })
+      : t("option:flashcards.back", { defaultValue: "Back" })
+  const answerContent =
+    effectivePromptSide === "back" ? activeCard?.front ?? "" : activeCard?.back ?? ""
 
   const activeSchedulerLabel = React.useMemo(() => {
     if (!activeCard?.scheduler_type) return null
@@ -432,9 +494,20 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           rating,
           answerTimeMs: attemptedAnswerTimeMs
         })
+        if (typeof reviewResult.review_session_id === "number") {
+          setActiveReviewSessionId(reviewResult.review_session_id)
+          setSelectedStudySessionId(null)
+        }
         setReviewFailure(null)
         setShowAnswer(false)
         answerStartTimeRef.current = null
+        if (reviewedCount === 0) {
+          message.success(
+            t("option:flashcards.milestoneFirstReview", {
+              defaultValue: "First card reviewed! Review daily for best results."
+            })
+          )
+        }
         setReviewedCount((c) => c + 1)
         if (reviewOverrideCard) {
           onClearOverride?.()
@@ -476,11 +549,13 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           }
         }, 10000) // 10 second undo window
 
-        const dueLabel = reviewResult.due_at
-          ? dayjs(reviewResult.due_at).fromNow()
-          : t("option:flashcards.nextReviewUnknown", {
-              defaultValue: "soon"
-            })
+        const dueLabel =
+          (reviewResult.due_at
+            ? formatFlashcardRelativeTime(reviewResult.due_at)
+            : null) ??
+          t("option:flashcards.nextReviewUnknown", {
+            defaultValue: "soon"
+          })
         const intervalLabel =
           reviewResult.interval_days === 1
             ? t("option:flashcards.intervalOneDay", { defaultValue: "1 day" })
@@ -600,6 +675,74 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     }
   }, [dueCountsQuery, message, reportUiError, reviewFailure, reviewQuery, t])
 
+  const completeReviewSession = React.useCallback(
+    async (
+      reason: "manual" | "auto" | "scope_change",
+      options?: {
+        revealSnapshot?: boolean
+        sessionId?: number | null
+      }
+    ) => {
+      const sessionId = options?.sessionId ?? activeReviewSessionId
+      if (sessionId == null || endReviewSessionMutation.isPending) {
+        return
+      }
+      if (reason === "auto" && autoEndSessionAttemptedRef.current === sessionId) {
+        return
+      }
+      if (reason === "auto") {
+        autoEndSessionAttemptedRef.current = sessionId
+      }
+
+      try {
+        const completedSession = await endReviewSessionMutation.mutateAsync(sessionId)
+        setActiveReviewSessionId((current) => (current === sessionId ? null : current))
+        if (options?.revealSnapshot ?? reason !== "scope_change") {
+          setSelectedStudySessionId(completedSession.id)
+        }
+        autoEndSessionAttemptedRef.current = null
+      } catch (error: unknown) {
+        reportUiError(
+          error,
+          "ending the review session",
+          t("option:flashcards.reviewSessionEndFailed", {
+            defaultValue: "Failed to end session."
+          })
+        )
+      }
+    },
+    [activeReviewSessionId, endReviewSessionMutation, reportUiError, t]
+  )
+
+  const handleStudySuggestionActionResult = React.useCallback(
+    async (response: StudySuggestionActionResponse, request: StudySuggestionActionRequest) => {
+      const targetId = parseStudySuggestionTargetId(response.target_id)
+
+      if (response.target_service === "flashcards" && targetId) {
+        setSelectedStudySessionId(null)
+        onReviewDeckChange(targetId)
+        return
+      }
+
+      if (response.target_service === "quiz" && request.actionKind === "follow_up_quiz" && targetId) {
+        navigate(
+          buildQuizAssessmentRouteFromFlashcards({
+            startQuizId: targetId,
+            highlightQuizId: targetId,
+            deckId: reviewDeckId ?? undefined,
+            deckName: currentDeckName,
+            forceShowWorkspaceItems
+          })
+        )
+      }
+    },
+    [currentDeckName, forceShowWorkspaceItems, navigate, onReviewDeckChange, reviewDeckId]
+  )
+
+  React.useEffect(() => {
+    completeReviewSessionRef.current = completeReviewSession
+  }, [completeReviewSession])
+
   // Handle undo - re-present the last reviewed card
   const handleUndoReview = React.useCallback(() => {
     const undoState = buildReviewUndoState(lastReviewedCard, reviewedCount)
@@ -656,6 +799,15 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setShowRatingRationale(false)
     answerStartTimeRef.current = null
   }, [activeCard?.uuid])
+
+  React.useEffect(() => {
+    const previousActiveCardUuid = previousActiveCardUuidRef.current
+    const nextActiveCardUuid = activeCard?.uuid ?? null
+    if (previousActiveCardUuid && !nextActiveCardUuid && activeReviewSessionId != null) {
+      void completeReviewSession("auto")
+    }
+    previousActiveCardUuidRef.current = nextActiveCardUuid
+  }, [activeCard?.uuid, activeReviewSessionId, completeReviewSession])
 
   // Track when the answer is shown (for auto-timing)
   const handleShowAnswer = React.useCallback(() => {
@@ -777,16 +929,44 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
     setCramQueueIndex((idx) => Math.min(idx, cramQueue.length))
   }, [reviewMode, cramQueue.length])
 
+  React.useEffect(() => {
+    activeReviewSessionIdRef.current = activeReviewSessionId
+  }, [activeReviewSessionId])
+
   // Reset reviewed/session state when review scope changes
   React.useEffect(() => {
+    const previousReviewScopeKey = previousReviewScopeKeyRef.current
+    const scopeChanged =
+      previousReviewScopeKey != null && previousReviewScopeKey !== reviewScopeKey
+    const sessionIdToClose = scopeChanged ? activeReviewSessionIdRef.current : null
+
     setReviewedCount(0)
     setCramQueueIndex(0)
     setLocalOverrideCard(null)
     setShowUndoButton(false)
     setLastReviewedCard(null)
     setUndoCountdown(0)
+    setSelectedStudySessionId(null)
+    setSessionReviewPromptSide(null)
+    autoEndSessionAttemptedRef.current = null
     autoRevealAnswerRef.current = false
-  }, [reviewDeckId, reviewMode, cramTagFilter])
+    previousReviewScopeKeyRef.current = reviewScopeKey
+
+    if (sessionIdToClose != null) {
+      void (async () => {
+        try {
+          await completeReviewSessionRef.current?.("scope_change", {
+            sessionId: sessionIdToClose,
+            revealSnapshot: false
+          })
+        } finally {
+          setActiveReviewSessionId((current) =>
+            current === sessionIdToClose ? null : current
+          )
+        }
+      })()
+    }
+  }, [reviewScopeKey])
 
   React.useEffect(() => {
     if (reviewOverrideCard) {
@@ -859,6 +1039,28 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
             }
           ]}
           data-testid="flashcards-review-mode-toggle"
+        />
+        <Segmented
+          value={effectivePromptSide}
+          onChange={(value) => {
+            setSessionReviewPromptSide(value as DeckReviewPromptSide)
+          }}
+          disabled={isPromptSideLockedToFront}
+          options={[
+            {
+              label: t("option:flashcards.reviewPromptSideFront", {
+                defaultValue: "Front first"
+              }),
+              value: "front"
+            },
+            {
+              label: t("option:flashcards.reviewPromptSideBack", {
+                defaultValue: "Back first"
+              }),
+              value: "back"
+            }
+          ]}
+          data-testid="flashcards-review-prompt-side-toggle"
         />
         {reviewMode === "cram" && (
           <>
@@ -972,11 +1174,11 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
             <div>
               <Title level={5} className="!mb-2">
-                {t("option:flashcards.front", { defaultValue: "Front" })}
+                {promptLabel}
               </Title>
               <div className="rounded border border-border bg-surface p-3 text-sm text-text">
                 <MarkdownWithBoundary
-                  content={activeCard.front}
+                  content={promptContent}
                   size="sm"
                   className="prose-headings:!text-text prose-p:!text-text prose-li:!text-text prose-strong:!text-text"
                 />
@@ -986,11 +1188,11 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
             {showAnswer && (
               <div>
                 <Title level={5} className="!mb-2">
-                  {t("option:flashcards.back", { defaultValue: "Back" })}
+                  {answerLabel}
                 </Title>
                 <div className="rounded border border-border bg-surface p-3 text-sm text-text">
                   <MarkdownWithBoundary
-                    content={activeCard.back}
+                    content={answerContent}
                     size="sm"
                     className="prose-headings:!text-text prose-p:!text-text prose-li:!text-text prose-strong:!text-text"
                   />
@@ -1007,17 +1209,47 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
               </div>
             )}
 
-            <FlashcardStudyAssistantPanel
-              cardUuid={activeCard.uuid}
-              threadVersion={assistantQuery.data?.thread.version ?? null}
-              messages={assistantQuery.data?.messages ?? []}
-              availableActions={assistantQuery.data?.available_actions ?? null}
-              isLoading={assistantQuery.isLoading}
-              isError={assistantQuery.isError}
-              isResponding={assistantRespondMutation.isPending}
-              onReloadContext={() => assistantQuery.refetch()}
-              onRespond={handleAssistantRespond}
-            />
+            <div className="relative">
+              <FlashcardStudyAssistantPanel
+                cardUuid={activeCard.uuid}
+                threadVersion={assistantQuery.data?.thread.version ?? null}
+                messages={assistantQuery.data?.messages ?? []}
+                availableActions={assistantQuery.data?.available_actions ?? null}
+                assistantContext={assistantQuery.data}
+                isLoading={assistantQuery.isLoading}
+                isError={assistantQuery.isError}
+                queryError={assistantQuery.error}
+                isResponding={assistantRespondMutation.isPending}
+                onReloadContext={() => assistantQuery.refetch()}
+                onRespond={handleAssistantRespond}
+              />
+              <FeatureHint
+                featureKey="flashcards_study_assistant_discovery"
+                title={t("option:flashcards.studyAssistantHintTitle", {
+                  defaultValue: "Study assistant"
+                })}
+                description={t("option:flashcards.studyAssistantHintDescription", {
+                  defaultValue:
+                    "Need help understanding a card? Ask the study assistant."
+                })}
+                position="top"
+              />
+            </div>
+
+            {activeReviewSessionId != null && (
+              <div className="flex justify-end">
+                <Button
+                  type="default"
+                  loading={endReviewSessionMutation.isPending}
+                  onClick={() => {
+                    void completeReviewSession("manual")
+                  }}
+                  data-testid="flashcards-review-end-session"
+                >
+                  End Session
+                </Button>
+              </div>
+            )}
 
             <div className="mt-2 flex flex-col gap-3">
               {!showAnswer ? (
@@ -1342,6 +1574,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                                   "Rate recall with Again/Hard/Good/Easy so the next review is scheduled automatically."
                               })}
                             </li>
+                            <li className="text-text-muted">
+                              {t("option:flashcards.onboardingStepLlmNote", {
+                                defaultValue:
+                                  "Card generation and the study assistant require an LLM provider (configure in Settings)."
+                              })}
+                            </li>
                           </ol>
                           <a
                             href={FLASHCARDS_HELP_LINKS.ratings}
@@ -1384,7 +1622,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                   <Text type="secondary">
                     {t("option:flashcards.noCardsDescription", {
                       defaultValue:
-                        "Create your first flashcard to start studying."
+                        "Get started by creating cards, importing a deck, or generating flashcards from your content."
                     })}
                   </Text>
                   <Space>
@@ -1459,12 +1697,12 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                             <Text strong>
                               {t("option:flashcards.nextDueAt", {
                                 defaultValue: "Next review: {{time}}",
-                                time: dayjs(nextDueInfo.nextDueAt).fromNow()
+                                time: nextDueRelativeLabel ?? nextDueInfo.nextDueAt
                               })}
                             </Text>
                           </div>
                           <Text type="secondary" className="text-xs mt-1 block">
-                            {dayjs(nextDueInfo.nextDueAt).format("dddd, MMMM D [at] h:mm A")}
+                            {nextDueAbsoluteLabel ?? nextDueInfo.nextDueAt}
                             {" · "}
                             {t("option:flashcards.nextDueCardCount", {
                               defaultValue: "{{count}} cards due",
@@ -1496,12 +1734,46 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       defaultValue: "Create card"
                     })}
                   </Button>
+                  {activeReviewSessionId != null && (
+                    <Button
+                      type="default"
+                      loading={endReviewSessionMutation.isPending}
+                      onClick={() => {
+                        void completeReviewSession("manual")
+                      }}
+                      data-testid="flashcards-review-end-session-empty"
+                    >
+                      {t("option:flashcards.endSession", {
+                        defaultValue: "End Session"
+                      })}
+                    </Button>
+                  )}
                 </>
               )}
-            </Space>
-          </Empty>
-        </Card>
+          </Space>
+        </Empty>
+      </Card>
       )}
+      {selectedStudySessionId != null && (
+        <div className="mt-4">
+          <StudySuggestionsPanel
+            anchorType="flashcard_review_session"
+            anchorId={selectedStudySessionId}
+            onActionResult={handleStudySuggestionActionResult}
+          />
+        </div>
+      )}
+      <div className="mt-4">
+        <RecentStudySessions
+          deckId={reviewDeckId ?? null}
+          selectedSessionId={selectedStudySessionId}
+          onOpenSession={(sessionId) => {
+            setSelectedStudySessionId(sessionId)
+            setActiveReviewSessionId(null)
+          }}
+          isActive={isActive}
+        />
+      </div>
       <FlashcardEditDrawer
         open={editDrawerOpen}
         onClose={() => setEditDrawerOpen(false)}

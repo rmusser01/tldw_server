@@ -17,10 +17,10 @@ def test_dockerfiles_readme_documents_persistence_contract() -> None:
 
     for snippet in (
         "app-data",
-        "chroma-data",
         "docker-compose.host-storage.yml",
         "docker compose down -v",
         "tldw_Server_API/Config_Files/.env",
+        "No nested named volume is mounted under /app/Databases/user_databases",
     ):
         _require(
             snippet in text,
@@ -39,9 +39,24 @@ def test_docker_single_user_profile_documents_named_volumes_and_overlay() -> Non
         "docker-compose.host-storage.yml",
         "docker compose down -v",
         "app-data",
-        "chroma-data",
+        "No nested named volume is mounted under /app/Databases/user_databases",
     ):
         _require(
             snippet in text,
             f"Docker single-user profile should mention {snippet}",
         )
+
+
+def test_dockerfiles_readme_documents_public_multi_user_admin_bootstrap() -> None:
+    """Docker docs should not tell public multi-user users to create admins manually."""
+    text = Path("Dockerfiles/README.md").read_text(encoding="utf-8")
+
+    _require(
+        "ADMIN_USERNAME" in text and "ADMIN_PASSWORD" in text,
+        "Dockerfiles README should document env-driven first admin bootstrap",
+    )
+    _require(
+        "For `multi_user`, run AuthNZ initialization manually to create your admin account"
+        not in text,
+        "Dockerfiles README should not use stale manual AuthNZ init wording",
+    )

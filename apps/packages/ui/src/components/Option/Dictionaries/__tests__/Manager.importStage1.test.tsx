@@ -419,8 +419,11 @@ describe("DictionariesManager import stage-1 preview workflow", () => {
     })
 
     render(<DictionariesManager />)
+
     await user.click(
-      screen.getByRole("button", { name: "Export Medical Terms as Markdown" })
+      screen.getByRole("button", {
+        name: "Export Medical Terms as Markdown"
+      })
     )
 
     await waitFor(() => {

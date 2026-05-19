@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import builtins
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -71,7 +75,7 @@ def test_minimal_app_uses_router_registry(client_user_only) -> None:
 
 
 @pytest.mark.unit
-def test_minimal_app_import_survives_setup_router_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_minimal_app_import_does_not_probe_setup_router_directly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")
     monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
@@ -81,8 +85,15 @@ def test_minimal_app_import_survives_setup_router_import_error(monkeypatch: pyte
     clear_app_main()
 
     def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "tldw_Server_API.app.api.v1.endpoints.setup":
-            raise ImportError("setup router unavailable")
+        setup_module = "tldw_Server_API.app.api.v1.endpoints.setup"
+        endpoints_module = "tldw_Server_API.app.api.v1.endpoints"
+        requested_attrs = {fromlist} if isinstance(fromlist, str) else set(fromlist or ())
+        if (
+            name == setup_module
+            or name.startswith(f"{setup_module}.")
+            or (name == endpoints_module and "setup" in requested_attrs)
+        ):
+            raise AssertionError("setup router should be registered through router groups")
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", _guarded_import)
@@ -93,3 +104,54 @@ def test_minimal_app_import_survives_setup_router_import_error(monkeypatch: pyte
         assert any(route.path == "/health" for route in imported_main.app.routes)
     finally:
         restore_app_main(existing_main)
+
+
+@pytest.mark.integration
+def test_app_import_outside_explicit_pytest_runtime_has_no_duplicate_routes(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    env = os.environ.copy()
+    env.update(
+        {
+            "AUTH_MODE": "single_user",
+            "SINGLE_USER_API_KEY": "test-api-key-12345",
+            "TEST_MODE": "true",
+            "MINIMAL_TEST_APP": "0",
+            "ULTRA_MINIMAL_APP": "0",
+            "USER_DB_BASE_DIR": str(tmp_path / "user_databases"),
+        }
+    )
+    env.pop("PYTEST_CURRENT_TEST", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import tldw_Server_API.app.main as main; "
+                "main._fail_on_duplicate_route_method_pairs("
+                "main.app, context='subprocess-import'"
+                "); "
+                "vlm_routes = ["
+                "route for route in main.app.routes "
+                "if getattr(route, 'path', None) == '/api/v1/vlm/backends'"
+                "]; "
+                "assert len(vlm_routes) == 1, "
+                "f'expected one VLM route, found {len(vlm_routes)}'; "
+                "print('NO_DUPLICATES')"
+            ),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        "Expected app import to succeed outside explicit pytest runtime without duplicate routes.\n"
+        f"stdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}"
+    )
+    assert "NO_DUPLICATES" in result.stdout

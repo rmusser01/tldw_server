@@ -383,18 +383,8 @@ def test_websearch_4chan_engine_surfaces_all_board_failure_diagnostics(monkeypat
                 "aggregate": False,
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        payload = data["web_search_results_dict"]
-        assert payload["results"] == []
-        assert payload.get("error") == "4chan search failed for all requested boards."
-        assert isinstance(payload.get("warnings"), list)
-        assert len(payload["warnings"]) >= 2
-        assert any(
-            warning.get("board") == "g" and warning.get("phase") == "catalog"
-            for warning in payload["warnings"]
-            if isinstance(warning, dict)
-        )
+        assert resp.status_code == 502
+        assert "4chan search failed for all requested boards." in resp.json()["detail"]
 
 
 def test_websearch_4chan_engine_surfaces_partial_failure_warnings(monkeypatch):

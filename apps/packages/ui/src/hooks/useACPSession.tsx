@@ -41,6 +41,12 @@ export interface UseACPSessionOptions {
   onDisconnected?: () => void
 }
 
+export interface ReconnectInfo {
+  isReconnecting: boolean
+  attempt: number
+  maxAttempts: number
+}
+
 export interface UseACPSessionReturn {
   /** Current connection state */
   state: ACPSessionState
@@ -54,6 +60,8 @@ export interface UseACPSessionReturn {
   pendingPermissions: ACPPendingPermission[]
   /** Last error message */
   error: string | null
+  /** Auto-reconnection progress (null when not reconnecting) */
+  reconnectInfo: ReconnectInfo | null
   /** Connect to the session */
   connect: () => Promise<void>
   /** Disconnect from the session */
@@ -95,6 +103,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
   const [updates, setUpdates] = React.useState<ACPUpdate[]>([])
   const [pendingPermissions, setPendingPermissions] = React.useState<ACPPendingPermission[]>([])
   const [error, setError] = React.useState<string | null>(null)
+  const [reconnectInfo, setReconnectInfo] = React.useState<ReconnectInfo | null>(null)
 
   // Refs
   const wsRef = React.useRef<WebSocket | null>(null)
@@ -260,6 +269,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
 
       ws.onopen = () => {
         reconnectAttemptsRef.current = 0
+        setReconnectInfo(null)
         // State will be updated to "connected" when we receive the "connected" message
       }
 
@@ -270,6 +280,12 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
             shouldRetryACPWebSocketClose(event.code) &&
             reconnectAttemptsRef.current < WS_CONFIG.MAX_RECONNECT_ATTEMPTS
           ) {
+            const nextAttempt = reconnectAttemptsRef.current + 1
+            setReconnectInfo({
+              isReconnecting: true,
+              attempt: nextAttempt,
+              maxAttempts: WS_CONFIG.MAX_RECONNECT_ATTEMPTS,
+            })
             const delay = Math.min(
               WS_CONFIG.RECONNECT_DELAY_MS * Math.pow(WS_CONFIG.RECONNECT_BACKOFF_MULTIPLIER, reconnectAttemptsRef.current),
               WS_CONFIG.MAX_RECONNECT_DELAY_MS
@@ -279,10 +295,12 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
               connect()
             }, delay)
           } else {
+            setReconnectInfo(null)
             updateState("disconnected")
             callbacksRef.current.onDisconnected?.()
           }
         } else {
+          setReconnectInfo(null)
           updateState("disconnected")
           callbacksRef.current.onDisconnected?.()
         }
@@ -314,6 +332,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
       wsRef.current = null
     }
 
+    setReconnectInfo(null)
     updateState("disconnected")
     setPendingPermissions([])
   }, [updateState])
@@ -420,6 +439,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
     updates,
     pendingPermissions,
     error,
+    reconnectInfo,
     connect,
     disconnect,
     sendPrompt,

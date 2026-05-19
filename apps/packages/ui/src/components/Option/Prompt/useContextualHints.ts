@@ -6,10 +6,18 @@ export type HintId =
   | "gallery-view"
   | "bulk-actions"
   | "command-palette"
+  | "filter-presets"
 
 const STORAGE_PREFIX = "tldw-prompt-hint-dismissed-"
 const MAX_SHOWS = 3
+const MAX_SHOWS_BY_HINT: Partial<Record<HintId, number>> = {
+  "filter-presets": 1,
+}
 const SHOW_COUNT_PREFIX = "tldw-prompt-hint-shown-"
+
+function getMaxShows(id: HintId): number {
+  return MAX_SHOWS_BY_HINT[id] ?? MAX_SHOWS
+}
 
 function isDismissed(id: HintId): boolean {
   try {
@@ -54,10 +62,11 @@ export function useContextualHints() {
       "gallery-view",
       "bulk-actions",
       "command-palette",
+      "filter-presets",
     ]
     const set = new Set<HintId>()
     for (const id of allIds) {
-      if (isDismissed(id) || getShowCount(id) >= MAX_SHOWS) {
+      if (isDismissed(id) || getShowCount(id) >= getMaxShows(id)) {
         set.add(id)
       }
     }
@@ -78,12 +87,16 @@ export function useContextualHints() {
 
   const markShown = useCallback(
     (id: HintId) => {
+      const maxShows = getMaxShows(id)
       incrementShowCount(id)
-      if (getShowCount(id) >= MAX_SHOWS) {
-        dismiss(id)
+      if (getShowCount(id) >= maxShows) {
+        dismissHint(id)
+        if (maxShows > 1) {
+          setDismissed((prev) => new Set(prev).add(id))
+        }
       }
     },
-    [dismiss]
+    []
   )
 
   return { shouldShow, dismiss, markShown }

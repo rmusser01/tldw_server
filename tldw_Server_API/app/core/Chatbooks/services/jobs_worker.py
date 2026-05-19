@@ -16,7 +16,8 @@ Payload fields:
 - name, description, author, tags, categories
 - content_selections: {content_type: [ids]}
 - include_media, media_quality, include_embeddings, include_generated_content
-- file_token (preferred) or file_path (legacy), conflict_resolution, prefix_imported, import_media, import_embeddings
+- file_token (preferred) or file_path (legacy), source_format, selected_openwebui_user_id,
+  conflict_resolution, prefix_imported, import_media, import_embeddings
 
 Usage:
   python -m tldw_Server_API.app.core.Chatbooks.services.jobs_worker
@@ -27,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -40,12 +42,23 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
+    OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 
 _CHATBOOKS_DOMAIN = "chatbooks"
+_MAX_HYDRATION_JOB_WARNINGS = 100
+_POSIX_ABS_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^\s,;:)\"']+/?)+")
+_WINDOWS_ABS_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[\\/](?:[^\s,;:)\"']+[\\/]?)+"
+)
+_UNC_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_])\\\\[^\\/\s,;:)\"']+(?:[\\/][^\s,;:)\"']+)+"
+)
 
 # Ensure worker runs in core backend mode.
 if os.getenv("CHATBOOKS_JOBS_BACKEND") not in {"", "core"}:
@@ -121,7 +134,8 @@ def _map_content_selections(raw: Any) -> dict[ContentType, list]:
     for key, value in raw.items():
         try:
             selections[ContentType(key)] = list(value or [])
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            logger.debug(f"Ignoring invalid Chatbooks content selection key {key!r}: {exc}")
             continue
     return selections
 
@@ -133,6 +147,87 @@ def _parse_conflict_resolution(raw: Any) -> ConflictResolution:
         return ConflictResolution(str(raw))
     except Exception:
         return ConflictResolution.SKIP
+
+
+def _mark_import_job_failed(service: ChatbookService, job_id: str, message: str) -> None:
+    """Persist a claimed import job failure before raising a worker error."""
+    ij = service._get_import_job(job_id)
+    if ij and ij.status != ImportStatus.CANCELLED:
+        ij.status = ImportStatus.FAILED
+        ij.completed_at = datetime.now(timezone.utc)
+        ij.error_message = message
+        service._save_import_job(ij)
+
+
+def _raise_import_job_failed(service: ChatbookService, job_id: str, message: str) -> None:
+    _mark_import_job_failed(service, job_id, message)
+    raise ChatbooksJobError(message, retryable=False)
+
+
+def _redact_hydration_warning(value: object) -> str:
+    """Redact local absolute paths before persisting hydration warnings to Jobs."""
+    text = str(value)
+    text = _POSIX_ABS_PATH_RE.sub("[redacted-path]", text)
+    text = _WINDOWS_ABS_PATH_RE.sub("[redacted-path]", text)
+    return _UNC_PATH_RE.sub("[redacted-path]", text)
+
+
+def _hydration_job_id(job: dict[str, Any]) -> str | None:
+    """Return a stable job identifier for hydration metadata."""
+    raw_job_id = job.get("uuid") or job.get("id") or job.get("job_id")
+    text = str(raw_job_id or "").strip()
+    return text or None
+
+
+def _openwebui_hydration_job_summary(result: Any) -> dict[str, Any]:
+    """Normalize a hydration service result into a JSON-safe core Jobs result."""
+    payload = result if isinstance(result, dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    return {
+        "referenced_files": int(summary.get("referenced_files") or 0),
+        "resolved_files": int(summary.get("resolved_files") or 0),
+        "hydrated_images": int(summary.get("hydrated_images") or 0),
+        "registered_media_files": int(summary.get("registered_media_files") or 0),
+        "already_hydrated": int(summary.get("already_hydrated") or 0),
+        "missing_files": int(summary.get("missing_files") or 0),
+        "unsupported_files": int(summary.get("unsupported_files") or 0),
+        "failed_files": int(summary.get("failed_files") or 0),
+        "processed_files": int(summary.get("processed_files") or 0),
+        "warnings": [
+            _redact_hydration_warning(warning)
+            for warning in warnings[:_MAX_HYDRATION_JOB_WARNINGS]
+        ],
+    }
+
+
+async def _handle_openwebui_attachment_hydration(
+    service: ChatbookService,
+    payload: dict[str, Any],
+    job: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one OpenWebUI attachment hydration job."""
+    openwebui_data_root = str(payload.get("openwebui_data_root") or "").strip()
+    if not openwebui_data_root:
+        raise ChatbooksJobError("Missing openwebui_data_root", retryable=False)
+    scope = payload.get("scope")
+    if scope is None:
+        scope = {}
+    if not isinstance(scope, dict):
+        raise ChatbooksJobError("OpenWebUI hydration scope must be an object", retryable=False)
+
+    try:
+        result = await asyncio.to_thread(
+            service.run_openwebui_attachment_hydration,
+            openwebui_data_root=openwebui_data_root,
+            scope=scope,
+            process_supported_files=bool(payload.get("process_supported_files", False)),
+            job_id=_hydration_job_id(job),
+        )
+    except ValueError as exc:
+        raise ChatbooksJobError(str(exc), retryable=False) from exc
+
+    return _openwebui_hydration_job_summary(result)
 
 
 async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
@@ -192,18 +287,108 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
 
     selections = _map_content_selections(payload.get("content_selections") or {})
     conflict_resolution = _parse_conflict_resolution(payload.get("conflict_resolution", "skip"))
+    source_format = str(payload.get("source_format") or "chatbook").strip().lower()
     file_ref = payload.get("file_token") or payload.get("file_path")
     if not file_ref or not str(file_ref).strip():
-        raise ChatbooksJobError("Missing file reference for import job", retryable=False)
+        _raise_import_job_failed(service, job_id, "Missing file reference for import job")
+    if source_format == "openwebui_db":
+        selected_user_id = str(payload.get("selected_openwebui_user_id") or "").strip()
+        if not selected_user_id:
+            _raise_import_job_failed(
+                service,
+                job_id,
+                "selected_openwebui_user_id is required for OpenWebUI DB imports",
+            )
+        try:
+            resolved_path = service._resolve_import_upload_path(file_ref)
+        except Exception as exc:
+            _mark_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
+            raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False) from exc
+        resolved_file_path = str(resolved_path or "").strip()
+        if not resolved_file_path:
+            _raise_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
+        try:
+            ok, msg, result = await asyncio.to_thread(
+                service.import_openwebui_db,
+                resolved_file_path,
+                selected_user_id=selected_user_id,
+                conflict_resolution=conflict_resolution,
+                prefix_imported=bool(payload.get("prefix_imported", False)),
+            )
+        finally:
+            try:
+                if resolved_path.exists() and resolved_path.is_file():
+                    resolved_path.unlink()
+            except Exception as cleanup_err:
+                logger.debug(
+                    f"Chatbooks Jobs worker: failed to remove OpenWebUI DB import file {resolved_path}: {cleanup_err}"
+                )
+
+        ij = service._get_import_job(job_id)
+        if ok:
+            if ij and ij.status != ImportStatus.CANCELLED:
+                ij.status = ImportStatus.COMPLETED
+                ij.completed_at = datetime.now(timezone.utc)
+                service._save_import_job(ij)
+            return {"openwebui_db_result": result or {}}
+
+        if ij:
+            ij.status = ImportStatus.FAILED
+            ij.completed_at = datetime.now(timezone.utc)
+            ij.error_message = msg
+            service._save_import_job(ij)
+        raise ChatbooksJobError(str(msg), retryable=False)
+
+    if source_format == "openwebui_json":
+        try:
+            resolved_path = service._resolve_import_upload_path(file_ref)
+        except Exception as exc:
+            _mark_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
+            raise ChatbooksJobError("Invalid or potentially malicious import file", retryable=False) from exc
+        resolved_file_path = str(resolved_path or "").strip()
+        if not resolved_file_path:
+            _raise_import_job_failed(service, job_id, "Invalid or potentially malicious import file")
+        try:
+            ok, msg, result = await asyncio.to_thread(
+                service.import_openwebui_json,
+                resolved_file_path,
+                conflict_resolution,
+                bool(payload.get("prefix_imported", False)),
+            )
+        finally:
+            try:
+                if resolved_path.exists() and resolved_path.is_file():
+                    resolved_path.unlink()
+            except Exception as cleanup_err:
+                logger.debug(f"Chatbooks Jobs worker: failed to remove OpenWebUI import file {resolved_path}: {cleanup_err}")
+
+        ij = service._get_import_job(job_id)
+        if ok:
+            if ij and ij.status != ImportStatus.CANCELLED:
+                ij.status = ImportStatus.COMPLETED
+                ij.completed_at = datetime.now(timezone.utc)
+                service._save_import_job(ij)
+            return {"openwebui_result": result or {}}
+
+        if ij:
+            ij.status = ImportStatus.FAILED
+            ij.completed_at = datetime.now(timezone.utc)
+            ij.error_message = msg
+            service._save_import_job(ij)
+        raise ChatbooksJobError(str(msg), retryable=False)
+
+    if source_format != "chatbook":
+        _raise_import_job_failed(service, job_id, f"Unsupported import source format: {source_format}")
     try:
         resolved_path = service._resolve_import_archive_path(file_ref)
     except Exception as exc:
+        _mark_import_job_failed(service, job_id, "Invalid or potentially malicious archive file")
         raise ChatbooksJobError("Invalid or potentially malicious archive file", retryable=False) from exc
     resolved_file_path = str(resolved_path or "").strip()
     if not resolved_file_path:
-        raise ChatbooksJobError("Invalid or potentially malicious archive file", retryable=False)
+        _raise_import_job_failed(service, job_id, "Invalid or potentially malicious archive file")
     try:
-        ok, msg, warnings = await asyncio.to_thread(
+        ok, msg, result = await asyncio.to_thread(
             service._import_chatbook_sync,
             resolved_file_path,
             selections,
@@ -225,7 +410,12 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             ij.status = ImportStatus.COMPLETED
             ij.completed_at = datetime.now(timezone.utc)
             service._save_import_job(ij)
-        return {"warnings": warnings or []}
+        if isinstance(result, dict):
+            return {
+                "imported_items": result.get("imported_items") or {},
+                "warnings": result.get("warnings") or [],
+            }
+        return {"imported_items": {}, "warnings": result or []}
 
     if ij:
         ij.status = ImportStatus.FAILED
@@ -244,6 +434,9 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     service = _get_service(user_id)
 
     action = str(payload.get("action") or job.get("job_type") or "").lower()
+    if action == OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE:
+        return await _handle_openwebui_attachment_hydration(service, payload, job)
+
     chatbooks_job_id = str(payload.get("chatbooks_job_id") or "").strip()
     if not chatbooks_job_id:
         raise ChatbooksJobError("Missing chatbooks_job_id", retryable=False)

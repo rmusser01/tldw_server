@@ -14,10 +14,25 @@ from typing import Any, Literal, Optional, Union
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    CursorPaginationMeta,
+    OffsetPaginationMeta,
+    default_cursor_pagination_aliases,
+)
+from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
+
 try:
     import bleach
 except Exception:
     bleach = None
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 # ============= Utility Functions =============
@@ -327,17 +342,27 @@ class RunResponse(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, value: Any) -> RunStatus:
+        return RunStatus(normalize_run_status(value))
+
 
 class RunResultsResponse(BaseModel):
     """Run results response"""
     id: str
     eval_id: str
-    status: str
+    status: RunStatus
     started_at: int
     completed_at: int
     results: dict[str, Any]
     usage: Optional[dict[str, int]] = None
     duration_seconds: float
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, value: Any) -> RunStatus:
+        return RunStatus(normalize_run_status(value))
 
 
 class CreateDatasetRequest(BaseModel):
@@ -362,6 +387,18 @@ class DatasetResponse(BaseModel):
     metadata: Optional[dict[str, Any]] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class DatasetDetailResponse(DatasetResponse):
+    """Dataset detail response with sample pagination metadata."""
+
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "DatasetDetailResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 # ============= OCR Evaluation Schemas =============
@@ -404,16 +441,45 @@ class ListResponse(BaseModel):
 class EvaluationListResponse(ListResponse):
     """Evaluation list response"""
     data: list[EvaluationResponse]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: Optional[str] = None
+    next_cursor: Optional[str] = None
+    has_more: bool | None = Field(default=None)
+    pagination: CursorPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def _default_cursor_aliases(self) -> "EvaluationListResponse":
+        if self.pagination is not None:
+            return default_cursor_pagination_aliases(self)
+        return self
 
 
 class RunListResponse(ListResponse):
     """Run list response"""
     data: list[RunResponse]
+    limit: int | None = Field(default=None, ge=1)
+    cursor: Optional[str] = None
+    next_cursor: Optional[str] = None
+    has_more: bool | None = Field(default=None)
+    pagination: CursorPaginationMeta | None = None
+
+    @model_validator(mode="after")
+    def _default_cursor_aliases(self) -> "RunListResponse":
+        if self.pagination is not None:
+            return default_cursor_pagination_aliases(self)
+        return self
 
 
 class DatasetListResponse(ListResponse):
     """Dataset list response"""
     data: list[DatasetResponse]
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # ============= tldw-Specific Evaluation Schemas =============
@@ -680,7 +746,16 @@ class PipelinePresetResponse(BaseModel):
 
 class PipelinePresetListResponse(BaseModel):
     items: list[PipelinePresetResponse]
-    total: int
+    total: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class PipelineCleanupResponse(BaseModel):
@@ -797,6 +872,13 @@ class EvaluationHistoryResponse(BaseModel):
     total_count: int
     items: list[dict[str, Any]]
     aggregations: Optional[dict[str, Any]] = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # ============= Webhook Schemas =============

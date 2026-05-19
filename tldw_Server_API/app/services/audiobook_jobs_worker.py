@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.TTS.adapter_registry import TTSProvider
 from tldw_Server_API.app.core.TTS.audio_converter import AudioConverter
+from tldw_Server_API.app.core.TTS.tts_request_resolution import normalize_tts_provider as normalize_tts_provider_name
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.TTS.tts_validation import TTSInputValidator
 from tldw_Server_API.app.core.Usage.audio_quota import can_start_job, finish_job, increment_jobs_started
@@ -143,6 +144,8 @@ DEFAULT_KITTEN_TTS_VOICE = "Bella"
 DEFAULT_KITTEN_TTS_PROVIDER = "kitten_tts"
 DEFAULT_OPENAI_TTS_VOICE = "alloy"
 DEFAULT_KOKORO_TTS_VOICE = "af_heart"
+DEFAULT_OMNIVOICE_TTS_MODEL = "omnivoice"
+DEFAULT_OMNIVOICE_TTS_VOICE = "auto"
 CLONE_REQUIRED_TTS_VOICE = "clone_required"
 
 
@@ -176,7 +179,9 @@ def _resolve_audiobook_generation_defaults(
 def _normalize_tts_provider(value: str | None) -> str | None:
     if value is None:
         return None
-    provider = str(value).strip().lower()
+    provider = normalize_tts_provider_name(value)
+    if provider is None:
+        return None
     if not provider:
         return None
     try:
@@ -194,10 +199,22 @@ def _is_kokoro_request(provider: str | None, model: str | None) -> bool:
     return False
 
 
+def _canonicalize_omnivoice_model(model: str | None) -> str | None:
+    if model is None:
+        return None
+    normalized = str(model).strip()
+    collapsed = normalized.lower().replace("-", "").replace("_", "")
+    if collapsed == "omnivoice":
+        return DEFAULT_OMNIVOICE_TTS_MODEL
+    return normalized
+
+
 def _resolve_tts_model(provider: str | None, model: str | None) -> str:
-    if model is not None:
-        return str(model)
     provider_norm = str(provider).strip().lower() if provider else ""
+    if model is not None:
+        model_value = _canonicalize_omnivoice_model(model)
+        if model_value is not None:
+            return model_value
     if provider_norm == "openai":
         return "tts-1"
     if provider_norm == "kitten_tts":
@@ -206,6 +223,8 @@ def _resolve_tts_model(provider: str | None, model: str | None) -> str:
         return DEFAULT_KITTEN_TTS_MODEL
     if provider_norm == "kokoro":
         return "kokoro"
+    if provider_norm == "omnivoice":
+        return DEFAULT_OMNIVOICE_TTS_MODEL
     if provider_norm == "pocket_tts_cpp":
         return "pocket_tts_cpp"
     if provider_norm == "pocket_tts":
@@ -223,15 +242,18 @@ def _resolve_tts_voice(provider: str | None, voice: str | None) -> str:
         return DEFAULT_OPENAI_TTS_VOICE
     if provider_norm == "kokoro":
         return DEFAULT_KOKORO_TTS_VOICE
+    if provider_norm == "omnivoice":
+        return DEFAULT_OMNIVOICE_TTS_VOICE
     if provider_norm in {"pocket_tts_cpp", "pocket_tts"}:
         return CLONE_REQUIRED_TTS_VOICE
     return DEFAULT_KITTEN_TTS_VOICE
 
 
 def _infer_tts_provider_from_model(model: str | None) -> str | None:
-    if not model:
+    canonical = _canonicalize_omnivoice_model(model)
+    if not canonical:
         return None
-    m = str(model).strip().lower()
+    m = canonical.lower()
     if m in {"tts-1", "tts-1-hd"}:
         return "openai"
     if (
@@ -243,6 +265,8 @@ def _infer_tts_provider_from_model(model: str | None) -> str | None:
         return "kitten_tts"
     if m.startswith("kokoro"):
         return "kokoro"
+    if m.startswith("omnivoice") or m.startswith("omni-voice") or m.startswith("omni_voice"):
+        return "omnivoice"
     if m.startswith("higgs"):
         return "higgs"
     if m.startswith("dia"):

@@ -878,6 +878,57 @@ class StorageQuotaService:
 
         return file_record
 
+    def _unlink_voice_clone_file(self, file_record: dict[str, Any]) -> None:
+        """Best-effort cleanup for generated voice clone files removed from the DB."""
+        user_id = file_record.get("user_id")
+        file_category = file_record.get("file_category")
+        storage_path = str(file_record.get("storage_path") or "")
+        if file_category != FILE_CATEGORY_VOICE_CLONE or not user_id or not storage_path:
+            return
+
+        try:
+            base_dir = DatabasePaths.get_user_voices_dir(user_id)
+            resolved_path = (base_dir / storage_path).resolve()
+            if resolved_path.is_relative_to(base_dir.resolve()) and resolved_path.exists():
+                resolved_path.unlink()
+        except Exception as exc:
+            logger.debug(f"Failed to remove voice clone file {file_record.get('id')} from disk: {exc}")
+
+    async def _apply_generated_file_usage_delta(
+        self,
+        file_records: list[dict[str, Any]],
+        *,
+        operation: str,
+    ) -> None:
+        """Apply aggregated user/org/team usage changes for generated files."""
+        if not file_records:
+            return
+
+        user_deltas: dict[int, int] = {}
+        org_deltas: dict[int, int] = {}
+        team_deltas: dict[int, int] = {}
+        for file_record in file_records:
+            size = int(file_record.get("file_size_bytes", 0) or 0)
+            if size <= 0:
+                continue
+            user_id = file_record.get("user_id")
+            org_id = file_record.get("org_id")
+            team_id = file_record.get("team_id")
+            if user_id:
+                user_deltas[int(user_id)] = user_deltas.get(int(user_id), 0) + size
+            if org_id:
+                org_deltas[int(org_id)] = org_deltas.get(int(org_id), 0) + size
+            if team_id:
+                team_deltas[int(team_id)] = team_deltas.get(int(team_id), 0) + size
+
+        org_multiplier = -1 if operation == "remove" else 1
+        for user_id, bytes_delta in user_deltas.items():
+            await self.update_usage(user_id, bytes_delta, operation=operation)
+        for org_id, bytes_delta in org_deltas.items():
+            await self.update_org_usage(org_id, org_multiplier * bytes_delta)
+        for team_id, bytes_delta in team_deltas.items():
+            await self.update_team_usage(team_id, org_multiplier * bytes_delta)
+
     async def unregister_generated_file(
         self,
         file_id: int,
@@ -908,8 +959,6 @@ class StorageQuotaService:
         org_id = file_record.get("org_id")
         team_id = file_record.get("team_id")
         file_size_bytes = file_record.get("file_size_bytes", 0)
-        file_category = file_record.get("file_category")
-        storage_path = str(file_record.get("storage_path") or "")
 
         if hard_delete:
             success = await files_repo.hard_delete_file(file_id)
@@ -926,17 +975,65 @@ class StorageQuotaService:
             if team_id:
                 await self.update_team_usage(team_id, -file_size_bytes)
 
-        # On hard delete, attempt to remove the voice clone from disk.
-        if success and hard_delete and file_category == FILE_CATEGORY_VOICE_CLONE and user_id and storage_path:
-            try:
-                base_dir = DatabasePaths.get_user_voices_dir(user_id)
-                resolved_path = (base_dir / storage_path).resolve()
-                if resolved_path.is_relative_to(base_dir.resolve()) and resolved_path.exists():
-                    resolved_path.unlink()
-            except Exception as exc:
-                logger.debug(f"Failed to remove voice clone file {file_id} from disk: {exc}")
+        if success and hard_delete:
+            self._unlink_voice_clone_file(file_record)
 
         return success
+
+    async def unregister_generated_files(
+        self,
+        file_records: list[dict[str, Any]],
+        hard_delete: bool = False,
+    ) -> int:
+        """Unregister generated files from already-loaded records and update usage in aggregate."""
+        if not self._initialized:
+            await self.initialize()
+
+        if not file_records:
+            return 0
+
+        files_repo = await self.get_generated_files_repo()
+
+        if hard_delete:
+            deleted_records: list[dict[str, Any]] = []
+            for file_record in file_records:
+                file_id = file_record.get("id")
+                if file_id and await files_repo.hard_delete_file(file_id):
+                    deleted_records.append(file_record)
+                    self._unlink_voice_clone_file(file_record)
+        else:
+            active_records = [record for record in file_records if not bool(record.get("is_deleted"))]
+            deleted_count = await files_repo.bulk_soft_delete(
+                [int(record["id"]) for record in active_records if record.get("id")]
+            )
+            deleted_records = active_records[:deleted_count]
+
+        usage_records = [record for record in deleted_records if not bool(record.get("is_deleted"))]
+        await self._apply_generated_file_usage_delta(usage_records, operation="remove")
+        return len(deleted_records)
+
+    async def restore_generated_file(
+        self,
+        file_id: int,
+        *,
+        file_record: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Restore a generated file and update usage counters in the service layer."""
+        if not self._initialized:
+            await self.initialize()
+
+        files_repo = await self.get_generated_files_repo()
+        file_record = file_record or await files_repo.get_file_by_id(file_id)
+        if not file_record or not file_record.get("is_deleted"):
+            return None
+
+        success = await files_repo.restore_file(file_id)
+        if not success:
+            return None
+
+        await self._apply_generated_file_usage_delta([file_record], operation="add")
+        updated = await files_repo.get_file_by_id(file_id)
+        return updated or file_record
 
     async def get_user_generated_files_usage(self, user_id: int) -> dict[str, Any]:
         """Get detailed usage breakdown for user's generated files."""

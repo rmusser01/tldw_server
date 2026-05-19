@@ -23,6 +23,28 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => mocks.capabilitiesState
 }))
 
+vi.mock("@/design-system", async () => {
+  const actual = await vi.importActual<typeof import("@/design-system")>(
+    "@/design-system"
+  )
+
+  return {
+    ...actual,
+    getDesignSystemState: (
+      key: Parameters<typeof actual.getDesignSystemState>[0]
+    ) => {
+      const state = actual.getDesignSystemState(key)
+      if (key === "setup_required" && state) {
+        return {
+          ...state,
+          label: "Registry setup required"
+        }
+      }
+      return state
+    }
+  }
+})
+
 vi.mock("@/services/companion-home", () => ({
   fetchCompanionHomeSnapshot: (...args: unknown[]) =>
     mocks.fetchCompanionHomeSnapshot(...args)
@@ -270,10 +292,9 @@ describe("CompanionHomePage", () => {
 
     expect(await screen.findByText("Companion setup required")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
+    expect(screen.getAllByText("Registry setup required").length).toBeGreaterThan(0)
     expect(
-      screen.getByText(
-        "Companion inbox items unlock once personalization is available for this workspace."
-      )
+      screen.getByText(/Companion inbox items unlock once personalization is available for this workspace\./)
     ).toBeInTheDocument()
     expect(
       screen.queryByText("Companion unavailable")

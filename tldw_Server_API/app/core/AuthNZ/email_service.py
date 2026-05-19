@@ -272,6 +272,69 @@ Use this link to complete your admin reauthentication (expires in {{ expiry_minu
 If you did not request this, ignore this email.
 """
     },
+    "user_invitation": {
+        "subject": "You've been invited to {{ app_name }}",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #2563eb; color: white; padding: 20px; text-align: center; }
+        .content { background-color: #f8f9fa; padding: 30px; margin-top: 20px; }
+        .button { display: inline-block; padding: 12px 30px; background-color: #2563eb;
+                  color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;
+                  font-size: 0.9em; color: #6c757d; }
+        .note { background-color: #eff6ff; border: 1px solid #bfdbfe; padding: 10px;
+                margin: 16px 0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ app_name }}</h1>
+        </div>
+        <div class="content">
+            <h2>You're Invited!</h2>
+            <p>Hello,</p>
+            <p>You have been invited to join <strong>{{ app_name }}</strong> as a <strong>{{ role }}</strong>.</p>
+            <p>Click the button below to create your account:</p>
+            <center>
+                <a href="{{ invite_url }}" class="button">Accept Invitation</a>
+            </center>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="word-break: break-all; background: #fff; padding: 10px; border: 1px solid #dee2e6;">
+                {{ invite_url }}
+            </p>
+            <div class="note">
+                <strong>Note:</strong> This invitation expires in {{ expiry_days }} day(s).
+            </div>
+        </div>
+        <div class="footer">
+            <p>If you did not expect this invitation, you can safely ignore this email.</p>
+            <p>This is an automated message from {{ app_name }}.</p>
+        </div>
+    </div>
+</body>
+</html>
+""",
+        "text": """
+You're Invited to {{ app_name }}!
+
+Hello,
+
+You have been invited to join {{ app_name }} as a {{ role }}.
+
+To accept your invitation and create your account, visit:
+{{ invite_url }}
+
+This invitation expires in {{ expiry_days }} day(s).
+
+If you did not expect this invitation, you can safely ignore this email.
+"""
+    },
     "mfa_enabled": {
         "subject": "Two-Factor Authentication Enabled - {{ app_name }}",
         "html": """
@@ -429,6 +492,31 @@ class EmailService:
         resolved_path = self._normalize_public_path(legacy_default_path)
         return f"{str(fallback_base_url).rstrip('/')}{resolved_path}?token={token}"
 
+    @staticmethod
+    def _record_delivery(
+        *,
+        recipient: str,
+        subject: str,
+        template: Optional[str] = None,
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """Record an email delivery attempt to the system-ops store (fire-and-forget)."""
+        try:
+            from tldw_Server_API.app.services.admin_system_ops_service import (
+                record_email_delivery,
+            )
+
+            record_email_delivery(
+                recipient=recipient,
+                subject=subject,
+                template=template,
+                status=status,
+                error=error,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Failed to record email delivery: {}", exc)
+
     async def send_email(
         self,
         to_email: str,
@@ -439,6 +527,7 @@ class EmailService:
         attachments: Optional[list[dict[str, Any]]] = None,
         *,
         redact_mock_tokens: bool = False,
+        _template: Optional[str] = None,
     ) -> bool:
         """
         Send an email
@@ -451,6 +540,7 @@ class EmailService:
             from_email: Sender email (uses default if not provided)
             attachments: List of attachments
             redact_mock_tokens: Whether mock transport should redact token-bearing content
+            _template: Internal hint identifying the email template (for delivery tracking)
 
         Returns:
             True if email was sent successfully
@@ -458,7 +548,7 @@ class EmailService:
         from_email = from_email or self.default_sender
 
         if self.provider == "mock":
-            return await self._send_mock_email(
+            result = await self._send_mock_email(
                 to_email,
                 subject,
                 html_body,
@@ -467,12 +557,44 @@ class EmailService:
                 attachments,
                 redact_mock_tokens=redact_mock_tokens,
             )
-        elif self.provider == "smtp":
-            return await self._send_smtp_email(
-                to_email, subject, html_body, text_body, from_email, attachments
+            self._record_delivery(
+                recipient=to_email,
+                subject=subject,
+                template=_template,
+                status="sent" if result else "failed",
             )
+            return result
+        elif self.provider == "smtp":
+            try:
+                result = await self._send_smtp_email(
+                    to_email, subject, html_body, text_body, from_email, attachments
+                )
+            except Exception as exc:
+                self._record_delivery(
+                    recipient=to_email,
+                    subject=subject,
+                    template=_template,
+                    status="failed",
+                    error=str(exc),
+                )
+                raise
+            self._record_delivery(
+                recipient=to_email,
+                subject=subject,
+                template=_template,
+                status="sent" if result else "failed",
+                error=None if result else "SMTP send returned False",
+            )
+            return result
         else:
             logger.error(f"Unsupported email provider: {self.provider}")
+            self._record_delivery(
+                recipient=to_email,
+                subject=subject,
+                template=_template,
+                status="skipped",
+                error=f"Unsupported email provider: {self.provider}",
+            )
             return False
 
     async def _send_mock_email(
@@ -537,10 +659,15 @@ class EmailService:
             with open(file_path, "w") as f:
                 json.dump(email_data, f, indent=2)
 
-            # Also save HTML for viewing
+            # Persist a stub HTML artifact instead of the rendered body so local
+            # mock mailboxes do not store sensitive message content at rest.
             html_path = self.mock_file_path / f"{email_id}.html"
             with open(html_path, "w") as f:
-                f.write(stored_html_body)
+                f.write(
+                    "<!DOCTYPE html><html><body>"
+                    "<p>Mock email body omitted from persisted mock output for security.</p>"
+                    "</body></html>"
+                )
 
             logger.debug(f"Mock email saved to: {file_path}")
 
@@ -663,7 +790,7 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["password_reset"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body)
+        return await self.send_email(to_email, subject, html_body, text_body, _template="password_reset")
 
     async def send_verification_email(
         self,
@@ -696,7 +823,7 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["email_verification"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body)
+        return await self.send_email(to_email, subject, html_body, text_body, _template="email_verification")
 
     async def send_magic_link_email(
         self,
@@ -733,7 +860,7 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["magic_link"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body)
+        return await self.send_email(to_email, subject, html_body, text_body, _template="magic_link")
 
     async def send_admin_reauth_email(
         self,
@@ -770,7 +897,42 @@ class EmailService:
             html_body,
             text_body,
             redact_mock_tokens=True,
+            _template="admin_reauth",
         )
+
+    async def send_user_invitation_email(
+        self,
+        *,
+        to_email: str,
+        invite_token: str,
+        role: str = "user",
+        expiry_days: int = 7,
+        base_url: Optional[str] = None,
+    ) -> bool:
+        """Send a user invitation email with a registration link."""
+        invite_url = self._resolve_public_web_base_url(
+            base_url=base_url,
+            hosted_default_path="/register",
+            legacy_default_path="/register",
+            configured_public_path=self._read_setting_text("PUBLIC_REGISTRATION_PATH"),
+            token=invite_token,
+        )
+
+        template_data = {
+            "app_name": self.app_name,
+            "invite_url": invite_url,
+            "role": role,
+            "expiry_days": expiry_days,
+        }
+
+        html_template = Template(EMAIL_TEMPLATES["user_invitation"]["html"])
+        text_template = Template(EMAIL_TEMPLATES["user_invitation"]["text"])
+
+        html_body = html_template.render(**template_data)
+        text_body = text_template.render(**template_data)
+        subject = Template(EMAIL_TEMPLATES["user_invitation"]["subject"]).render(**template_data)
+
+        return await self.send_email(to_email, subject, html_body, text_body, _template="user_invitation")
 
     async def send_mfa_enabled_email(
         self,
@@ -797,7 +959,7 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["mfa_enabled"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body)
+        return await self.send_email(to_email, subject, html_body, text_body, _template="mfa_enabled")
 
 
 #######################################################################################################################

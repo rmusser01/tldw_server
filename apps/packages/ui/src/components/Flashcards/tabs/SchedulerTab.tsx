@@ -1,5 +1,5 @@
 import React from "react"
-import { Alert, Button, Card, Empty, Input, List, Space, Typography } from "antd"
+import { Alert, Button, Card, Collapse, Empty, Input, List, Space, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "../hooks/useFlashcardQueries"
 import { DeckSchedulerSettingsEditor } from "../components/DeckSchedulerSettingsEditor"
 import { useDeckSchedulerDraft } from "../hooks/useDeckSchedulerDraft"
+import { DeckStudyDefaultsFields } from "../components/DeckStudyDefaultsFields"
 import type { Deck } from "@/services/flashcards"
 import type { SchedulerSettingsDraft } from "../utils/scheduler-settings"
 import { createSchedulerDraft, formatSchedulerSummary } from "../utils/scheduler-settings"
@@ -61,6 +62,12 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   const [baseVersion, setBaseVersion] = React.useState<number | null>(null)
   const [baseDraft, setBaseDraft] = React.useState<SchedulerSettingsDraft | null>(null)
   const [conflictDraft, setConflictDraft] = React.useState<SchedulerSettingsDraft | null>(null)
+  const [reviewPromptSide, setReviewPromptSide] =
+    React.useState<Deck["review_prompt_side"]>("front")
+  const [baseReviewPromptSide, setBaseReviewPromptSide] =
+    React.useState<Deck["review_prompt_side"]>("front")
+  const [conflictReviewPromptSide, setConflictReviewPromptSide] =
+    React.useState<Deck["review_prompt_side"] | null>(null)
   const [saveError, setSaveError] = React.useState<string | null>(null)
 
   const allDecks = decksQuery.data ?? []
@@ -96,11 +103,14 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
         settings: deck.scheduler_settings
       })
       schedulerDraft.replaceDraftState(nextDraft)
+      setReviewPromptSide(deck.review_prompt_side)
       setBaseDeckId(deck.id)
       setBaseVersion(deck.version)
       setBaseDraft(cloneDraft(nextDraft))
+      setBaseReviewPromptSide(deck.review_prompt_side)
       setCopyDeckId("")
       setConflictDraft(null)
+      setConflictReviewPromptSide(null)
       setSaveError(null)
       setEditorStatus(status)
     },
@@ -118,11 +128,14 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
           settings: latestDeck.scheduler_settings
         })
         schedulerDraft.replaceDraftState(latestDraft)
+        setReviewPromptSide(latestDeck.review_prompt_side)
         setBaseDeckId(latestDeck.id)
         setBaseVersion(latestDeck.version)
         setBaseDraft(cloneDraft(latestDraft))
+        setBaseReviewPromptSide(latestDeck.review_prompt_side)
         setCopyDeckId("")
         setConflictDraft(null)
+        setConflictReviewPromptSide(null)
         setSaveError(null)
         setEditorStatus(status)
       }
@@ -136,8 +149,11 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       setBaseDeckId(null)
       setBaseVersion(null)
       setBaseDraft(null)
+      setReviewPromptSide("front")
+      setBaseReviewPromptSide("front")
       setCopyDeckId("")
       setConflictDraft(null)
+      setConflictReviewPromptSide(null)
       setSaveError(null)
       setEditorStatus("idle")
       return
@@ -161,15 +177,16 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
     if (!baseDraft) return false
     return JSON.stringify(schedulerDraft.draft) !== JSON.stringify(baseDraft)
   }, [baseDraft, schedulerDraft.draft])
+  const reviewPromptSideChanged = reviewPromptSide !== baseReviewPromptSide
 
   React.useEffect(() => {
     if (editorStatus === "saving" || editorStatus === "conflict") return
-    if (draftChanged) {
+    if (draftChanged || reviewPromptSideChanged) {
       setEditorStatus("dirty")
     } else if (editorStatus === "dirty") {
       setEditorStatus("idle")
     }
-  }, [draftChanged, editorStatus])
+  }, [draftChanged, editorStatus, reviewPromptSideChanged])
 
   const otherDecks = React.useMemo(
     () => allDecks.filter((deck) => deck.id !== activeDeck?.id),
@@ -196,6 +213,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       settings: sourceDeck.scheduler_settings
     })
     setConflictDraft(null)
+    setConflictReviewPromptSide(null)
     setSaveError(null)
     setEditorStatus("dirty")
   }, [copyDeckId, otherDecks, schedulerDraft])
@@ -203,6 +221,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   const resetToDefaults = React.useCallback(() => {
     schedulerDraft.resetToDefaults()
     setConflictDraft(null)
+    setConflictReviewPromptSide(null)
     setSaveError(null)
     setEditorStatus("dirty")
   }, [schedulerDraft])
@@ -225,9 +244,12 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
   const reapplyConflict = React.useCallback(() => {
     if (!conflictDraft) return
     schedulerDraft.replaceDraftState(cloneDraft(conflictDraft))
+    if (conflictReviewPromptSide) {
+      setReviewPromptSide(conflictReviewPromptSide)
+    }
     setEditorStatus("dirty")
     setSaveError(null)
-  }, [conflictDraft, schedulerDraft])
+  }, [conflictDraft, conflictReviewPromptSide, schedulerDraft])
 
   const handleSave = React.useCallback(async () => {
     if (!activeDeck) return
@@ -242,6 +264,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       const updatedDeck = await updateDeckMutation.mutateAsync({
         deckId: activeDeck.id,
         update: {
+          review_prompt_side: reviewPromptSide,
           scheduler_type: parsed.scheduler_type,
           scheduler_settings: parsed.scheduler_settings,
           expected_version: baseVersion ?? activeDeck.version
@@ -251,6 +274,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
     } catch (error: unknown) {
       if (isVersionConflict(error)) {
         const pendingDraft = cloneDraft(schedulerDraft.draft)
+        const pendingReviewPromptSide = reviewPromptSide
 
         try {
           const latestDeck = await refreshDeckFromServer(activeDeck.id)
@@ -262,6 +286,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
         }
 
         setConflictDraft(pendingDraft)
+        setConflictReviewPromptSide(pendingReviewPromptSide)
         setEditorStatus("conflict")
         return
       }
@@ -269,13 +294,21 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       setEditorStatus("dirty")
       setSaveError(
         t("option:flashcards.schedulerSaveError", {
-          defaultValue: "Failed to save scheduler settings."
+          defaultValue: "Failed to save deck settings."
         })
       )
     }
-  }, [activeDeck, baseVersion, refreshDeckFromServer, schedulerDraft, t, updateDeckMutation])
+  }, [
+    activeDeck,
+    baseVersion,
+    refreshDeckFromServer,
+    reviewPromptSide,
+    schedulerDraft,
+    t,
+    updateDeckMutation
+  ])
 
-  const isDirty = draftChanged || editorStatus === "conflict"
+  const isDirty = draftChanged || reviewPromptSideChanged || editorStatus === "conflict"
 
   React.useEffect(() => {
     onDirtyChange?.(isDirty)
@@ -288,8 +321,11 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       setBaseDeckId(null)
       setBaseVersion(null)
       setBaseDraft(null)
+      setReviewPromptSide("front")
+      setBaseReviewPromptSide("front")
       setCopyDeckId("")
       setConflictDraft(null)
+      setConflictReviewPromptSide(null)
       setSaveError(null)
       setEditorStatus("idle")
       return
@@ -302,7 +338,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
     if (!isDirty) return true
     return window.confirm(
       t("option:flashcards.schedulerDiscardChangesPrompt", {
-        defaultValue: "Discard unsaved scheduler changes?"
+        defaultValue: "Discard unsaved deck changes?"
       })
     )
   }, [isDirty, t])
@@ -516,7 +552,48 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
                 </Space>
               </Card>
 
+              <Card size="small" title={t("option:flashcards.studyDefaults", { defaultValue: "Study defaults" })}>
+                <DeckStudyDefaultsFields
+                  reviewPromptSide={reviewPromptSide}
+                  onReviewPromptSideChange={setReviewPromptSide}
+                />
+              </Card>
+
               <DeckSchedulerSettingsEditor schedulerDraft={schedulerDraft} advancedDefaultOpen />
+
+              <Collapse
+                ghost
+                items={[
+                  {
+                    key: "scheduler-explainer",
+                    label: t("option:flashcards.schedulerExplainerTitle", {
+                      defaultValue: "What's the difference between SM-2+ and FSRS?"
+                    }),
+                    children: (
+                      <div className="space-y-2 text-xs text-text-muted">
+                        <p>
+                          {t("option:flashcards.schedulerSm2Description", {
+                            defaultValue:
+                              "SM-2+ is the classic algorithm used by Anki for decades. It adjusts review intervals based on a simple ease factor. Predictable and well-understood."
+                          })}
+                        </p>
+                        <p>
+                          {t("option:flashcards.schedulerFsrsDescription", {
+                            defaultValue:
+                              "FSRS is a newer algorithm that uses a memory model to predict when you'll forget each card. Often more efficient — fewer reviews for the same retention."
+                          })}
+                        </p>
+                        <p>
+                          {t("option:flashcards.schedulerRecommendation", {
+                            defaultValue:
+                              "If you're unsure, start with SM-2+ (the default). You can switch later without losing your review history."
+                          })}
+                        </p>
+                      </div>
+                    )
+                  }
+                ]}
+              />
 
               <div className="flex flex-wrap items-center gap-3">
                 <Button
@@ -528,14 +605,14 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
                     defaultValue: "Save changes"
                   })}
                 </Button>
-                {draftChanged && editorStatus !== "conflict" && (
+                {(draftChanged || reviewPromptSideChanged) && editorStatus !== "conflict" && (
                   <Text type="warning">
                     {t("option:flashcards.schedulerDirtyState", {
                       defaultValue: "Unsaved changes"
                     })}
                   </Text>
                 )}
-                {editorStatus === "saved" && !draftChanged && (
+                {editorStatus === "saved" && !draftChanged && !reviewPromptSideChanged && (
                   <Text type="success">
                     {t("option:flashcards.schedulerSavedState", {
                       defaultValue: "All changes saved"

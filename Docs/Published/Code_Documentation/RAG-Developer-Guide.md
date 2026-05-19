@@ -1,985 +1,220 @@
-# RAG Module Developer Guide
+# RAG Developer Guide
 
-## Table of Contents
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Core Components](#core-components)
-4. [Database Integration](#database-integration)
-5. [Embedding System](#embedding-system)
-6. [Extending the RAG Module](#extending-the-rag-module)
-7. [Testing](#testing)
-8. [Configuration](#configuration)
-9. [Performance Optimization](#performance-optimization)
-10. [Troubleshooting](#troubleshooting)
+## Purpose And Ownership
 
-## Overview
+This is the canonical developer and contributor guide for the current unified RAG module. It maps the active FastAPI routes, schema boundaries, pipeline orchestration, retriever setup, vector store adapters, profiles, health endpoints, and test locations that contributors need when changing RAG behavior.
 
-The RAG (Retrieval-Augmented Generation) module is a production-ready system using a **functional pipeline architecture** that provides intelligent search and question-answering capabilities across multiple data sources.
+Use this guide for architecture and extension decisions. Do not treat it as the schema reference. For exhaustive parameter constraints, read UnifiedRAGRequest directly or use the generated OpenAPI schema; this guide intentionally documents stable groups and extension-relevant fields rather than copying the full schema.
 
-### Key Features
-- **Functional Pipeline Architecture**: Composable pure functions instead of object-oriented design
-- **Multi-source retrieval**: Search across media, notes, characters, and chat history
-- **Hybrid search**: Combines FTS5 full-text and vector similarity search
-- **Query Expansion**: Automatic enhancement with synonyms, acronyms, and domain terms
-- **Smart Caching**: Semantic cache with adaptive thresholds
-- **Production Ready**: Optional resilience features (circuit breakers, retries)
-- **Performance Monitoring**: Built-in metrics and timing analysis
+Primary ownership areas:
 
-## Architecture
+- API surface: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` and `tldw_Server_API/app/api/v1/endpoints/rag_health.py`.
+- Public schemas: `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`.
+- Core orchestration: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`.
+- Retrieval and indexing: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py` and `tldw_Server_API/app/core/RAG/rag_service/vector_stores/`.
+- Profiles: `tldw_Server_API/app/core/RAG/rag_service/profiles.py`.
+- Tests: `tldw_Server_API/tests/RAG/`, `tldw_Server_API/tests/RAG_NEW/`, RAG-related integration/e2e tests, and AuthNZ permission tests that exercise RAG access.
 
-The RAG module uses a functional pipeline architecture where pure functions are composed into workflows:
+## Current Architecture
 
-```mermaid
-graph LR
-    A[Query] --> B[expand_query]
-    B --> C[check_cache]
-    C --> D{Cache Hit?}
-    D -->|No| E[retrieve_documents]
-    D -->|Yes| H[Return Cached]
-    E --> F[rerank_documents]
-    F --> G[store_in_cache]
-    G --> H[Return Results]
+The active public RAG API is split between the unified query router and the health/observability router. Both use the `/api/v1/rag` prefix.
 
-    subgraph Optional Features
-        I[process_tables]
-        J[optimize_chromadb]
-        K[analyze_performance]
-    end
-```
+Endpoint modules:
 
-### Pipeline Types
-- **minimal_pipeline**: Retrieve → Rerank (fastest)
-- **standard_pipeline**: Expand → Cache → Retrieve → Rerank → Store
-- **quality_pipeline**: All features enabled for maximum accuracy
-- **enhanced_pipeline**: Advanced chunking and parent retrieval
-- **custom**: Build your own by composing functions
+- `rag_unified.py`: router prefix `/api/v1/rag`, tag `rag-unified`.
+- `rag_health.py`: router prefix `/api/v1/rag`, tag `rag-health`.
 
-### Directory Structure
-```
-tldw_Server_API/app/
-├── api/v1/
-│   ├── endpoints/
-│   │   └── rag_api.py             # Single unified API endpoint
-│   └── schemas/
-│       └── rag_schemas_simple.py  # Request/response models
-└── core/
-    └── RAG/
-        ├── rag_service/
-        │   ├── functional_pipeline.py    # Core pipeline functions
-        │   ├── database_retrievers.py    # Database retrieval strategies
-        │   ├── query_expansion.py        # Query enhancement
-        │   ├── semantic_cache.py         # Semantic caching
-        │   ├── advanced_reranking.py     # Document reranking
-        │   ├── resilience.py             # Fault tolerance
-        │   ├── performance_monitor.py    # Performance tracking
-        │   ├── config.py                 # Configuration
-        │   └── types.py                  # Type definitions
-        └── __init__.py                   # Module exports
-```
+Active unified query routes:
+
+- `POST /ablate` -> `rag_ablate`
+- `GET /capabilities` -> `get_capabilities`
+- `GET /vlm/backends` -> `list_vlm_backends`
+- `POST /search` -> `unified_search_endpoint`
+- `POST /feedback/implicit` -> `rag_implicit_feedback`
+- `POST /batch` -> `unified_batch_endpoint`
+- `GET /simple` -> `simple_search_endpoint`
+- `POST /batch/resume/{checkpoint_id}` -> `resume_batch_endpoint`
+- `POST /search/stream` -> `unified_search_stream_endpoint`
+- `GET /advanced` -> `advanced_search_endpoint`
+- `GET /features` -> `list_features`
+- `GET /health/simple` -> `unified_health_simple`
+
+Active health and observability routes:
+
+- Health: `GET /health`, `GET /health/live`, `GET /health/ready`
+- Cache: `GET /cache/stats`, `POST /cache/clear`, `GET /cache/warm`
+- Metrics/cost/batch visibility: `GET /metrics/summary`, `GET /costs/summary`, `GET /batch/jobs`
+- Quality and regression: `POST /quality-gate`, `POST /baseline/save`, `GET /regression/check`, `POST /regression/check`
+
+Source map:
+
+- Schemas: `UnifiedRAGRequest`, `UnifiedRAGResponse`, `UnifiedBatchRequest`, and `UnifiedBatchResponse` live in `rag_schemas_unified.py`.
+- Pipeline functions: `unified_rag_pipeline`, `unified_batch_pipeline`, `simple_search`, and `advanced_search` live under `rag_service/`.
+- Result mapping: `UnifiedSearchResult` is the pipeline result carrier; `rag_unified.py::convert_result_to_response` maps it into `UnifiedRAGResponse`.
+- Retrieval: `database_retrievers.py` owns `DataSource`, retriever classes, `RetrievalConfig`, and `MultiDatabaseRetriever`.
+- Source normalization: `core/Text2SQL/source_registry.py` normalizes public aliases before schemas and endpoints hand sources to retrievers.
+- Vector stores: `rag_service/vector_stores/base.py`, `chromadb_adapter.py`, `pgvector_adapter.py`, `factory.py`, and `__init__.py`.
+- Profiles: `profiles.py` defines built-in profile defaults and merge helpers.
+- Health/observability: `rag_health.py`, metrics/cost/cache helpers under `rag_service/`, and regression/quality gate tests.
+- Tests: older `tests/RAG/` coverage remains relevant for source behavior and feedback; current unified API and pipeline coverage is concentrated in `tests/RAG_NEW/`.
+
+Public request sources advertised by `UnifiedRAGRequest` are `media_db`, `notes`, `characters`, `chats`, `kanban`, and `sql`. The canonical source registry also supports internal normalized sources `prompts` and `claims`. `characters` and `chats` are routed to the character-card/ChaChaNotes-backed retriever path in the current inspected setup. `DataSource` includes `CHAT_HISTORY` and `WEB_CONTENT`, but those enum values are not active `MultiDatabaseRetriever` keys in the inspected retriever setup; do not document or expose them as fully wired public sources without adding retriever wiring and tests.
+
+Vector store support is adapter-based. `VectorStoreType` declares `chromadb`, `pinecone`, `weaviate`, `qdrant`, `milvus`, `faiss`, and `pgvector`, but only `ChromaDBAdapter` is registered by default. `PGVectorAdapter` is conditionally registered if its import succeeds. Treat the other enum values as declared/future types until a concrete adapter is implemented, registered, and tested.
+
+## Request Flow
+
+The standard search request path is:
+
+`POST /api/v1/rag/search -> dependencies -> UnifiedRAGRequest validation/profile/default resolution -> per-user DB adapter injection -> unified_rag_pipeline(...) -> convert_result_to_response(...) -> UnifiedRAGResponse`
+
+The endpoint layer is responsible for request validation, authentication dependencies, user-scoped database adapter selection, source normalization, and profile/default application. The pipeline layer should receive an explicit payload and dependencies, then return `UnifiedSearchResult` without knowing about FastAPI response models.
+
+Important route variants:
+
+- `/search/stream` requires `enable_generation=true`; the endpoint rejects streaming search when generation is disabled.
+- `/batch` and `/batch/resume/{checkpoint_id}` use `UnifiedBatchRequest` and the batch pipeline/checkpoint path, not repeated ad hoc calls from client code.
+- `/simple` is a GET wrapper around `simple_search` for lightweight retrieval.
+- `/advanced` is a GET wrapper around `advanced_search` for richer retrieval options.
+- `/capabilities` and `/features` are discovery endpoints. Keep them in sync when adding externally visible features.
+- Health, cache, metrics, cost, quality gate, baseline, and regression routes live in `rag_health.py`, not in the unified search router.
 
 ## Core Components
 
-### 1. Functional Pipeline (`functional_pipeline.py`)
-
-The core of the RAG module - composable pure functions:
-
-```python
-from tldw_Server_API.app.core.RAG import (
-    standard_pipeline,
-    build_pipeline,
-    RAGPipelineContext
-)
-
-# Use pre-built pipeline
-result = await standard_pipeline(
-    "machine learning concepts",
-    config={"enable_cache": True, "top_k": 10}
-)
-
-# Or build custom pipeline
-my_pipeline = build_pipeline(
-    expand_query,
-    check_cache,
-    retrieve_documents,
-    rerank_documents
-)
-
-# Execute with context
-context = RAGPipelineContext(
-    query="your query",
-    original_query="your query",
-    config={"sources": ["media_db", "notes"]}
-)
-result = await my_pipeline(context)
-```
-
-### 2. Pipeline Functions
-
-Core functions that compose into pipelines:
-
-#### Query Processing
-```python
-@timer("query_expansion")
-@with_resilience("query_expansion", expand_query_fallback)
-async def expand_query(context: RAGPipelineContext,
-                       strategies: List[str] = None) -> RAGPipelineContext:
-    """Expand query with synonyms, acronyms, entities"""
-    # Applies multiple expansion strategies
-    # Updates context.expanded_queries
-    return context
-```
-
-#### Document Retrieval
-```python
-@timer("retrieval")
-@with_resilience("retrieval", retrieve_fallback)
-async def retrieve_documents(context: RAGPipelineContext) -> RAGPipelineContext:
-    """Retrieve from configured databases"""
-    retriever = MultiDatabaseRetriever(context.config.get("databases", {}))
-    context.documents = await retriever.retrieve(
-        context.query,
-        sources=context.config.get("sources", ["media_db"]),
-        config=RetrievalConfig(**context.config)
-    )
-    return context
-```
-
-#### Reranking
-```python
-@timer("reranking")
-@with_resilience("reranking", rerank_fallback)
-async def rerank_documents(context: RAGPipelineContext) -> RAGPipelineContext:
-    """Reorder documents by relevance"""
-    strategy = context.config.get("reranking_strategy", "hybrid")
-    reranker = get_reranker(strategy)
-    context.documents = await reranker.rerank(
-        context.documents,
-        context.query
-    )
-    return context
-```
-
-### 3. Database Retrievers (`database_retrievers.py`)
-
-Specialized retrievers for each data source:
-
-```python
-# Media database retriever
-retriever = MediaDBRetriever("/path/to/media.db")
-documents = await retriever.retrieve(query, media_type="video")
-
-# Multi-database retriever
-retriever = MultiDatabaseRetriever({
-    "media_db": "/path/to/media.db",
-    "notes_db": "/path/to/notes.db"
-})
-documents = await retriever.retrieve(
-    query,
-    sources=[DataSource.MEDIA_DB, DataSource.NOTES],
-    config=RetrievalConfig(max_results=20)
-)
-```
-
-## Database Integration
+`rag_unified.py` is the FastAPI boundary. It owns route declarations, request dependency handling, profile/default resolution, batch/resume request handling, streaming checks, and response conversion. Keep endpoint logic focused on transport concerns and compatibility translation.
 
-### MediaDatabase Integration
+`rag_schemas_unified.py` is the public schema boundary. `UnifiedRAGRequest` groups query text, sources, strategy/profile selection, retrieval controls, cache controls, reranking controls, generation controls, advanced retrieval options, observability/debug flags, and evaluation metrics inputs. `UnifiedRAGResponse` groups retrieved documents, query metadata, timings, citations, feedback identifiers, answer/generation output, cache state, and retrieval metrics. Batch schemas mirror the same knobs at batch granularity.
 
-The RAG module integrates with the Media_DB_v2 system:
+`unified_pipeline.py` is the orchestration boundary. It coordinates retrieval, optional query expansion, optional reranking, optional generation, metadata/timing collection, and batch execution. Pipeline additions should surface through explicit request fields, profile defaults, or internal kwargs instead of implicit global behavior.
 
-```python
-from tldw_Server_API.app.core.DB_Management.Media_DB_v2 import MediaDatabase
+`database_retrievers.py` is the retrieval source boundary. `MultiDatabaseRetriever` configures available retrievers from database paths and injected adapters. Current active keys include media, notes, character cards for `characters`/`chats`, kanban, SQL when an SQL retriever is provided, and internal prompts/claims when their DB paths are present.
 
-# Initialize database connection
-media_db = MediaDatabase(db_path="user_media_library.sqlite", client_id="rag_service")
+`rag_service/vector_stores/` is the vector abstraction boundary. `base.py` defines the adapter contract and shared config/result types. `factory.py` selects and registers concrete adapters. Adapter modules should translate the common interface to backend-specific collection, upsert, delete, and search operations.
 
-# Search with FTS5
-results = media_db.fts_search(
-    query="machine learning",
-    limit=10,
-    fields=["title", "content", "transcription"]
-)
-```
+`advanced_reranking.py` owns reranking implementations and strategy selection. The request schema exposes reranking enablement, strategy, model override, rerank count, and relevance thresholds; the pipeline decides when to apply them.
 
-### CharactersRAGDB Integration
+`query_expansion.py` owns query expansion behavior. Keep expansion strategies isolated there and wire new controls through the schema/profile/pipeline path.
 
-For notes and character cards:
+`profiles.py` owns named presets. Built-in profiles are `production`, `research`, `cheap`, `fast`, `balanced`, and `accuracy`. Public request-time `rag_profile` currently accepts `fast`, `balanced`, and `accuracy`; lower-level profile helpers can build kwargs for all registered profiles.
 
-```python
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+## Extension Points
 
-# Initialize notes database
-notes_db = CharactersRAGDB(db_path="user_chacha_notes.sqlite")
+Retrieval source:
 
-# Search notes
-notes = notes_db.search_notes(
-    query="important concepts",
-    limit=10,
-    include_keywords=True
-)
-```
+1. Add or extend the retriever implementation in `rag_service/database_retrievers.py`.
+2. Add the source to `DataSource` only if a retriever will be wired in `MultiDatabaseRetriever`.
+3. Add alias/public or internal normalization in `core/Text2SQL/source_registry.py`.
+4. Update endpoint source normalization and any discovery payloads in `rag_unified.py`.
+5. Add unit tests for the retriever and endpoint/integration tests for source selection and authorization.
 
-### ChromaDB Vector Store
+Vector store:
 
-For semantic search capabilities:
+1. Implement `VectorStoreAdapter` from `rag_service/vector_stores/base.py`.
+2. Put backend-specific code in a dedicated adapter module.
+3. Register the adapter in `rag_service/vector_stores/factory.py`.
+4. Add factory tests, adapter contract tests, and any backend-specific integration tests behind appropriate fixtures.
+5. Do not imply support for a declared `VectorStoreType` until the adapter is registered and covered.
 
-```python
-import chromadb
-from chromadb.config import Settings
+Reranker:
 
-# Initialize ChromaDB client
-client = chromadb.PersistentClient(
-    path="./chroma_db",
-    settings=Settings(
-        anonymized_telemetry=False,
-        allow_reset=True
-    )
-)
+1. Add strategy-specific implementation in `advanced_reranking.py`.
+2. Wire strategy selection through the pipeline.
+3. Expose only stable knobs in `UnifiedRAGRequest` and batch schema.
+4. Add tests for ordering, truncation, score metadata, and failure fallback.
 
-# Create or get collection
-collection = client.get_or_create_collection(
-    name="media_embeddings",
-    metadata={"description": "Media content embeddings"}
-)
-```
+Query expansion:
 
-## Embedding System
+1. Add expansion logic in `query_expansion.py`.
+2. Keep strategy-specific dependencies optional and testable.
+3. Wire the strategy through profile defaults or explicit request fields.
+4. Verify expanded query metadata is preserved in `UnifiedSearchResult` and response mapping.
 
-The RAG module uses the production embedding service for vector operations:
+Profile:
 
-### RAGEmbeddingsIntegration
+1. Add or modify profile defaults in `profiles.py`.
+2. Ensure endpoint profile application preserves explicit user-supplied fields over profile defaults.
+3. Update `/capabilities` or `/features` only when the profile becomes a supported public contract.
+4. Add focused tests for profile metadata and override behavior.
 
-```python
-from tldw_Server_API.app.core.RAG.rag_embeddings_integration import RAGEmbeddingsIntegration
+Response metadata:
 
-# Initialize embeddings integration
-embeddings = RAGEmbeddingsIntegration(
-    embedding_provider="huggingface",
-    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-    cache_embeddings=True
-)
+1. Add pipeline-level metadata to `UnifiedSearchResult`.
+2. Map the metadata in `convert_result_to_response`.
+3. Add the response field to `UnifiedRAGResponse` only when clients need a stable typed contract; otherwise prefer namespaced `metadata`.
+4. Test both direct pipeline output and API response mapping.
 
-# Embed query
-query_embedding = await embeddings.embed_query("machine learning concepts")
+## Configuration And Profiles
 
-# Embed documents
-doc_embeddings = await embeddings.embed_documents(documents)
+Configuration enters RAG from three places: request fields, profile defaults, and application settings. Endpoint logic applies precedence in this order: explicit request value, profile default, search/default helper value, schema default.
 
-# Get embedding dimension
-dimension = embeddings.get_embedding_dimension()  # Returns 384 for MiniLM
-```
+Stable request field groups:
 
-### ProductionEmbeddingFunction
+- Query and source selection: `query`, `sources`, `sql_target_id`, `corpus`, and `index_namespace`.
+- Strategy and profiles: `strategy` and `rag_profile`.
+- Retrieval knobs: `top_k`, score thresholds, hybrid/FTS/vector choices, filters, temporal/selection controls, and advanced retrieval feature toggles.
+- Cache knobs: `enable_cache`, `cache_threshold`, `adaptive_cache`, semantic cache and agentic cache controls.
+- Reranking knobs: `enable_reranking`, `reranking_strategy`, `rerank_top_k`, `reranking_model`, and relevance thresholds.
+- Generation knobs: `enable_generation`, model/provider options, answer style, citation/grounding controls, pre-retrieval clarification, post-verification, numeric fidelity, and strict extractive behavior.
+- Observability and evaluation knobs: debug flags, monitoring, tracing, retrieval metrics inputs, and quality gate inputs.
 
-For ChromaDB integration:
+Built-in profiles:
 
-```python
-from tldw_Server_API.app.core.RAG.rag_embeddings_integration import ProductionEmbeddingFunction
+- `production`: conservative defaults for hybrid retrieval, cache, reranking, and guardrails.
+- `research`: broader experimental retrieval and verification features.
+- `cheap`: lower cost and latency with fewer expensive extras.
+- `fast`: latency-first public preset.
+- `balanced`: public preset balancing latency and retrieval quality.
+- `accuracy`: quality-first public preset with stronger retrieval/reranking.
 
-# Create embedding function for ChromaDB
-embedding_function = ProductionEmbeddingFunction(
-    provider="huggingface",
-    model_id="sentence-transformers/all-MiniLM-L6-v2"
-)
+When changing profile defaults, check both the direct helpers in `profiles.py` and endpoint application in `rag_unified.py`. The public schema currently constrains `rag_profile` to `fast`, `balanced`, and `accuracy`, so exposing `production`, `research`, or `cheap` through the request model is a separate API compatibility decision.
 
-# Use with ChromaDB collection
-collection = client.create_collection(
-    name="documents",
-    embedding_function=embedding_function
-)
-```
+## Testing Guide
 
-## Extending the RAG Module
-
-### Adding a New Pipeline Function
-
-1. Create a new async function that accepts and returns `RAGPipelineContext`:
-
-```python
-from tldw_Server_API.app.core.RAG.ARCHIVE.functional_pipeline import (
-    RAGPipelineContext,
-    timer,
-    with_resilience
-)
-
-
-@timer("custom_processing")
-@with_resilience("custom_processing", custom_fallback)  # Optional
-async def custom_processing(context: RAGPipelineContext) -> RAGPipelineContext:
-    """
-    Custom processing function for the pipeline.
-
-    Args:
-        context: The pipeline context containing query, documents, config
-
-    Returns:
-        Modified context with processed documents
-    """
-    # Your custom logic here
-    for doc in context.documents:
-        doc.metadata["custom_score"] = calculate_custom_score(doc, context.query)
-
-    # Sort by custom score
-    context.documents.sort(
-        key=lambda d: d.metadata.get("custom_score", 0),
-        reverse=True
-    )
-
-    return context
-
-
-# Fallback function for resilience
-async def custom_fallback(context: RAGPipelineContext) -> RAGPipelineContext:
-    logger.warning("Custom processing failed, returning original documents")
-    return context
-```
-
-2. Use in a custom pipeline:
-
-```python
-from tldw_Server_API.app.core.RAG import build_pipeline
-
-# Build pipeline with custom function
-my_pipeline = build_pipeline(
-    expand_query,
-    retrieve_documents,
-    custom_processing,  # Your custom function
-    rerank_documents
-)
-
-# Execute pipeline
-result = await my_pipeline(context)
-```
-
-### Adding a New Retriever
-
-1. Create a new retriever class inheriting from `BaseRetriever`:
-
-```python
-from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import BaseRetriever
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
-
-class CustomRetriever(BaseRetriever):
-    def __init__(self, connection_string: str):
-        self.connection = connection_string
-        self.source = DataSource.CUSTOM  # Add to enum
-
-    async def retrieve(
-        self,
-        query: str,
-        limit: int = 10,
-        **kwargs
-    ) -> List[Document]:
-        # Your retrieval logic
-        raw_results = await self._query_database(query, limit)
-
-        # Convert to Document objects
-        return [
-            Document(
-                id=result["id"],
-                content=result["content"],
-                metadata=result.get("metadata", {}),
-                source=self.source,
-                score=result.get("score", 0.0)
-            )
-            for result in raw_results
-        ]
-```
-
-2. Use in the pipeline:
-
-```python
-# Add to MultiDatabaseRetriever configuration
-config = {
-    "databases": {
-        "media_db_path": "/path/to/media.db",
-        "custom_db": "postgresql://localhost/custom"
-    },
-    "sources": ["media_db", "custom"]
-}
-
-result = await standard_pipeline(query, config)
-```
-
-## Testing
-
-The RAG module has comprehensive test coverage. All tests are located in `tldw_Server_API/tests/RAG/`.
-
-### Running Tests
+Use the project virtual environment before running Python tests:
 
 ```bash
-# Run all RAG tests
-python -m pytest tldw_Server_API/tests/RAG/ -v
-
-# Run functional pipeline tests
-python -m pytest tldw_Server_API/tests/RAG/test_functional_pipeline.py -v
-python -m pytest tldw_Server_API/tests/RAG/test_rag_refactored.py -v
-
-# Run with coverage
-python -m pytest tldw_Server_API/tests/RAG/ --cov=tldw_Server_API.app.core.RAG --cov-report=html
+source .venv/bin/activate
 ```
 
-### Test Structure
-
-```
-tests/RAG/
-├── test_functional_pipeline.py         # Core pipeline tests
-├── test_rag_refactored.py             # Comprehensive refactored tests
-├── test_database_retrievers.py        # Retriever tests
-├── test_query_expansion.py            # Query expansion tests
-├── test_resilience.py                 # Fault tolerance tests
-└── test_rag_endpoints_integration.py  # API endpoint tests
-```
-
-### Writing Tests
-
-Example test for a custom pipeline function:
-
-```python
-import pytest
-from tldw_Server_API.app.core.RAG import (
-    RAGPipelineContext,
-    build_pipeline,
-    custom_processing  # Your custom function
-)
-from tldw_Server_API.app.core.RAG.rag_service.types import Document
-
-@pytest.mark.asyncio
-async def test_custom_pipeline_function():
-    """Test custom processing function"""
-    # Create test context
-    context = RAGPipelineContext(
-        query="test query",
-        original_query="test query",
-        config={"enable_custom": True}
-    )
-
-    # Add test documents
-    context.documents = [
-        Document(
-            id="1",
-            content="Test content",
-            metadata={},
-            source="test",
-            score=0.5
-        )
-    ]
-
-    # Test function
-    result = await custom_processing(context)
-
-    # Assertions
-    assert result.documents[0].metadata.get("custom_score") is not None
-    assert len(result.documents) == 1
-
-@pytest.mark.asyncio
-async def test_custom_pipeline_integration():
-    """Test custom pipeline end-to-end"""
-    # Build pipeline with custom function
-    pipeline = build_pipeline(
-        retrieve_documents,
-        custom_processing,
-        rerank_documents
-    )
-
-    # Create context
-    context = RAGPipelineContext(
-        query="machine learning",
-        original_query="machine learning",
-        config={
-            "databases": {"media_db_path": "test.db"},
-            "sources": ["media_db"],
-            "top_k": 5
-        }
-    )
-
-    # Execute pipeline
-    result = await pipeline(context)
-
-    # Verify custom processing was applied
-    assert all(
-        "custom_score" in doc.metadata
-        for doc in result.documents
-    )
-```
-
-### Important Test Considerations
-
-1. **CSRF Protection**: Tests must disable CSRF for testing:
-
-```python
-@pytest.fixture(scope="module", autouse=True)
-def disable_csrf():
-    """Disable CSRF for testing"""
-    from tldw_Server_API.app.core.config import settings
-    original_csrf = settings.get("CSRF_ENABLED", None)
-    settings["CSRF_ENABLED"] = False
-    yield
-    if original_csrf is not None:
-        settings["CSRF_ENABLED"] = original_csrf
-```
-
-2. **Database Fixtures**: Use temporary databases for testing:
-
-```python
-@pytest.fixture
-def temp_media_db():
-    """Create temporary media database"""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "test_media.db"
-        db = MediaDatabase(db_path, "test_client")
-        # Add test data
-        yield db
-        db.close_connection()
-```
-
-## Configuration
-
-### Configuration Examples
-
-```python
-# Basic configuration
-config = {
-    "pipeline": "standard",  # or minimal, quality, enhanced, custom
-    "enable_cache": True,
-    "enable_monitoring": True,
-    "sources": ["media_db", "notes"],
-    "top_k": 10
-}
-
-# Advanced configuration with resilience
-config = {
-    "pipeline": "quality",
-    "databases": {
-        "media_db_path": "/path/to/media.db",
-        "notes_db_path": "/path/to/notes.db"
-    },
-    "expansion_strategies": ["acronym", "synonym", "domain"],
-    "reranking_strategy": "cross_encoder",
-    "enable_resilience": True,
-    "resilience": {
-        "retry": {
-            "enabled": True,
-            "max_attempts": 3,
-            "initial_delay": 0.5
-        },
-        "circuit_breaker": {
-            "enabled": True,
-            "failure_threshold": 5,
-            "timeout": 60
-        }
-    },
-    "cache_threshold": 0.85,
-    "use_adaptive_cache": True
-}
-
-# Use configuration
-result = await standard_pipeline(query, config)
-```
-
-### TOML Configuration File
-
-```toml
-# rag_config.toml
-[rag]
-default_pipeline = "standard"
-enable_monitoring = true
-
-[rag.retrieval]
-default_top_k = 10
-min_score = 0.0
-use_fts = true
-use_vector = false
-
-[rag.expansion]
-enabled = true
-strategies = ["acronym", "synonym"]
-max_expansions = 5
-
-[rag.cache]
-enabled = true
-threshold = 0.85
-adaptive = true
-ttl = 3600
-
-[rag.reranking]
-enabled = true
-strategy = "hybrid"
-diversity = 0.3
-
-[rag.resilience]
-enabled = false
-retry_attempts = 3
-circuit_breaker_threshold = 5
-```
-
-### Environment Variables
+Focused RAG test entry points:
 
 ```bash
-# Embedding configuration
-EMBEDDING_PROVIDER=huggingface
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-
-# Database paths
-USER_DB_BASE_DIR=/path/to/user/databases  # per-user DB root; USER_DB_BASE is deprecated alias
-CHROMA_DB_PATH=/path/to/chroma
-
-# API configuration
-OPENAI_API_KEY=your-api-key
-ANTHROPIC_API_KEY=your-api-key
-
-# Performance tuning
-RAG_NUM_WORKERS=4
-RAG_CACHE_SIZE=1000
-RAG_TIMEOUT_SECONDS=30
+python -m pytest tldw_Server_API/tests/RAG_NEW/unit -v
+python -m pytest tldw_Server_API/tests/RAG_NEW/integration -v
+python -m pytest tldw_Server_API/tests/RAG -v
 ```
 
-`USER_DB_BASE_DIR` is defined in `tldw_Server_API.app.core.config` (defaults to `Databases/user_databases/` under the project root). Override via environment variable or `Config_Files/config.txt` as needed.
-
-### Loading Configuration
-
-```python
-from tldw_Server_API.app.core.RAG.rag_service.config import RAGConfig
-import toml
-
-# Load from TOML file
-with open("rag_config.toml", "r") as f:
-    toml_config = toml.load(f)
-    config = toml_config.get("rag", {})
-
-# Or create programmatically
-config = RAGConfig(
-    pipeline="standard",
-    enable_cache=True,
-    cache_threshold=0.85,
-    expansion_strategies=["acronym", "synonym"],
-    reranking_strategy="hybrid",
-    top_k=10
-)
-
-# Use with pipeline
-result = await standard_pipeline(query, config.to_dict())
-```
-
-## Performance Optimization
-
-### 1. Caching Strategy
-
-The RAG module implements multi-level caching:
-
-```python
-# Query result caching
-@lru_cache(maxsize=1000)
-async def cached_search(query_hash: str, sources: tuple, limit: int):
-    return await rag_service.search(query_hash, list(sources), limit)
-
-# Embedding caching
-embedding_cache = {}
-def get_cached_embedding(text: str):
-    if text not in embedding_cache:
-        embedding_cache[text] = embed(text)
-    return embedding_cache[text]
-```
-
-### 2. Parallel Retrieval
-
-Use asyncio for parallel operations:
-
-```python
-async def parallel_search(query: str, sources: List[DataSource]):
-    tasks = [
-        retriever.retrieve(query)
-        for retriever in retrievers
-        if retriever.source in sources
-    ]
-    results = await asyncio.gather(*tasks)
-    return merge_results(results)
-```
-
-### 3. Connection Pooling
-
-For database operations:
-
-```python
-from contextlib import asynccontextmanager
-
-class DatabasePool:
-    def __init__(self, max_connections: int = 10):
-        self._pool = []
-        self._max = max_connections
-
-    @asynccontextmanager
-    async def get_connection(self):
-        conn = await self._acquire()
-        try:
-            yield conn
-        finally:
-            await self._release(conn)
-```
-
-### 4. Batch Processing
-
-For embedding operations:
-
-```python
-async def batch_embed_documents(documents: List[str], batch_size: int = 32):
-    embeddings = []
-    for i in range(0, len(documents), batch_size):
-        batch = documents[i:i + batch_size]
-        batch_embeddings = await embed_batch(batch)
-        embeddings.extend(batch_embeddings)
-    return embeddings
-```
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-#### 1. Import Errors
-
-**Problem**: `ModuleNotFoundError` for RAG components.
-
-**Solution**: Import from the correct module:
-```python
-# Correct imports
-from tldw_Server_API.app.core.RAG import (
-    standard_pipeline,
-    build_pipeline,
-    RAGPipelineContext
-)
-
-# NOT from old paths like:
-# from app.core.RAG.rag_service.integration import RAGService  # OLD
-```
-
-#### 2. Embedding Dimension Mismatch
-
-**Problem**: Different embedding models produce different dimensions.
-
-**Solution**: Ensure consistent model usage:
-```python
-# Check embedding dimension
-dimension = embeddings.get_embedding_dimension()
-assert dimension == expected_dimension, f"Expected {expected_dimension}, got {dimension}"
-```
-
-#### 3. Database Lock Errors
-
-**Problem**: SQLite database locks during concurrent access.
-
-**Solution**: Use write-ahead logging (WAL) mode:
-```python
-conn.execute("PRAGMA journal_mode=WAL")
-conn.execute("PRAGMA busy_timeout=5000")
-```
-
-#### 4. Memory Issues with Large Result Sets
-
-**Problem**: Out of memory when processing large documents.
-
-**Solution**: Use streaming and pagination:
-```python
-async def stream_results(query: str, batch_size: int = 10):
-    offset = 0
-    while True:
-        batch = await retrieve(query, limit=batch_size, offset=offset)
-        if not batch:
-            break
-        for doc in batch:
-            yield doc
-        offset += batch_size
-```
-
-#### 5. Slow Vector Search
-
-**Problem**: ChromaDB queries are slow.
-
-**Solution**: Use the optimize_chromadb_search function:
-```python
-from tldw_Server_API.app.core.RAG import quality_pipeline
-
-# Quality pipeline includes ChromaDB optimization
-result = await quality_pipeline(
-    query,
-    config={
-        "enable_chromadb": True,
-        "chromadb_top_k": 50,  # Retrieve more, then rerank
-        "final_top_k": 10      # Return top 10 after reranking
-    }
-)
-```
-
-#### 6. Resilience Not Working
-
-**Problem**: Circuit breakers and retries not activating.
-
-**Solution**: Ensure resilience is enabled in config:
-```python
-config = {
-    "enable_resilience": True,  # Must be True
-    "resilience": {
-        "retry": {"enabled": True, "max_attempts": 3},
-        "circuit_breaker": {"enabled": True, "failure_threshold": 5}
-    }
-}
-```
-
-**Problem**: ChromaDB queries are slow.
-
-**Solution**: Optimize collection settings:
-```python
-collection = client.create_collection(
-    name="optimized",
-    metadata={
-        "hnsw:space": "cosine",
-        "hnsw:construction_ef": 200,
-        "hnsw:M": 48
-    }
-)
-```
-
-### Debugging Tips
-
-1. **Enable Debug Logging**:
-```python
-import logging
-from loguru import logger
-
-logger.level("DEBUG")
-```
-
-2. **Monitor Query Performance**:
-```python
-from tldw_Server_API.app.core.RAG.rag_service.metrics import MetricsCollector
-
-metrics = MetricsCollector()
-with metrics.measure("search_operation"):
-    results = await rag_service.search(query)
-logger.info(f"Search took {metrics.get_timing('search_operation')}ms")
-```
-
-3. **Trace Retrieval Path**:
-```python
-# Add to retriever
-logger.debug(f"Retrieving from {self.source}: query='{query}', limit={limit}")
-results = await self._retrieve_internal(query, limit)
-logger.debug(f"Retrieved {len(results)} documents from {self.source}")
-```
-
-## Best Practices
-
-### 1. Pipeline Selection
-
-Choose the right pipeline for your use case:
-
-```python
-# Fast lookup for simple queries
-result = await minimal_pipeline(query)
-
-# Balanced for most use cases
-result = await standard_pipeline(query, config)
-
-# Maximum accuracy for complex queries
-result = await quality_pipeline(query, config)
-
-# Custom for specific requirements
-my_pipeline = build_pipeline(
-    expand_query,
-    retrieve_documents,
-    custom_processing,
-    rerank_documents
-)
-```
-
-### 2. Error Handling
-
-Pipelines handle errors gracefully with optional resilience:
-
-```python
-try:
-    result = await standard_pipeline(query, config)
-except Exception as e:
-    logger.error(f"Pipeline failed: {e}")
-    # Fallback to minimal pipeline
-    result = await minimal_pipeline(query)
-```
-
-### 3. Performance Optimization
-
-```python
-# Enable caching for repeated queries
-config = {
-    "enable_cache": True,
-    "cache_threshold": 0.85,
-    "use_adaptive_cache": True
-}
-
-# Use minimal pipeline for speed
-if need_fast_response:
-    result = await minimal_pipeline(query)
-else:
-    result = await standard_pipeline(query, config)
-
-# Monitor performance
-if config.get("enable_monitoring"):
-    logger.info(f"Query took {sum(result.timings.values()):.2f}s")
-    for component, timing in result.timings.items():
-        logger.debug(f"{component}: {timing:.3f}s")
-```
-
-### 4. Type Hints
-
-Always use type hints for clarity:
-
-```python
-from typing import List, Optional, Dict, Any
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
-
-async def search(
-    query: str,
-    sources: List[DataSource],
-    limit: int = 10,
-    filters: Optional[Dict[str, Any]] = None
-) -> List[Document]:
-    pass
-```
-
-### 5. Documentation
-
-Document your custom pipeline functions:
-
-```python
-async def custom_processing(context: RAGPipelineContext) -> RAGPipelineContext:
-    """
-    Apply custom scoring based on domain-specific rules.
-
-    This function adds a custom score to each document based on
-    business logic and reorders documents accordingly.
-
-    Args:
-        context: Pipeline context with documents to process
-
-    Returns:
-        Context with documents sorted by custom score
-
-    Example:
-        >>> pipeline = build_pipeline(
-        ...     retrieve_documents,
-        ...     custom_processing,
-        ...     rerank_documents
-        ... )
-        >>> result = await pipeline(context)
-    """
-    # Implementation
-    pass
-```
-
-## Conclusion
-
-The RAG module's functional pipeline architecture provides a flexible, performant foundation for retrieval-augmented generation. With composable functions, optional resilience features, and comprehensive testing, it's production-ready and easily extensible.
+Run narrower tests while iterating:
+
+- Schema/profile behavior: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_request_schema_profiles.py`, `test_rag_profiles.py`, and `test_unified_pipeline_profile_metadata.py`.
+- Response mapping: `tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py`.
+- Pipeline behavior: `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py`, `test_unified_pipeline_focused.py`, and related feature-specific tests.
+- Vector stores: `tldw_Server_API/tests/RAG_NEW/unit/test_vector_store_parity.py`, `test_vector_store_list_vectors.py`, and integration tests for PGVector when available.
+- Endpoints: `tldw_Server_API/tests/RAG_NEW/integration/test_rag_integration.py`, `test_rag_stream_parity.py`, `test_rag_batch_resume_api.py`, `test_rag_batch_checkpoint_api.py`, `test_rag_capabilities_styles.py`, `test_rag_unified_features_endpoint.py`, and `test_rag_health_endpoints.py`.
+- Source and SQL hardening: `tldw_Server_API/tests/RAG/test_rag_sources_sql_validation.py`, `test_sql_retriever_hardening.py`, and SQL integration tests.
+- Auth and permissions: `tldw_Server_API/tests/AuthNZ/integration/test_rag_media_permissions_claims.py`, `test_auth_principal_media_rag_invariants.py`, and SQLite equivalents.
+
+For API changes, include at least one endpoint-level test and one lower-level test near the component you changed. For new retrieval sources or vector stores, test the contract in isolation and then test the endpoint path that normalizes and activates it.
+
+Before considering RAG code changes complete, run Bandit on touched Python paths as required by the repository security policy. Documentation-only changes normally do not need Bandit unless they include executable examples that are copied into source files.
+
+## Known Pitfalls
+
+- Do not add public source names only to `DataSource`; they also need normalization, retriever registration, endpoint discovery updates, and tests.
+- Do not present `CHAT_HISTORY` or `WEB_CONTENT` as public wired sources until `MultiDatabaseRetriever` has active retrievers for them.
+- `characters` and `chats` are public source aliases, but the current retriever setup maps them through character-card/ChaChaNotes-backed retrieval rather than a distinct chat-history retriever key.
+- Declared vector store enum values are not equivalent to implemented adapter support. ChromaDB is the default adapter; PGVector is optional; other declared values need adapter work.
+- `/search/stream` is generation-only. Retrieval-only callers should use `/search`, `/simple`, or `/advanced`.
+- Profile defaults must not override explicit user request fields.
+- Avoid putting transport concerns inside `unified_rag_pipeline`; keep FastAPI dependencies and response model conversion in endpoint code.
+- Keep response metadata names stable. Prefer namespaced metadata for experimental details until the contract is ready for typed schema fields.
+- Health and observability endpoints are split into `rag_health.py`; adding health-like routes to `rag_unified.py` makes the API harder to discover.
 
 ## Related Documentation
 
-- [RAG Module Overview](/app/core/RAG/README.md)
-- [RAG Service Implementation](/app/core/RAG/rag_service/README.md)
-- [RAG API Documentation](../API-related/RAG_API_Documentation.md)
-- [Functional Pipeline Guide](./RAG-Functional-Pipeline-Guide.md)
+- `tldw_Server_API/app/core/RAG/README.md`: deeper module notes and examples for the current RAG service.
+- `tldw_Server_API/app/core/RAG/UNIFIED_PIPELINE_EXAMPLES.md`: request and pipeline examples.
+- `Docs/Published/User_Guides/Server/RAG_Production_Configuration_Guide.md`: operator-facing configuration guidance.
+- `Docs/RAG/`: research notes, benchmark manifests, and design background.
+- `Docs/Code_Documentation/Embeddings-Developer-Guide.md`: embedding subsystem details used by vector retrieval.
+- Generated OpenAPI schema: authoritative endpoint and field constraints for clients.

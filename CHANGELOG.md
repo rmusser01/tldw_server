@@ -12,12 +12,49 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- Expanded ACP release-signoff evidence for permission denial, reconnect, and
+  recovery paths with deterministic frontend hook coverage and a readiness
+  addendum that separates automated evidence from live downstream-agent caveats.
+- ACP release notes now explicitly limit downstream-agent support to
+  protocol/runner validation unless operators configure and verify a real
+  downstream ACP stdio agent plus required provider credentials. Binary
+  detection for tools such as Claude Code or Codex is not, by itself, a
+  live-agent create/prompt/cancel verification. (Issue #1504)
+- Clarified the ACP release posture for retention and transcript redaction:
+  session detail, events, and artifacts are authenticated operator
+  drill-through surfaces rather than redacted transcript views; diagnostics and
+  audit metadata are sanitized, but automatic transcript/artifact hard-delete
+  retention is not yet a release-certified claim.
+
 ### Fixed
 
 ### Removed
 
 
-## [0.1.30] - 2026-03-31
+## [0.1.31] - 2026-04-19
+
+### Added
+
+- **Onboarding, Artifact Profiling, And Scion Foundations** — Added branch-aware artifact profiles, a first-run assistant setup wizard with archetype templates, and Scion-inspired backend improvements spanning template handling, policy conditions, and request multiplexing. (PRs #1070, #1075, #1076)
+- **Flashcard Templates And Study Suggestions v2** — Added flashcard templates and review orientation, plus deterministic v2 study-suggestion grounding with canonical topic keys, richer evidence metadata, lineage-aware reuse, review-session aggregates, and matching backend/frontend support. (PRs #1069, #1093)
+
+### Changed
+
+- **Audit-Driven UX Refresh Across Core Workspaces** — Notes, prompts, dictionaries, and World Books all received audit-driven UX follow-through covering labels, dialogs, disclosure, keyboard/help affordances, ARIA cleanup, remaining NNG issues, structural refactors, and cross-workspace search improvements. (PRs #1041, #1052, #1054, #1057, #1071, #1073, #1077)
+- **Release Documentation And Review Artifacts** — Refreshed the README/version narrative and added review/remediation planning artifacts to support the broader audit and hardening wave. (PRs #1061, #1065, #1066)
+- **Dependency And CI Baseline Refresh** — Updated GitHub Actions artifact/pages/codecov actions, refreshed regex and multiple Python dependency groups, moved the extension toolchain forward with a Vite bump, and lifted several backend/runtime package baselines including `langdetect`, `python-multipart`, and `opentelemetry-distro`. (PRs #1017, #1018, #1019, #1020, #1040, #1079, #1080, #1081, #1082, #1083, #1084, #1085, #1086)
+- **Security, Isolation, And Runtime Contracts** — Tightened shared SQLite backend ownership, strict-audit durability, MCP unified workspace/persona isolation and concurrency handling, external server/media fallbacks, Docker packaging contracts, and ACP/storage-path safety. (PRs #1059, #1064, #1067, #1078)
+
+### Fixed
+
+- **Character, Persona, And Upload Reliability** — Remediated character full-stack findings, hardened persona archetype loading against malformed YAML, and improved duplicate-media upload feedback. (PRs #1056, #1068, #1088)
+- **WebUI Stream, Abort, And Persistence Stability** — Stabilized WebUI auth/persistence notifications, surfaced chat stream timeout and abort failures correctly, and hardened abort handling plus ingest DB messaging. (PRs #1063, #1089, #1090)
+- **Web Scraping Ingest Safety** — Closed out ingest review issues and hardened outbound web-scraping policy enforcement. (PRs #1058, #1095)
+- **First-Run Assistant Follow-Through** — Addressed post-merge issues in the first-run assistant rollout after the initial wizard landed. (PRs #1087, #1091)
+- **Wave Hardening For Bootstrap, Lifecycle, And Shutdown** — Completed wave-based hardening across data/bootstrap safety, character lifecycle and evaluations reliability, and final evaluations shutdown behavior. (PRs #1092, #1094, #1100)
+
+
+## [0.1.30] - 2026-04-04
 
 ### Added
 
@@ -26,18 +63,40 @@ and this project adheres to Some kind of Versioning
 - **Reference Manager Import/Sync** — Provider-neutral reference-manager connector contracts, storage, and Zotero integration. Zotero collection sources are exposed through the connectors API with import-mode scheduler and worker sync including dedupe, metadata-only tracking. (PR #940)
 - **NotebookLM Presentation Style Catalog** — Built-in visual style catalog with resolver-backed metadata, prompt profiles, and reusable style packs. Reveal export rendering extended with namespaced style CSS and richer visual-block HTML. Presentation Studio gained a visual style picker, client metadata support, and built-in theme synchronization. (PR #935)
 - **FTUE Audit** — Comprehensive first-time user experience audit addressing 41 issues across documentation, tooling, configuration, and frontend UX. Includes unified README entry points, `make help`/`make show-api-key` targets, restructured `.env.example`, improved onboarding error messages, Docker entrypoint auth-init failure handling, DATABASE_URL preflight checks, demo mode exit banners, and multi-user JWT setup guidance. (PRs #938, #944)
+- **Evaluations Recipe Framework** — A recipe-driven evaluation system with manifests, run persistence, job worker integration, and reporting APIs. Includes guided retrieval tuning and RAG answer quality recipes, recipe-first UI flows with a guided launcher, and legacy evaluations tab fixes. Synthetic eval draft generation and shared review workflow added alongside browser and unit test coverage. (PR #942)
+- **MCP Virtual CLI** — Phase-1 virtual CLI command runtime with workspace-bounded filesystem tools, governed `run` MCP tool, parser/registry/execution/presentation layers, approval-gated execution for governed chains, policy-aware discovery, nested idempotency propagation, spill-safe presentation, and integration test coverage across authz and path scoping. (PRs #939, #941)
+- **Reference Manager Import/Sync** — Provider-neutral reference-manager connector contracts, storage, and Zotero integration. Zotero collection sources are exposed through the connectors API with import-mode scheduler and worker sync including dedupe, metadata-only tracking. (PR #940)
+- **NotebookLM Presentation Style Catalog** — Built-in visual style catalog with resolver-backed metadata, prompt profiles, and reusable style packs. Reveal export rendering extended with namespaced style CSS and richer visual-block HTML. Presentation Studio gained a visual style picker, client metadata support, and built-in theme synchronization. (PR #935)
+- **FTUE Audit** — Comprehensive first-time user experience audit addressing 41 issues across documentation, tooling, configuration, and frontend UX. Includes unified README entry points, `make help`/`make show-api-key` targets, restructured `.env.example`, improved onboarding error messages, Docker entrypoint auth-init failure handling, DATABASE_URL preflight checks, demo mode exit banners, and multi-user JWT setup guidance. (PRs #938, #944)
+- **Speech / Audio FTUE Follow-through** — Added a TTS/STT first-time-user audit pass with broader onboarding, navigation, and setup-guidance improvements across the speech entry points. (PR #983)
+- **Deferred FTUE and Workspace Handoffs** — Added follow-up tutorials, JSON export affordances, Quick Ingest result CTAs into Knowledge and Workspace, recently-ingested document auto-open behavior, and "Open in Workspace" handoffs from knowledge sources. (PRs #984, #1007)
+- **MCP Hub / Media / Quiz Phase 2 UX** — Added Joyride-guided onboarding for MCP Hub and quizzes, richer empty states and retry guidance for MCP Hub and Media Library, connected quiz orientation improvements, and extension sidepanel deep links into Media Library and Quizzes. (PRs #993, #997, #998)
+- **Writing Suite Phase 1** — Added manuscript database tables, CRUD/FTS helpers, REST API endpoints and schemas, TipTap-backed writing editor surfaces, manuscript tree and focus mode, drag-and-drop reorder, and review-driven hardening across the writing stack. (PR #995)
+- **Container Snapshot Publishing and Lifecycle Docs** — Added GHCR main snapshot publishing for the app and UI images, a single roll-up `container-build-check` summary job, and first-class container image lifecycle documentation. (PRs #996, #1006)
+- **FTUE / FTUX Expansion** — First-time user improvements broadened across onboarding, LLM connection, chat and watchlist journeys, realtime and BYOK setup, extension notification flows, media and review surfaces, MCP Hub, moderation, quiz, and a larger flashcards-first experience with new tutorials, empty states, and UX polish. (PRs #948, #950, #951, #953, #954, #963, #965, #969, #973, #977, #981, #982)
+- **Study Packs Phase 1** — Added a new study-pack pipeline spanning backend generation, provenance, source resolution, jobs-worker execution, API schemas/endpoints, and shared UI creation, remediation, and handoff flows with broad automated coverage. (PR #978)
+- **Flashcards Workflow Expansion** — Added workspace deck preview support, global tag suggestions, deck references in the create drawer, richer create/review/import flows, and related study-assistant follow-through across backend and shared UI surfaces. (PRs #974, #975, #979)
+- **Watchlist Alert Rules** — Added a watchlist alert-rules engine, database layer, and API support for user-defined run and feed notifications. (PR #970)
+- **Coordinated App Shutdown** — Added coordinated application shutdown flow support to improve lifecycle cleanup and service teardown behavior. (PR #945)
+- **MCP Virtual CLI Phase 2** — Extended the governed MCP virtual CLI beyond the initial runtime with deeper policy/runtime integration, safer command execution flows, and additional UX and test hardening for workspace-bounded command handling. (PRs #946, #962)
 
 ### Changed
 
 - Chat mood badge hidden by default across shared WebUI and extension chat surfaces, with one-time legacy preference migration and preserved user opt-in. (PR #943)
 - Workspace scope now forwarded when saving chat knowledge; voice-unavailable reason propagated through PlaygroundForm. (PR #943)
+- Chat mood badge hidden by default across shared WebUI and extension chat surfaces, with one-time legacy preference migration and preserved user opt-in. (PR #943)
+- Workspace scope now forwarded when saving chat knowledge; voice-unavailable reason propagated through PlaygroundForm. (PR #943)
+- Settings internals were further decomposed by extracting the growing Settings page into smaller components, reducing page-level coupling while keeping the version line at `0.1.30`. (PR #994)
+- Settings and notifications management moved further toward task-oriented configuration with tabbed Settings navigation, stronger extension notification subscription wiring, cleaner notification count/preference handling, and improved route parity across shared UI entry points. (PRs #968, #969)
+- AuthNZ admin CLI maintenance was tightened with clearer module-level documentation expectations and dedicated regression coverage for create/reset-admin command docs. (PR #976)
+- Admin, operator, and production-readiness surfaces continued to harden through follow-up infrastructure work in the admin UI stack. (PR #934)
 
 ### Fixed
 
 - Evaluations recipe framework hardened with 50 review-feedback fixes: Pydantic-typed recipe endpoints, worker readiness gating before enqueue, custom `RecipeEnqueueError` exception, sanitized error metadata, `managed_media_database` context manager for worker sessions, `owner_user_id` enforcement on `get_run()`, pre-validated `build_reuse_hash`, DB-level reuse-hash lookup, `ConfidenceSummary.model_validate` fallback, field-specific weight validation errors, CLI JSON shape validation, non-retryable `fts` mode error, `RecipeNotFoundError` custom exception, dict-backed document normalization in RAG pipeline, parameterized Loguru logging, and comprehensive recipe logic fixes across retrieval tuning, answer quality, embeddings, and summarization recipes. (PR #942 review follow-ups)
 - FTUE v2 residual issues: Docker entrypoint now exits on auth init failure, DATABASE_URL TCP connectivity preflight added, demo mode crash guard for missing `DemoModeProvider`, and clearer configuration guidance across Docker and local installs. (PR #944)
 - MCP virtual CLI review feedback addressed: preflight validation, filesystem module registration, command runtime path scope tests, and idempotency propagation fixes. (PR #941 review follow-ups)
-
+- Addressed post-review regressions across notifications, snoozed-state handling, persona buddy follow-ups, flashcard onboarding, and FTUE onboarding/realtime/watchlist flows so the new user journey and notification surfaces behave consistently across the web app and extension. (PRs #965, #966, #972, #973, #982)
 
 ## [0.1.29] 2026-03-29
 ### Added
@@ -64,6 +123,11 @@ and this project adheres to Some kind of Versioning
 - Sharing, research, governance-pack trust, Telegram approvals/webhooks, companion routing, MCP Hub navigation, and admin audio installer follow-ups received post-review stability fixes. (PRs #903, #831, #922, #924, #926, #933)
 - `pocket_tts_cpp`, KittenTTS bundle verification, quick ingest language-state handling, quickstart same-origin hydration/browser config, and Media DB v2 delete/review regressions were addressed in post-merge hardening. (PRs #919, #921, #923, #930, #931 and direct follow-ups)
 - CI and repo hygiene were tightened with frontend/browser gate fixes, isolated workspace installation repo tests, OSS/private boundary enforcement, and GitHub Actions dependency bumps for `docker/login-action`, `docker/setup-buildx-action`, and `dependency-review-action`. (PRs #843, #900, #901, #925 and related follow-ups)
+- Resolved FTUX follow-up issues across MCP Hub routing/confirmation flows, media-library dead ends and search help, quiz mobile labels and empty-reset behavior, companion deep links, `window.open` safety, notification duration, and tutorial dispatch/timing behavior. (PRs #993, #997, #998)
+- Hardened document-ingest and workspace handoff flows by fixing `keep_original_file` behavior for HTML and document types, centralizing doc-type constants, preventing process-only temp-file leaks, and improving missing-original-file recovery messaging. (PR #1007)
+- Hardened manuscripts and writing review follow-ups with optimistic locking for reorder operations, corrected word-count propagation metadata, safer state selection, and broader security/sync/null-guard fixes across the new writing stack. (PR #995)
+- Completed the GHCR/container follow-through with workflow safety fixes, provenance pinning, admin-monitoring null-safety cleanup, and clearer container build roll-up behavior. (PRs #996, #1006)
+- Addressed post-review regressions across notifications, snoozed-state handling, persona buddy follow-ups, flashcard onboarding, and FTUE onboarding/realtime/watchlist flows so the new user journey and notification surfaces behave consistently across the web app and extension. (PRs #965, #966, #972, #973, #982)
 
 ## Backfill: merged on `main` before `dev` sync
 

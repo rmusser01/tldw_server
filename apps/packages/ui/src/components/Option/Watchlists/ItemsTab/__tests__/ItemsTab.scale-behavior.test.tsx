@@ -264,7 +264,7 @@ describe("ItemsTab scale behavior", () => {
 
     ;(serviceMocks.fetchScrapedItems as Mock).mockClear()
 
-    const search = screen.getByPlaceholderText("Search feed items...")
+    const search = screen.getByPlaceholderText("Search updates...")
     fireEvent.change(search, { target: { value: "a" } })
     fireEvent.change(search, { target: { value: "ai" } })
     fireEvent.change(search, { target: { value: "ai chips" } })

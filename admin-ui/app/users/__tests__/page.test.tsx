@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import UsersPage from '../page';
 import { api } from '@/lib/api-client';
 import { formatAxeViolations, getCriticalAndSeriousAxeViolations } from '@/test-utils/axe';
+import { getScopedItem } from '@/lib/scoped-storage';
 
 const confirmMock = vi.hoisted(() => vi.fn());
 const privilegedActionMock = vi.hoisted(() => vi.fn());
@@ -20,6 +21,7 @@ const permissionUser = vi.hoisted(() => ({
   role: 'admin',
   is_active: true,
   is_verified: true,
+  mfa_enabled: true,
   storage_quota_mb: 100,
   storage_used_mb: 12,
   created_at: '2024-01-01T00:00:00Z',
@@ -107,13 +109,17 @@ vi.mock('@/lib/api-client', () => ({
     getUsers: vi.fn(),
     getOrganizations: vi.fn(),
     getOrgInvites: vi.fn(),
-    getUserMfaStatus: vi.fn(),
     getUserMfaStatusBulk: vi.fn(),
     deleteUser: vi.fn(),
     updateUser: vi.fn(),
     createUser: vi.fn(),
     resetUserPassword: vi.fn(),
     setUserMfaRequirement: vi.fn(),
+    getUserMfaStatus: vi.fn(),
+    inviteUser: vi.fn(),
+    getInvitations: vi.fn(),
+    revokeInvitation: vi.fn(),
+    resendInvitation: vi.fn(),
   },
 }));
 
@@ -127,6 +133,7 @@ const makeUser = (overrides: Partial<Record<string, unknown>> = {}) => ({
   role: 'admin',
   is_active: true,
   is_verified: true,
+  mfa_enabled: false,
   storage_quota_mb: 100,
   storage_used_mb: 12,
   created_at: '2024-01-01T00:00:00Z',
@@ -144,9 +151,9 @@ beforeEach(() => {
   toastErrorMock.mockClear();
 
   apiMock.getUsers.mockResolvedValue([
-    makeUser({ id: 1, username: 'Alice', email: 'alice@example.com', role: 'admin', is_active: true, is_verified: true }),
-    makeUser({ id: 2, uuid: 'user-2', username: 'Bob', email: 'bob@example.com', role: 'user', is_active: false, is_verified: true }),
-    makeUser({ id: 3, uuid: 'user-3', username: 'Carol', email: 'carol@example.com', role: 'service', is_active: true, is_verified: false }),
+    makeUser({ id: 1, username: 'Alice', email: 'alice@example.com', role: 'admin', is_active: true, is_verified: true, mfa_enabled: true }),
+    makeUser({ id: 2, uuid: 'user-2', username: 'Bob', email: 'bob@example.com', role: 'user', is_active: false, is_verified: true, mfa_enabled: false }),
+    makeUser({ id: 3, uuid: 'user-3', username: 'Carol', email: 'carol@example.com', role: 'service', is_active: true, is_verified: false, mfa_enabled: true }),
   ]);
   apiMock.getOrganizations.mockResolvedValue([
     { id: 11, name: 'Core Org' },
@@ -202,6 +209,45 @@ beforeEach(() => {
   apiMock.createUser.mockResolvedValue({});
   apiMock.resetUserPassword.mockResolvedValue({});
   apiMock.setUserMfaRequirement.mockResolvedValue({});
+  apiMock.getUserMfaStatus.mockResolvedValue({ enabled: false });
+  apiMock.getInvitations.mockResolvedValue({
+    items: [
+      {
+        id: 'inv-001',
+        email: 'invited@example.com',
+        role: 'user',
+        status: 'pending',
+        invited_by: 'Alice',
+        created_at: '2026-03-20T10:00:00Z',
+        expires_at: '2026-03-27T10:00:00Z',
+        email_sent: true,
+        email_error: null,
+      },
+    ],
+    total: 1,
+  });
+  apiMock.inviteUser.mockResolvedValue({
+    id: 'inv-new',
+    email: 'new@example.com',
+    role: 'user',
+    status: 'pending',
+    email_sent: true,
+    email_error: null,
+  });
+  apiMock.revokeInvitation.mockResolvedValue({
+    id: 'inv-001',
+    status: 'revoked',
+  });
+  apiMock.resendInvitation.mockResolvedValue({
+    id: 'inv-001',
+    email: 'invited@example.com',
+    role: 'user',
+    status: 'pending',
+    email_sent: true,
+    email_error: null,
+    resend_count: 1,
+    last_resent_at: '2026-03-27T10:00:00Z',
+  });
 });
 
 afterEach(() => {
@@ -213,7 +259,7 @@ describe('UsersPage', () => {
   it('has no critical/serious axe violations in the default state', async () => {
     const { container } = render(<UsersPage />);
 
-    await screen.findByText('Invitations');
+    await screen.findByText('Organization Invitations');
     const violations = await getCriticalAndSeriousAxeViolations(container);
     expect(violations, formatAxeViolations(violations)).toEqual([]);
   });
@@ -221,7 +267,7 @@ describe('UsersPage', () => {
   it('renders invitation funnel metrics and mixed invitation statuses', async () => {
     render(<UsersPage />);
 
-    await screen.findByText('Invitations');
+    await screen.findByText('Organization Invitations');
     expect(screen.getByTestId('invitation-total-sent').textContent).toContain('3');
     expect(screen.getByTestId('invitation-total-accepted').textContent).toContain('1');
     expect(screen.getByTestId('invitation-conversion-rate').textContent).toContain('33.3%');
@@ -352,6 +398,9 @@ describe('UsersPage', () => {
         admin_password: 'AdminPass123!',
       });
     });
+    await waitFor(() => {
+      expect(apiMock.getUsers).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('round-trips a saved view through save, apply, and delete', async () => {
@@ -369,7 +418,7 @@ describe('UsersPage', () => {
     await waitFor(() => {
       expect(toastSuccessMock).toHaveBeenCalledWith('Saved view', 'Bob only has been added.');
     });
-    expect(window.localStorage.getItem('admin_users_saved_views')).toContain('Bob only');
+    expect(getScopedItem('admin_users_saved_views')).toContain('Bob only');
 
     await user.clear(searchInput);
     await waitFor(() => {
@@ -394,7 +443,166 @@ describe('UsersPage', () => {
       );
     });
     await waitFor(() => {
-      expect(window.localStorage.getItem('admin_users_saved_views') ?? '').not.toContain('Bob only');
+      expect(getScopedItem('admin_users_saved_views') ?? '').not.toContain('Bob only');
+    });
+  });
+
+  it('renders the Pending Invitations section with direct invitations', async () => {
+    render(<UsersPage />);
+
+    await screen.findByText('Pending Invitations');
+    expect(screen.getByText('invited@example.com')).toBeInTheDocument();
+    expect(screen.getByTestId('direct-invitation-row-inv-001')).toBeInTheDocument();
+  });
+
+  it('shows the Invite User button and opens the invite dialog', async () => {
+    const user = userEvent.setup();
+    render(<UsersPage />);
+
+    const inviteButton = await screen.findByRole('button', { name: /invite user/i });
+    expect(inviteButton).toBeInTheDocument();
+
+    await user.click(inviteButton);
+    expect(await screen.findByText('Invite user')).toBeInTheDocument();
+    expect(screen.getByLabelText('Email address')).toBeInTheDocument();
+    expect(screen.getByLabelText('Role')).toBeInTheDocument();
+  });
+
+  it('sends an invitation when the invite form is submitted', async () => {
+    const user = userEvent.setup();
+    render(<UsersPage />);
+
+    await user.click(await screen.findByRole('button', { name: /invite user/i }));
+    await user.type(screen.getByLabelText('Email address'), 'new@example.com');
+    await user.click(screen.getByRole('button', { name: /send invitation/i }));
+
+    await waitFor(() => {
+      expect(apiMock.inviteUser).toHaveBeenCalledWith({
+        email: 'new@example.com',
+        role: 'user',
+      });
+    });
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalled();
+    });
+  });
+
+  it('revokes an invitation when the revoke button is clicked', async () => {
+    const user = userEvent.setup();
+    render(<UsersPage />);
+
+    await screen.findByText('Pending Invitations');
+    const row = screen.getByTestId('direct-invitation-row-inv-001');
+    const revokeButton = within(row).getByTitle('Revoke invitation');
+
+    await user.click(revokeButton);
+
+    await waitFor(() => {
+      expect(confirmMock).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Revoke invitation' })
+      );
+    });
+    await waitFor(() => {
+      expect(apiMock.revokeInvitation).toHaveBeenCalledWith('inv-001');
+    });
+  });
+
+  it('shows empty state when no direct invitations exist', async () => {
+    apiMock.getInvitations.mockResolvedValue({ items: [], total: 0 });
+    render(<UsersPage />);
+
+    await screen.findByText('Pending Invitations');
+    expect(screen.getByText('No invitations')).toBeInTheDocument();
+  });
+
+  it('renders a resend button on pending invitation rows', async () => {
+    apiMock.getInvitations.mockResolvedValue({
+      items: [
+        {
+          id: 'inv-resend',
+          email: 'resendme@example.com',
+          role: 'user',
+          status: 'pending',
+          invited_by: 'Alice',
+          created_at: '2026-03-20T10:00:00Z',
+          expires_at: '2099-03-27T10:00:00Z',
+          email_sent: true,
+          email_error: null,
+          resend_count: 0,
+        },
+      ],
+      total: 1,
+    });
+    render(<UsersPage />);
+
+    const row = await screen.findByTestId('direct-invitation-row-inv-resend');
+    const resendBtn = within(row).getByLabelText('Resend invitation');
+    expect(resendBtn).toBeInTheDocument();
+    expect(resendBtn).not.toBeDisabled();
+  });
+
+  it('disables resend button when resend_count >= 3', async () => {
+    apiMock.getInvitations.mockResolvedValue({
+      items: [
+        {
+          id: 'inv-maxed',
+          email: 'maxed@example.com',
+          role: 'user',
+          status: 'pending',
+          invited_by: 'Alice',
+          created_at: '2026-03-20T10:00:00Z',
+          expires_at: '2099-03-27T10:00:00Z',
+          email_sent: true,
+          email_error: null,
+          resend_count: 3,
+        },
+      ],
+      total: 1,
+    });
+    render(<UsersPage />);
+
+    const row = await screen.findByTestId('direct-invitation-row-inv-maxed');
+    const resendBtn = within(row).getByLabelText('Resend invitation');
+    expect(resendBtn).toBeDisabled();
+  });
+
+  it('calls resendInvitation API when resend button is clicked', async () => {
+    const user = userEvent.setup();
+    apiMock.getInvitations.mockResolvedValue({
+      items: [
+        {
+          id: 'inv-click',
+          email: 'click@example.com',
+          role: 'user',
+          status: 'pending',
+          invited_by: 'Alice',
+          created_at: '2026-03-20T10:00:00Z',
+          expires_at: '2099-03-27T10:00:00Z',
+          email_sent: false,
+          email_error: 'delivery failed',
+          resend_count: 1,
+        },
+      ],
+      total: 1,
+    });
+    apiMock.resendInvitation.mockResolvedValue({
+      id: 'inv-click',
+      email: 'click@example.com',
+      role: 'user',
+      status: 'pending',
+      email_sent: true,
+      email_error: null,
+      resend_count: 2,
+      last_resent_at: '2026-03-27T12:00:00Z',
+    });
+    render(<UsersPage />);
+
+    const row = await screen.findByTestId('direct-invitation-row-inv-click');
+    const resendBtn = within(row).getByLabelText('Resend invitation');
+    await user.click(resendBtn);
+
+    await waitFor(() => {
+      expect(apiMock.resendInvitation).toHaveBeenCalledWith('inv-click');
     });
   });
 });

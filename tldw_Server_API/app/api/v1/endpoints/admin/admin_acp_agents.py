@@ -5,26 +5,42 @@ configurations, and tool permission policy management.
 """
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAgentConfigCreate,
     ACPAgentConfigListResponse,
     ACPAgentConfigResponse,
+    ACPAgentInfo,
+    ACPAgentMetrics,
+    ACPAgentMetricsListResponse,
     ACPAgentUsageItem,
     ACPAgentUsageResponse,
+    ACPExecutionHealthFailureBuckets,
+    ACPExecutionHealthRedactionSummary,
+    ACPExecutionHealthRetentionSummary,
+    ACPExecutionHealthSessionSummary,
+    ACPExecutionHealthSetupSummary,
+    ACPExecutionHealthSummaryResponse,
     ACPPermissionPolicyCreate,
     ACPPermissionPolicyListResponse,
     ACPPermissionPolicyResponse,
+    ACPSessionBudgetRequest,
+    ACPSessionBudgetResponse,
     ACPSessionInfo,
     ACPSessionListResponse,
     ACPSessionUsageResponse,
     ACPTokenUsage,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+    summarize_execution_health,
+)
+from tldw_Server_API.app.core.Usage.pricing_catalog import compute_token_cost
 from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
 
 router = APIRouter(tags=["admin-acp"])
@@ -39,6 +55,38 @@ _NONCRITICAL = (
     TypeError,
     ValueError,
 )
+
+
+async def _get_available_agents() -> tuple[list[ACPAgentInfo], str | None]:
+    """Return configured ACP agents through the public ACP endpoint helper."""
+    from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import (
+        _get_available_agents as _acp_get_available_agents,
+    )
+
+    return await _acp_get_available_agents()
+
+
+def _now_iso() -> str:
+    """Return the current UTC time in ISO 8601 format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _retention_summary() -> ACPExecutionHealthRetentionSummary:
+    """Return the configured ACP retention posture, falling back to defaults."""
+    try:
+        from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
+
+        config = load_acp_sandbox_config()
+        return ACPExecutionHealthRetentionSummary(
+            session_retention_days=int(getattr(config, "session_retention_days", 30)),
+            audit_retention_days=int(getattr(config, "audit_retention_days", 30)),
+        )
+    except _NONCRITICAL as exc:
+        logger.warning(
+            "Unable to load ACP retention config for execution-health summary; using defaults: {}",
+            type(exc).__name__,
+        )
+        return ACPExecutionHealthRetentionSummary()
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +118,16 @@ async def admin_list_acp_sessions(
         ))
         for rec in records
     ]
-    return ACPSessionListResponse(sessions=sessions, total=total)
+    return ACPSessionListResponse(
+        sessions=sessions,
+        total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(sessions),
+        ),
+    )
 
 
 @router.get("/acp/sessions/{session_id}/usage", response_model=ACPSessionUsageResponse)
@@ -88,6 +145,12 @@ async def admin_acp_session_usage(session_id: str) -> ACPSessionUsageResponse:
         message_count=rec.message_count,
         created_at=rec.created_at,
         last_activity_at=rec.last_activity_at,
+        model=rec.model,
+        estimated_cost_usd=compute_token_cost(
+            model=rec.model,
+            prompt_tokens=rec.usage.prompt_tokens,
+            completion_tokens=rec.usage.completion_tokens,
+        ),
     )
 
 
@@ -107,6 +170,40 @@ async def admin_close_acp_session(session_id: str) -> dict[str, str]:
         pass
     await store.close_session(session_id)
     return {"status": "ok", "session_id": session_id}
+
+
+@router.patch("/acp/sessions/{session_id}/budget", response_model=ACPSessionBudgetResponse)
+async def admin_set_session_budget(
+    session_id: str,
+    body: ACPSessionBudgetRequest,
+) -> ACPSessionBudgetResponse:
+    """Set or update the token budget for an ACP session.
+
+    Setting token_budget to null removes the budget (unlimited).
+    When auto_terminate_at_budget is True, the session will automatically
+    close once total_tokens >= token_budget.
+    """
+    store = await get_acp_session_store()
+    rec = await store.update_session_budget(
+        session_id,
+        token_budget=body.token_budget,
+        auto_terminate_at_budget=body.auto_terminate_at_budget,
+    )
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+
+    budget_remaining = None
+    if rec.token_budget is not None:
+        budget_remaining = max(0, rec.token_budget - rec.usage.total_tokens)
+
+    return ACPSessionBudgetResponse(
+        session_id=rec.session_id,
+        token_budget=rec.token_budget,
+        auto_terminate_at_budget=rec.auto_terminate_at_budget,
+        budget_exhausted=rec.budget_exhausted,
+        total_tokens=rec.usage.total_tokens,
+        budget_remaining=budget_remaining,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +241,55 @@ async def admin_list_agent_configs(
     return ACPAgentConfigListResponse(
         agents=[ACPAgentConfigResponse(**c.to_dict()) for c in configs],
         total=len(configs),
+    )
+
+
+@router.get("/acp/agents/metrics", response_model=ACPAgentMetricsListResponse)
+async def get_acp_agent_metrics() -> ACPAgentMetricsListResponse:
+    """Aggregate runtime metrics per ACP agent type.
+
+    Returns per-agent totals for sessions, active sessions, tokens,
+    messages, and the timestamp of the most recent activity.
+    """
+    store = await get_acp_session_store()
+    metrics = await store.get_agent_metrics()
+    return ACPAgentMetricsListResponse(
+        items=[ACPAgentMetrics(**m) for m in metrics],
+    )
+
+
+@router.get("/acp/execution-health/summary", response_model=ACPExecutionHealthSummaryResponse)
+async def get_acp_execution_health_summary(
+    range_days: int = Query(30, ge=1, le=180),
+    _: object = Depends(get_auth_principal),
+    __: None = Depends(check_rate_limit),
+) -> ACPExecutionHealthSummaryResponse:
+    """Return a compact ACP execution-health rollup for admin reporting."""
+    store = await get_acp_session_store()
+    since = datetime.now(timezone.utc) - timedelta(days=range_days)
+    sessions = await store.list_sessions_with_messages_since(since=since, page_size=1000)
+
+    try:
+        agents, _default_agent = await _get_available_agents()
+    except _NONCRITICAL as exc:
+        logger.warning(
+            "Unable to include ACP agent compatibility in execution-health summary: {}",
+            exc,
+        )
+        agents = []
+
+    summary = summarize_execution_health(sessions=sessions, agents=agents)
+
+    return ACPExecutionHealthSummaryResponse(
+        timestamp=_now_iso(),
+        range_days=range_days,
+        sessions=ACPExecutionHealthSessionSummary(**summary["sessions"]),
+        failure_buckets=ACPExecutionHealthFailureBuckets(**summary["failure_buckets"]),
+        setup_health=ACPExecutionHealthSetupSummary(**summary["setup_health"]),
+        agents=summary["agents"],
+        compatibility=summary["compatibility"],
+        retention=_retention_summary(),
+        redaction=ACPExecutionHealthRedactionSummary(),
     )
 
 

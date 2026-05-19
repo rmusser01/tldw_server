@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -163,13 +164,35 @@ class URLPatternFilter(URLFilter):
         return True
 
 
+_RobotsStatus = Literal["allowed", "disallowed", "egress_denied", "unreachable"]
+
+
+@dataclass(slots=True, frozen=True)
+class _RobotsFetchResult:
+    """Internal representation of a robots.txt fetch attempt."""
+
+    parser: RobotFileParser | None
+    status: Literal["ok", "unreachable"]
+
+
+@dataclass(slots=True, frozen=True)
+class RobotsCheckResult:
+    """Structured result for a robots.txt permission check."""
+
+    allowed: bool
+    status: _RobotsStatus
+
+
 class RobotsFilter:
     """Asynchronous robots.txt gate with per-domain cache.
 
     Notes:
-    - This filter is not part of the synchronous FilterChain. Call `await allowed(url)` explicitly.
-    - Fails open (allow) when robots.txt is unreachable or parser errors occur.
-    - Honors centralized egress guard: robots check runs only for allowed hosts.
+    - This filter is not part of the synchronous FilterChain. Call `await check(...)`
+      or `await allowed(...)` explicitly.
+    - Compatibility callers can fail open on robots fetch errors; strict callers can
+      request fail-closed behavior without depending on exceptions.
+    - Honors centralized egress guard unless the caller explicitly reuses a prior
+      outbound decision via `skip_egress_check=True`.
     """
 
     def __init__(
@@ -199,10 +222,10 @@ class RobotsFilter:
         except (TypeError, ValueError):
             return ""
 
-    async def _fetch_parser(self, url: str) -> RobotFileParser | None:
+    async def _fetch_parser(self, url: str) -> _RobotsFetchResult:
         host = self._host(url)
         if not host:
-            return None
+            return _RobotsFetchResult(parser=None, status="unreachable")
 
         # TTL-based cache
         now = time.time()
@@ -210,7 +233,8 @@ class RobotsFilter:
         if cached is not None:
             parser, ts = cached
             if (now - ts) < self.ttl_seconds:
-                return parser
+                status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
+                return _RobotsFetchResult(parser=parser, status=status)
 
         # Ensure only one fetch in-flight per host
         lock = self._locks.setdefault(host, asyncio.Lock())
@@ -220,14 +244,15 @@ class RobotsFilter:
             if cached is not None:
                 parser, ts = cached
                 if (time.time() - ts) < self.ttl_seconds:
-                    return parser
+                    status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
+                    return _RobotsFetchResult(parser=parser, status=status)
 
             robots_url = self._robots_url_for(url)
             try:
                 if http_fetch is None:
                     logger.debug("http_fetch not available; allowing by default (no robots fetch)")
                     self._cache[host] = (None, time.time())
-                    return None
+                    return _RobotsFetchResult(parser=None, status="unreachable")
 
                 # Use thread offload to keep interface consistent with other code paths
                 resp = await asyncio.to_thread(
@@ -244,52 +269,78 @@ class RobotsFilter:
                     text = getattr(resp, "text", None)
                     status = getattr(resp, "status_code", None)
                 if not text or (isinstance(status, int) and status >= 400):
-                    # Treat missing/unreadable robots as allow
+                    # Treat missing/unreadable robots as unreachable and let the caller
+                    # decide whether to fail open or closed.
                     self._cache[host] = (None, time.time())
-                    return None
+                    return _RobotsFetchResult(parser=None, status="unreachable")
                 rp = RobotFileParser()
                 rp.parse(text.splitlines())
                 self._cache[host] = (rp, time.time())
-                return rp
+                return _RobotsFetchResult(parser=rp, status="ok")
             except _WEB_FILTER_NONCRITICAL_EXCEPTIONS as e:  # pragma: no cover - network/parse errors fail open
                 logger.debug(f"Robots fetch failed for host={host}: {e}")
                 self._cache[host] = (None, time.time())
-                return None
+                return _RobotsFetchResult(parser=None, status="unreachable")
 
-    async def allowed(self, url: str) -> bool:
-        """Return True if URL passes robots policy or when check is skipped.
+    async def check(
+        self,
+        url: str,
+        *,
+        skip_egress_check: bool = False,
+        fail_open: bool = True,
+    ) -> RobotsCheckResult:
+        """Return a structured robots.txt decision for the target URL.
 
-        Skips robots check when egress policy denies the target host.
+        Parameters
+        ----------
+        skip_egress_check:
+            Reuse a prior egress decision instead of evaluating policy again.
+        fail_open:
+            When `True`, unreachable or unreadable robots.txt is treated as allowed.
+            When `False`, the same condition is treated as blocked.
         """
-        # Always short-circuit on egress denial; do not fetch robots for disallowed hosts.
-        # Import lazily so test monkeypatches on egress.evaluate_url_policy are honored.
-        eval_fn = None
-        try:
-            from tldw_Server_API.app.core.Security import egress as _egress  # local import to honor monkeypatch
-            eval_fn = getattr(_egress, "evaluate_url_policy", None)
-        except ImportError:
-            eval_fn = evaluate_url_policy
-        try:
-            if eval_fn is not None:
-                pol = eval_fn(url)
-                if not getattr(pol, "allowed", False):
-                    return False
-        except _WEB_FILTER_NONCRITICAL_EXCEPTIONS:
-            # On egress evaluation error, fail closed for safety at enqueue time
-            return False
-
-        parser = await self._fetch_parser(url)
-        if parser is None:
-            # If fetcher not available, fall back to one-off async helper when present
+        if not skip_egress_check:
+            # Import lazily so test monkeypatches on egress.evaluate_url_policy are honored.
+            eval_fn = None
             try:
-                from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-                    is_allowed_by_robots_async as _robots_check_async,
-                )
-                return await _robots_check_async(url, self.user_agent, timeout=self.timeout)
+                from tldw_Server_API.app.core.Security import egress as _egress  # local import to honor monkeypatch
+
+                eval_fn = getattr(_egress, "evaluate_url_policy", None)
+            except ImportError:
+                eval_fn = evaluate_url_policy
+            try:
+                if eval_fn is not None:
+                    pol = eval_fn(url)
+                    if not getattr(pol, "allowed", False):
+                        return RobotsCheckResult(allowed=False, status="egress_denied")
             except _WEB_FILTER_NONCRITICAL_EXCEPTIONS:
-                # Fail open: treat as allowed when robots is missing/unreadable
-                return True
+                # On egress evaluation error, fail closed and preserve that distinction for observability.
+                return RobotsCheckResult(allowed=False, status="egress_error")
+
+        fetch_result = await self._fetch_parser(url)
+        if fetch_result.status != "ok" or fetch_result.parser is None:
+            return RobotsCheckResult(allowed=fail_open, status="unreachable")
+
         try:
-            return bool(parser.can_fetch(self.user_agent, url))
+            allowed = bool(fetch_result.parser.can_fetch(self.user_agent, url))
         except _WEB_FILTER_NONCRITICAL_EXCEPTIONS:
-            return True
+            return RobotsCheckResult(allowed=fail_open, status="unreachable")
+        return RobotsCheckResult(
+            allowed=allowed,
+            status="allowed" if allowed else "disallowed",
+        )
+
+    async def allowed(
+        self,
+        url: str,
+        *,
+        skip_egress_check: bool = False,
+        fail_open: bool = True,
+    ) -> bool:
+        """Return `True` when the URL passes robots policy for the requested mode."""
+        result = await self.check(
+            url,
+            skip_egress_check=skip_egress_check,
+            fail_open=fail_open,
+        )
+        return result.allowed

@@ -8,6 +8,7 @@ from typing import Awaitable, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.base import EventConsumer
+from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.replay_utils import replay_events
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 
@@ -67,14 +68,31 @@ class WSBroadcaster(EventConsumer):
     # Connection management
     # ------------------------------------------------------------------ #
 
-    def add_connection(
+    async def add_connection(
         self,
         conn_id: str,
         send_callback: SendCallback,
         verbosity: str = "full",
+        from_sequence: int = 0,
     ) -> None:
-        """Register a WebSocket connection for event delivery."""
-        self._connections[conn_id] = _ConnectionInfo(conn_id, send_callback, verbosity)
+        """Register a WebSocket connection for event delivery.
+
+        If *from_sequence* > 0 and a bus is available, buffered events are
+        replayed to this connection (with verbosity filtering) before it is
+        added to the live broadcast set.
+        """
+        info = _ConnectionInfo(conn_id, send_callback, verbosity)
+
+        # Replay buffered events before going live
+        if from_sequence > 0 and self._bus is not None:
+            async def _emit(event: AgentEvent) -> None:
+                if _passes_filter(event.kind, verbosity):
+                    msg = json.dumps(event.to_dict())
+                    await send_callback(msg)
+
+            await replay_events(self._bus, from_sequence, _emit)
+
+        self._connections[conn_id] = info
 
     def remove_connection(self, conn_id: str) -> None:
         """Unregister a WebSocket connection."""

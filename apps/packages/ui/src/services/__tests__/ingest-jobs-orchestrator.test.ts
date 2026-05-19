@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   createIngestJobsTracker,
+  pollSingleIngestJob,
   pollTrackedIngestJobs
 } from "@/services/tldw/ingest-jobs-orchestrator"
 
@@ -100,5 +101,76 @@ describe("ingest-jobs-orchestrator", () => {
     expect(results).toHaveLength(2)
     expect(results[0]).toMatchObject({ status: "ok" })
     expect(results[1]).toMatchObject({ status: "error" })
+  })
+
+  it("treats completed jobs with error payloads as failures instead of successes", async () => {
+    const tracker = createIngestJobsTracker<{ id: string }>()
+    tracker.trackSubmit(
+      {
+        batch_id: "batch-err",
+        jobs: [{ id: 404 }]
+      },
+      { id: "item-error" }
+    )
+
+    const results = await pollTrackedIngestJobs({
+      tracker,
+      fetchJob: async () => ({
+        ok: true,
+        data: {
+          status: "completed",
+          result: {
+            status: "Error",
+            error: "File preparation/download failed: Port not allowed: 3000"
+          }
+        }
+      }),
+      timeoutMs: 10_000,
+      pollIntervalMs: 1,
+      isCancelled: () => false,
+      onCancel: async () => {},
+      mapCompleted: () => ({
+        kind: "completed"
+      }),
+      mapCancelled: () => ({
+        kind: "cancelled"
+      }),
+      mapFailure: (_item, details) => ({
+        kind: "failed",
+        error: details.error
+      })
+    })
+
+    expect(results).toEqual([
+      {
+        kind: "failed",
+        error: "File preparation/download failed: Port not allowed: 3000"
+      }
+    ])
+  })
+
+  it("reports completed jobs with error payloads as failed in single-job polling", async () => {
+    const result = await pollSingleIngestJob({
+      jobId: 405,
+      fetchJob: async () => ({
+        ok: true,
+        data: {
+          status: "completed",
+          result: {
+            status: "Error",
+            error: "File preparation/download failed: Port not allowed: 3000"
+          }
+        }
+      }),
+      timeoutMs: 10_000,
+      pollIntervalMs: 1,
+      isCancelled: () => false,
+      onCancel: async () => {}
+    })
+
+    expect(result).toMatchObject({
+      terminalStatus: "failed",
+      error: "File preparation/download failed: Port not allowed: 3000"
+    })
   })
 })

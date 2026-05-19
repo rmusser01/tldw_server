@@ -2,7 +2,9 @@ import React from "react"
 import { Input, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 
+import { DeckStudyDefaultsFields } from "./DeckStudyDefaultsFields"
 import { DeckSchedulerSettingsEditor } from "./DeckSchedulerSettingsEditor"
+import type { DeckReviewPromptSide } from "@/services/flashcards"
 import type { DeckSchedulerDraftState } from "../hooks/useDeckSchedulerDraft"
 
 const { Text } = Typography
@@ -13,6 +15,8 @@ type NewDeckConfigurationFieldsProps = {
   schedulerDraft: DeckSchedulerDraftState
   nameTestId: string
   hint?: string | null
+  reviewPromptSide?: DeckReviewPromptSide
+  onReviewPromptSideChange?: (value: DeckReviewPromptSide) => void
 }
 
 export const NewDeckConfigurationFields: React.FC<NewDeckConfigurationFieldsProps> = ({
@@ -20,9 +24,24 @@ export const NewDeckConfigurationFields: React.FC<NewDeckConfigurationFieldsProp
   onDeckNameChange,
   schedulerDraft,
   nameTestId,
-  hint = null
+  hint = null,
+  reviewPromptSide,
+  onReviewPromptSideChange
 }) => {
   const { t } = useTranslation(["option"])
+  const [localReviewPromptSide, setLocalReviewPromptSide] = React.useState<DeckReviewPromptSide>(
+    reviewPromptSide ?? "front"
+  )
+
+  React.useEffect(() => {
+    if (reviewPromptSide) {
+      setLocalReviewPromptSide(reviewPromptSide)
+    }
+  }, [reviewPromptSide])
+
+  const effectiveReviewPromptSide = reviewPromptSide ?? localReviewPromptSide
+  const handleReviewPromptSideChange =
+    onReviewPromptSideChange ?? setLocalReviewPromptSide
 
   return (
     <div className="space-y-3 rounded border border-border bg-muted/10 p-3">
@@ -41,6 +60,11 @@ export const NewDeckConfigurationFields: React.FC<NewDeckConfigurationFieldsProp
           data-testid={nameTestId}
         />
       </label>
+
+      <DeckStudyDefaultsFields
+        reviewPromptSide={effectiveReviewPromptSide}
+        onReviewPromptSideChange={handleReviewPromptSideChange}
+      />
 
       <DeckSchedulerSettingsEditor
         schedulerDraft={schedulerDraft}

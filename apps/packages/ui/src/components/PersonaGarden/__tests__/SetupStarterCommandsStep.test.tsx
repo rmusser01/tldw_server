@@ -60,6 +60,55 @@ describe("SetupStarterCommandsStep", () => {
     expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
   })
 
+  it("does not create a starter command again when an already-selected template is unchecked", () => {
+    const onCreateFromTemplate = vi.fn()
+
+    render(
+      <SetupStarterCommandsStep
+        saving={false}
+        defaultCommands={[{ template_key: "notes-search" }]}
+        onCreateFromTemplate={onCreateFromTemplate}
+        onCreateMcpStarter={vi.fn()}
+        onSkip={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Search Notes" }))
+
+    expect(onCreateFromTemplate).not.toHaveBeenCalled()
+  })
+
+  it("keeps selected-template toggle semantics and exposes an explicit retry action", () => {
+    const onCreateFromTemplate = vi.fn()
+
+    render(
+      <SetupStarterCommandsStep
+        saving={false}
+        error="Failed to create starter command"
+        defaultCommands={[{ template_key: "notes-search" }]}
+        onCreateFromTemplate={onCreateFromTemplate}
+        onCreateMcpStarter={vi.fn()}
+        onSkip={vi.fn()}
+      />
+    )
+
+    const searchNotes = screen.getByRole("button", { name: "Search Notes" })
+    fireEvent.click(searchNotes)
+
+    expect(onCreateFromTemplate).not.toHaveBeenCalled()
+    expect(searchNotes).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(searchNotes)
+    expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
+    expect(searchNotes).toHaveAttribute("aria-pressed", "true")
+
+    onCreateFromTemplate.mockClear()
+    fireEvent.click(screen.getByRole("button", { name: "Retry Search Notes" }))
+
+    expect(onCreateFromTemplate).toHaveBeenCalledWith("notes-search")
+    expect(searchNotes).toHaveAttribute("aria-pressed", "true")
+  })
+
   it("creates an MCP-backed starter command from an explicit tool and phrase", () => {
     const onCreateMcpStarter = vi.fn()
 

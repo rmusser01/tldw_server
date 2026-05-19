@@ -19,6 +19,7 @@ vi.mock('recharts', () => {
     ResponsiveContainer: MockContainer,
     AreaChart: MockContainer,
     Area: () => <div />,
+    Line: () => <div />,
     CartesianGrid: () => <div />,
     XAxis: () => <div />,
     YAxis: () => <div />,
@@ -50,6 +51,10 @@ describe('ActivitySection', () => {
         checkedAt: '2026-02-17T10:00:07.000Z',
         cacheHitRatePct: 84.3,
       },
+      jobQueue: {
+        status: 'healthy',
+        checkedAt: '2026-02-17T10:00:08.000Z',
+      },
     };
 
     render(
@@ -69,8 +74,9 @@ describe('ActivitySection', () => {
     expect(screen.getByText('STT Service')).toBeInTheDocument();
     expect(screen.getByText('Embeddings')).toBeInTheDocument();
     expect(screen.getByText('RAG Cache')).toBeInTheDocument();
+    expect(screen.getByText('Job Queue')).toBeInTheDocument();
     expect(screen.getByText('Cache hit rate: 84.3%')).toBeInTheDocument();
-    expect(screen.getAllByText(/Last checked:/).length).toBe(8);
+    expect(screen.getAllByText(/Last checked:/).length).toBe(9);
   });
 
   it('keeps health rows visible when some subsystem checks fail', () => {
@@ -83,6 +89,7 @@ describe('ActivitySection', () => {
       stt: { status: 'down', checkedAt: '2026-02-17T10:05:00.000Z' },
       embeddings: { status: 'down', checkedAt: '2026-02-17T10:05:00.000Z' },
       cache: { status: 'down', checkedAt: '2026-02-17T10:05:00.000Z' },
+      jobQueue: { status: 'down', checkedAt: '2026-02-17T10:05:00.000Z', errorMessage: '5 quarantined job(s)' },
     };
 
     render(
@@ -94,7 +101,8 @@ describe('ActivitySection', () => {
       />
     );
 
-    expect(screen.getAllByText('Down').length).toBeGreaterThanOrEqual(6);
+    expect(screen.getAllByText('Down').length).toBeGreaterThanOrEqual(7);
+    expect(screen.getByText('5 quarantined job(s)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'View Details' })).toBeInTheDocument();
   });
 
@@ -109,6 +117,7 @@ describe('ActivitySection', () => {
       stt: { status: 'healthy', checkedAt: '2026-02-17T10:00:05.000Z' },
       embeddings: { status: 'healthy', checkedAt: '2026-02-17T10:00:06.000Z' },
       cache: { status: 'healthy', checkedAt: '2026-02-17T10:00:07.000Z' },
+      jobQueue: { status: 'healthy', checkedAt: '2026-02-17T10:00:08.000Z' },
     };
 
     render(

@@ -121,6 +121,57 @@ describe("watchlists overview quick setup helpers", () => {
     timezoneSpy.mockRestore()
   })
 
+  it("attaches selected Watchlist id when building collection payloads", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "UTC" })
+      }) as Intl.DateTimeFormat)
+
+    expect(
+      toQuickSetupSourcePayload(
+        {
+          sourceName: " Security Feed ",
+          sourceUrl: " https://example.com/security.xml ",
+          sourceType: "rss"
+        },
+        42
+      )
+    ).toEqual({
+      name: "Security Feed",
+      url: "https://example.com/security.xml",
+      source_type: "rss",
+      active: true,
+      watchlist_id: 42
+    })
+
+    expect(
+      toQuickSetupJobPayload(
+        {
+          monitorName: " Security Monitor ",
+          schedulePreset: "daily",
+          setupGoal: "briefing",
+          includeAudioBriefing: false
+        },
+        [101],
+        42
+      )
+    ).toEqual({
+      name: "Security Monitor",
+      scope: { sources: [101] },
+      active: true,
+      schedule_expr: "0 8 * * *",
+      timezone: "UTC",
+      watchlist_id: 42,
+      output_prefs: {
+        template_name: "briefing_md",
+        generate_audio: false
+      }
+    })
+
+    timezoneSpy.mockRestore()
+  })
+
   it("parses extra source URLs from newline/comma-delimited values", () => {
     expect(
       parseQuickSetupExtraSourceUrls(

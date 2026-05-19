@@ -19,9 +19,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { logger } from '@/lib/logger';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
-import { OrgContextSwitcher } from '@/components/OrgContextSwitcher';
+import { OrgContextSwitcher, OrgContextBanner } from '@/components/OrgContextSwitcher';
 import { usePermissions } from '@/components/PermissionGuard';
 import { useToast } from '@/components/ui/toast';
 import { isBillingEnabled } from '@/lib/billing';
@@ -91,7 +92,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       await refresh();
       router.push('/login');
     } catch (error) {
-      console.error('Logout failed:', error);
+      logger.error('Logout failed', { component: 'SidebarContent', error: error instanceof Error ? error.message : String(error) });
       showError('Logout failed', 'Please try again.');
     }
   };
@@ -486,6 +487,9 @@ export function ResponsiveLayout({ children }: ResponsiveLayoutProps) {
               {showBreadcrumbs && <Breadcrumbs />}
             </div>
           )}
+          <div className="px-4 pt-2 lg:px-8 empty:hidden">
+            <OrgContextBanner />
+          </div>
           {children}
         </main>
       </div>

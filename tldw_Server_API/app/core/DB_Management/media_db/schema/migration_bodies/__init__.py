@@ -23,6 +23,10 @@ from .postgres_email_schema import (
     PostgresEmailSchemaBody,
     run_postgres_migrate_to_v22,
 )
+from .postgres_transcript_run_history import (
+    PostgresTranscriptRunHistoryBody,
+    run_postgres_migrate_to_v23,
+)
 from .postgres_source_hash import (
     PostgresSourceHashBody,
     run_postgres_migrate_to_v16,
@@ -78,6 +82,8 @@ __all__ = [
     "run_postgres_migrate_to_v15",
     "PostgresEmailSchemaBody",
     "run_postgres_migrate_to_v22",
+    "PostgresTranscriptRunHistoryBody",
+    "run_postgres_migrate_to_v23",
     "PostgresSourceHashBody",
     "run_postgres_migrate_to_v16",
     "PostgresSequenceSyncBody",

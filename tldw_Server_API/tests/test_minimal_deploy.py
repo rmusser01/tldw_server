@@ -27,6 +27,7 @@ class TestRedisOptional:
 
 
 class TestSQLiteDefault:
-    def test_default_database_url_is_sqlite(self):
+    def test_default_database_url_is_sqlite(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("DATABASE_URL", raising=False)
         default_url = os.getenv("DATABASE_URL", "sqlite:///./Databases/users.db")
         assert "sqlite" in default_url.lower()

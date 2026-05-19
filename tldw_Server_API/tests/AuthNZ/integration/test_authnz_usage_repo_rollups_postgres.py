@@ -33,13 +33,14 @@ async def test_authnz_usage_repo_insert_llm_and_rollup_postgres(test_db_pool):
         )
         key_id = await conn.fetchval(
             """
-            INSERT INTO api_keys (user_id, key_hash, key_prefix, status)
-            VALUES ($1, $2, $3, 'active')
+            INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
+            VALUES ($1, $2, $3, $4, 'active')
             RETURNING id
             """,
             int(user_id),
             "pg-usage-rollup-key-hash",
             "pg-rollup-pfx",
+            "read",
         )
 
     await repo.insert_llm_usage_log(
@@ -198,13 +199,14 @@ async def test_authnz_usage_repo_summarize_user_and_key_day_postgres(test_db_poo
         )
         key_id = await conn.fetchval(
             """
-            INSERT INTO api_keys (user_id, key_hash, key_prefix, status)
-            VALUES ($1, $2, $3, 'active')
+            INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
+            VALUES ($1, $2, $3, $4, 'active')
             RETURNING id
             """,
             int(user_id),
             "pg-usage-summarize-key-hash",
             "pg-summarize-pfx",
+            "read",
         )
 
     await repo.insert_llm_usage_log(

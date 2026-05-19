@@ -161,15 +161,15 @@ DATA_TABLES_RUNTIME_EXCEPTIONS = (
 def _close_media_db(user_id: str, db: Any) -> None:
     try:
         db.close_connection()
-    except DATA_TABLES_DB_EXCEPTIONS as exc:
-        logger.warning("data_tables: failed to close media db for user_id {}: {}", user_id, exc)
+    except DATA_TABLES_DB_EXCEPTIONS:
+        logger.warning("data_tables: failed to close media db")
 
 
 def _close_chacha_db(user_id: str, db: CharactersRAGDB) -> None:
     try:
         db.close_connection()
-    except DATA_TABLES_DB_EXCEPTIONS as exc:
-        logger.warning("data_tables: failed to close chacha db for user_id {}: {}", user_id, exc)
+    except DATA_TABLES_DB_EXCEPTIONS:
+        logger.warning("data_tables: failed to close chacha db")
 
 
 def _evict_lru_entry(cache: LRUCache, on_evict: Callable[[str, Any], None]) -> None:
@@ -703,24 +703,16 @@ def _extract_media_text(db: Any, media_id: int) -> str:
     if not text.strip():
         try:
             latest = get_document_version(db, media_id=media_id, version_number=None, include_content=True)
-        except DATA_TABLES_DB_EXCEPTIONS as exc:
-            logger.debug(
-                "data_tables: get_document_version failed for media_id {}: {}",
-                media_id,
-                exc,
-            )
+        except DATA_TABLES_DB_EXCEPTIONS:
+            logger.debug("data_tables: get_document_version failed while extracting media text")
             latest = None
         if latest and latest.get("content"):
             text = str(latest.get("content") or "")
         else:
             try:
                 fallback = get_latest_transcription(db, media_id)
-            except DATA_TABLES_DB_EXCEPTIONS as exc:
-                logger.debug(
-                    "data_tables: get_latest_transcription failed for media_id {}: {}",
-                    media_id,
-                    exc,
-                )
+            except DATA_TABLES_DB_EXCEPTIONS:
+                logger.debug("data_tables: get_latest_transcription failed while extracting media text")
                 fallback = None
             if fallback:
                 text = fallback

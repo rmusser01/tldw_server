@@ -7,6 +7,7 @@ before any tests import the FastAPI app.
 """
 
 import os
+import sys
 import importlib
 import types
 import importlib.machinery

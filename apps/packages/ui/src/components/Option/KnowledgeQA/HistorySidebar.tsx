@@ -391,7 +391,8 @@ export function HistorySidebar({ className }: HistorySidebarProps) {
 
   return (
     <div
-      className={cn("flex flex-col w-64 border-r border-border bg-surface", className)}
+      className={cn("flex flex-col border-r border-border bg-surface", className)}
+      style={{ width: "var(--sidebar-width)" }}
       data-testid="knowledge-history-desktop-open"
     >
       {renderExpandedContent()}

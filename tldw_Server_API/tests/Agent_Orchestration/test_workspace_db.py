@@ -3,8 +3,8 @@ import tempfile
 
 import pytest
 
-from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, TaskStatus
 from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
+    CanonicalWorkspaceBridgeConflictError,
     OrchestrationDB,
     OrchestrationNotFoundError,
 )
@@ -25,7 +25,7 @@ def db():
 
 class TestSchemaMigration:
     def test_fresh_db_creates_v2_schema(self, db):
-        """A fresh DB should have all v2 tables."""
+        """A fresh DB should have all current workspace tables and columns."""
         db._ensure_schema()
         conn = db._get_conn()
         tables = {
@@ -37,9 +37,13 @@ class TestSchemaMigration:
         assert "acp_workspaces" in tables
         assert "acp_workspace_mcp_servers" in tables
         assert "projects" in tables
+        workspace_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(acp_workspaces)").fetchall()
+        }
+        assert "canonical_workspace_id" in workspace_cols
         # Check user_version
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 2
+        assert version == 3
 
     def test_projects_has_workspace_id_column(self, db):
         """The projects table should have a workspace_id column after migration."""
@@ -48,8 +52,8 @@ class TestSchemaMigration:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
         assert "workspace_id" in cols
 
-    def test_v1_to_v2_migration(self):
-        """Simulate a v1 DB and verify migration to v2 works."""
+    def test_v1_to_current_migration(self):
+        """Simulate a v1 DB and verify migration to the current schema works."""
         import os
         import sqlite3
 
@@ -100,8 +104,119 @@ class TestSchemaMigration:
             assert row is not None
             assert row[1] == "test"  # name
 
+            workspace_cols = {
+                r[1] for r in c.execute("PRAGMA table_info(acp_workspaces)").fetchall()
+            }
+            assert "canonical_workspace_id" in workspace_cols
+
             version = c.execute("PRAGMA user_version").fetchone()[0]
-            assert version == 2
+            assert version == 3
+            db.close()
+
+    def test_v2_to_v3_migration_backfills_canonical_workspace_id(self):
+        """Existing metadata links should backfill the dedicated canonical column."""
+        import os
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "orchestration.db")
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE acp_workspaces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    root_path TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    workspace_type TEXT NOT NULL DEFAULT 'manual',
+                    parent_workspace_id INTEGER,
+                    env_vars TEXT NOT NULL DEFAULT '{}',
+                    git_remote_url TEXT,
+                    git_default_branch TEXT,
+                    git_current_branch TEXT,
+                    git_is_dirty INTEGER,
+                    last_health_check TEXT,
+                    health_status TEXT NOT NULL DEFAULT 'unknown',
+                    user_id INTEGER NOT NULL,
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
+                );
+                CREATE UNIQUE INDEX idx_acp_workspaces_name ON acp_workspaces(user_id, name);
+                CREATE UNIQUE INDEX idx_acp_workspaces_root ON acp_workspaces(user_id, root_path);
+                PRAGMA user_version=2;
+            """)
+            conn.execute(
+                "INSERT INTO acp_workspaces "
+                "(name, root_path, user_id, metadata, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    "Linked",
+                    "/tmp/linked",
+                    1,
+                    '{"canonical_workspace_id":"workspace-alpha"}',
+                    "2026-01-01T00:00:00+00:00",
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            db = OrchestrationDB(user_id=1, db_dir=tmp)
+            db._ensure_schema()
+
+            found = db.get_workspace_by_canonical_workspace_id("workspace-alpha")
+            assert found is not None
+            assert found.name == "Linked"
+            db.close()
+
+    def test_v2_to_v3_migration_rejects_duplicate_canonical_links(self):
+        """Duplicate metadata links should fail migration with remediation context."""
+        import os
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "orchestration.db")
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE acp_workspaces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    root_path TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    workspace_type TEXT NOT NULL DEFAULT 'manual',
+                    parent_workspace_id INTEGER,
+                    env_vars TEXT NOT NULL DEFAULT '{}',
+                    git_remote_url TEXT,
+                    git_default_branch TEXT,
+                    git_current_branch TEXT,
+                    git_is_dirty INTEGER,
+                    last_health_check TEXT,
+                    health_status TEXT NOT NULL DEFAULT 'unknown',
+                    user_id INTEGER NOT NULL,
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
+                );
+                PRAGMA user_version=2;
+            """)
+            for name, root_path in (("Linked A", "/tmp/a"), ("Linked B", "/tmp/b")):
+                conn.execute(
+                    "INSERT INTO acp_workspaces "
+                    "(name, root_path, user_id, metadata, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        name,
+                        root_path,
+                        1,
+                        '{"canonical_workspace_id":"workspace-alpha"}',
+                        "2026-01-01T00:00:00+00:00",
+                    ),
+                )
+            conn.commit()
+            conn.close()
+
+            db = OrchestrationDB(user_id=1, db_dir=tmp)
+            with pytest.raises(ValueError, match="Duplicate canonical workspace links"):
+                db._ensure_schema()
             db.close()
 
 
@@ -212,6 +327,16 @@ class TestWorkspaceCRUD:
         assert found.name == "WS1"
         assert db.get_workspace_by_root_path("/tmp/nonexistent") is None
 
+    def test_get_workspaces_by_ids_returns_current_user_workspaces(self, db):
+        ws1 = db.create_workspace(name="WS1", root_path="/tmp/ws1")
+        ws2 = db.create_workspace(name="WS2", root_path="/tmp/ws2")
+
+        found = db.get_workspaces_by_ids([ws1.id, ws2.id, ws1.id, 999])
+
+        assert set(found) == {ws1.id, ws2.id}
+        assert found[ws1.id].name == "WS1"
+        assert found[ws2.id].name == "WS2"
+
     def test_workspace_with_env_vars(self, db):
         ws = db.create_workspace(
             name="WS1",
@@ -229,6 +354,100 @@ class TestWorkspaceCRUD:
             metadata={"framework": "fastapi", "version": "0.100"},
         )
         assert ws.metadata["framework"] == "fastapi"
+
+    def test_get_workspace_by_canonical_workspace_id(self, db):
+        db.create_workspace(name="Other", root_path="/tmp/other")
+        linked = db.create_workspace(
+            name="Linked",
+            root_path="/tmp/linked",
+            metadata={
+                "canonical_workspace_id": "workspace-alpha",
+                "canonical_workspace_source": "workspace_playground",
+                "link_status": "linked",
+            },
+        )
+
+        found = db.get_workspace_by_canonical_workspace_id("workspace-alpha")
+
+        assert found is not None
+        assert found.id == linked.id
+        assert db.get_workspace_by_canonical_workspace_id("workspace-missing") is None
+
+    def test_duplicate_canonical_workspace_id_raises(self, db):
+        db.create_workspace(
+            name="Linked A",
+            root_path="/tmp/linked-a",
+            metadata={"canonical_workspace_id": "workspace-alpha"},
+        )
+
+        with pytest.raises(ValueError, match="canonical_workspace_id"):
+            db.create_workspace(
+                name="Linked B",
+                root_path="/tmp/linked-b",
+                metadata={"canonical_workspace_id": "workspace-alpha"},
+            )
+
+    def test_link_workspace_to_canonical_merges_metadata_without_duplication(self, db):
+        ws = db.create_workspace(
+            name="Existing Root",
+            root_path="/tmp/existing-root",
+            metadata={"existing": "kept"},
+        )
+
+        linked = db.link_workspace_to_canonical(
+            ws.id,
+            canonical_workspace_id="workspace-alpha",
+            canonical_workspace_source="workspace_playground",
+        )
+
+        assert linked.id == ws.id
+        assert linked.metadata == {
+            "existing": "kept",
+            "canonical_workspace_id": "workspace-alpha",
+            "canonical_workspace_source": "workspace_playground",
+            "link_status": "linked",
+        }
+        assert len(db.list_workspaces()) == 1
+        assert db.get_workspace_by_canonical_workspace_id("workspace-alpha").id == ws.id
+
+    def test_link_workspace_to_canonical_rejects_duplicate_canonical_id(self, db):
+        first = db.create_workspace(name="First", root_path="/tmp/first")
+        second = db.create_workspace(name="Second", root_path="/tmp/second")
+        db.link_workspace_to_canonical(
+            first.id,
+            canonical_workspace_id="workspace-alpha",
+            canonical_workspace_source="workspace_playground",
+        )
+
+        with pytest.raises(ValueError, match="already linked"):
+            db.link_workspace_to_canonical(
+                second.id,
+                canonical_workspace_id="workspace-alpha",
+                canonical_workspace_source="workspace_playground",
+            )
+
+    def test_link_workspace_to_canonical_rejects_overwriting_existing_link(self, db):
+        ws = db.create_workspace(name="Existing Root", root_path="/tmp/existing-root")
+        db.link_workspace_to_canonical(
+            ws.id,
+            canonical_workspace_id="workspace-alpha",
+            canonical_workspace_source="workspace_playground",
+        )
+
+        with pytest.raises(
+            CanonicalWorkspaceBridgeConflictError,
+            match="different canonical workspace",
+        ):
+            db.link_workspace_to_canonical(
+                ws.id,
+                canonical_workspace_id="workspace-beta",
+                canonical_workspace_source="workspace_playground",
+            )
+
+        assert (
+            db.get_workspace_by_canonical_workspace_id("workspace-alpha").id == ws.id
+        )
+        assert db.get_workspace_by_canonical_workspace_id("workspace-beta") is None
 
     def test_workspace_with_git_info(self, db):
         ws = db.create_workspace(

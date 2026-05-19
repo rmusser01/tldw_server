@@ -577,4 +577,108 @@ describe("useChatActions character stream throttling integration", () => {
       .at(-1)
     expect(finalAssistant?.message).toBe("x".repeat(180))
   })
+
+  it("does not fall back to addChatMessage when persistCharacterCompletion reports saved degraded state", async () => {
+    persistCharacterCompletionMock.mockRejectedValueOnce(
+      Object.assign(new Error("degraded"), {
+        status: 503,
+        details: {
+          detail: {
+            code: "persist_validation_degraded",
+            saved: true,
+            assistant_message_id: "assistant-server-99"
+          }
+        }
+      })
+    )
+    streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      yield {
+        choices: [
+          {
+            delta: {
+              content: "saved degraded reply"
+            }
+          }
+        ]
+      }
+    })
+
+    const { options } = createHookOptions([])
+    options.serverChatId = "chat-character-1"
+    options.selectedCharacter = {
+      id: 101,
+      name: "Stream Character",
+      avatar_url: ""
+    }
+
+    const { result } = renderHook(() => useChatActions(options))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "persist but degrade",
+        image: ""
+      })
+    })
+
+    expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(1)
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        assistant_message_id: expect.any(String)
+      })
+    )
+    expect(
+      addChatMessageMock.mock.calls.filter(
+        ([, payload]) => payload?.role === "assistant"
+      )
+    ).toHaveLength(0)
+  })
+
+  it("does not fall back when a saved degraded error only exposes top-level detail", async () => {
+    persistCharacterCompletionMock.mockRejectedValueOnce(
+      Object.assign(new Error("degraded"), {
+        status: 503,
+        detail: {
+          code: "persist_validation_degraded",
+          saved: true
+        }
+      })
+    )
+    streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      yield {
+        choices: [
+          {
+            delta: {
+              content: "saved degraded reply without server id"
+            }
+          }
+        ]
+      }
+    })
+
+    const { options } = createHookOptions([])
+    options.serverChatId = "server-chat-1"
+    options.selectedCharacter = {
+      id: 101,
+      name: "Stream Character",
+      avatar_url: ""
+    }
+
+    const { result } = renderHook(() => useChatActions(options))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "persist but degrade without id",
+        image: ""
+      })
+    })
+
+    expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(1)
+    expect(
+      addChatMessageMock.mock.calls.filter(
+        ([, payload]) => payload?.role === "assistant"
+      )
+    ).toHaveLength(0)
+  })
+
 })

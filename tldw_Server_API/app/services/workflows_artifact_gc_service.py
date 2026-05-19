@@ -26,6 +26,36 @@ def _now_utc() -> datetime:
     return datetime.utcnow().replace(tzinfo=timezone.utc)
 
 
+def _record_artifact_gc_event(
+    db: WorkflowsDatabase,
+    *,
+    tenant_id: str,
+    run_id: str,
+    artifact_id: str,
+    uri: str,
+    artifact_type: str | None,
+    file_deleted: bool,
+    retention_days: int,
+) -> None:
+    payload: dict[str, object] = {
+        "artifact_id": artifact_id,
+        "uri": uri,
+        "status": "deleted",
+        "file_deleted": bool(file_deleted),
+        "row_deleted": True,
+        "retention_days": int(retention_days),
+        "source": "artifact_gc",
+    }
+    if artifact_type:
+        payload["artifact_type"] = artifact_type
+    try:
+        db.append_event(tenant_id, run_id, "artifact_gc", payload)
+    except _GC_NONCRITICAL_EXCEPTIONS as exc:
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Artifact GC: failed to append workflow evidence"
+        )
+
+
 async def run_workflows_artifact_gc_worker(stop_event: asyncio.Event) -> None:
     """Background loop to enforce artifact retention by deleting old files and DB rows.
 
@@ -52,22 +82,41 @@ async def run_workflows_artifact_gc_worker(stop_event: asyncio.Event) -> None:
             deleted = 0
             for r in rows:
                 try:
+                    artifact_id = str(r.get("artifact_id") or "")
+                    run_id = str(r.get("run_id") or "")
+                    artifact_type = r.get("type")
                     uri = str(r.get("uri") or "")
+                    file_deleted = False
                     if uri.startswith("file://"):
                         fp = Path(uri[7:])
                         try:
                             if fp.exists() and fp.is_file():
                                 fp.unlink()
+                                file_deleted = True
                         except OSError as fe:
-                            logger.warning(f"Artifact GC: failed to delete file {fp}: {fe}")
-                    db.delete_artifact(str(r.get("artifact_id")))
+                            logger.bind(error_type=type(fe).__name__).warning(
+                                "Artifact GC: failed to delete artifact file"
+                            )
+                    db.delete_artifact(artifact_id)
+                    _record_artifact_gc_event(
+                        db,
+                        tenant_id=str(r.get("tenant_id") or "default"),
+                        run_id=run_id,
+                        artifact_id=artifact_id,
+                        uri=uri,
+                        artifact_type=str(artifact_type) if artifact_type is not None else None,
+                        file_deleted=file_deleted,
+                        retention_days=retention_days,
+                    )
                     deleted += 1
                 except _GC_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Artifact GC: error deleting artifact {r.get('artifact_id')}: {e}")
+                    logger.bind(error_type=type(e).__name__).warning(
+                        "Artifact GC: error deleting artifact"
+                    )
             if deleted:
                 logger.info(f"Artifact GC: deleted {deleted} artifacts older than {retention_days} days")
         except _GC_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Artifact GC loop error: {e}")
+            logger.bind(error_type=type(e).__name__).warning("Artifact GC loop error")
 
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=interval)

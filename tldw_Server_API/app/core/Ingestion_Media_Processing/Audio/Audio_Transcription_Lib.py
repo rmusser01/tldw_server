@@ -1475,7 +1475,7 @@ def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate
             return transcribe_with_qwen2audio(audio_data, sample_rate)
         except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as e:
             logging.error(f"Qwen2Audio transcription failed: {e}", exc_info=True)
-            return f"[Transcription error] Qwen2Audio transcription failed: {e}"
+            return "[Transcription error] Qwen2Audio transcription failed"
 
     elif transcription_provider.lower() == "parakeet":
         logging.info("Transcribing using Parakeet")
@@ -1492,7 +1492,7 @@ def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate
             return "Nemo transcription module not available. Please check installation."
         except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as e:
             logging.error(f"Parakeet transcription failed: {e}")
-            return f"Parakeet transcription error: {str(e)}"
+            return "Parakeet transcription error"
 
     elif transcription_provider.lower() == "canary":
         logging.info("Transcribing using Canary")
@@ -1506,7 +1506,7 @@ def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate
             return "Nemo transcription module not available. Please check installation."
         except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as e:
             logging.error(f"Canary transcription failed: {e}")
-            return f"Canary transcription error: {str(e)}"
+            return "Canary transcription error"
 
     elif transcription_provider.lower() == "external" or transcription_provider.lower().startswith("external:"):
         logging.info("Transcribing using external provider")
@@ -1530,7 +1530,7 @@ def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate
             return "External provider module not available. Please check installation."
         except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as e:
             logging.error(f"External provider transcription failed: {e}")
-            return f"External provider transcription error: {str(e)}"
+            return "External provider transcription error"
 
     else:
         logging.info(f"Transcribing using faster-whisper with model: {whisper_model}")
@@ -1543,7 +1543,7 @@ def transcribe_audio(audio_data: np.ndarray, transcription_provider, sample_rate
         )
         if isinstance(segments, dict) and 'error' in segments:
             # handle error
-            return f"Error in transcription: {segments['error']}"
+            return "Error in transcription"
 
         # Merge all segment texts
         final_text = " ".join(seg["Text"] for seg in segments['segments']) if isinstance(segments, dict) else " ".join(
@@ -2096,7 +2096,18 @@ def transcribe_with_qwen2audio(audio: np.ndarray, sample_rate: int = 16000) -> s
 # Faster Whisper related functions
 whisper_model_instance = None
 config = load_and_log_configs() or {}
-processing_choice = config.get("processing_choice", "cpu")
+
+
+def _resolve_processing_choice(config_data: dict[str, Any] | None) -> str:
+    """Resolve the STT processing device, allowing a runtime env override."""
+    env_override = str(os.getenv("PROCESSING_CHOICE", "")).strip().lower()
+    if env_override:
+        return env_override
+    configured = str((config_data or {}).get("processing_choice", "cpu")).strip().lower()
+    return configured or "cpu"
+
+
+processing_choice = _resolve_processing_choice(config)
 total_thread_count = multiprocessing.cpu_count()
 
 # Model download status tracking
@@ -2528,6 +2539,7 @@ def parse_transcription_model(model_name: str) -> tuple:
 
     Examples:
     - "parakeet-mlx" -> ("parakeet", "parakeet", "mlx")
+    - "parakeet-tdt-0.6b-v3-onnx" -> ("parakeet", "parakeet", "onnx")
     - "parakeet-onnx" -> ("parakeet", "parakeet", "onnx")
     - "parakeet-cuda" -> ("parakeet", "parakeet", "cuda")
     - "parakeet-standard" -> ("parakeet", "parakeet", "standard")
@@ -3040,10 +3052,14 @@ def speech_to_text_parakeet(
 
         # Transcribe with Parakeet
         text = transcribe_with_parakeet(audio_data, sample_rate, variant)
+        if isinstance(text, str) and _looks_like_error_text(text):
+            raise STTTranscriptionError(text)
 
         # Convert to segment format with sentence-level segmentation
         return create_segments_from_text(text, audio_duration, segmentation="sentence")
 
+    except STTTranscriptionError:
+        raise
     except _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Parakeet transcription failed: {e}")
         raise STTTranscriptionError(f"Parakeet transcription error: {str(e)}") from e

@@ -13,6 +13,7 @@ import {
   ConnectionPhase,
   type ConnectionState,
   type KnowledgeStatus,
+  type UserPersona,
   deriveConnectionUxState
 } from "@/types/connection"
 import { CONNECTED_THROTTLE_MS } from "@/config/connection-timing"
@@ -27,6 +28,7 @@ const KNOWLEDGE_RECHECK_INTERVAL_MS = 5 * 60_000
 const TEST_BYPASS_KEY = "__tldw_allow_offline"
 const FORCE_UNCONFIGURED_KEY = "__tldw_force_unconfigured"
 const FIRST_RUN_COMPLETE_KEY = "__tldw_first_run_complete"
+const USER_PERSONA_KEY = "__tldw_user_persona"
 
 const coerceStorageFlag = (value: unknown): boolean | null => {
   if (typeof value === "boolean") return value
@@ -144,6 +146,89 @@ const setFirstRunCompleteFlag = async (complete: boolean): Promise<void> => {
         localStorage.setItem(FIRST_RUN_COMPLETE_KEY, "true")
       } else {
         localStorage.removeItem(FIRST_RUN_COMPLETE_KEY)
+      }
+    }
+  } catch {
+    // ignore localStorage availability
+  }
+}
+
+const VALID_PERSONAS = new Set<string>(["family", "researcher", "explorer"])
+
+const readLocalStoragePersona = (key: string): UserPersona => {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(key)
+      if (raw != null && VALID_PERSONAS.has(raw)) {
+        return raw as UserPersona
+      }
+    }
+  } catch {
+    // ignore localStorage availability
+  }
+
+  return null
+}
+
+/** Read a single key from chrome.storage.local (extension context only). */
+const chromeStorageGet = (key: string): Promise<string | undefined> =>
+  new Promise((resolve, reject) => {
+    chrome.storage.local.get(key, (res) => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError)
+        return
+      }
+      resolve(
+        res && Object.prototype.hasOwnProperty.call(res, key)
+          ? (res[key] as string)
+          : undefined
+      )
+    })
+  })
+
+const getUserPersonaFlag = async (): Promise<UserPersona> => {
+  try {
+    if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+      const value = await chromeStorageGet(USER_PERSONA_KEY)
+      if (typeof value === "string" && VALID_PERSONAS.has(value)) {
+        return value as UserPersona
+      }
+      return readLocalStoragePersona(USER_PERSONA_KEY)
+    }
+  } catch {
+    // ignore storage read errors
+  }
+
+  return readLocalStoragePersona(USER_PERSONA_KEY)
+}
+
+const setUserPersonaFlag = async (persona: UserPersona): Promise<void> => {
+  try {
+    if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+      await new Promise<void>((resolve, reject) => {
+        const storage = chrome.storage.local
+        const cb = () => {
+          if (chrome.runtime.lastError) { reject(chrome.runtime.lastError); return }
+          resolve()
+        }
+        if (persona) {
+          storage.set({ [USER_PERSONA_KEY]: persona }, cb)
+        } else {
+          storage.remove(USER_PERSONA_KEY, cb)
+        }
+      })
+      return
+    }
+  } catch {
+    // ignore storage write errors
+  }
+
+  try {
+    if (typeof localStorage !== "undefined") {
+      if (persona) {
+        localStorage.setItem(USER_PERSONA_KEY, persona)
+      } else {
+        localStorage.removeItem(USER_PERSONA_KEY)
       }
     }
   } catch {
@@ -413,6 +498,7 @@ type ConnectionStore = {
   testConnectionFromOnboarding: () => Promise<void>
   setDemoMode: () => void
   markFirstRunComplete: () => Promise<void>
+  setUserPersona: (persona: UserPersona) => Promise<void>
 }
 
 const initialState: ConnectionState = {
@@ -432,6 +518,7 @@ const initialState: ConnectionState = {
   configStep: "none",
   errorKind: "none",
   hasCompletedFirstRun: false,
+  userPersona: null,
   lastConfigUpdatedAt: null,
   checksSinceConfigChange: 0
 }
@@ -514,15 +601,20 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
 
     // Load all persisted flags upfront
     const persistedFirstRun = await getFirstRunCompleteFlag()
+    const persistedUserPersona = await getUserPersonaFlag()
     const persistedServerUrl = await getPersistedServerUrl()
     const forceUnconfigured = await getForceUnconfiguredFlag()
     const bypass = await getOfflineBypassFlag()
 
+    const needsFirstRunSync = !prev.hasCompletedFirstRun && persistedFirstRun
+    const needsPersonaSync = prev.userPersona !== persistedUserPersona
+
     const currentState =
-      !prev.hasCompletedFirstRun && persistedFirstRun
+      needsFirstRunSync || needsPersonaSync
         ? {
             ...prev,
-            hasCompletedFirstRun: true
+            ...(needsFirstRunSync ? { hasCompletedFirstRun: true } : {}),
+            ...(needsPersonaSync ? { userPersona: persistedUserPersona } : {})
           }
         : prev
 
@@ -1117,6 +1209,16 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       state: {
         ...prev,
         hasCompletedFirstRun: true
+      }
+    })
+  },
+
+  async setUserPersona(persona: UserPersona) {
+    await setUserPersonaFlag(persona)
+    set({
+      state: {
+        ...get().state,
+        userPersona: persona
       }
     })
   }

@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class OrganizationCreateRequest(BaseModel):
@@ -27,6 +37,12 @@ class OrganizationListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "OrganizationListResponse":
+        return _default_offset_pagination_aliases(self)
 
 
 class TeamCreateRequest(BaseModel):
@@ -151,6 +167,38 @@ class OrganizationWatchlistsSettingsResponse(BaseModel):
     require_include_default: bool | None = None
 
 
+class OrganizationSTTSettingsUpdate(BaseModel):
+    delete_audio_after_success: bool | None = None
+    audio_retention_hours: float | None = Field(default=None, ge=0.0)
+    redact_pii: bool | None = None
+    allow_unredacted_partials: bool | None = None
+    redact_categories: list[str] | None = None
+
+    @field_validator("redact_categories")
+    @classmethod
+    def _normalize_redact_categories(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            item = str(raw).strip().lower()
+            if not item or item in seen:
+                continue
+            normalized.append(item)
+            seen.add(item)
+        return normalized
+
+
+class OrganizationSTTSettingsResponse(BaseModel):
+    org_id: int
+    delete_audio_after_success: bool
+    audio_retention_hours: float
+    redact_pii: bool
+    allow_unredacted_partials: bool
+    redact_categories: list[str] = Field(default_factory=list)
+
+
 # ============================
 # Self-service org schemas
 # ============================
@@ -246,6 +294,15 @@ class OrgInviteListResponse(BaseModel):
     """List of organization invites."""
     items: list[OrgInviteResponse]
     total: int
+    limit: int
+    offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class OrgInvitePreviewResponse(BaseModel):

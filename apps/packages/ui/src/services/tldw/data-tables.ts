@@ -6,6 +6,7 @@ import type {
   DataTableSourceType,
   DataTableSummary
 } from "@/types/data-tables"
+import type { OffsetPaginationMeta } from "@/services/response-envelope"
 
 export type ApiDataTableSource = {
   source_type: string
@@ -66,6 +67,7 @@ export type ApiDataTablesListResponse = {
   total?: number
   limit?: number
   offset?: number
+  pagination?: Partial<OffsetPaginationMeta>
 }
 
 export type ApiDataTableGenerateResponse = {
@@ -126,7 +128,7 @@ export const mapApiListToUi = (
   const tables = tablesList.map(mapApiSummaryToUi)
   const total = Array.isArray(response)
     ? tables.length
-    : response.total ?? response.count ?? tables.length
+    : response.total ?? response.pagination?.total ?? response.count ?? tables.length
   return { tables, total }
 }
 

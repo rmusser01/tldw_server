@@ -1,4 +1,5 @@
-import { Alert, Modal, Select, Switch } from "antd"
+import { useRef } from "react"
+import { Alert, Modal, Radio, Select, Switch } from "antd"
 import { useNavigate } from "react-router-dom"
 import { SearchModeSettings } from "./search-mode"
 import { useTranslation } from "react-i18next"
@@ -9,10 +10,15 @@ import { SystemSettings } from "./system-settings"
 import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
 import { getDefaultOcrLanguage, ocrLanguages } from "@/data/ocr-language"
 import { useServerOnline } from "@/hooks/useServerOnline"
-import { useConnectionActions } from "@/hooks/useConnectionState"
+import { useConnectionState, useConnectionActions } from "@/hooks/useConnectionState"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import ConnectFeatureBanner from "@/components/Common/ConnectFeatureBanner"
 import { useTutorialCompletion } from "@/store/tutorials"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { useSetting } from "@/hooks/useSetting"
+import { HEADER_SHORTCUT_SELECTION_SETTING } from "@/services/settings/ui-settings"
+import { getDefaultShortcutsForPersona } from "@/components/Layouts/header-shortcut-items"
+import type { UserPersona } from "@/types/connection"
 
 export const GeneralSettings = () => {
   // Persisted preference: auto-finish onboarding when connection & RAG are healthy
@@ -48,8 +54,19 @@ export const GeneralSettings = () => {
   const { changeLocale, locale, supportLanguage } = useI18n()
   const isOnline = useServerOnline()
   const navigate = useNavigate()
-  const { restartOnboarding } = useConnectionActions()
+  const { serverUrl: connectedServerUrl, userPersona } = useConnectionState()
+  const { restartOnboarding, setUserPersona } = useConnectionActions()
   const { completedTutorials, resetProgress: resetTutorialProgress } = useTutorialCompletion()
+  const [, setShortcutSelection] = useSetting(HEADER_SHORTCUT_SELECTION_SETTING)
+  const personaSeqRef = useRef(0)
+
+  const handlePersonaChange = async (nextPersona: UserPersona) => {
+    const seq = ++personaSeqRef.current
+    await setUserPersona(nextPersona)
+    if (seq !== personaSeqRef.current) return // stale
+    const shortcuts = getDefaultShortcutsForPersona(nextPersona)
+    await setShortcutSelection(shortcuts)
+  }
 
   return (
     <dl className="flex flex-col space-y-6 text-sm">
@@ -108,6 +125,40 @@ export const GeneralSettings = () => {
           />
         </div>
       )}
+      {/* Connection info (A1: read-only server URL) */}
+      <div>
+        <h2 className="text-base font-semibold leading-7 text-text">
+          {t("generalSettings.connection.title", "Connection")}
+        </h2>
+        <div className="border-b border-border mt-3 mb-3"></div>
+        <div className="flex flex-row items-center justify-between">
+          <span className="text-text">
+            {t("generalSettings.connection.serverUrl", "Server URL")}
+          </span>
+          <div className="flex items-center gap-2">
+            <code className="rounded border border-border bg-surface2 px-2 py-0.5 text-xs text-text-muted select-all">
+              {connectedServerUrl || t("generalSettings.connection.notConfigured", "Not configured")}
+            </code>
+            {isOnline ? (
+              <span className="inline-flex h-2 w-2 rounded-full bg-success" title={t("generalSettings.connection.online", "Online")} />
+            ) : (
+              <span className="inline-flex h-2 w-2 rounded-full bg-danger" title={t("generalSettings.connection.offline", "Offline")} />
+            )}
+          </div>
+        </div>
+        <p className="mt-1 text-[11px] text-text-subtle">
+          {isExtensionRuntime()
+            ? t(
+                "generalSettings.connection.changeHintExtension",
+                "To change, update the server URL in extension settings."
+              )
+            : t(
+                "generalSettings.connection.changeHint",
+                "To change, go to Settings > tldw Server, or update NEXT_PUBLIC_API_URL and rebuild."
+              )}
+        </p>
+      </div>
+
       <div>
         <h2 className="text-base font-semibold leading-7 text-text">
           {t("generalSettings.title")}
@@ -287,6 +338,84 @@ export const GeneralSettings = () => {
           )}
         </button>
       </div>
+
+      {/* Persona selection */}
+      <div>
+        <h2 className="text-base font-semibold leading-7 text-text">
+          {t("generalSettings.persona.title", "Persona")}
+        </h2>
+        <p className="mt-1 mb-3 text-xs text-text-muted">
+          {t(
+            "generalSettings.persona.description",
+            "Your persona controls which features are shown in the navigation. Change it at any time."
+          )}
+        </p>
+        <div className="border-b border-border mb-3"></div>
+        <Radio.Group
+          value={userPersona ?? "explorer"}
+          onChange={(e) => {
+            const val = e.target.value as string
+            handlePersonaChange(val === "explorer" ? null : (val as UserPersona)).catch(
+              (err) => console.error("[GeneralSettings] Failed to change persona", err)
+            )
+          }}
+          className="flex flex-col gap-2"
+        >
+          <Radio value="researcher">
+            {t("generalSettings.persona.researcher", "Researcher")}
+            <span className="ml-2 text-xs text-text-muted">
+              {t(
+                "generalSettings.persona.researcherHint",
+                "Focus on research, knowledge, and evaluation tools"
+              )}
+            </span>
+          </Radio>
+          <Radio value="family">
+            {t("generalSettings.persona.family", "Family")}
+            <span className="ml-2 text-xs text-text-muted">
+              {t(
+                "generalSettings.persona.familyHint",
+                "Simplified view with safety and content controls"
+              )}
+            </span>
+          </Radio>
+          <Radio value="explorer">
+            {t("generalSettings.persona.explorer", "Explorer / All features")}
+            <span className="ml-2 text-xs text-text-muted">
+              {t(
+                "generalSettings.persona.explorerHint",
+                "Show every feature in the navigation"
+              )}
+            </span>
+          </Radio>
+        </Radio.Group>
+      </div>
+
+      {/* Browser extension promotion (webui only) */}
+      {!isExtensionRuntime() && (
+        <Alert
+          type="info"
+          showIcon
+          message={t(
+            "generalSettings.extensionPromo.title",
+            "Browser Extension Available"
+          )}
+          description={t(
+            "generalSettings.extensionPromo.description",
+            "Get the tldw browser extension for quick access to chat, ingestion, and more from any tab."
+          )}
+          action={
+            <a
+              href="https://github.com/rmusser01/tldw_server"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded border border-border bg-surface2 px-2 py-1 text-xs text-primary hover:bg-surface3"
+            >
+              {t("generalSettings.extensionPromo.cta", "Learn More")}
+            </a>
+          }
+        />
+      )}
 
       <div className="space-y-2">
         <div className="flex flex-row justify-between">

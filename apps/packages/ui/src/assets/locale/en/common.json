@@ -36,6 +36,12 @@
   "saving": "Saving...",
   "retry": "Retry",
   "close": "Close",
+  "storageQuota": {
+    "exceededTitle": "Storage nearly full",
+    "exceededDescription": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). New data may not save. Archive or delete old workspaces to free space.",
+    "warningTitle": "Storage getting full",
+    "warningDescription": "Workspace storage is {{pct}}% full ({{usedMB}}/{{budgetMB}} MB). Consider archiving old workspaces."
+  },
   "loadMore": "Load More...",
   "share": {
     "tooltip": {
@@ -515,6 +521,9 @@
     },
     "noServerChats": "No server chats yet",
     "foldersRequireConnection": "Folders require a server connection"
+  },
+  "knowledgeSidebar": {
+    "title": "Knowledge history"
   },
   "extName": "tldw Assistant",
   "extDescription": "Browser extension for tldw_server - your unified AI assistant with RAG, media processing, and more.",

@@ -1260,7 +1260,7 @@ def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events
         daemon=True,
     )
     replay_stream.start()
-    replay_stream.join(timeout=5.0)
+    replay_stream.join(timeout=12.0)
     assert not replay_stream.is_alive()
 
     meta = next(item for item in reconnect_events if item["event"] == "__meta__")

@@ -164,6 +164,21 @@ async def test_model_path_traversal_rejected(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_start_server_rejects_absolute_model_filename_even_under_allowed_dir(tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    model = model_dir / "m.gguf"
+    model.write_text("x")
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+
+    with pytest.raises(ServerError):
+        await handler.start_server(str(model))
+
+
+@pytest.mark.asyncio
 async def test_port_autoselect(monkeypatch, tmp_path: Path):
     exe = tmp_path / "llama_server"
     exe.write_text("#!/bin/sh\n")

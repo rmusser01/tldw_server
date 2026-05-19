@@ -3,6 +3,8 @@
  * Types for the NotebookLM-style three-pane research interface
  */
 
+import type { WorkProductTemplateId } from "@/workspace-templates/types"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Source Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +117,106 @@ export type ArtifactType =
   | "data_table"
 
 export type ArtifactStatus = "pending" | "generating" | "completed" | "failed"
+export type ArtifactReviewStatus =
+  | "draft"
+  | "reviewing"
+  | "accepted"
+  | "needs_revision"
+  | "rejected"
+  | "exported"
+  | "assigned"
+  | "archived"
+
+export type ArtifactExportTarget =
+  | "markdown"
+  | "docx"
+  | "pdf"
+  | "slides"
+  | "chatbook"
+
+export interface ArtifactSourceLineage {
+  sourceId: string
+  sourceType?: string
+  mediaId?: number
+  title?: string
+  label?: string
+  citationCount?: number
+  citationSpans?: unknown[]
+  evidenceIds?: string[]
+  coverageNotes?: string
+  [key: string]: unknown
+}
+
+export interface ArtifactReviewChecklistItem {
+  id: string
+  label: string
+  checked: boolean
+}
+
+export interface TraceableArtifactProducerLinks {
+  session?: string
+  run?: string
+  review?: string
+  diagnostics?: string
+  artifacts?: string
+  audit?: string
+  [key: string]: string | undefined
+}
+
+export interface TraceableArtifactProducerMetadata {
+  producerType?: string
+  producerId?: string
+  runId?: string
+  sessionId?: string
+  reviewId?: string
+  taskId?: string
+  promptId?: string
+  templateId?: string
+  model?: string
+  provider?: string
+  completionReason?: string
+  links?: TraceableArtifactProducerLinks
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactReviewMetadata {
+  reviewerId?: string
+  decision?: ArtifactReviewStatus | string
+  decidedAt?: string
+  reason?: string
+  checklist?: ArtifactReviewChecklistItem[]
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactVersionMetadata {
+  revisionReason?: string
+  versionLabel?: string
+  comparedToVersionId?: string
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactExportRef {
+  id?: number | string
+  format: string
+  fileId?: number | string
+  jobId?: number | string
+  artifactVersionId?: string
+  generatedAt?: string
+  expiresAt?: string
+  status?: string
+  url?: string
+  error?: string
+  [key: string]: unknown
+}
+
+export interface TraceableArtifactRedaction {
+  supportSafe?: boolean
+  redacted?: boolean
+  retentionClass?: string
+  redactedFields?: string[]
+  visibility?: string
+  [key: string]: unknown
+}
 
 export type StudyMaterialsPolicy = "general" | "workspace"
 
@@ -130,9 +232,11 @@ export interface WorkspaceStudyArtifactData {
   sourceMediaIds?: number[]
   sourceBundle?: WorkspaceStudyArtifactSource[]
   questions?: Array<{
-    question: string
+    question?: string
+    question_text?: string
     options: string[]
-    answer: string
+    answer?: string
+    correct_answer?: string
     explanation?: string
     sourceMediaId?: number
   }>
@@ -147,7 +251,29 @@ export interface GeneratedArtifact {
   type: ArtifactType
   title: string
   status: ArtifactStatus
+  templateId?: WorkProductTemplateId
+  reviewStatus?: ArtifactReviewStatus
+  sourceLineage?: ArtifactSourceLineage[]
+  reviewChecklist?: ArtifactReviewChecklistItem[]
+  exportTargets?: ArtifactExportTarget[]
+  version?: number
   previousVersionId?: string
+  rootArtifactId?: string
+  artifactVersionId?: string
+  ownerScope?: string
+  ownerId?: string
+  projectId?: string
+  taskId?: string
+  sourceCollectionId?: string
+  contentType?: string
+  previewText?: string
+  summary?: string
+  schemaVersion?: number
+  producerMetadata?: TraceableArtifactProducerMetadata
+  reviewMetadata?: TraceableArtifactReviewMetadata
+  versionMetadata?: TraceableArtifactVersionMetadata
+  exportRefs?: TraceableArtifactExportRef[]
+  redaction?: TraceableArtifactRedaction
   estimatedTokens?: number
   estimatedCostUsd?: number
   totalTokens?: number

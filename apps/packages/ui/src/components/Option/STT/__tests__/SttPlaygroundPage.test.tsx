@@ -48,7 +48,8 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: tMock })
+  useTranslation: () => ({ t: tMock }),
+  Trans: ({ defaults }: { defaults: string }) => <>{defaults}</>
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -140,9 +141,11 @@ describe("SttPlaygroundPage", () => {
     warnSpy.mockRestore()
   })
 
-  it("renders page title 'STT Playground'", () => {
+  it("renders the Speech to Text page heading", () => {
     render(<SttPlaygroundPage />)
-    expect(screen.getByText("STT Playground")).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Speech to Text" })
+    ).toBeTruthy()
   })
 
   it("renders all 3 zones (recording-strip, comparison-panel, history-panel)", () => {

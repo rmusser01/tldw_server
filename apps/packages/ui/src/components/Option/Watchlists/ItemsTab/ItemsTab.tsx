@@ -16,26 +16,53 @@ import {
   message
 } from "antd"
 import DOMPurify from "dompurify"
-import { CheckCircle2, ExternalLink, HelpCircle, MessageSquare, RefreshCw, Rss, Sun } from "lucide-react"
+import {
+  AlertTriangle,
+  Bell,
+  CheckCircle2,
+  ExternalLink,
+  HelpCircle,
+  MessageSquare,
+  RefreshCw,
+  Rss,
+  Sun
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import {
+  batchUpdateScrapedItems,
+  createWatchlistItemView,
   createWatchlistOutput,
+  deleteWatchlistItemView,
   fetchScrapedItemSmartCounts,
   fetchScrapedItems,
+  fetchWatchlistItemViews,
   fetchWatchlistRuns,
   fetchWatchlistSources,
+  updateWatchlistItemView,
   updateScrapedItem
 } from "@/services/watchlists"
 import type { FetchItemsParams } from "@/services/watchlists"
 import { useWatchlistsStore } from "@/store/watchlists"
-import type { ScrapedItem, WatchlistRun, WatchlistSource } from "@/types/watchlists"
+import type {
+  ScrapedItem,
+  ScrapedItemAlertSummary,
+  ScrapedItemBatchScope,
+  ScrapedItemBatchUpdateResponse,
+  WatchlistContentAlertSeverity,
+  WatchlistItemSavedView,
+  WatchlistItemSavedViewFilters,
+  WatchlistRun,
+  WatchlistSource
+} from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import {
+  buildServerItemViewCreatePayload,
   buildDefaultItemsViewPresets,
   DEFAULT_ITEMS_SORT_MODE,
   extractImageUrl,
   filterSourcesForReader,
+  getMigratableItemsViewPresets,
   getInitialSourceRenderCount,
   getNextSourceRenderCount,
   ITEM_PAGE_SIZE_OPTIONS,
@@ -57,9 +84,9 @@ import {
   SOURCE_LIST_INITIAL_RENDER_COUNT,
   SOURCE_LOAD_MAX_ITEMS,
   SOURCE_LOAD_PAGE_SIZE,
-  sortItemsForReader,
   SYSTEM_ITEMS_VIEW_PRESET_IDS,
-  stripHtmlToText
+  stripHtmlToText,
+  toServerItemSortMode
 } from "./items-utils"
 import {
   getFocusableActiveElement,
@@ -78,13 +105,14 @@ import {
 const { Search } = Input
 
 type ReaderStatusFilter = "all" | "ingested" | "filtered"
-type SmartFeedFilter = "all" | "today" | "todayUnread" | "unread" | "reviewed" | "queued"
+type SmartFeedFilter = "all" | "today" | "todayUnread" | "unread" | "reviewed" | "queued" | "alertMatches"
 type BatchReviewScope = "selected" | "page" | "allFiltered"
 type BatchReviewPhase = "running" | "complete" | "partial" | "failed"
 type ItemsViewPreset = Omit<PersistedItemsViewPreset, "smartFilter" | "statusFilter" | "sortMode"> & {
   smartFilter: SmartFeedFilter
   statusFilter: ReaderStatusFilter
   sortMode: ReaderSortMode
+  serverId?: number
 }
 const SHORTCUTS_HINT_DISMISSED_STORAGE_KEY = "watchlists:items:shortcuts-hint-dismissed"
 const SMART_COUNTS_CACHE_TTL_MS = 15_000
@@ -102,17 +130,33 @@ interface BatchReviewProgress {
   processed: number
   succeeded: number
   failed: number
+  incomplete: boolean
   failedIds: number[]
   failedItemIds: number[]
 }
 
+type BatchScopeDraft = ScrapedItemBatchScope & {
+  watchlist_id?: number
+  include_alert_summary?: boolean
+  page?: number
+  size?: number
+  sort?: FetchItemsParams["sort"]
+}
+
+interface AllFilteredBatchParams {
+  countParams: FetchItemsParams
+  batchScope: ScrapedItemBatchScope
+}
+
 const normalizeSmartFilter = (value: string): SmartFeedFilter => {
+  if (value === "today_unread") return "todayUnread"
   if (
     value === "today" ||
     value === "todayUnread" ||
     value === "unread" ||
     value === "reviewed" ||
-    value === "queued"
+    value === "queued" ||
+    value === "alertMatches"
   ) {
     return value
   }
@@ -122,6 +166,99 @@ const normalizeSmartFilter = (value: string): SmartFeedFilter => {
 const normalizeStatusFilter = (value: string): ReaderStatusFilter => {
   if (value === "ingested" || value === "filtered") return value
   return "all"
+}
+
+const toReaderSortModeFromServer = (value: string | null | undefined): ReaderSortMode => {
+  if (value === "created_asc" || value === "published_asc") return "oldest"
+  if (value === "unread_first") return "unreadFirst"
+  return DEFAULT_ITEMS_SORT_MODE
+}
+
+const getSmartFilterFromServerFilters = (
+  filters: WatchlistItemSavedViewFilters
+): SmartFeedFilter => {
+  if (filters.smart_filter) return normalizeSmartFilter(filters.smart_filter)
+  if (filters.has_alert) return "alertMatches"
+  if (filters.queued_for_briefing) return "queued"
+  if (filters.reviewed === true) return "reviewed"
+  if (filters.reviewed === false) return "unread"
+  return "all"
+}
+
+const toItemsViewPresetFromServer = (view: WatchlistItemSavedView): ItemsViewPreset => ({
+  id: `server-${view.id}`,
+  serverId: view.id,
+  name: view.name,
+  sourceId: typeof view.filters.source_id === "number" ? view.filters.source_id : null,
+  smartFilter: getSmartFilterFromServerFilters(view.filters),
+  statusFilter: normalizeStatusFilter(String(view.filters.status || "all")),
+  sortMode: toReaderSortModeFromServer(view.sort),
+  searchQuery: String(view.filters.q || view.filters.search || "")
+})
+
+const makeCurrentViewPreset = (
+  name: string,
+  sourceId: number | null,
+  smartFilter: SmartFeedFilter,
+  statusFilter: ReaderStatusFilter,
+  sortMode: ReaderSortMode,
+  searchQuery: string
+): PersistedItemsViewPreset => ({
+  id: "current",
+  name,
+  sourceId,
+  smartFilter,
+  statusFilter,
+  sortMode,
+  searchQuery
+})
+
+const severityRank: Record<WatchlistContentAlertSeverity, number> = {
+  info: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  critical: 4
+}
+
+const severityTagColor: Record<WatchlistContentAlertSeverity, string> = {
+  info: "blue",
+  low: "default",
+  medium: "gold",
+  high: "orange",
+  critical: "red"
+}
+
+const formatSeverityLabel = (
+  severity: WatchlistContentAlertSeverity | null | undefined
+): string => {
+  if (!severity) return "Alert"
+  return severity.charAt(0).toUpperCase() + severity.slice(1)
+}
+
+const getHighestSeverity = (
+  summary: ScrapedItemAlertSummary | null | undefined
+): WatchlistContentAlertSeverity | null => {
+  if (!summary) return null
+  if (summary.highest_severity) return summary.highest_severity
+  return (summary.severities || []).reduce<WatchlistContentAlertSeverity | null>(
+    (highest, severity) => {
+      if (!highest) return severity
+      return severityRank[severity] > severityRank[highest] ? severity : highest
+    },
+    null
+  )
+}
+
+const hasAlertSummary = (summary: ScrapedItemAlertSummary | null | undefined): boolean =>
+  Boolean(summary && Number(summary.total || 0) > 0)
+
+const formatAlertSummaryLabel = (
+  summary: ScrapedItemAlertSummary | null | undefined
+): string => {
+  const severity = getHighestSeverity(summary)
+  const prefix = formatSeverityLabel(severity)
+  return `${prefix} alert match`
 }
 
 const startOfTodayIso = (): string => {
@@ -207,6 +344,7 @@ export const ItemsTab: React.FC = () => {
   const setStoreSmartFilter = useWatchlistsStore((s) => s.setItemsSmartFilter)
   const itemsSearch = useWatchlistsStore((s) => s.itemsSearchQuery)
   const setStoreItemsSearch = useWatchlistsStore((s) => s.setItemsSearchQuery)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   const [sources, setSources] = useState<WatchlistSource[]>([])
   const [sourcesLoading, setSourcesLoading] = useState(false)
@@ -281,6 +419,9 @@ export const ItemsTab: React.FC = () => {
       sortMode: normalizeReaderSortMode(preset.sortMode)
     }))
   )
+  const [viewPresetsLoading, setViewPresetsLoading] = useState(false)
+  const [legacyViewPresets, setLegacyViewPresets] = useState<ItemsViewPreset[]>([])
+  const [importingLocalViews, setImportingLocalViews] = useState(false)
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
   const [saveViewModalOpen, setSaveViewModalOpen] = useState(false)
   const [newViewName, setNewViewName] = useState("")
@@ -290,7 +431,8 @@ export const ItemsTab: React.FC = () => {
     todayUnread: 0,
     unread: 0,
     reviewed: 0,
-    queued: 0
+    queued: 0,
+    alertMatches: 0
   })
 
   const sourceNameById = useMemo(
@@ -333,10 +475,7 @@ export const ItemsTab: React.FC = () => {
   )
   const hasCollapsedSources = visibleSources.length < orderedSources.length
 
-  const sortedItems = useMemo(
-    () => sortItemsForReader(items, sortMode),
-    [items, sortMode]
-  )
+  const sortedItems = items
 
   const selectedItem = useMemo(
     () => sortedItems.find((item) => item.id === selectedItemId) || null,
@@ -429,7 +568,7 @@ export const ItemsTab: React.FC = () => {
 
     if (!selectedItem) {
       setItemsLiveAnnouncement(
-        t("watchlists:items.live.selectionCleared", "No article selected.")
+        t("watchlists:items.live.selectionCleared", "No update selected.")
       )
     } else {
       const title = selectedItem.title || t("watchlists:items.untitled", "Untitled item")
@@ -461,8 +600,11 @@ export const ItemsTab: React.FC = () => {
       queryOverride: string = effectiveSearchQuery
     ): FetchItemsParams => {
       const params: FetchItemsParams = {
+        watchlist_id: selectedWatchlistId ?? undefined,
         source_id: selectedSourceId ?? undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
+        sort: toServerItemSortMode(sortMode),
+        include_alert_summary: true,
         q: queryOverride || undefined,
         ...overrides
       }
@@ -479,11 +621,13 @@ export const ItemsTab: React.FC = () => {
       } else if (smartFilter === "queued") {
         params.queued_for_briefing = true
         params.run_id = queueRunFilter ?? undefined
+      } else if (smartFilter === "alertMatches") {
+        params.has_alert = true
       }
 
       return params
     },
-    [effectiveSearchQuery, queueRunFilter, selectedSourceId, smartFilter, statusFilter]
+    [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, smartFilter, sortMode, statusFilter]
   )
 
   const loadSources = useCallback(async () => {
@@ -497,6 +641,7 @@ export const ItemsTab: React.FC = () => {
 
       while (loaded.length < SOURCE_LOAD_MAX_ITEMS) {
         const response = await fetchWatchlistSources({
+          watchlist_id: selectedWatchlistId ?? undefined,
           page,
           size: SOURCE_LOAD_PAGE_SIZE
         })
@@ -529,12 +674,16 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== sourcesRequestTokenRef.current) return
       setSourcesLoading(false)
     }
-  }, [t])
+  }, [selectedWatchlistId, t])
 
   const loadRuns = useCallback(async () => {
     setRunsLoading(true)
     try {
-      const response = await fetchWatchlistRuns({ page: 1, size: 200 })
+      const response = await fetchWatchlistRuns({
+        watchlist_id: selectedWatchlistId ?? undefined,
+        page: 1,
+        size: 200
+      })
       setRuns(Array.isArray(response.items) ? response.items : [])
     } catch (error) {
       console.error("Failed to load watchlist runs:", error)
@@ -542,7 +691,7 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setRunsLoading(false)
     }
-  }, [])
+  }, [selectedWatchlistId])
 
   const expandVisibleSourcesIfNeeded = useCallback(() => {
     const listElement = sourceListRef.current
@@ -575,15 +724,14 @@ export const ItemsTab: React.FC = () => {
       )
       if (requestToken !== itemsRequestTokenRef.current) return
       const nextItems = Array.isArray(response.items) ? response.items : []
-      const sortedNextItems = sortItemsForReader(nextItems, sortMode)
       setItems(nextItems)
       setItemsTotal(response.total || nextItems.length)
-      setSelectedItemId((prev) => resolveSelectedItemId(prev, sortedNextItems))
+      setSelectedItemId((prev) => resolveSelectedItemId(prev, nextItems))
     } catch (error) {
       if (requestToken !== itemsRequestTokenRef.current) return
       console.error("Failed to load watchlist items:", error)
       if (!silent) {
-        message.error(t("watchlists:items.fetchError", "Failed to load feed items"))
+        message.error(t("watchlists:items.fetchError", "Failed to load updates"))
         setItems([])
         setItemsTotal(0)
         setSelectedItemId(null)
@@ -592,14 +740,16 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== itemsRequestTokenRef.current) return
       if (!silent) setItemsLoading(false)
     }
-  }, [buildBaseFilterParams, itemsPage, itemsPageSize, sortMode, t])
+  }, [buildBaseFilterParams, itemsPage, itemsPageSize, t])
 
   const loadSmartCounts = useCallback(async () => {
     const requestToken = smartCountsRequestTokenRef.current + 1
     smartCountsRequestTokenRef.current = requestToken
     const cacheKey = [
+      selectedWatchlistId ?? "all-watchlists",
       selectedSourceId ?? "all",
       statusFilter,
+      queueRunFilter ?? "all-runs",
       effectiveSearchQuery.trim().toLowerCase()
     ].join("|")
     const cached = smartCountsCacheRef.current[cacheKey]
@@ -609,12 +759,19 @@ export const ItemsTab: React.FC = () => {
     }
     try {
       const base = {
+        watchlist_id: selectedWatchlistId ?? undefined,
         source_id: selectedSourceId ?? undefined,
         status: statusFilter === "all" ? undefined : statusFilter,
         q: effectiveSearchQuery || undefined,
         queue_run_id: queueRunFilter ?? undefined
       }
-      const counts = await fetchScrapedItemSmartCounts(base)
+      const [counts, alertCounts] = await Promise.all([
+        fetchScrapedItemSmartCounts(base),
+        fetchScrapedItemSmartCounts({
+          ...base,
+          has_alert: true
+        })
+      ])
 
       if (requestToken !== smartCountsRequestTokenRef.current) return
       const nextCounts = {
@@ -623,7 +780,8 @@ export const ItemsTab: React.FC = () => {
         todayUnread: Number(counts.today_unread || 0),
         unread: Number(counts.unread || 0),
         reviewed: Number(counts.reviewed || 0),
-        queued: Number(counts.queued || 0)
+        queued: Number(counts.queued || 0),
+        alertMatches: Number(alertCounts.all || 0)
       }
       setSmartCounts(nextCounts)
       smartCountsCacheRef.current[cacheKey] = {
@@ -634,7 +792,7 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== smartCountsRequestTokenRef.current) return
       console.error("Failed to load smart feed counts:", error)
     }
-  }, [effectiveSearchQuery, queueRunFilter, selectedSourceId, statusFilter])
+  }, [effectiveSearchQuery, queueRunFilter, selectedSourceId, selectedWatchlistId, statusFilter])
 
   const invalidateSmartCountsCache = useCallback(() => {
     smartCountsCacheRef.current = {}
@@ -705,11 +863,12 @@ export const ItemsTab: React.FC = () => {
   }, [itemsPageSize])
 
   useEffect(() => {
+    if (selectedWatchlistId != null) return
     persistItemsViewPresets(
       typeof window !== "undefined" ? window.localStorage : undefined,
       viewPresets
     )
-  }, [viewPresets])
+  }, [selectedWatchlistId, viewPresets])
 
   useEffect(() => {
     persistItemsSortMode(
@@ -981,7 +1140,13 @@ export const ItemsTab: React.FC = () => {
   )
   const selectedUnreviewedCount = selectedUnreviewedItemIds.length
   const pageUnreviewedCount = pageUnreviewedItemIds.length
-  const allFilteredUnreadEstimate = smartCounts.unread
+  const allFilteredUnreadEstimate = useMemo(() => {
+    if (smartFilter === "reviewed") return 0
+    if (smartFilter === "today" || smartFilter === "todayUnread") return smartCounts.todayUnread
+    if (smartFilter === "queued") return smartCounts.queued
+    if (smartFilter === "alertMatches") return smartCounts.alertMatches
+    return smartCounts.unread
+  }, [smartCounts, smartFilter])
 
   const allPageItemsSelected = useMemo(
     () => pageItemIds.length > 0 && pageItemIds.every((id) => selectedItemIdSet.has(id)),
@@ -1010,9 +1175,9 @@ export const ItemsTab: React.FC = () => {
         })
       }
       if (scope === "page") {
-        return t("watchlists:items.batch.scope.page", "items on this page")
+        return t("watchlists:items.batch.scope.page", "updates on this page")
       }
-      return t("watchlists:items.batch.scope.allFiltered", "all filtered items")
+      return t("watchlists:items.batch.scope.allFiltered", "all filtered updates")
     },
     [t]
   )
@@ -1035,6 +1200,69 @@ export const ItemsTab: React.FC = () => {
       })),
     [defaultViewPresets]
   )
+
+  const buildCurrentServerViewPayload = useCallback(
+    (name: string) =>
+      buildServerItemViewCreatePayload(
+        makeCurrentViewPreset(
+          name,
+          selectedSourceId,
+          smartFilter,
+          statusFilter,
+          sortMode,
+          searchQuery
+        )
+      ),
+    [searchQuery, selectedSourceId, smartFilter, sortMode, statusFilter]
+  )
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadServerSavedViews = async () => {
+      const storage = typeof window !== "undefined" ? window.localStorage : undefined
+      const migratable = getMigratableItemsViewPresets(storage).map((preset) => ({
+        ...preset,
+        smartFilter: normalizeSmartFilter(preset.smartFilter),
+        statusFilter: normalizeStatusFilter(preset.statusFilter),
+        sortMode: normalizeReaderSortMode(preset.sortMode)
+      }))
+
+      if (selectedWatchlistId == null) {
+        setLegacyViewPresets([])
+        setViewPresets(
+          normalizeViewPresets(loadPersistedItemsViewPresets(storage))
+        )
+        return
+      }
+
+      setViewPresetsLoading(true)
+      try {
+        const result = await fetchWatchlistItemViews(selectedWatchlistId)
+        if (cancelled) return
+        const serverPresets = (Array.isArray(result.items) ? result.items : [])
+          .map(toItemsViewPresetFromServer)
+        setLegacyViewPresets(migratable)
+        setViewPresets(normalizeViewPresets(serverPresets))
+      } catch (error) {
+        if (cancelled) return
+        console.error("Failed to load watchlist item saved views:", error)
+        setLegacyViewPresets(migratable)
+        setViewPresets(normalizeViewPresets(loadPersistedItemsViewPresets(storage)))
+        message.error(
+          t("watchlists:items.savedViews.loadError", "Failed to load saved views.")
+        )
+      } finally {
+        if (!cancelled) setViewPresetsLoading(false)
+      }
+    }
+
+    void loadServerSavedViews()
+    return () => {
+      cancelled = true
+    }
+  }, [normalizeViewPresets, selectedWatchlistId, t])
+
   const activePresetIsSystem = useMemo(
     () => isSystemItemsViewPresetId(activePresetId),
     [activePresetId]
@@ -1059,126 +1287,181 @@ export const ItemsTab: React.FC = () => {
     })
   }, [pageItemIds])
 
+  const buildAllFilteredBatchParams = useCallback((): AllFilteredBatchParams | null => {
+    if (smartFilter === "reviewed") {
+      return null
+    }
+    const countParams = { ...buildBaseFilterParams({}, searchQuery), reviewed: false }
+    delete countParams.include_alert_summary
+    delete countParams.page
+    delete countParams.size
+    delete countParams.sort
+
+    const batchScope: BatchScopeDraft = { ...countParams }
+    delete batchScope.watchlist_id
+    delete batchScope.include_alert_summary
+    delete batchScope.page
+    delete batchScope.size
+    delete batchScope.sort
+
+    return {
+      countParams,
+      batchScope
+    }
+  }, [buildBaseFilterParams, searchQuery, smartFilter])
+
+  const countAllFilteredBatchScope = useCallback(async (
+    scope: FetchItemsParams
+  ): Promise<number> => {
+    const response = await fetchScrapedItems({
+      ...scope,
+      page: 1,
+      size: 1
+    })
+    return Number(response.total || 0)
+  }, [])
+
+  const applyBatchReviewResult = useCallback((
+    result: ScrapedItemBatchUpdateResponse,
+    fallbackIds: number[]
+  ) => {
+    const changedIds = Array.isArray(result.changed_ids)
+      ? result.changed_ids
+      : fallbackIds
+    if (changedIds.length === 0) return
+    const changedIdSet = new Set(changedIds)
+    setItems((prev) =>
+      prev.map((item) =>
+        changedIdSet.has(item.id)
+          ? { ...item, reviewed: true }
+          : item
+      )
+    )
+    setSelectedItemIds((prev) => prev.filter((id) => !changedIdSet.has(id)))
+  }, [])
+
   const markItemsReviewed = useCallback(async (
-    itemIds: number[],
-    scope: BatchReviewScope
+    itemIds: number[] | null,
+    scope: BatchReviewScope,
+    estimatedCount?: number,
+    batchScopeParams?: ScrapedItemBatchScope | null
   ): Promise<void> => {
-    const uniqueIds = Array.from(new Set(itemIds))
-    if (uniqueIds.length === 0) return
+    if (selectedWatchlistId == null) {
+      message.error(t("watchlists:items.batch.watchlistRequired", "Select a Watchlist first."))
+      return
+    }
+
+    const uniqueIds = Array.from(new Set(itemIds || []))
+    const resolvedBatchScope = itemIds
+      ? null
+      : (batchScopeParams ?? buildAllFilteredBatchParams()?.batchScope ?? null)
+    const totalEstimate = itemIds ? uniqueIds.length : Number(estimatedCount || 0)
+    if (totalEstimate === 0) return
+    if (!itemIds && !resolvedBatchScope) {
+      message.info(
+        t(
+          "watchlists:items.batch.noFiltered",
+          "No matching unread updates to review."
+        )
+      )
+      return
+    }
 
     setBatchReviewScope(scope)
     setBatchReviewProgress({
       scope,
       phase: "running",
       isRunning: true,
-      total: uniqueIds.length,
+      total: totalEstimate,
       processed: 0,
       succeeded: 0,
       failed: 0,
+      incomplete: false,
       failedIds: [],
       failedItemIds: []
     })
     try {
-      const successfulIds: number[] = []
-      const failedItemIds: number[] = []
-      let failedCount = 0
-      let processedCount = 0
-      const chunkSize = 20
+      const result = await batchUpdateScrapedItems(
+        itemIds
+          ? {
+              watchlist_id: selectedWatchlistId,
+              item_ids: uniqueIds,
+              reviewed: true
+            }
+          : {
+              watchlist_id: selectedWatchlistId,
+              scope: resolvedBatchScope ?? undefined,
+              reviewed: true
+            }
+      )
 
-      for (let index = 0; index < uniqueIds.length; index += chunkSize) {
-        const chunk = uniqueIds.slice(index, index + chunkSize)
-        const results = await Promise.allSettled(
-          chunk.map((itemId) => updateScrapedItem(itemId, { reviewed: true }))
-        )
-        let chunkSucceededCount = 0
-        let chunkFailedCount = 0
+      applyBatchReviewResult(result, uniqueIds)
 
-        results.forEach((result, offset) => {
-          if (result.status === "fulfilled") {
-            const updatedId =
-              typeof result.value?.id === "number"
-                ? result.value.id
-                : chunk[offset]
-            successfulIds.push(updatedId)
-            chunkSucceededCount += 1
-          } else {
-            failedCount += 1
-            chunkFailedCount += 1
-            failedItemIds.push(chunk[offset])
-          }
-        })
-
-        setBatchReviewProgress((previous) => {
-          if (!previous) return previous
-          return {
-            ...previous,
-            processed: Math.min(uniqueIds.length, previous.processed + chunk.length),
-            succeeded: previous.succeeded + chunkSucceededCount,
-            failed: previous.failed + chunkFailedCount,
-            failedIds: [...failedItemIds],
-            failedItemIds
-          }
-        })
-
-        processedCount += chunk.length
-      }
-
-      if (successfulIds.length > 0) {
-        const successfulIdSet = new Set(successfulIds)
-        setItems((prev) =>
-          prev.map((item) =>
-            successfulIdSet.has(item.id)
-              ? { ...item, reviewed: true }
-              : item
-          )
-        )
-        setSelectedItemIds((prev) => prev.filter((id) => !successfulIdSet.has(id)))
-      }
-
+      const cappedOrIncomplete = result.capped === true || result.exhausted === false
       const finalPhase: BatchReviewPhase =
-        failedCount === 0
+        cappedOrIncomplete
+          ? "partial"
+          : Number(result.failed || 0) === 0
           ? "complete"
-          : successfulIds.length > 0
+          : Number(result.changed || 0) > 0
             ? "partial"
             : "failed"
+      const matched = Number(result.matched || totalEstimate)
+      const changed = Number(result.changed || 0)
+      const failed = Number(result.failed || 0)
+      const failedItemIds = Array.isArray(result.failed_ids) ? result.failed_ids : []
       setBatchReviewProgress((previous) =>
         previous
           ? {
               ...previous,
               phase: finalPhase,
               isRunning: false,
-              processed: uniqueIds.length,
-              succeeded: successfulIds.length,
-              failed: failedCount,
+              total: matched,
+              processed: matched,
+              succeeded: changed,
+              failed,
+              incomplete: cappedOrIncomplete,
               failedIds: [...failedItemIds],
               failedItemIds
             }
           : previous
       )
 
-      if (successfulIds.length > 0 && failedCount === 0) {
-        const scopeLabel = getBatchScopeLabel(scope, successfulIds.length)
+      if (changed > 0 && failed === 0 && !cappedOrIncomplete) {
+        const scopeLabel = getBatchScopeLabel(scope, changed)
         message.success(
           t("watchlists:items.batch.completedScoped", "Marked {{count}} {{scope}} as reviewed.", {
-            count: successfulIds.length,
+            count: changed,
             scope: scopeLabel
           })
         )
-      } else if (successfulIds.length > 0) {
-        const scopeLabel = getBatchScopeLabel(scope, successfulIds.length)
+      } else if (changed > 0 && cappedOrIncomplete) {
+        const scopeLabel = getBatchScopeLabel(scope, changed)
+        message.warning(
+          t(
+            "watchlists:items.batch.incompleteScoped",
+            "Marked {{success}} {{scope}} as reviewed; more matching updates may remain.",
+            {
+              success: changed,
+              scope: scopeLabel
+            }
+          )
+        )
+      } else if (changed > 0) {
+        const scopeLabel = getBatchScopeLabel(scope, changed)
         message.warning(
           t(
             "watchlists:items.batch.partialScoped",
             "Marked {{success}} {{scope}} as reviewed; {{failed}} failed.",
             {
-              success: successfulIds.length,
+              success: changed,
               scope: scopeLabel,
-              failed: failedCount
+              failed
             }
           )
         )
       } else {
-        const scopeLabel = getBatchScopeLabel(scope, uniqueIds.length)
+        const scopeLabel = getBatchScopeLabel(scope, matched)
         message.error(
           t("watchlists:items.batch.failedScoped", "Failed to mark {{scope}} as reviewed.", {
             scope: scopeLabel
@@ -1195,7 +1478,7 @@ export const ItemsTab: React.FC = () => {
       }
     } catch (error) {
       console.error("Failed to apply batch reviewed update:", error)
-      const scopeLabel = getBatchScopeLabel(scope, uniqueIds.length)
+      const scopeLabel = getBatchScopeLabel(scope, totalEstimate)
       setBatchReviewProgress((previous) =>
         previous
           ? {
@@ -1213,29 +1496,41 @@ export const ItemsTab: React.FC = () => {
     } finally {
       setBatchReviewScope(null)
     }
-  }, [getBatchScopeLabel, invalidateSmartCountsCache, loadItems, loadSmartCounts, requiresReviewedRefresh, t])
+  }, [
+    applyBatchReviewResult,
+    buildAllFilteredBatchParams,
+    getBatchScopeLabel,
+    invalidateSmartCountsCache,
+    loadItems,
+    loadSmartCounts,
+    requiresReviewedRefresh,
+    selectedWatchlistId,
+    t
+  ])
 
   const openBatchConfirm = useCallback((
     scope: BatchReviewScope,
-    itemIds: number[],
-    title: string
+    itemIds: number[] | null,
+    count: number,
+    title: string,
+    batchScopeParams?: ScrapedItemBatchScope | null
   ) => {
-    if (itemIds.length === 0) return
-    const scopeLabel = getBatchScopeLabel(scope, itemIds.length)
+    if (count === 0) return
+    const scopeLabel = getBatchScopeLabel(scope, count)
     Modal.confirm({
       title,
       content: t(
         "watchlists:items.batch.confirmDescriptionScoped",
-        "Scope: {{scope}}. This will mark {{count}} item{{plural}} as reviewed.",
+        "Scope: {{scope}}. This will mark {{count}} update{{plural}} as reviewed.",
         {
           scope: scopeLabel,
-          count: itemIds.length,
-          plural: itemIds.length === 1 ? "" : "s"
+          count,
+          plural: count === 1 ? "" : "s"
         }
       ),
       okText: t("watchlists:items.markReviewed", "Mark as reviewed"),
       cancelText: t("common:cancel", "Cancel"),
-      onOk: () => markItemsReviewed(itemIds, scope)
+      onOk: () => markItemsReviewed(itemIds, scope, count, batchScopeParams)
     })
   }, [getBatchScopeLabel, markItemsReviewed, t])
 
@@ -1250,14 +1545,15 @@ export const ItemsTab: React.FC = () => {
     openBatchConfirm(
       "selected",
       selectedUnreviewedItemIds,
-      t("watchlists:items.batch.confirmSelectedTitle", "Mark selected items as reviewed?")
+      selectedUnreviewedItemIds.length,
+      t("watchlists:items.batch.confirmSelectedTitle", "Mark selected updates as reviewed?")
     )
   }, [openBatchConfirm, selectedUnreviewedItemIds, t])
 
   const handleMarkPageReviewed = useCallback(() => {
     if (pageUnreviewedItemIds.length === 0) {
       message.info(
-        t("watchlists:items.batch.noPage", "All items on this page are already reviewed.")
+        t("watchlists:items.batch.noPage", "All updates on this page are already reviewed.")
       )
       return
     }
@@ -1265,44 +1561,31 @@ export const ItemsTab: React.FC = () => {
     openBatchConfirm(
       "page",
       pageUnreviewedItemIds,
-      t("watchlists:items.batch.confirmPageTitle", "Mark this page as reviewed?")
+      pageUnreviewedItemIds.length,
+      t("watchlists:items.batch.confirmPageTitle", "Mark this page of updates as reviewed?")
     )
   }, [openBatchConfirm, pageUnreviewedItemIds, t])
 
-  const collectAllFilteredUnreadItemIds = useCallback(async (): Promise<number[]> => {
-    const allIds: number[] = []
-    const lookupPageSize = 200
-    let page = 1
-
-    while (true) {
-      const response = await fetchScrapedItems(
-        buildBaseFilterParams({
-          reviewed: false,
-          page,
-          size: lookupPageSize
-        }, searchQuery)
+  const handleMarkAllFilteredReviewed = useCallback(async () => {
+    const batchParams = buildAllFilteredBatchParams()
+    if (!batchParams) {
+      message.info(
+        t(
+          "watchlists:items.batch.noFiltered",
+          "No matching unread updates to review."
+        )
       )
-      const batch = Array.isArray(response.items) ? response.items : []
-      allIds.push(...batch.map((item) => item.id))
-      const total = response.total || allIds.length
-      if (batch.length < lookupPageSize || allIds.length >= total) {
-        break
-      }
-      page += 1
+      return
     }
 
-    return allIds
-  }, [buildBaseFilterParams, searchQuery])
-
-  const handleMarkAllFilteredReviewed = useCallback(async () => {
     setCollectingAllFiltered(true)
     try {
-      const candidateIds = await collectAllFilteredUnreadItemIds()
-      if (candidateIds.length === 0) {
+      const totalEstimate = await countAllFilteredBatchScope(batchParams.countParams)
+      if (totalEstimate === 0) {
         message.info(
           t(
             "watchlists:items.batch.noFiltered",
-            "No matching unread items to review."
+            "No matching unread updates to review."
           )
         )
         return
@@ -1310,16 +1593,18 @@ export const ItemsTab: React.FC = () => {
 
       openBatchConfirm(
         "allFiltered",
-        candidateIds,
-        t("watchlists:items.batch.confirmAllFilteredTitle", "Mark all filtered items as reviewed?")
+        null,
+        totalEstimate,
+        t("watchlists:items.batch.confirmAllFilteredTitle", "Mark all filtered updates as reviewed?"),
+        batchParams.batchScope
       )
     } catch (error) {
-      console.error("Failed to collect filtered unread item ids:", error)
-      message.error(t("watchlists:items.batch.failed", "Failed to mark items as reviewed."))
+      console.error("Failed to count filtered items for batch review:", error)
+      message.error(t("watchlists:items.fetchError", "Failed to load updates"))
     } finally {
       setCollectingAllFiltered(false)
     }
-  }, [collectAllFilteredUnreadItemIds, openBatchConfirm, t])
+  }, [buildAllFilteredBatchParams, countAllFilteredBatchScope, openBatchConfirm, t])
 
   const batchProgressPercent = useMemo(() => {
     if (!batchReviewProgress) return 0
@@ -1352,6 +1637,15 @@ export const ItemsTab: React.FC = () => {
       )
     }
     if (batchReviewProgress.phase === "partial") {
+      if (batchReviewProgress.incomplete) {
+        return t(
+          "watchlists:items.batch.progressIncomplete",
+          "Batch review partial: {{succeeded}} succeeded; more matching updates may remain.",
+          {
+            succeeded: batchReviewProgress.succeeded
+          }
+        )
+      }
       return t(
         "watchlists:items.batch.progressPartial",
         "Batch review complete: {{succeeded}} succeeded, {{failed}} failed.",
@@ -1374,7 +1668,11 @@ export const ItemsTab: React.FC = () => {
     if (!batchReviewProgress) return
     if (batchReviewScope !== null) return
     if (batchReviewProgress.failedItemIds.length === 0) return
-    void markItemsReviewed(batchReviewProgress.failedItemIds, batchReviewProgress.scope)
+    void markItemsReviewed(
+      batchReviewProgress.failedItemIds,
+      batchReviewProgress.scope,
+      batchReviewProgress.failedItemIds.length
+    )
   }, [batchReviewProgress, batchReviewScope, markItemsReviewed])
 
   const handleSortModeChange = useCallback((nextSortMode: string) => {
@@ -1401,21 +1699,51 @@ export const ItemsTab: React.FC = () => {
     viewPresets
   ])
 
-  const saveCurrentView = useCallback(() => {
+  const saveCurrentView = useCallback(async () => {
     if (activePresetId && !isSystemItemsViewPresetId(activePresetId)) {
+      const preset = viewPresets.find((candidate) => candidate.id === activePresetId)
+      if (!preset) return
+      const payload = buildCurrentServerViewPayload(preset.name)
+
+      if (selectedWatchlistId != null && typeof preset.serverId === "number") {
+        try {
+          const updated = await updateWatchlistItemView(
+            selectedWatchlistId,
+            preset.serverId,
+            payload
+          )
+          const nextPreset = toItemsViewPresetFromServer(updated)
+          setViewPresets((prev) =>
+            normalizeViewPresets(
+              prev.map((candidate) =>
+                candidate.id === activePresetId ? nextPreset : candidate
+              )
+            )
+          )
+          setActivePresetId(nextPreset.id)
+          message.success(t("watchlists:items.savedViews.updated", "Saved view updated."))
+        } catch (error) {
+          console.error("Failed to update item saved view:", error)
+          message.error(
+            t("watchlists:items.savedViews.updateError", "Failed to update saved view.")
+          )
+        }
+        return
+      }
+
       setViewPresets((prev) =>
         normalizeViewPresets(
-          prev.map((preset) =>
-          preset.id === activePresetId
-            ? {
-                ...preset,
-                sourceId: selectedSourceId,
-                smartFilter,
-                statusFilter,
-                sortMode,
-                searchQuery
-              }
-            : preset
+          prev.map((candidate) =>
+            candidate.id === activePresetId
+              ? {
+                  ...candidate,
+                  sourceId: selectedSourceId,
+                  smartFilter,
+                  statusFilter,
+                  sortMode,
+                  searchQuery
+                }
+              : candidate
           )
         )
       )
@@ -1430,13 +1758,16 @@ export const ItemsTab: React.FC = () => {
     setSaveViewModalOpen(true)
   }, [
     activePresetId,
+    buildCurrentServerViewPayload,
     normalizeViewPresets,
     searchQuery,
     selectedSourceId,
+    selectedWatchlistId,
     smartFilter,
     sortMode,
     statusFilter,
-    t
+    t,
+    viewPresets
   ])
 
   const openShortcuts = useCallback((source: "button" | "keyboard" = "button") => {
@@ -1460,7 +1791,7 @@ export const ItemsTab: React.FC = () => {
     setShortcutsOpen(false)
   }, [])
 
-  const createViewPreset = useCallback(() => {
+  const createViewPreset = useCallback(async () => {
     const trimmedName = newViewName.trim()
     if (!trimmedName) {
       message.error(
@@ -1468,6 +1799,28 @@ export const ItemsTab: React.FC = () => {
       )
       return
     }
+
+    if (selectedWatchlistId != null) {
+      try {
+        const created = await createWatchlistItemView(
+          selectedWatchlistId,
+          buildCurrentServerViewPayload(trimmedName)
+        )
+        const createdPreset = toItemsViewPresetFromServer(created)
+        setViewPresets((prev) => normalizeViewPresets([createdPreset, ...prev]))
+        setActivePresetId(createdPreset.id)
+        setSaveViewModalOpen(false)
+        setNewViewName("")
+        message.success(t("watchlists:items.savedViews.created", "Saved view created."))
+      } catch (error) {
+        console.error("Failed to create item saved view:", error)
+        message.error(
+          t("watchlists:items.savedViews.createError", "Failed to create saved view.")
+        )
+      }
+      return
+    }
+
     const newPreset: ItemsViewPreset = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       name: trimmedName,
@@ -1483,10 +1836,12 @@ export const ItemsTab: React.FC = () => {
     setNewViewName("")
     message.success(t("watchlists:items.savedViews.created", "Saved view created."))
   }, [
+    buildCurrentServerViewPayload,
     newViewName,
     normalizeViewPresets,
     searchQuery,
     selectedSourceId,
+    selectedWatchlistId,
     smartFilter,
     sortMode,
     statusFilter,
@@ -1508,7 +1863,10 @@ export const ItemsTab: React.FC = () => {
       okText: t("common:delete", "Delete"),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
-      onOk: () => {
+      onOk: async () => {
+        if (selectedWatchlistId != null && typeof preset.serverId === "number") {
+          await deleteWatchlistItemView(selectedWatchlistId, preset.serverId)
+        }
         setViewPresets((prev) =>
           normalizeViewPresets(
             prev.filter((candidate) => candidate.id !== activePresetId)
@@ -1518,7 +1876,63 @@ export const ItemsTab: React.FC = () => {
         message.success(t("watchlists:items.savedViews.deleted", "Saved view deleted."))
       }
     })
-  }, [activePresetId, normalizeViewPresets, t, viewPresets])
+  }, [activePresetId, normalizeViewPresets, selectedWatchlistId, t, viewPresets])
+
+  const importLegacySavedViews = useCallback(async () => {
+    if (selectedWatchlistId == null || legacyViewPresets.length === 0) return
+    setImportingLocalViews(true)
+    try {
+      const results = await Promise.allSettled(
+        legacyViewPresets.map((preset) =>
+          createWatchlistItemView(
+            selectedWatchlistId,
+            buildServerItemViewCreatePayload(preset)
+          )
+        )
+      )
+      const createdViews = results
+        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof createWatchlistItemView>>> =>
+          result.status === "fulfilled"
+        )
+        .map((result) => result.value)
+      const failedCount = results.length - createdViews.length
+      const importedPresets = createdViews.map(toItemsViewPresetFromServer)
+      setViewPresets((prev) => normalizeViewPresets([...importedPresets, ...prev]))
+      const importedIds = new Set(
+        legacyViewPresets
+          .filter((_, index) => results[index]?.status === "fulfilled")
+          .map((preset) => preset.id)
+      )
+      setLegacyViewPresets((prev) => prev.filter((preset) => !importedIds.has(preset.id)))
+      if (importedPresets.length > 0) {
+        message.success(
+          t("watchlists:items.savedViews.imported", "Imported {{count}} saved view{{plural}}.", {
+            count: importedPresets.length,
+            plural: importedPresets.length === 1 ? "" : "s"
+          })
+        )
+      }
+      if (failedCount > 0) {
+        message.warning(
+          t(
+            "watchlists:items.savedViews.importPartialError",
+            "{{count}} saved view{{plural}} could not be imported and can be retried.",
+            {
+              count: failedCount,
+              plural: failedCount === 1 ? "" : "s"
+            }
+          )
+        )
+      }
+    } catch (error) {
+      console.error("Failed to import local item saved views:", error)
+      message.error(
+        t("watchlists:items.savedViews.importError", "Failed to import saved views.")
+      )
+    } finally {
+      setImportingLocalViews(false)
+    }
+  }, [legacyViewPresets, normalizeViewPresets, selectedWatchlistId, t])
 
   const moveSelectionBy = useCallback((offset: number) => {
     if (sortedItems.length === 0) return
@@ -1581,7 +1995,7 @@ export const ItemsTab: React.FC = () => {
         title: t("watchlists:items.chatSizeWarningTitle", "Large content warning"),
         content: t(
           "watchlists:items.chatSizeWarningContent",
-          "Selected articles contain {{chars}} characters of content. This may use significant tokens. Continue with full content?",
+          "Selected updates contain {{chars}} characters of content. This may use significant tokens. Continue with full content?",
           { chars: totalChars.toLocaleString() }
         ),
         okText: t("watchlists:items.chatSizeWarningOk", "Use full content"),
@@ -1630,6 +2044,10 @@ export const ItemsTab: React.FC = () => {
     setActiveTab("outputs")
   }, [selectedItem, setActiveTab, setOutputsJobFilter, setOutputsRunFilter])
 
+  const openAlertsTab = useCallback(() => {
+    setActiveTab("alerts")
+  }, [setActiveTab])
+
   const openQuickCreateFlow = useCallback(() => {
     setActiveTab("sources")
     openSourceForm()
@@ -1641,28 +2059,28 @@ export const ItemsTab: React.FC = () => {
         keys: "j / k",
         description: t(
           "watchlists:items.shortcuts.nextPrevious",
-          "Move to next or previous article in the list."
+          "Move to next or previous update in the list."
         )
       },
       {
         keys: "space",
         description: t(
           "watchlists:items.shortcuts.toggleReviewed",
-          "Toggle reviewed state for the selected article."
+          "Toggle reviewed state for the selected update."
         )
       },
       {
         keys: "o",
         description: t(
           "watchlists:items.shortcuts.openOriginal",
-          "Open the selected article in a new tab."
+          "Open the selected update in a new tab."
         )
       },
       {
         keys: "r",
         description: t(
           "watchlists:items.shortcuts.refresh",
-          "Refresh feeds, article list, and smart counts."
+          "Refresh feeds, updates, and smart counts."
         )
       },
       {
@@ -1779,6 +2197,12 @@ export const ItemsTab: React.FC = () => {
       icon: <Rss className="h-4 w-4" />
     },
     {
+      key: "alertMatches",
+      label: t("watchlists:items.alertMatches", "Alert matches"),
+      count: smartCounts.alertMatches,
+      icon: <Bell className="h-4 w-4" />
+    },
+    {
       key: "reviewed",
       label: t("watchlists:items.reviewedOnly", "Reviewed"),
       count: smartCounts.reviewed,
@@ -1814,7 +2238,7 @@ export const ItemsTab: React.FC = () => {
         <p className="text-sm text-text-muted">
           {t(
             "watchlists:items.description",
-            "Browse scraped feed items and open the selected source content."
+            "Review collected updates, alert matches, and briefing candidates from this Watchlist."
           )}
         </p>
         <Space>
@@ -1855,7 +2279,7 @@ export const ItemsTab: React.FC = () => {
           <p className="text-sm text-text-muted">
             {t(
               "watchlists:items.shortcuts.hintStrip",
-              "Shortcuts: j/k navigate, space toggles reviewed, o opens original, ? shows help."
+              "Shortcuts: j/k navigate, space toggles reviewed, o opens original update, ? shows help."
             )}
           </p>
           <Space size="small">
@@ -2018,7 +2442,7 @@ export const ItemsTab: React.FC = () => {
 
           <section
             className="border-b border-border p-4 xl:border-b-0 xl:border-r"
-            aria-label={t("watchlists:items.articleListRegionAria", "Article list and triage controls")}
+            aria-label={t("watchlists:items.articleListRegionAria", "Updates list and triage controls")}
             data-testid="watchlists-items-list-pane">
             <div className="mb-3 space-y-2">
               <div className="flex items-end justify-between gap-2">
@@ -2033,7 +2457,7 @@ export const ItemsTab: React.FC = () => {
               </div>
 
               <Search
-                placeholder={t("watchlists:items.searchPlaceholder", "Search feed items...")}
+                placeholder={t("watchlists:items.searchPlaceholder", "Search updates...")}
                 value={itemsSearch}
                 onChange={(event) => {
                   setStoreItemsSearch(event.target.value)
@@ -2124,6 +2548,7 @@ export const ItemsTab: React.FC = () => {
                     value={activePresetId ?? undefined}
                     placeholder={t("watchlists:items.savedViews.placeholder", "Select a saved view")}
                     options={viewPresetOptions}
+                    loading={viewPresetsLoading}
                     onChange={(presetId) => {
                       if (!presetId) {
                         setActivePresetId(null)
@@ -2152,6 +2577,19 @@ export const ItemsTab: React.FC = () => {
                   >
                     {t("watchlists:items.savedViews.delete", "Delete view")}
                   </Button>
+                  {selectedWatchlistId != null && legacyViewPresets.length > 0 && (
+                    <Button
+                      size="small"
+                      onClick={() => void importLegacySavedViews()}
+                      loading={importingLocalViews}
+                      data-testid="watchlists-items-import-local-views"
+                    >
+                      {t(
+                        "watchlists:items.savedViews.importLocal",
+                        "Import local views"
+                      )}
+                    </Button>
+                  )}
                 </div>
                 <p className="mt-2 text-xs text-text-subtle">
                   {t(
@@ -2212,7 +2650,7 @@ export const ItemsTab: React.FC = () => {
                   >
                     {t(
                       "watchlists:items.batch.markAllFiltered",
-                      "Mark all filtered as reviewed"
+                      "Mark all filtered updates"
                     )}
                   </Button>
 
@@ -2316,7 +2754,7 @@ export const ItemsTab: React.FC = () => {
             <div
               className="max-h-[560px] space-y-2 overflow-y-auto pr-1"
               role="region"
-              aria-label={t("watchlists:items.articleListAria", "Articles list")}
+              aria-label={t("watchlists:items.articleListAria", "Updates list")}
               data-testid="watchlists-items-list">
               {itemsLoading ? (
                 <div className="flex items-center justify-center py-12">
@@ -2325,7 +2763,7 @@ export const ItemsTab: React.FC = () => {
               ) : items.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t("watchlists:items.empty", "No feed items found")}
+                  description={t("watchlists:items.empty", "No updates found")}
                 />
               ) : (
                 sortedItems.map((item) => {
@@ -2341,6 +2779,8 @@ export const ItemsTab: React.FC = () => {
                   const reviewStateLabel = item.reviewed
                     ? t("watchlists:items.rowStatusReviewed", "Reviewed")
                     : t("watchlists:items.rowStatusUnread", "Unread")
+                  const alertSummary = item.alert_summary
+                  const alertSeverity = getHighestSeverity(alertSummary)
                   const rowAriaLabel = t(
                     "watchlists:items.rowAriaLabel",
                     "{{title}} from {{source}}. {{state}}.",
@@ -2424,6 +2864,24 @@ export const ItemsTab: React.FC = () => {
                           </div>
                         </div>
                         <p className="line-clamp-2 text-sm text-text-muted">{previewText}</p>
+                        {hasAlertSummary(alertSummary) && (
+                          <div
+                            className="flex flex-wrap items-center gap-1.5 text-xs text-text-subtle"
+                            data-testid={`watchlists-item-row-alert-summary-${item.id}`}
+                          >
+                            <Tag
+                              color={alertSeverity ? severityTagColor[alertSeverity] : "default"}
+                              className="m-0"
+                            >
+                              {formatAlertSummaryLabel(alertSummary)}
+                            </Tag>
+                            {alertSummary?.latest_matched_text && (
+                              <span className="line-clamp-1">
+                                {alertSummary.latest_matched_text}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <p className="truncate text-xs font-medium text-text-subtle">
                           {sourceLabel}
                         </p>
@@ -2467,7 +2925,7 @@ export const ItemsTab: React.FC = () => {
 
           <section
             className="min-h-[720px] p-5"
-            aria-label={t("watchlists:items.readerRegionAria", "Article reader")}
+            aria-label={t("watchlists:items.readerRegionAria", "Update reader")}
             data-testid="watchlists-items-reader-pane"
           >
             {itemsLoading && !selectedItem ? (
@@ -2599,6 +3057,51 @@ export const ItemsTab: React.FC = () => {
                     </Space>
                   </div>
                 </header>
+
+                {hasAlertSummary(selectedItem.alert_summary) && (
+                  <div
+                    className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-3 text-sm text-text"
+                    data-testid="watchlists-item-alert-summary-panel"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-700" />
+                        <span className="font-semibold">
+                          {formatAlertSummaryLabel(selectedItem.alert_summary)}
+                        </span>
+                        <Tag
+                          color={
+                            getHighestSeverity(selectedItem.alert_summary)
+                              ? severityTagColor[getHighestSeverity(selectedItem.alert_summary)!]
+                              : "default"
+                          }
+                          className="m-0"
+                        >
+                          {t(
+                            "watchlists:items.alertSummary.total",
+                            "{{count}} {{label}}",
+                            {
+                              count: selectedItem.alert_summary?.total || 0,
+                              label: selectedItem.alert_summary?.total === 1 ? "match" : "matches"
+                            }
+                          )}
+                        </Tag>
+                      </div>
+                      <Button
+                        size="small"
+                        onClick={openAlertsTab}
+                        data-testid="watchlists-item-open-alerts"
+                      >
+                        {t("watchlists:items.alertSummary.openAlerts", "Open Alerts")}
+                      </Button>
+                    </div>
+                    {selectedItem.alert_summary?.latest_matched_text && (
+                      <p className="mt-2 text-text-muted">
+                        {selectedItem.alert_summary.latest_matched_text}
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {selectedItemPreviewImage && !selectedItemBodyHtml.includes("<img") && (
                   <img

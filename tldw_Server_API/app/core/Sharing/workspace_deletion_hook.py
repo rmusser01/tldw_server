@@ -45,5 +45,5 @@ async def on_workspace_deleted(workspace_id: str, owner_user_id: int) -> None:
             owner_user_id=owner_user_id,
             metadata={"trigger": "workspace_deletion"},
         )
-    except Exception as exc:
-        logger.warning(f"workspace_deletion_hook failed for {workspace_id}: {exc}")
+    except Exception:
+        logger.warning(f"workspace_deletion_hook failed for {workspace_id}")

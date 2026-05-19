@@ -1,6 +1,7 @@
 import type { Storage } from "@plasmohq/storage"
 import { browser } from "wxt/browser"
 import { getInitialConfig } from "@/services/action"
+import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 
 export type BackgroundCapabilities = {
   sendToTldw: boolean
@@ -12,6 +13,7 @@ export type BackgroundCapabilities = {
 export type BackgroundInitOptions = {
   storage: Storage
   contextMenuId: { webui: string; sidePanel: string }
+  saveToClipperMenuId: string
   saveToCompanionMenuId: string
   saveToNotesMenuId: string
   narrateSelectionMenuId: string
@@ -58,6 +60,32 @@ const scheduleModelWarmAlarm = async (enabled: boolean) => {
       (error as any)?.message || error
     )
   }
+}
+
+const syncWebClipperContextMenu = async (menuId: string) => {
+  try {
+    await browser.contextMenus.remove(menuId)
+  } catch {
+    // best effort removal before re-creating the menu item
+  }
+
+  let hasWebClipper = false
+  try {
+    const capabilities = await getServerCapabilities({ forceRefresh: true })
+    hasWebClipper = Boolean(capabilities.hasWebClipper)
+  } catch {
+    hasWebClipper = false
+  }
+
+  if (!hasWebClipper) {
+    return
+  }
+
+  browser.contextMenus.create({
+    id: menuId,
+    title: browser.i18n.getMessage("contextSaveToClipper"),
+    contexts: ["page", "selection"]
+  })
 }
 
 const shouldSkipOpenApiDriftCheck = async (
@@ -148,7 +176,8 @@ const checkOpenApiDrift = async (storage: Storage) => {
       "/api/v1/flashcards",
       "/api/v1/flashcards/decks",
       "/api/v1/characters/world-books",
-      "/api/v1/chat/dictionaries"
+      "/api/v1/chat/dictionaries",
+      "/api/v1/web-clipper/save"
     ]
     const missing = required.filter((path) => !(path in paths))
     if (missing.length > 0) {
@@ -178,6 +207,7 @@ export const initBackground = async (
   const {
     storage,
     contextMenuId,
+    saveToClipperMenuId,
     saveToCompanionMenuId,
     saveToNotesMenuId,
     narrateSelectionMenuId,
@@ -228,6 +258,7 @@ export const initBackground = async (
       const prevUrl = getServerUrl(value?.oldValue)
       const hasServer = nextUrl.length > 0
       void scheduleModelWarmAlarm(hasServer)
+      void syncWebClipperContextMenu(saveToClipperMenuId)
       if (hasServer && nextUrl !== prevUrl) {
         void warmModels(true)
       }
@@ -238,85 +269,123 @@ export const initBackground = async (
   onContextMenuClickChange(data.contextMenuClick)
   onActionIconClickChange(data.actionIconClick)
 
+  // Top-level: Open Sidebar / Open Web UI (dynamic)
   browser.contextMenus.create({
     id: contextMenuId[data.contextMenuClick],
     title: contextMenuTitle[data.contextMenuClick],
     contexts: ["page", "selection"]
   })
+
+  // Parent: AI Actions
+  browser.contextMenus.create({
+    id: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextMenuAIActions") || "AI Actions",
+    contexts: ["selection"]
+  })
   browser.contextMenus.create({
     id: "summarize-pa",
-    title: browser.i18n.getMessage("contextSummarize"),
+    parentId: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextSummarize") || "Summarize",
     contexts: ["selection"]
   })
   browser.contextMenus.create({
     id: "explain-pa",
-    title: browser.i18n.getMessage("contextExplain"),
+    parentId: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextExplain") || "Explain",
     contexts: ["selection"]
   })
   browser.contextMenus.create({
     id: "rephrase-pa",
-    title: browser.i18n.getMessage("contextRephrase"),
+    parentId: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextRephrase") || "Rephrase",
     contexts: ["selection"]
   })
   browser.contextMenus.create({
     id: "translate-pg",
-    title: browser.i18n.getMessage("contextTranslate"),
+    parentId: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextTranslate") || "Translate",
     contexts: ["selection"]
   })
   browser.contextMenus.create({
     id: "custom-pg",
-    title: browser.i18n.getMessage("contextCustom"),
+    parentId: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextCustom") || "Custom",
     contexts: ["selection"]
   })
   browser.contextMenus.create({
     id: "contextual-popup-pa",
-    title: browser.i18n.getMessage("contextCopilotPopup"),
+    parentId: "tldw-ai-actions",
+    title: browser.i18n.getMessage("contextCopilotPopup") || "AI Popup",
     contexts: ["selection"]
   })
+
+  // Parent: Save
   browser.contextMenus.create({
-    id: narrateSelectionMenuId,
-    title: browser.i18n.getMessage("contextNarrateSelection"),
+    id: "tldw-save",
+    title: browser.i18n.getMessage("contextMenuSave") || "Save",
     contexts: ["selection"]
   })
   browser.contextMenus.create({
     id: saveToNotesMenuId,
-    title: browser.i18n.getMessage("contextSaveToNotes"),
+    parentId: "tldw-save",
+    title: browser.i18n.getMessage("contextSaveToNotes") || "Save to Notes",
     contexts: ["selection"]
   })
+  await syncWebClipperContextMenu(saveToClipperMenuId)
   browser.contextMenus.create({
     id: saveToCompanionMenuId,
+    parentId: "tldw-save",
     title:
       browser.i18n.getMessage("contextSaveToCompanion") || "Save to Companion",
     contexts: ["selection"]
   })
+  browser.contextMenus.create({
+    id: narrateSelectionMenuId,
+    parentId: "tldw-save",
+    title: browser.i18n.getMessage("contextNarrateSelection") || "Read Aloud",
+    contexts: ["selection"]
+  })
 
-  if (capabilities.sendToTldw) {
+  // Parent: Process (only created if at least one capability is enabled)
+  if (capabilities.sendToTldw || capabilities.processLocal || capabilities.transcribe) {
     browser.contextMenus.create({
-      id: "send-to-tldw",
-      title: browser.i18n.getMessage("contextSendToTldw"),
+      id: "tldw-process",
+      title: browser.i18n.getMessage("contextMenuProcess") || "Process",
       contexts: ["page", "link"]
     })
-  }
 
-  if (capabilities.processLocal) {
-    browser.contextMenus.create({
-      id: "process-local-tldw",
-      title: browser.i18n.getMessage("contextProcessLocalTldw"),
-      contexts: ["page", "link"]
-    })
-  }
+    if (capabilities.sendToTldw) {
+      browser.contextMenus.create({
+        id: "send-to-tldw",
+        parentId: "tldw-process",
+        title: browser.i18n.getMessage("contextSendToTldw") || "Save to Library",
+        contexts: ["page", "link"]
+      })
+    }
 
-  if (capabilities.transcribe) {
-    browser.contextMenus.create({
-      id: transcribeMenuId.transcribe,
-      title: browser.i18n.getMessage("contextTranscribeMedia"),
-      contexts: ["page", "link"]
-    })
-    browser.contextMenus.create({
-      id: transcribeMenuId.transcribeAndSummarize,
-      title: browser.i18n.getMessage("contextTranscribeAndSummarizeMedia"),
-      contexts: ["page", "link"]
-    })
+    if (capabilities.processLocal) {
+      browser.contextMenus.create({
+        id: "process-local-tldw",
+        parentId: "tldw-process",
+        title: browser.i18n.getMessage("contextProcessLocalTldw") || "Analyze without Saving",
+        contexts: ["page", "link"]
+      })
+    }
+
+    if (capabilities.transcribe) {
+      browser.contextMenus.create({
+        id: transcribeMenuId.transcribe,
+        parentId: "tldw-process",
+        title: browser.i18n.getMessage("contextTranscribeMedia") || "Transcribe Video/Audio",
+        contexts: ["page", "link"]
+      })
+      browser.contextMenus.create({
+        id: transcribeMenuId.transcribeAndSummarize,
+        parentId: "tldw-process",
+        title: browser.i18n.getMessage("contextTranscribeAndSummarizeMedia") || "Transcribe + Summarize",
+        contexts: ["page", "link"]
+      })
+    }
   }
 
   if (capabilities.openApiCheck) {

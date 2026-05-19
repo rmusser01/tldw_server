@@ -51,16 +51,19 @@ const mediaBasics: TutorialDefinition = {
       contentKey: "tutorials:media.basics.resultsContent",
       contentFallback:
         "Review matched items, select one, and navigate pages to inspect more content.",
-      placement: "right"
+      placement: "right",
+      disableBeacon: true
     },
     {
-      target: '[data-testid="content-scroll-container"]',
+      target:
+        '[data-testid="content-scroll-container"], [data-testid="content-viewer-empty"]',
       titleKey: "tutorials:media.basics.viewerTitle",
       titleFallback: "Content Viewer",
       contentKey: "tutorials:media.basics.viewerContent",
       contentFallback:
         "Inspect selected content, metadata, and navigation details in the main viewer pane.",
-      placement: "left"
+      placement: "left",
+      disableBeacon: true
     },
     {
       target: '[data-testid="media-library-tools-toggle"]',

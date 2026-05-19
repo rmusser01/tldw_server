@@ -1,19 +1,27 @@
 import React, { useState, useCallback, useRef } from "react"
 import { Modal, Input, Select, Button, message } from "antd"
 import { Download, Upload } from "lucide-react"
-import type { ThemeColorTokens, ThemeDefinition, ThemePalette } from "@/themes/types"
+import type { ThemeColorTokens, ThemeRgbTokenKey, ThemeDefinition, ThemeTypography, ThemeShape, ThemeLayout, ThemeComponents } from "@/themes/types"
 import { getBuiltinPresets } from "@/themes/presets"
 import { generateThemeId } from "@/themes/validation"
-import { validateThemeDefinition } from "@/themes/validation"
+import { defaultTypography, defaultShape, defaultLayout, defaultComponents } from "@/themes/defaults"
+import { parseImportedTheme } from "@/themes/import-export"
 import { ColorTokenRow } from "./ColorTokenRow"
 import { ThemePreview } from "./ThemePreview"
 
-const TOKEN_KEYS: (keyof ThemeColorTokens)[] = [
+/** The 17 RGB color token keys rendered via ColorPicker rows. */
+const TOKEN_KEYS: ThemeRgbTokenKey[] = [
   "bg", "surface", "surface2", "elevated",
   "primary", "primaryStrong", "accent",
   "success", "warn", "danger", "muted",
   "border", "borderStrong",
   "text", "textMuted", "textSubtle", "focus",
+]
+
+/** Shadow tokens are CSS box-shadow strings, edited as plain text. */
+const SHADOW_KEYS: { key: "shadowSm" | "shadowMd"; label: string }[] = [
+  { key: "shadowSm", label: "Shadow Small" },
+  { key: "shadowMd", label: "Shadow Medium" },
 ]
 
 interface ThemeEditorModalProps {
@@ -44,6 +52,21 @@ export function ThemeEditorModal({
   const [description, setDescription] = useState(editingTheme?.description ?? "")
   const [lightTokens, setLightTokens] = useState<ThemeColorTokens>({ ...initialPalette.light })
   const [darkTokens, setDarkTokens] = useState<ThemeColorTokens>({ ...initialPalette.dark })
+  const [typography, setTypography] = useState<ThemeTypography>(
+    editingTheme?.typography ?? defaultTypography(),
+  )
+  const [shape, setShape] = useState<ThemeShape>(
+    editingTheme?.shape ?? defaultShape(),
+  )
+  const [layout, setLayout] = useState<ThemeLayout>(
+    editingTheme?.layout ?? defaultLayout(),
+  )
+  const [components, setComponents] = useState<ThemeComponents>(
+    editingTheme?.components ?? defaultComponents(),
+  )
+  const [basePresetId, setBasePresetId] = useState<string | undefined>(
+    editingTheme?.basePresetId,
+  )
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -81,12 +104,18 @@ export function ThemeEditorModal({
       id: editingTheme?.id ?? generateThemeId(name),
       name: name.trim(),
       description: description.trim() || undefined,
+      version: 1,
       builtin: false,
       palette: { light: { ...lightTokens }, dark: { ...darkTokens } },
+      typography,
+      shape,
+      layout,
+      components,
+      basePresetId,
     }
     onSave(theme)
     onClose()
-  }, [name, description, lightTokens, darkTokens, editingTheme, onSave, onClose])
+  }, [name, description, lightTokens, darkTokens, typography, shape, layout, components, basePresetId, editingTheme, onSave, onClose])
 
   const handleDelete = useCallback(() => {
     if (editingTheme && onDelete) {
@@ -108,17 +137,29 @@ export function ThemeEditorModal({
       id: editingTheme?.id ?? generateThemeId(name),
       name: name.trim() || "Exported Theme",
       description: description.trim() || undefined,
+      version: 1,
       builtin: false,
       palette: { light: { ...lightTokens }, dark: { ...darkTokens } },
+      typography,
+      shape,
+      layout,
+      components,
+      basePresetId,
     }
-    const blob = new Blob([JSON.stringify(theme, null, 2)], { type: "application/json" })
+    const exportData = {
+      tldw_theme: true,
+      version: 1,
+      exported_at: new Date().toISOString(),
+      theme,
+    }
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
     a.download = `theme-${theme.id}.json`
     a.click()
     URL.revokeObjectURL(url)
-  }, [name, description, lightTokens, darkTokens, editingTheme])
+  }, [name, description, lightTokens, darkTokens, typography, shape, layout, components, basePresetId, editingTheme])
 
   const handleImport = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -126,20 +167,29 @@ export function ThemeEditorModal({
       if (!file) return
       const reader = new FileReader()
       reader.onload = (e) => {
-        try {
-          const parsed = JSON.parse(e.target?.result as string)
-          if (!validateThemeDefinition(parsed)) {
-            void message.error("Invalid theme file format")
-            return
-          }
-          setName(parsed.name)
-          setDescription(parsed.description ?? "")
-          setLightTokens({ ...parsed.palette.light })
-          setDarkTokens({ ...parsed.palette.dark })
-          void message.success("Theme imported")
-        } catch {
-          void message.error("Failed to parse theme file")
+        const jsonString = e.target?.result as string
+        const result = parseImportedTheme(jsonString)
+
+        if (result.valid === false) {
+          void message.error(result.error)
+          return
         }
+
+        const { theme, warnings } = result
+        setName(theme.name)
+        setDescription(theme.description ?? "")
+        setLightTokens({ ...theme.palette.light })
+        setDarkTokens({ ...theme.palette.dark })
+        setTypography(theme.typography ? { ...theme.typography } : defaultTypography())
+        setShape(theme.shape ? { ...theme.shape } : defaultShape())
+        setLayout(theme.layout ? { ...theme.layout } : defaultLayout())
+        setComponents(theme.components ? { ...theme.components } : defaultComponents())
+        setBasePresetId(theme.basePresetId)
+
+        if (warnings.length > 0) {
+          void message.warning(warnings.join(" "))
+        }
+        void message.success(`Theme "${theme.name}" imported`)
       }
       reader.readAsText(file)
       // Reset so the same file can be re-imported
@@ -245,6 +295,20 @@ export function ThemeEditorModal({
                 />
               ))}
             </div>
+            <h4 className="text-xs font-medium text-text-muted mb-2 mt-3">Shadows</h4>
+            <div className="space-y-1.5">
+              {SHADOW_KEYS.map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-xs text-text-muted flex-1 min-w-0 truncate">{label}</span>
+                  <Input
+                    size="small"
+                    value={lightTokens[key]}
+                    onChange={(e) => handleLightChange(key, e.target.value)}
+                    className="w-48 font-mono text-[10px]"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
           <div>
             <h4 className="text-xs font-medium text-text-muted mb-2">Dark Palette</h4>
@@ -256,6 +320,20 @@ export function ThemeEditorModal({
                   value={darkTokens[key]}
                   onChange={handleDarkChange}
                 />
+              ))}
+            </div>
+            <h4 className="text-xs font-medium text-text-muted mb-2 mt-3">Shadows</h4>
+            <div className="space-y-1.5">
+              {SHADOW_KEYS.map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-xs text-text-muted flex-1 min-w-0 truncate">{label}</span>
+                  <Input
+                    size="small"
+                    value={darkTokens[key]}
+                    onChange={(e) => handleDarkChange(key, e.target.value)}
+                    className="w-48 font-mono text-[10px]"
+                  />
+                </div>
               ))}
             </div>
           </div>

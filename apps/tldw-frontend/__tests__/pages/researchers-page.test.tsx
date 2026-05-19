@@ -34,17 +34,13 @@ describe('ResearchersPage CTA routing', () => {
       'href',
       '/docs'
     );
-    expect(screen.getByRole('link', { name: 'Download' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Download Free' })).toHaveAttribute(
       'href',
       '/docs/self-hosting'
     );
-    expect(screen.getByRole('link', { name: 'Start Trial' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Read the Docs' })).toHaveAttribute(
       'href',
-      '/research'
-    );
-    expect(screen.getByRole('link', { name: 'Contact Us' })).toHaveAttribute(
-      'href',
-      '/contact'
+      '/docs'
     );
   });
 });

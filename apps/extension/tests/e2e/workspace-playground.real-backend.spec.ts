@@ -22,7 +22,7 @@ const seedLocalStorage = {
   "tldw-tutorials": JSON.stringify({
     state: {
       completedTutorials: ["playground", "chat", "notes", "media", "settings"],
-      seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/workspace-playground"]
+      seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/research-studio"]
     },
     version: 0
   })
@@ -71,7 +71,7 @@ const waitForConnected = async (page: Page, label: string): Promise<void> => {
   }
 }
 
-test.describe("Workspace Playground parity (extension real backend)", () => {
+test.describe("Research Studio parity (extension real backend)", () => {
   test("passes baseline + deterministic studio parity contract against a real server", async () => {
     const { serverUrl, apiKey } = requireRealServerConfig(test)
     const normalizedServerUrl = normalizeServerUrl(serverUrl)

@@ -3,145 +3,315 @@
   "$id": "https://schemas.tldw.ai/chatbooks/manifest/v1.json",
   "title": "Chatbooks manifest v1",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "version",
+    "name",
+    "description",
+    "author",
+    "created_at",
+    "updated_at",
+    "export_id",
+    "content_items",
+    "relationships",
+    "configuration",
+    "statistics",
     "metadata",
-    "entries"
+    "user_info"
   ],
   "properties": {
     "version": {
       "type": "string",
-      "const": "1.0"
+      "const": "1.0.0"
     },
-    "metadata": {
-      "type": "object",
-      "required": [
-        "created_at",
-        "exported_by",
-        "app_version"
-      ],
-      "properties": {
-        "created_at": {
-          "type": "string"
-        },
-        "exported_by": {
-          "type": "string"
-        },
-        "app_version": {
-          "type": "string"
-        },
-        "timezone": {
-          "type": "string"
-        },
-        "locale": {
-          "type": "string"
-        },
-        "binary_limits": {
-          "type": "object"
-        },
-        "template_mode": {
-          "type": "string"
-        },
-        "template_defaults": {
-          "type": "object"
-        },
-        "template_timezone": {
-          "type": "string"
-        },
-        "template_locale": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": true
+    "name": {
+      "type": "string"
     },
-    "entries": {
+    "description": {
+      "type": "string"
+    },
+    "author": {
+      "type": ["string", "null"]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "export_id": {
+      "type": ["string", "null"]
+    },
+    "content_items": {
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
+          "id",
           "type",
-          "id"
+          "title",
+          "description",
+          "created_at",
+          "updated_at",
+          "tags",
+          "metadata",
+          "file_path",
+          "checksum"
         ],
         "properties": {
-          "type": {
-            "type": "string"
-          },
           "id": {
             "type": "string"
           },
-          "name": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "note",
+              "character",
+              "media",
+              "embedding",
+              "prompt",
+              "evaluation",
+              "world_book",
+              "dictionary",
+              "generated_document"
+            ]
+          },
+          "title": {
             "type": "string"
           },
-          "content": {},
-          "references": {
+          "description": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "tags": {
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "path": {
-                  "type": "string"
-                },
-                "sha256": {
-                  "type": "string"
-                },
-                "size_bytes": {
-                  "type": "integer"
-                },
-                "bundled": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "path"
-              ],
-              "additionalProperties": true
-            }
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
           },
-          "provenance": {
-            "type": "object"
+          "file_path": {
+            "type": ["string", "null"]
           },
-          "conflict_strategy": {
-            "type": "string",
-            "enum": [
-              "skip",
-              "overwrite",
-              "rename",
-              "merge"
-            ]
+          "checksum": {
+            "type": ["string", "null"]
           }
-        },
-        "additionalProperties": true
+        }
       }
     },
     "relationships": {
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "target_id",
+          "relationship_type",
+          "metadata"
+        ],
         "properties": {
-          "from": {
+          "source_id": {
             "type": "string"
           },
-          "to": {
+          "target_id": {
             "type": "string"
           },
-          "type": {
+          "relationship_type": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "include_media",
+        "include_embeddings",
+        "include_generated_content",
+        "media_quality",
+        "max_file_size_mb"
+      ],
+      "properties": {
+        "include_media": {
+          "type": "boolean"
+        },
+        "include_embeddings": {
+          "type": "boolean"
+        },
+        "include_generated_content": {
+          "type": "boolean"
+        },
+        "media_quality": {
+          "type": "string",
+          "enum": [
+            "thumbnail",
+            "compressed",
+            "original"
+          ]
+        },
+        "max_file_size_mb": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_conversations",
+        "total_notes",
+        "total_characters",
+        "total_media_items",
+        "total_prompts",
+        "total_evaluations",
+        "total_embeddings",
+        "total_world_books",
+        "total_dictionaries",
+        "total_documents",
+        "total_size_bytes"
+      ],
+      "properties": {
+        "total_conversations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_notes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_characters": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_media_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_prompts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_evaluations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_embeddings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_world_books": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_dictionaries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_documents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "tags",
+        "categories",
+        "language",
+        "license"
+      ],
+      "properties": {
+        "tags": {
+          "type": "array",
+          "items": {
             "type": "string"
           }
         },
-        "required": [
-          "from",
-          "to",
-          "type"
-        ],
-        "additionalProperties": true
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "language": {
+          "type": "string"
+        },
+        "license": {
+          "type": ["string", "null"]
+        },
+        "binary_limits": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "user_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user_id"
+      ],
+      "properties": {
+        "user_id": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "truncation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "evaluations": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "truncated": {
+              "type": "boolean"
+            },
+            "max_rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "continuations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     }
-  },
-  "additionalProperties": true
+  }
 }

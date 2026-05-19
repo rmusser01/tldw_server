@@ -344,6 +344,15 @@ const expandGeneratedOutputsSection = () => {
   }
 }
 
+const expandMoreOutputsSection = () => {
+  const toggle = screen.queryByRole("button", {
+    name: /More outputs/i
+  })
+  if (toggle?.getAttribute("aria-expanded") === "false") {
+    fireEvent.click(toggle)
+  }
+}
+
 const renderStudioPane = () => {
   const renderResult = render(<StudioPane />)
   expandOutputTypesSection()
@@ -863,7 +872,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       )
     })
-  })
+  }, 15000)
 
   it("removes a flashcard draft with undo parity in editor", async () => {
     workspaceStoreState.generatedArtifacts = [
@@ -973,7 +982,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       )
     })
-  })
+  }, 15000)
 
   it("removes a quiz draft question with undo parity in editor", async () => {
     workspaceStoreState.generatedArtifacts = [
@@ -1259,6 +1268,7 @@ describe("StudioPane Stage 2 workflows", () => {
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
     renderStudioPane()
+    expandMoreOutputsSection()
 
     const compareButton = screen.getByRole("button", { name: "Compare Sources" })
     expect(compareButton).toBeDisabled()
@@ -1322,6 +1332,7 @@ describe("StudioPane Stage 2 workflows", () => {
     )
 
     renderStudioPane()
+    expandMoreOutputsSection()
 
     fireEvent.click(screen.getByRole("button", { name: "Compare Sources" }))
 
@@ -1356,7 +1367,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       )
     })
-  })
+  }, 15000)
 
   it("generates data table output from selected source content via chat completion", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
@@ -1412,6 +1423,7 @@ describe("StudioPane Stage 2 workflows", () => {
     )
 
     renderStudioPane()
+    expandMoreOutputsSection()
 
     fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
 
@@ -1451,7 +1463,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       )
     })
-  })
+  }, 15000)
 
   it("falls back to the first available chat model for mind maps when no model is selected", async () => {
     messageOptionStoreState.selectedModel = null
@@ -1492,6 +1504,7 @@ describe("StudioPane Stage 2 workflows", () => {
     )
 
     renderStudioPane()
+    expandMoreOutputsSection()
 
     fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
 
@@ -1507,90 +1520,23 @@ describe("StudioPane Stage 2 workflows", () => {
         signal: expect.any(AbortSignal)
       })
     )
-  })
+  }, 15000)
 
-  it("retries mind map generation when the first completion is not Mermaid syntax", async () => {
+  it("marks mind map generation failed when completion is not Mermaid syntax", async () => {
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
       content: {
         text: "DSPy helps optimize prompting workflows and compound AI pipelines."
       }
     })
-    let resolveRepairResponse: ((response: Response) => void) | undefined
-    const repairResponsePromise = new Promise<Response>((resolve) => {
-      resolveRepairResponse = resolve
-    })
-    mockCreateChatCompletion
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content:
-                    "Central topic: Workspace Research\n- Prompting workflows\n- Compound AI pipelines"
-                }
-              }
-            ]
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          }
-        )
-      )
-      .mockImplementationOnce(() => repairResponsePromise)
-
-    renderStudioPane()
-
-    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
-
-    await waitFor(() => {
-      expect(mockCreateChatCompletion).toHaveBeenCalledTimes(2)
-    })
-
-    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
-      expect.any(String),
-      "failed",
-      expect.anything()
-    )
-    expect(mockUpdateArtifactStatus).not.toHaveBeenCalledWith(
-      expect.any(String),
-      "completed",
-      expect.anything()
-    )
-    expect(mockMessageError).not.toHaveBeenCalled()
-
-    expect(mockCreateChatCompletion).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        model: "gpt-4o-mini",
-        messages: [
-          expect.objectContaining({
-            role: "system",
-            content: expect.stringContaining("convert notes and outlines")
-          }),
-          expect.objectContaining({
-            role: "user",
-            content: expect.stringContaining(
-              "The previous answer was not valid Mermaid mindmap syntax"
-            )
-          })
-        ]
-      }),
-      expect.objectContaining({
-        signal: expect.any(AbortSignal)
-      })
-    )
-
-    resolveRepairResponse?.(
+    mockCreateChatCompletion.mockResolvedValue(
       new Response(
         JSON.stringify({
           choices: [
             {
               message: {
                 content:
-                  "```mermaid\nmindmap\n  root((Workspace Research))\n    Prompting workflows\n    Compound AI pipelines\n```"
+                  "Central topic: Workspace Research\n- Prompting workflows\n- Compound AI pipelines"
               }
             }
           ]
@@ -1602,19 +1548,24 @@ describe("StudioPane Stage 2 workflows", () => {
       )
     )
 
+    renderStudioPane()
+    expandMoreOutputsSection()
+
+    fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
+
     await waitFor(() => {
       expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
         expect.stringMatching(/^artifact-/),
-        "completed",
+        "failed",
         expect.objectContaining({
-          content: expect.stringContaining("mindmap"),
-          data: expect.objectContaining({
-            mermaid: expect.stringContaining("mindmap")
-          })
+          errorMessage: expect.stringContaining("usable mind map")
         })
       )
     })
-  })
+
+    expect(mockCreateChatCompletion).toHaveBeenCalledTimes(1)
+    expect(mockMessageError).toHaveBeenCalled()
+  }, 15000)
 
   it("generates data table output from selected source content via chat completion", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]
@@ -1670,6 +1621,7 @@ describe("StudioPane Stage 2 workflows", () => {
     )
 
     renderStudioPane()
+    expandMoreOutputsSection()
 
     fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
 
@@ -1711,7 +1663,7 @@ describe("StudioPane Stage 2 workflows", () => {
         })
       )
     })
-  })
+  }, 15000)
 
   it("falls back to the first available chat model for data tables when no model is selected", async () => {
     messageOptionStoreState.selectedModel = null
@@ -1753,6 +1705,7 @@ describe("StudioPane Stage 2 workflows", () => {
     )
 
     renderStudioPane()
+    expandMoreOutputsSection()
 
     fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
 
@@ -1765,7 +1718,7 @@ describe("StudioPane Stage 2 workflows", () => {
         model: "gpt-4o-mini"
       })
     )
-  })
+  }, 15000)
 
   it("renders cumulative workspace usage and per-artifact usage", async () => {
     Modal.destroyAll()

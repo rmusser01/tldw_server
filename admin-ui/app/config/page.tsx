@@ -417,14 +417,19 @@ export default function ConfigPage() {
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold">System Configuration Overview</h1>
                 <Badge
-                  variant="outline"
+                  variant={
+                    process.env.NODE_ENV === 'production' ? 'default'
+                    : process.env.NODE_ENV === 'development' ? 'secondary'
+                    : 'outline'
+                  }
                   className={
                     process.env.NODE_ENV === 'production' ? 'border-red-500 text-red-600' :
                     process.env.NODE_ENV === 'development' ? 'border-green-500 text-green-600' :
                     'border-yellow-500 text-yellow-600'
                   }
+                  data-testid="environment-badge"
                 >
-                  {process.env.NODE_ENV || 'unknown'}
+                  {process.env.NODE_ENV ?? 'unknown'}
                 </Badge>
               </div>
               <p className="text-muted-foreground">

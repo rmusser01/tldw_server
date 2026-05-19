@@ -65,6 +65,7 @@ import { documentChatMode } from "./chat-modes/documentChatMode";
 import { updatePageTitle } from "@/utils/update-page-title";
 import { useAntdNotification } from "./useAntdNotification";
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState";
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
 import { normalizeConversationState } from "@/utils/conversation-state";
 import {
   resolveApiProviderForModel,
@@ -76,6 +77,7 @@ import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure";
 import { normalizeChatModelId } from "@/utils/chat-model-availability";
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation";
 import { discardAbortedTurnIfRequested } from "@/hooks/chat/abort-turn-cleanup";
+import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
 import {
   collectGreetings,
   isGreetingMessageType,
@@ -122,10 +124,7 @@ export const useMessage = () => {
   const invalidateServerChatHistory = React.useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
   }, [queryClient]);
-  const [selectedModel, setSelectedModel] = useStorage<string | null>(
-    "selectedModel",
-    null,
-  );
+  const { selectedModel, setSelectedModel } = useSelectedModel();
   const currentChatModelSettings = useStoreChatModelSettings();
   const {
     setIsSearchingInternet,
@@ -1604,31 +1603,39 @@ export const useMessage = () => {
       // Persist assistant reply on server
       const finalPersistedContent = fullText.trim();
       if (finalPersistedContent.length > 0) {
+        let fallbackSpeakerId: number | undefined;
+        let speakerCharacterId: number | undefined;
+        let detectedMood: ReturnType<typeof detectCharacterMood> | undefined;
+        let resolvedMoodLabel: string | undefined;
+        let resolvedMoodConfidence: number | undefined;
+        let resolvedMoodTopic: string | undefined;
+        let metadataExtra: Record<string, unknown> | undefined;
         try {
-          const fallbackSpeakerId = Number.parseInt(
+          fallbackSpeakerId = Number.parseInt(
             String(selectedCharacter.id),
             10,
           );
-          const speakerCharacterId =
+          speakerCharacterId =
             Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
               ? fallbackSpeakerId
               : undefined;
-          const detectedMood = detectCharacterMood({
+          detectedMood = detectCharacterMood({
             assistantText: finalPersistedContent,
             userText: message,
           });
-          const resolvedMoodLabel = detectedMood.label;
-          const resolvedMoodConfidence =
+          resolvedMoodLabel = detectedMood.label;
+          resolvedMoodConfidence =
             typeof detectedMood.confidence === "number" &&
             Number.isFinite(detectedMood.confidence)
               ? detectedMood.confidence
               : undefined;
-          const resolvedMoodTopic =
+          resolvedMoodTopic =
             typeof detectedMood.topic === "string" && detectedMood.topic.trim()
               ? detectedMood.topic.trim()
               : undefined;
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
+            assistant_message_id: generateMessageId,
             speaker_character_id: speakerCharacterId,
             speaker_character_name: characterName,
           };
@@ -1644,6 +1651,13 @@ export const useMessage = () => {
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId;
           }
+          metadataExtra = {
+            speaker_character_id: speakerCharacterId ?? null,
+            speaker_character_name: characterName,
+            mood_label: resolvedMoodLabel,
+            mood_confidence: resolvedMoodConfidence ?? null,
+            mood_topic: resolvedMoodTopic ?? null,
+          };
           const persisted = (await tldwClient.persistCharacterCompletion(
             chatId,
             persistPayload,
@@ -1658,13 +1672,6 @@ export const useMessage = () => {
             persisted?.message_id ??
             persisted?.id;
           const createdAsstVersion = persisted?.version;
-          const metadataExtra = {
-            speaker_character_id: speakerCharacterId ?? null,
-            speaker_character_name: characterName,
-            mood_label: resolvedMoodLabel,
-            mood_confidence: resolvedMoodConfidence ?? null,
-            mood_topic: resolvedMoodTopic ?? null,
-          };
           setMessages(
             (prev) =>
               (prev as ServerBackedMessage[]).map((m) => {
@@ -1690,30 +1697,60 @@ export const useMessage = () => {
             "Failed to persist assistant message via completions/persist:",
             e,
           );
-          try {
-            const createdAsst = (await tldwClient.addChatMessage(chatId, {
-              role: "assistant",
-              content: finalPersistedContent,
-            })) as { id?: string | number; version?: number } | null;
+          const savedOutcome = resolveSavedDegradedCharacterPersist(e);
+          if (savedOutcome?.saved) {
             setMessages(
               (prev) =>
                 (prev as ServerBackedMessage[]).map((m) => {
                   if (m.id !== generateMessageId) return m;
                   const serverMessageId =
-                    createdAsst?.id != null
-                      ? String(createdAsst.id)
+                    savedOutcome.assistantMessageId != null
+                      ? String(savedOutcome.assistantMessageId)
                       : undefined;
                   return updateActiveVariant(m, {
                     serverMessageId,
-                    serverMessageVersion: createdAsst?.version,
+                    serverMessageVersion: savedOutcome.version,
+                    metadataExtra,
+                    speakerCharacterId: speakerCharacterId ?? null,
+                    speakerCharacterName: characterName,
+                    moodLabel: resolvedMoodLabel,
+                    moodConfidence: resolvedMoodConfidence ?? null,
+                    moodTopic: resolvedMoodTopic ?? null,
                   });
                 }) as Message[],
             );
-          } catch (fallbackError) {
-            console.error(
-              "Failed fallback assistant persistence with addChatMessage:",
-              fallbackError,
-            );
+          } else {
+            try {
+              const createdAsst = (await tldwClient.addChatMessage(chatId, {
+                role: "assistant",
+                content: finalPersistedContent,
+              })) as { id?: string | number; version?: number } | null;
+              setMessages(
+                (prev) =>
+                  (prev as ServerBackedMessage[]).map((m) => {
+                    if (m.id !== generateMessageId) return m;
+                    const serverMessageId =
+                      createdAsst?.id != null
+                        ? String(createdAsst.id)
+                        : undefined;
+                    return updateActiveVariant(m, {
+                      serverMessageId,
+                      serverMessageVersion: createdAsst?.version,
+                      metadataExtra,
+                      speakerCharacterId: speakerCharacterId ?? null,
+                      speakerCharacterName: characterName,
+                      moodLabel: resolvedMoodLabel,
+                      moodConfidence: resolvedMoodConfidence ?? null,
+                      moodTopic: resolvedMoodTopic ?? null,
+                    });
+                  }) as Message[],
+              );
+            } catch (fallbackError) {
+              console.error(
+                "Failed fallback assistant persistence with addChatMessage:",
+                fallbackError,
+              );
+            }
           }
         }
       } else {
@@ -1848,8 +1885,20 @@ export const useMessage = () => {
     signal: AbortSignal,
     messageType: string,
     regenerateFromMessage?: Message,
+    options?: {
+      selectedModel?: string | null;
+      useOCR?: boolean;
+    },
   ) => {
-    if (!selectedModel || selectedModel.trim().length === 0) {
+    const resolvedPresetModel = (
+      typeof options?.selectedModel === "string"
+        ? options.selectedModel
+        : selectedModel || ""
+    ).trim();
+    const resolvedPresetUseOCR =
+      typeof options?.useOCR === "boolean" ? options.useOCR : useOCR;
+
+    if (!resolvedPresetModel) {
       notification.error({
         message: t("error"),
         description: t("validationSelectModel"),
@@ -1857,7 +1906,7 @@ export const useMessage = () => {
       return;
     }
 
-    const model = selectedModel.trim();
+    const model = resolvedPresetModel;
     setStreaming(true);
 
     if (image.length > 0) {
@@ -1960,7 +2009,7 @@ export const useMessage = () => {
           },
         ],
         model,
-        useOCR,
+        useOCR: resolvedPresetUseOCR,
       });
       if (image.length > 0) {
         humanMessage = await humanMessageFormatter({
@@ -1975,7 +2024,7 @@ export const useMessage = () => {
             },
           ],
           model,
-          useOCR,
+          useOCR: resolvedPresetUseOCR,
         });
       }
 
@@ -2178,6 +2227,8 @@ export const useMessage = () => {
       useOCR?: boolean;
       webSearch?: boolean;
       chatMode?: "normal" | "rag" | "vision";
+      historyForModel?: ChatHistory;
+      messageForModel?: string;
     };
     serverChatIdOverride?: string | null;
   }) => {
@@ -2220,6 +2271,15 @@ export const useMessage = () => {
       requestOverrides?.chatMode === "vision"
         ? requestOverrides.chatMode
         : chatMode;
+    const conversationContextOverrides = {
+      historyForModel: Array.isArray(requestOverrides?.historyForModel)
+        ? requestOverrides.historyForModel
+        : undefined,
+      messageForModel:
+        typeof requestOverrides?.messageForModel === "string"
+          ? requestOverrides.messageForModel
+          : undefined,
+    };
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
         return;
@@ -2304,6 +2364,7 @@ export const useMessage = () => {
               ? trimmedImageBackendOverride
               : undefined,
             regenerateFromMessage,
+            ...conversationContextOverrides,
             ...replyOverrides,
           },
         );
@@ -2380,6 +2441,10 @@ export const useMessage = () => {
           signal,
           messageType,
           regenerateFromMessage,
+          {
+            selectedModel: resolvedSelectedModel,
+            useOCR: resolvedUseOCR,
+          },
         );
       } else {
         if (resolvedChatMode === "normal") {
@@ -2467,6 +2532,7 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 uploadedFiles,
                 regenerateFromMessage,
+                ...conversationContextOverrides,
                 ...replyOverrides,
               },
             );
@@ -2498,6 +2564,7 @@ export const useMessage = () => {
                 webSearch: resolvedWebSearch,
                 setIsSearchingInternet,
                 regenerateFromMessage,
+                ...conversationContextOverrides,
                 ...replyOverrides,
               },
             );
@@ -2563,6 +2630,7 @@ export const useMessage = () => {
     index: number,
     message: string,
     isHuman: boolean,
+    isSend = true,
   ) => {
     const newHistory = history;
 
@@ -2571,6 +2639,35 @@ export const useMessage = () => {
       const updatedMessages = messages.map((msg, idx) =>
         idx === index ? { ...msg, message } : msg,
       );
+      if (!isSend) {
+        setMessages(updatedMessages);
+        const updatedHistory = newHistory.map((item, idx) =>
+          idx === index ? { ...item, content: message } : item,
+        );
+        setHistory(updatedHistory);
+        await updateMessageByIndex(historyId, index, message);
+        if (
+          serverChatId &&
+          (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
+          currentHumanMessage?.serverMessageId
+        ) {
+          try {
+            const srv = await tldwClient.getMessage(
+              currentHumanMessage.serverMessageId,
+            );
+            const ver = srv?.version;
+            if (ver != null) {
+              await tldwClient.editMessage(
+                currentHumanMessage.serverMessageId,
+                message,
+                Number(ver),
+                serverChatId ?? undefined,
+              );
+            }
+          } catch {}
+        }
+        return;
+      }
       const previousMessages = updatedMessages.slice(0, index + 1);
       setMessages(previousMessages);
       const previousHistory = newHistory.slice(0, index);

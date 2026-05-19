@@ -88,6 +88,7 @@ vi.mock("../../hooks/useDatasets", () => ({
   }),
   useLoadDatasetSamples: () => ({
     mutate: loadSpy,
+    mutateAsync: loadSpy,
     isPending: false
   }),
   useCloseDatasetViewer: () => closeViewerSpy,

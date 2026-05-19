@@ -24,6 +24,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -429,9 +430,9 @@ export const ragMode = async (
   history: ChatHistory,
   signal: AbortSignal,
   params: RagModeParams
-) => {
+): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
-  await runChatPipeline(
+  return runChatPipeline(
     ragModeDefinition,
     message,
     image,

@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import { browser } from "wxt/browser"
 
 import {
   useConnectionActions,
@@ -54,6 +55,19 @@ const ExtensionIntro: React.FC<{
   </div>
 )
 
+const showFtueNotification = () => {
+  if (typeof browser?.notifications?.create === "function") {
+    void browser.notifications.create("ftue-features", {
+      type: "basic",
+      iconUrl: browser.runtime.getURL("icon/128.png"),
+      title: browser.i18n.getMessage("ftueNotificationTitle") || "You're all set!",
+      message:
+        browser.i18n.getMessage("ftueNotificationMessage") ||
+        "Right-click on any page to use AI actions. Click the tldw icon to open the sidebar for chat."
+    }).catch(() => undefined)
+  }
+}
+
 const OptionIndex = () => {
   const { phase } = useConnectionState()
   const { hasCompletedFirstRun } = useConnectionUxState()
@@ -88,8 +102,9 @@ const OptionIndex = () => {
               setDemoEnabled(true)
               try {
                 await markFirstRunComplete()
+                showFtueNotification()
               } catch {
-                // ignore
+                // markFirstRunComplete failed; skip notification since state may be inconsistent
               }
             }}
           />
@@ -103,8 +118,9 @@ const OptionIndex = () => {
           onFinish={async () => {
             try {
               await markFirstRunComplete()
+              showFtueNotification()
             } catch {
-              // ignore markFirstRunComplete failures here; connection state will self-heal on next load
+              // markFirstRunComplete failed; skip notification since state may be inconsistent
             }
             void checkOnce().catch(() => undefined)
           }}

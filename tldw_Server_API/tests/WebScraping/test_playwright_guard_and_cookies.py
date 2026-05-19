@@ -40,6 +40,42 @@ async def test_playwright_guard_fallback(monkeypatch):
     assert result.get("method") == "trafilatura"
 
 
+async def test_playwright_guard_strict_policy_blocks_before_navigation(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scraper_mod
+    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+        WebOutboundPolicyDecision,
+    )
+
+    scraper = EnhancedWebScraper()
+
+    async def fake_policy(*args, **kwargs):
+        return WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="robots_unreachable",
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        )
+
+    monkeypatch.setattr(scraper_mod, "decide_web_outbound_policy", fake_policy, raising=False)
+
+    async def fail_traf(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("trafilatura should not run when outbound policy blocks")
+
+    async def fail_playwright(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("playwright should not run when outbound policy blocks")
+
+    scraper._browser = object()
+    monkeypatch.setattr(scraper, "_scrape_with_trafilatura", fail_traf)
+    monkeypatch.setattr(scraper, "_scrape_with_playwright", fail_playwright)
+
+    result = await scraper.scrape_article("https://example.com/x", method="playwright")
+
+    assert result["extraction_successful"] is False
+    assert result["error"] == "Blocked by outbound policy"
+    assert result["policy_reason"] == "robots_unreachable"
+
+
 async def test_cookie_manager_accepts_name_value(tmp_path):
     manager = CookieManager(storage_path=tmp_path / "cookies.json")
     manager.add_cookies("example.com", [{"name": "foo", "value": "bar"}])

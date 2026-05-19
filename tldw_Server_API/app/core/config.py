@@ -1,6 +1,7 @@
 # config.py
 # Description: Configuration settings for the tldw server application.
 #
+from __future__ import annotations
 # Imports
 import configparser
 import contextlib
@@ -20,6 +21,14 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_config_option_names,
+    custom_openai_endpoint_env_keys,
+    custom_openai_model_env_keys,
+    custom_openai_section_name,
+    iter_custom_openai_provider_numbers,
+)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -63,6 +72,67 @@ def _safe_json_dict(raw: Optional[str]) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+CUSTOM_OPENAI_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(1)
+CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS = custom_openai_endpoint_env_keys(2)
+
+
+def _first_nonempty_env(env_keys: tuple[str, ...]) -> Optional[str]:
+    """Return the first non-empty environment value from ordered candidates."""
+    for env_key in env_keys:
+        value = os.getenv(env_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _env_or_config_value(
+    env_keys: tuple[str, ...],
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    key: str,
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve an env-first value with a single config option fallback."""
+    return _first_nonempty_env(env_keys) or config_parser_object.get(section, key, fallback=fallback)
+
+
+def _first_config_option_value(
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    keys: tuple[str, ...],
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Return the first non-empty value from equivalent config option names."""
+    sentinel = object()
+    for key in keys:
+        value = config_parser_object.get(section, key, fallback=sentinel)
+        if value is sentinel or value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        return value
+    return fallback
+
+
+def _env_or_config_option_value(
+    env_keys: tuple[str, ...],
+    config_parser_object: configparser.ConfigParser,
+    section: str,
+    keys: tuple[str, ...],
+    *,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve ordered env aliases before ordered config option aliases."""
+    return _first_nonempty_env(env_keys) or _first_config_option_value(
+        config_parser_object,
+        section,
+        keys,
+        fallback=fallback,
+    )
+
+
 def _int_env_or_cfg(
     env_value: Optional[object],
     cfg_value: Optional[object],
@@ -97,6 +167,7 @@ _CONFIG_SOURCE_METADATA: dict[str, Any] = {
 # True are buffered and flushed once initialization completes.
 _LOGGER_READY = False
 _STARTUP_LOG_BUFFER: list[tuple[str, str, dict[str, Any]]] = []
+_ENV_FILE_ENV_VAR = "TLDW_ENV_FILE"
 
 
 def _buffered_log(level: str, message: str, **kwargs: Any) -> None:
@@ -133,6 +204,62 @@ def _flush_startup_logs() -> None:
     _STARTUP_LOG_BUFFER = []
 
 
+def _resolve_path(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except _CONFIG_NONCRITICAL_EXCEPTIONS:
+        return path.expanduser()
+
+
+def get_tldw_env_file_path() -> Path | None:
+    """Return the explicit runtime .env path selected by TLDW_ENV_FILE."""
+    raw_path = os.getenv(_ENV_FILE_ENV_VAR)
+    if not raw_path or not raw_path.strip():
+        return None
+    return _resolve_path(Path(raw_path.strip()))
+
+
+def _candidate_env_paths(project_root: Path, repo_root: Path | None = None) -> list[Path]:
+    """Return .env candidates in load precedence order.
+
+    `TLDW_ENV_FILE` is an explicit user/runtime selection. It must be loaded
+    before canonical repo paths because python-dotenv uses override=False.
+    """
+    candidates: list[Path] = []
+    explicit_env_file = get_tldw_env_file_path()
+    if explicit_env_file:
+        candidates.append(explicit_env_file)
+
+    candidates.extend(
+        [
+            project_root / 'Config_Files' / '.env',
+            project_root / 'Config_Files' / '.ENV',
+            project_root / '.env',
+            project_root / '.ENV',
+        ]
+    )
+    if repo_root is not None:
+        candidates.extend(
+            [
+                repo_root / 'Config_Files' / '.env',
+                repo_root / 'Config_Files' / '.ENV',
+                repo_root / '.env',
+                repo_root / '.ENV',
+            ]
+        )
+
+    resolved_candidates: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        resolved = _resolve_path(path)
+        key = str(resolved)
+        if key in seen:
+            continue
+        resolved_candidates.append(resolved)
+        seen.add(key)
+    return resolved_candidates
+
+
 def _load_env_files_early() -> None:
     """Load .env files before any environment reads.
 
@@ -143,12 +270,10 @@ def _load_env_files_early() -> None:
     try:
         current_file_path = Path(__file__).resolve()
         project_root = current_file_path.parent.parent.parent
-        candidate_env_paths = [
-            project_root / 'Config_Files' / '.env',
-            project_root / 'Config_Files' / '.ENV',
-            project_root / '.env',
-            project_root / '.ENV',
-        ]
+        candidate_env_paths = _candidate_env_paths(
+            project_root,
+            project_root.parent,
+        )
         loaded_any = False
         for p in candidate_env_paths:
             try:
@@ -234,6 +359,8 @@ def get_config_value(
     parser = _load_config_parser()
     return parser.get(section, key, fallback=default)
 
+
+ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 _INGESTION_SOURCE_ALLOWED_ROOT_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOT_KEY = "ingestion_source_allowed_roots"
@@ -474,7 +601,8 @@ RAG_SERVICE_CONFIG = {
         "max_context_length": 4096,
         "context_padding_tokens": 100,
         "enable_metadata_filtering": True,
-        "token_counter": "tiktoken"
+        # Tokenizer name, not a secret.
+        "token_counter": "tiktoken"  # nosec B105
     },
 
     # Generator configuration
@@ -534,7 +662,8 @@ DIARIZATION_CONFIG = {
     "num_threads": 4,  # Number of threads for processing
     "memory_efficient": False,
     "max_memory_mb": 2048,
-    "use_auth_token": None,  # HuggingFace auth token if needed
+    # Default sentinel; real HuggingFace auth token is supplied via config/env.
+    "use_auth_token": None,  # nosec B105
     "cache_dir": None,  # Directory for model cache
 
     # Output settings
@@ -713,10 +842,6 @@ def load_settings():
         This function may load .env files, consult on-disk config files, emit startup warnings, and create filesystem directories (for the main SQLite database and the user data base directory) as needed.
     """
 
-    # Determine Actual Project Root based on the location of this file
-    # config.py is in project_root/tldw_server_api/app/core/config.py
-    # ACTUAL_PROJECT_ROOT will be /project_root/
-    ACTUAL_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
     _log_info(f"Determined ACTUAL_PROJECT_ROOT for database paths: {ACTUAL_PROJECT_ROOT}")
 
     # Ensure .env files are loaded before reading any environment variables
@@ -1155,6 +1280,99 @@ def load_settings():
     # Default to in-memory store for MVP to align with PRD (can be overridden to 'sqlite')
     SANDBOX_STORE_BACKEND = _sbx_env_or_cfg("SANDBOX_STORE_BACKEND", "store_backend", "memory").lower()
     SANDBOX_STORE_DB_PATH = os.getenv("SANDBOX_STORE_DB_PATH") or _sbx_get("store_db_path", None)
+
+    persona_config = load_comprehensive_config()
+
+    def _persona_cfg_get(option: str) -> Optional[str]:
+        try:
+            if persona_config and persona_config.has_section("persona"):
+                return persona_config.get("persona", option, fallback=None)
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            return None
+        return None
+
+    def _persona_bool(env_key: str, option: str, default: bool) -> bool:
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                return is_truthy(text)
+        cfg_value = _persona_cfg_get(option)
+        if cfg_value is None:
+            return default
+        return is_truthy(str(cfg_value))
+
+    def _persona_int(env_key: str, option: str, default: int) -> int:
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            text = str(env_value).strip()
+            if text and text.lower() not in {"none", "null", "nil"}:
+                try:
+                    return int(text)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{env_key} must be an integer") from exc
+
+        cfg_value = _persona_cfg_get(option)
+        if cfg_value is None:
+            return default
+        text = str(cfg_value).strip()
+        if not text or text.lower() in {"none", "null", "nil"}:
+            return default
+        try:
+            return int(text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"[persona] {option} must be an integer") from exc
+
+    PERSONA_DIALOGUE_TREE_EVAL_ENABLED = _persona_bool(
+        "PERSONA_DIALOGUE_TREE_EVAL_ENABLED",
+        "dialogue_tree_eval_enabled",
+        False,
+    )
+    PERSONA_RUNTIME_EXPLORER_ENABLED = _persona_bool(
+        "PERSONA_RUNTIME_EXPLORER_ENABLED",
+        "runtime_explorer_enabled",
+        False,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_DEPTH = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH",
+        "runtime_explorer_max_depth",
+        1,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING",
+        "runtime_explorer_max_branching",
+        2,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS",
+        "runtime_explorer_max_provider_calls",
+        1,
+    )
+    PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS",
+        "runtime_explorer_timeout_ms",
+        750,
+    )
+    PERSONA_RUNTIME_EXPLORER_MAX_TOKENS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS",
+        "runtime_explorer_max_tokens",
+        256,
+    )
+    PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS = _persona_int(
+        "PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS",
+        "runtime_explorer_p95_added_latency_ms",
+        1000,
+    )
+    PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED = _persona_bool(
+        "PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED",
+        "runtime_explorer_llm_judges_enabled",
+        False,
+    )
+    PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS = _persona_int(
+        "PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS",
+        "dialogue_tree_trace_retention_days",
+        7,
+    )
 
     config_dict = {
         # General App
@@ -1799,33 +2017,69 @@ def load_settings():
         "PERSONA_DEFAULT_PERSONA": (lambda _cp: (
             _cp.get('persona', 'default_persona', fallback='Research Assistant') if _cp and _cp.has_section('persona') else 'Research Assistant'
         ))(load_comprehensive_config()),
-        "PERSONA_VOICE": (lambda _cp: (
-            _cp.get('persona', 'voice', fallback='default') if _cp and _cp.has_section('persona') else 'default'
-        ))(load_comprehensive_config()),
-        "PERSONA_STT": (lambda _cp: (
-            _cp.get('persona', 'stt', fallback='faster_whisper') if _cp and _cp.has_section('persona') else 'faster_whisper'
-        ))(load_comprehensive_config()),
-        "PERSONA_MAX_TOOL_STEPS": (lambda _cp: (
-            int(_cp.get('persona', 'max_tool_steps', fallback='3')) if _cp and _cp.has_section('persona') else 3
-        ))(load_comprehensive_config()),
-        "PERSONA_MEMORY_READ_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_read_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        "PERSONA_VOICE": (
+            lambda _cp: (
+                _cp.get("persona", "voice", fallback="default") if _cp and _cp.has_section("persona") else "default"
             )
-        ))(os.getenv('PERSONA_MEMORY_READ_MODE'), load_comprehensive_config()),
-        "PERSONA_MEMORY_WRITE_MODE": (lambda _env, _cp: (
-            str(_env).strip().lower() if _env is not None else (
-                _cp.get('persona', 'persona_memory_write_mode', fallback='legacy_only').strip().lower()
-                if _cp and _cp.has_section('persona') else 'legacy_only'
+        )(load_comprehensive_config()),
+        "PERSONA_STT": (
+            lambda _cp: (
+                _cp.get("persona", "stt", fallback="faster_whisper")
+                if _cp and _cp.has_section("persona")
+                else "faster_whisper"
             )
-        ))(os.getenv('PERSONA_MEMORY_WRITE_MODE'), load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_EXPORT": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_export', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
-        "PERSONA_RBAC_ALLOW_DELETE": (lambda _cp: (
-            _cp.getboolean('persona.rbac', 'allow_delete', fallback=False) if _cp and _cp.has_section('persona.rbac') else False
-        ))(load_comprehensive_config()),
+        )(load_comprehensive_config()),
+        "PERSONA_MAX_TOOL_STEPS": (
+            lambda _cp: (
+                int(_cp.get("persona", "max_tool_steps", fallback="3")) if _cp and _cp.has_section("persona") else 3
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_MEMORY_READ_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_read_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_READ_MODE"), load_comprehensive_config()),
+        "PERSONA_MEMORY_WRITE_MODE": (
+            lambda _env, _cp: (
+                str(_env).strip().lower()
+                if _env is not None
+                else (
+                    _cp.get("persona", "persona_memory_write_mode", fallback="legacy_only").strip().lower()
+                    if _cp and _cp.has_section("persona")
+                    else "legacy_only"
+                )
+            )
+        )(os.getenv("PERSONA_MEMORY_WRITE_MODE"), load_comprehensive_config()),
+        "PERSONA_DIALOGUE_TREE_EVAL_ENABLED": PERSONA_DIALOGUE_TREE_EVAL_ENABLED,
+        "PERSONA_RUNTIME_EXPLORER_ENABLED": PERSONA_RUNTIME_EXPLORER_ENABLED,
+        "PERSONA_RUNTIME_EXPLORER_MAX_DEPTH": PERSONA_RUNTIME_EXPLORER_MAX_DEPTH,
+        "PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING": PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING,
+        "PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS": PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS,
+        "PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS": PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS,
+        "PERSONA_RUNTIME_EXPLORER_MAX_TOKENS": PERSONA_RUNTIME_EXPLORER_MAX_TOKENS,
+        "PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS": PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS,
+        "PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED": PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED,
+        "PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS": PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS,
+        "PERSONA_RBAC_ALLOW_EXPORT": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_export", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
+        "PERSONA_RBAC_ALLOW_DELETE": (
+            lambda _cp: (
+                _cp.getboolean("persona.rbac", "allow_delete", fallback=False)
+                if _cp and _cp.has_section("persona.rbac")
+                else False
+            )
+        )(load_comprehensive_config()),
     }
     # Only include explicit Character-Chat CHARACTER_RATE_LIMIT_ENABLED if present in config.txt
     try:
@@ -1846,6 +2100,10 @@ def load_settings():
         "custom_openai_api",
         "custom_openai_api_2",
     ]
+    provider_keys.extend(
+        custom_openai_section_name(number)
+        for number in iter_custom_openai_provider_numbers(start=3)
+    )
     for provider_key in provider_keys:
         provider_cfg = comprehensive_config.get(provider_key)
         if isinstance(provider_cfg, dict):
@@ -1986,18 +2244,9 @@ def load_comprehensive_config():
     project_root = current_file_path.parent.parent.parent
 
     # Load .env/.ENV files if they exist (API keys should be here).
-    # Prefer Config_Files/.env (canonical) before root-level fallbacks.
+    # Prefer TLDW_ENV_FILE when set, then canonical repo paths before fallbacks.
     repo_root = project_root.parent
-    candidate_env_paths = [
-        project_root / 'Config_Files' / '.env',
-        project_root / 'Config_Files' / '.ENV',
-        project_root / '.env',
-        project_root / '.ENV',
-        repo_root / 'Config_Files' / '.env',
-        repo_root / 'Config_Files' / '.ENV',
-        repo_root / '.env',
-        repo_root / '.ENV',
-    ]
+    candidate_env_paths = _candidate_env_paths(project_root, repo_root)
     loaded_any_env = False
     for p in candidate_env_paths:
         try:
@@ -2332,6 +2581,36 @@ def rag_low_confidence_behavior(default: str = "continue") -> str:
     return s if s in ("continue", "ask", "decline") else default
 
 
+def web_outbound_policy_mode(default: str = "compat") -> str:
+    """Return the web outbound-policy mode with env-over-config precedence.
+
+    Accepted values are ``compat`` and ``strict``. Invalid or missing values
+    fall back to ``default``.
+    """
+    v = os.getenv("WEB_OUTBOUND_POLICY_MODE")
+    if v is None:
+        try:
+            cp = load_comprehensive_config()
+            v = default
+            if cp:
+                has_section = getattr(cp, "has_section", None)
+                for section_name in ("Web-Scraper", "Web-Scraping"):
+                    if callable(has_section) and not has_section(section_name):
+                        continue
+                    candidate = cp.get(
+                        section_name,
+                        "web_outbound_policy_mode",
+                        fallback=None,
+                    )
+                    if candidate is not None and str(candidate).strip():
+                        v = candidate
+                        break
+        except _CONFIG_NONCRITICAL_EXCEPTIONS:
+            v = default
+    s = str(v).strip().lower()
+    return s if s in ("compat", "strict") else default
+
+
 def rag_agentic_cache_backend(default: str = "memory") -> str:
     v = os.getenv("RAG_AGENTIC_CACHE_BACKEND")
     if v is None:
@@ -2553,7 +2832,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
 
 
 _GOVERNANCE_ROLLOUT_MODES = {"off", "shadow", "enforce"}
-_RUN_FIRST_ROLLOUT_MODES = {"off", "gated"}
+_RUN_FIRST_ROLLOUT_MODES = {"off", "gated", "default_on"}
 
 
 def _split_run_first_provider_allowlist(raw: Optional[object]) -> list[str]:
@@ -2667,11 +2946,39 @@ def _resolve_run_first_presentation_variant(
     return safe_default
 
 
+def resolve_run_first_cohort_label(
+    rollout_mode: str | None,
+    *,
+    eligible: bool,
+    ineligible_reason: str | None = None,
+) -> str:
+    """Map run-first rollout state into the low-cardinality cohort label."""
+
+    rollout_mode_name = str(rollout_mode or "").strip().lower()
+    if rollout_mode_name == "gated":
+        if (
+            not eligible
+            and str(ineligible_reason or "").strip() == "provider_not_in_rollout_allowlist"
+        ):
+            return "out_of_cohort"
+        return "gated"
+    if rollout_mode_name == "default_on":
+        if eligible:
+            return "default_on"
+        if str(ineligible_reason or "").strip() == "provider_not_in_rollout_allowlist":
+            return "out_of_cohort"
+        return "default_on"
+    return "override_off"
 def resolve_chat_run_first_rollout_mode(
     raw_mode: Optional[str] = None,
     *,
     default: str = "off",
 ) -> str:
+    """Resolve the chat run-first rollout mode from args, env, or config.
+
+    Accepts the bounded rollout values supported by the shared resolver and
+    falls back to ``default`` when the configured value is missing or invalid.
+    """
     return _resolve_run_first_rollout_mode(
         raw_mode=raw_mode,
         env_name="CHAT_RUN_FIRST_ROLLOUT_MODE",
@@ -2684,6 +2991,11 @@ def resolve_chat_run_first_rollout_mode(
 def resolve_chat_run_first_provider_allowlist(
     raw_allowlist: Optional[str] = None,
 ) -> list[str]:
+    """Resolve the chat run-first provider allowlist as normalized CSV values.
+
+    Precedence is explicit arg, then environment variable, then config file.
+    Empty or unreadable values resolve to an empty allowlist.
+    """
     return _resolve_run_first_provider_allowlist(
         raw_allowlist=raw_allowlist,
         env_name="CHAT_RUN_FIRST_PROVIDER_ALLOWLIST",
@@ -2695,8 +3007,13 @@ def resolve_chat_run_first_provider_allowlist(
 def resolve_chat_run_first_presentation_variant(
     raw_variant: Optional[str] = None,
     *,
-    default: str = "chat_phase2a_v1",
+    default: str = "chat_phase2b_v1",
 ) -> str:
+    """Resolve the chat run-first presentation variant.
+
+    Uses explicit arg, env, and config precedence and falls back to the
+    phase-2b default when the configured variant is blank or unreadable.
+    """
     return _resolve_run_first_presentation_variant(
         raw_variant=raw_variant,
         env_name="CHAT_RUN_FIRST_PRESENTATION_VARIANT",
@@ -2711,6 +3028,11 @@ def resolve_acp_run_first_rollout_mode(
     *,
     default: str = "off",
 ) -> str:
+    """Resolve the ACP run-first rollout mode from args, env, or config.
+
+    Accepts the bounded rollout values supported by the shared resolver and
+    falls back to ``default`` when the configured value is missing or invalid.
+    """
     return _resolve_run_first_rollout_mode(
         raw_mode=raw_mode,
         env_name="ACP_RUN_FIRST_ROLLOUT_MODE",
@@ -2723,6 +3045,11 @@ def resolve_acp_run_first_rollout_mode(
 def resolve_acp_run_first_provider_allowlist(
     raw_allowlist: Optional[str] = None,
 ) -> list[str]:
+    """Resolve the ACP run-first provider allowlist as normalized CSV values.
+
+    Precedence is explicit arg, then environment variable, then config file.
+    Empty or unreadable values resolve to an empty allowlist.
+    """
     return _resolve_run_first_provider_allowlist(
         raw_allowlist=raw_allowlist,
         env_name="ACP_RUN_FIRST_PROVIDER_ALLOWLIST",
@@ -2734,8 +3061,13 @@ def resolve_acp_run_first_provider_allowlist(
 def resolve_acp_run_first_presentation_variant(
     raw_variant: Optional[str] = None,
     *,
-    default: str = "acp_phase2a_v1",
+    default: str = "acp_phase2b_v1",
 ) -> str:
+    """Resolve the ACP run-first presentation variant.
+
+    Uses explicit arg, env, and config precedence and falls back to the
+    phase-2b default when the configured variant is blank or unreadable.
+    """
     return _resolve_run_first_presentation_variant(
         raw_variant=raw_variant,
         env_name="ACP_RUN_FIRST_PRESENTATION_VARIANT",
@@ -3538,9 +3870,27 @@ def load_and_log_configs():
         aphrodite_api_retries = config_parser_object.get('Local-API', 'aphrodite_api_retry', fallback='3')
         aphrodite_api_retry_delay = config_parser_object.get('Local-API', 'aphrodite_api_retry_delay', fallback='5')
 
-        custom_openai_api_key = config_parser_object.get('API', 'custom_openai_api_key', fallback=None)
-        custom_openai_api_ip = config_parser_object.get('API', 'custom_openai_api_ip', fallback=None)
-        custom_openai_api_model = config_parser_object.get('API', 'custom_openai_api_model', fallback=None)
+        custom_openai_api_key = _env_or_config_option_value(
+            custom_openai_api_key_env_keys(1),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(1, 'key'),
+            fallback=None,
+        )
+        custom_openai_api_ip = _env_or_config_value(
+            CUSTOM_OPENAI_ENDPOINT_ENV_KEYS,
+            config_parser_object,
+            'API',
+            'custom_openai_api_ip',
+            fallback=None,
+        )
+        custom_openai_api_model = _env_or_config_option_value(
+            custom_openai_model_env_keys(1),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(1, 'model'),
+            fallback=None,
+        )
         custom_openai_api_streaming = config_parser_object.get('API', 'custom_openai_api_streaming', fallback='False')
         custom_openai_api_temperature = config_parser_object.get('API', 'custom_openai_api_temperature', fallback='0.7')
         custom_openai_api_top_p = config_parser_object.get('API', 'custom_openai_api_top_p', fallback='0.95')
@@ -3551,9 +3901,27 @@ def load_and_log_configs():
         custom_openai_api_retry_delay = config_parser_object.get('API', 'custom_openai_api_retry_delay', fallback='5')
 
         # 2nd Custom OpenAI API
-        custom_openai2_api_key = config_parser_object.get('API', 'custom_openai2_api_key', fallback=None)
-        custom_openai2_api_ip = config_parser_object.get('API', 'custom_openai2_api_ip', fallback=None)
-        custom_openai2_api_model = config_parser_object.get('API', 'custom_openai2_api_model', fallback=None)
+        custom_openai2_api_key = _env_or_config_option_value(
+            custom_openai_api_key_env_keys(2),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'key'),
+            fallback=None,
+        )
+        custom_openai2_api_ip = _env_or_config_option_value(
+            CUSTOM_OPENAI2_ENDPOINT_ENV_KEYS,
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'ip'),
+            fallback=None,
+        )
+        custom_openai2_api_model = _env_or_config_option_value(
+            custom_openai_model_env_keys(2),
+            config_parser_object,
+            'API',
+            custom_openai_config_option_names(2, 'model'),
+            fallback=None,
+        )
         custom_openai2_api_streaming = config_parser_object.get('API', 'custom_openai2_api_streaming', fallback='False')
         custom_openai2_api_temperature = config_parser_object.get('API', 'custom_openai2_api_temperature', fallback='0.7')
         custom_openai2_api_top_p = config_parser_object.get('API', 'custom_openai2_api_top_p', fallback='0.95')
@@ -3867,19 +4235,19 @@ def load_and_log_configs():
             config_parser_object.get(
                 'STT-Settings',
                 'default_batch_transcription_model',
-                fallback='parakeet-onnx',
+                fallback='parakeet-tdt-0.6b-v3-onnx',
             ).strip()
-            or 'parakeet-onnx'
+            or 'parakeet-tdt-0.6b-v3-onnx'
         )
         default_streaming_transcription_model = (
             config_parser_object.get(
                 'STT-Settings',
                 'default_streaming_transcription_model',
-                fallback='parakeet-onnx',
+                fallback='parakeet-tdt-0.6b-v3-onnx',
             ).strip()
-            or 'parakeet-onnx'
+            or 'parakeet-tdt-0.6b-v3-onnx'
         )
-        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='standard')
+        nemo_model_variant = config_parser_object.get('STT-Settings', 'nemo_model_variant', fallback='onnx')
         nemo_device = config_parser_object.get('STT-Settings', 'nemo_device', fallback='cuda')
         nemo_cache_dir = config_parser_object.get('STT-Settings', 'nemo_cache_dir', fallback='./models/nemo')
         # STT custom vocabulary (optional)
@@ -4298,6 +4666,7 @@ def load_and_log_configs():
         web_scraper_respect_robots = _as_bool(
             _env_or_cfg('WEB_SCRAPER_RESPECT_ROBOTS', 'Web-Scraper', 'web_scraper_respect_robots', 'true'), True
         )
+        web_outbound_policy_mode_value = web_outbound_policy_mode()
         # Optional scorers configuration
         web_crawl_enable_keyword = _as_bool(
             _env_or_cfg('WEB_CRAWL_ENABLE_KEYWORD_SCORER', 'Web-Scraper', 'web_crawl_enable_keyword_scorer', 'false'), False
@@ -4315,6 +4684,90 @@ def load_and_log_configs():
             except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Failed to read config section '{}': {}", section_name, exc)
             return {}
+
+        from tldw_Server_API.app.core.config_sections.stt import load_stt_config
+
+        stt_vnext_config = load_stt_config(config_parser_object)
+        stt_vnext_items = dict(vars(stt_vnext_config))
+
+        def _numbered_custom_openai_config(provider_number: int) -> Optional[dict[str, Any]]:
+            api_ip = _env_or_config_option_value(
+                custom_openai_endpoint_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'ip'),
+                fallback=None,
+            )
+            api_key = _env_or_config_option_value(
+                custom_openai_api_key_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'key'),
+                fallback=None,
+            )
+            model = _env_or_config_option_value(
+                custom_openai_model_env_keys(provider_number),
+                config_parser_object,
+                'API',
+                custom_openai_config_option_names(provider_number, 'model'),
+                fallback=None,
+            )
+            if not any(value for value in (api_ip, api_key, model)):
+                return None
+
+            return {
+                'api_ip': api_ip,
+                'api_key': api_key,
+                'streaming': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'streaming'),
+                    fallback=custom_openai_api_streaming,
+                ),
+                'model': model,
+                'temperature': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'temperature'),
+                    fallback=custom_openai_api_temperature,
+                ),
+                'max_tokens': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'max_tokens'),
+                    fallback=custom_openai_api_max_tokens,
+                ),
+                'top_p': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'top_p'),
+                    fallback=custom_openai_api_top_p,
+                ),
+                'min_p': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'min_p'),
+                    fallback=custom_openai_api_min_p,
+                ),
+                'api_timeout': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'timeout'),
+                    fallback=custom_openai_api_timeout,
+                ),
+                'api_retries': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'retry'),
+                    fallback=custom_openai_api_retries,
+                ),
+                'api_retry_delay': _first_config_option_value(
+                    config_parser_object,
+                    'API',
+                    custom_openai_config_option_names(provider_number, 'retry_delay'),
+                    fallback=custom_openai_api_retry_delay,
+                ),
+            }
 
         return_dict = {
             'anthropic_api': {
@@ -4774,6 +5227,7 @@ def load_and_log_configs():
                 'custom_vocab_postprocess_enable': stt_custom_vocab_postprocess_enable,
                 'custom_vocab_prompt_template': stt_custom_vocab_prompt_template,
                 'custom_vocab_case_sensitive': stt_custom_vocab_case_sensitive,
+                **stt_vnext_items,
             },
             # Also provide with hyphen for backward compatibility
             'STT-Settings': {
@@ -4826,6 +5280,7 @@ def load_and_log_configs():
                 'custom_vocab_postprocess_enable': stt_custom_vocab_postprocess_enable,
                 'custom_vocab_prompt_template': stt_custom_vocab_prompt_template,
                 'custom_vocab_case_sensitive': stt_custom_vocab_case_sensitive,
+                **stt_vnext_items,
             },
             'diarization': diarization_config,
             'tts_settings': {
@@ -4963,6 +5418,7 @@ def load_and_log_configs():
             'web_crawl_allowed_domains': web_crawl_allowed_domains,
             'web_crawl_blocked_domains': web_crawl_blocked_domains,
             'web_scraper_respect_robots': web_scraper_respect_robots,
+            'web_outbound_policy_mode': web_outbound_policy_mode_value,
             # Scorers
             'web_crawl_enable_keyword_scorer': web_crawl_enable_keyword,
             'web_crawl_keywords': web_crawl_keywords,
@@ -4972,6 +5428,11 @@ def load_and_log_configs():
             'Redis': dict(config_parser_object.items('Redis')) if config_parser_object.has_section('Redis') else {},
             'Web-Scraping': dict(config_parser_object.items('Web-Scraping')) if config_parser_object.has_section('Web-Scraping') else {}
         }
+        for provider_number in iter_custom_openai_provider_numbers(start=3):
+            numbered_config = _numbered_custom_openai_config(provider_number)
+            if numbered_config is not None:
+                return_dict[custom_openai_section_name(provider_number)] = numbered_config
+
         # Assemble minimal RAG config section (vector store + pgvector params)
         try:
             rag_section = {}
@@ -5196,7 +5657,7 @@ def legacy_get(key: str, default: Any = None) -> Any:
 
 def get_stt_config() -> dict[str, Any]:
     """
-    Return the `[STT-Settings]` section as a plain dict.
+    Return the canonical STT configuration export as a plain dict.
 
     This helper centralizes resolution of STT-related settings so callers do
     not need to worry about whether `loaded_config_data` is a lazy wrapper,
@@ -5217,7 +5678,9 @@ def get_stt_config() -> dict[str, Any]:
     if not isinstance(cfg, MutableMapping):
         return {}
 
-    stt_section = cfg.get("STT-Settings", {})
+    stt_section = cfg.get("STT_Settings")
+    if not isinstance(stt_section, MutableMapping):
+        stt_section = cfg.get("STT-Settings")
     return dict(stt_section) if isinstance(stt_section, MutableMapping) else {}
 
 _LOGGER_READY = True
@@ -5243,6 +5706,72 @@ def clear_config_cache() -> None:
     default_api_endpoint = "openai"
     object.__setattr__(settings, "_data", None)
     object.__setattr__(loaded_config_data, "_data", None)
+# ---------------------------------------------------------------------------
+# Startup config validation
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_LITERALS = frozenset({
+    "FIXME", "TODO", "TBD", "CHANGE_ME", "CHANGE-ME",
+    "PLACEHOLDER", "NONE", "NULL", "N/A", "NA",
+})
+
+
+def validate_config() -> list[str]:
+    """Validate the loaded configuration and return a list of warnings.
+
+    Call this during lifespan startup. Warnings are logged but do not
+    prevent startup. Returns the list so tests can assert on it.
+    """
+    warnings: list[str] = []
+    cfg = dict(loaded_config_data)
+
+    def _iter_scalar_values(prefix: str, value: Any):
+        if isinstance(value, MutableMapping):
+            for key, child in value.items():
+                child_prefix = f"{prefix}.{key}" if prefix else str(key)
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        if isinstance(value, list | tuple):
+            for index, child in enumerate(value):
+                child_prefix = f"{prefix}[{index}]"
+                yield from _iter_scalar_values(child_prefix, child)
+            return
+        yield prefix, value
+
+    validation_values = dict(_iter_scalar_values("", cfg))
+    validation_values.update({
+        "Database.pg_connection_string": get_config_value("Database", "pg_connection_string", default=""),
+        "Image-Generation.swarmui_base_url": get_config_value("Image-Generation", "swarmui_base_url", default=""),
+    })
+
+    # Check for placeholder values in any config key
+    for key, value in validation_values.items():
+        if isinstance(value, str) and value.strip().upper() in _PLACEHOLDER_LITERALS:
+            msg = f"Config key '{key}' has placeholder value '{value}' — set a real value or leave empty"
+            warnings.append(msg)
+
+    # Check critical URL values parse correctly
+    url_rules = {
+        "embedding_config.embedding_api_url": ("http://", "https://"),
+        "Database.pg_connection_string": ("postgres://", "postgresql://", "postgres+", "postgresql+"),
+        "Image-Generation.swarmui_base_url": ("http://", "https://"),
+    }
+    for key, allowed_prefixes in url_rules.items():
+        val = validation_values.get(key, "")
+        if val and not isinstance(val, str):
+            warnings.append(f"Config key '{key}' should be a string, got {type(val).__name__}")
+        elif isinstance(val, str) and val and not val.startswith(allowed_prefixes):
+            warnings.append(f"Config key '{key}' has unexpected URL scheme")
+
+    for w in warnings:
+        logger.warning("Config validation: {}", w)
+
+    if not warnings:
+        logger.info("Config validation passed — no issues found")
+
+    return warnings
+
+
 # --- Optional: Export individual variables if needed for backward compatibility (less recommended) ---
 # SINGLE_USER_MODE = settings["SINGLE_USER_MODE"]
 # SINGLE_USER_FIXED_ID = settings["SINGLE_USER_FIXED_ID"]

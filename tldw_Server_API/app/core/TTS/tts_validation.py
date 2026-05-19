@@ -149,6 +149,13 @@ class ProviderLimits:
             "valid_formats": {"mp3", "opus", "aac", "wav", "pcm"},
             "min_speed": 0.25,
             "max_speed": 4.0
+        },
+        "omnivoice": {
+            "max_text_length": 5000,
+            "languages": ["en"],
+            "valid_formats": {"mp3", "opus", "aac", "flac", "wav", "pcm"},
+            "min_speed": 0.25,
+            "max_speed": 4.0,
         }
     }
 
@@ -252,6 +259,7 @@ class TTSInputValidator:
         "echo_tts": 768,
         "lux_tts": 5000,
         "qwen3_tts": 5000,
+        "omnivoice": 5000,
         "default": 5000,
     }
 
@@ -286,6 +294,7 @@ class TTSInputValidator:
         "echo_tts": {"en"},
         "lux_tts": {"en"},
         "qwen3_tts": {"auto", "zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"},
+        "omnivoice": {"en"},
     }
 
     # Supported audio formats by provider
@@ -308,6 +317,7 @@ class TTSInputValidator:
         "echo_tts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.PCM},
         "lux_tts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.PCM},
         "qwen3_tts": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.WAV, AudioFormat.PCM},
+        "omnivoice": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.FLAC, AudioFormat.WAV, AudioFormat.PCM},
     }
 
     # Voice reference file validation
@@ -654,6 +664,37 @@ class TTSInputValidator:
                     and isinstance(extras, dict)
                     and extras.get("pocket_tts_cpp_voice_path")
                 )
+            elif provider == "omnivoice":
+                voice = (request.voice or "").strip()
+                is_clone_voice = voice.lower() == "clone"
+                is_custom_voice = voice.startswith("custom:")
+                ref_text = None
+                if isinstance(extras, dict):
+                    ref_text = (
+                        extras.get("reference_text")
+                        or extras.get("ref_text")
+                        or extras.get("voice_reference_text")
+                    )
+                clone_requested = bool(request.voice_reference) or is_clone_voice or is_custom_voice
+                if is_clone_voice and not request.voice_reference:
+                    raise TTSInvalidVoiceReferenceError(
+                        "OmniVoice clone requests require voice_reference",
+                        provider=provider,
+                    )
+                if is_custom_voice and not request.voice_reference:
+                    raise TTSInvalidVoiceReferenceError(
+                        "OmniVoice custom: voices require a resolved voice_reference before provider validation",
+                        provider=provider,
+                    )
+                if clone_requested and not (isinstance(ref_text, str) and ref_text.strip()):
+                    raise TTSInvalidInputError(
+                        "OmniVoice cloning requires reference_text",
+                        provider=provider,
+                    )
+                duration_limits = PROVIDER_REQUIREMENTS.get("omnivoice", {}).get("duration", {})
+                if min_duration is None:
+                    min_duration = self._coerce_float(duration_limits.get("min"))
+                max_duration = self._coerce_float(duration_limits.get("max"))
 
             # Validate parameters (provider-aware)
             self._validate_parameters(request, provider)
@@ -678,7 +719,7 @@ class TTSInputValidator:
         except TTSValidationError as e:
             return False, str(e)
         except Exception as e:
-            logger.error(f"Unexpected validation error: {e}")
+            logger.error(f"Unexpected validation error; exception_type={type(e).__name__}")
             return False, f"Validation failed: {str(e)}"
 
     def _validate_text(self, text: str, provider: Optional[str] = None):
@@ -886,6 +927,23 @@ class TTSInputValidator:
             voice_clone_prompt = extras.get("voice_clone_prompt")
             if voice_clone_prompt is not None:
                 self._validate_voice_clone_prompt(voice_clone_prompt, provider)
+
+            if provider == "omnivoice":
+                reference_text = (
+                    extras.get("reference_text")
+                    or extras.get("ref_text")
+                    or extras.get("voice_reference_text")
+                )
+                if reference_text is not None:
+                    if not isinstance(reference_text, str) or not reference_text.strip():
+                        raise TTSInvalidInputError("reference_text must be a non-empty string")
+
+                mode = extras.get("omnivoice_mode", extras.get("mode"))
+                if mode is not None:
+                    if not isinstance(mode, str):
+                        raise TTSInvalidInputError("OmniVoice mode must be a string")
+                    if mode.strip().lower() not in {"auto", "clone"}:
+                        raise TTSInvalidInputError("OmniVoice mode must be 'auto' or 'clone'")
 
     def _validate_voice_reference(
         self,

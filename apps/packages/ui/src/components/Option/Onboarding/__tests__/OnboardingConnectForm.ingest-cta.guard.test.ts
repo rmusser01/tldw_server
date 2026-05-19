@@ -18,5 +18,6 @@ describe("OnboardingConnectForm ingest CTA route guard", () => {
 
     expect(source).toContain('await finishAndNavigate("/media", { openQuickIngestIntro: true })')
     expect(source).not.toContain('await finishAndNavigate("/", { openQuickIngestIntro: true })')
+    expect(source).not.toContain("document.querySelector('[data-testid=\"open-quick-ingest\"]')")
   })
 })

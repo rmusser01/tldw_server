@@ -21,6 +21,10 @@ vi.mock("@/hooks/keyboard/useShortcutConfig", () => ({
   })
 }))
 
+vi.mock("@/components/Option/Prompt/usePromptPaletteCommands", () => ({
+  usePromptPaletteCommands: () => []
+}))
+
 describe("CommandPaletteHost", () => {
   beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn()
@@ -55,6 +59,57 @@ describe("CommandPaletteHost", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
 
     window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("opens the palette with Control+K on standard routes", async () => {
+    render(
+      <MemoryRouter>
+        <CommandPaletteHost />
+      </MemoryRouter>
+    )
+
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true })
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("opens the palette even when an input is focused", async () => {
+    render(
+      <MemoryRouter>
+        <div>
+          <input aria-label="composer" />
+          <CommandPaletteHost />
+        </div>
+      </MemoryRouter>
+    )
+
+    const input = screen.getByRole("textbox", { name: "composer" })
+    input.focus()
+    fireEvent.keyDown(input, { key: "k", ctrlKey: true })
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("opens the palette even when a focused control stops keydown propagation", async () => {
+    render(
+      <MemoryRouter>
+        <div>
+          <input
+            aria-label="propagation-blocker"
+            onKeyDown={(event) => {
+              event.stopPropagation()
+            }}
+          />
+          <CommandPaletteHost />
+        </div>
+      </MemoryRouter>
+    )
+
+    const input = screen.getByRole("textbox", { name: "propagation-blocker" })
+    input.focus()
+    fireEvent.keyDown(input, { key: "k", ctrlKey: true })
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })

@@ -1,11 +1,19 @@
 import { isChromiumTarget } from "@/config/platform"
 
-const captureVisibleTab = () => {
-  const result = new Promise<string>((resolve) => {
+export const captureVisibleTabScreenshot = () => {
+  const result = new Promise<string>((resolve, reject) => {
     if (isChromiumTarget) {
-      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-        const tab = tabs[0]
+      chrome.tabs.query({ active: true, currentWindow: true }, () => {
         chrome.tabs.captureVisibleTab(null, { format: "png" }, (dataUrl) => {
+          const errorMessage = chrome.runtime?.lastError?.message
+          if (errorMessage) {
+            reject(new Error(errorMessage))
+            return
+          }
+          if (!dataUrl) {
+            reject(new Error("Failed to capture screenshot"))
+            return
+          }
           resolve(dataUrl)
         })
       })
@@ -22,8 +30,13 @@ const captureVisibleTab = () => {
               )
             )
           ])) as string
+          if (!dataUrl) {
+            reject(new Error("Failed to capture screenshot"))
+            return
+          }
           resolve(dataUrl)
         })
+        .catch(reject)
     }
   })
   return result
@@ -31,7 +44,7 @@ const captureVisibleTab = () => {
 
 export const getScreenshotFromCurrentTab = async () => {
   try {
-    const screenshotDataUrl = await captureVisibleTab()
+    const screenshotDataUrl = await captureVisibleTabScreenshot()
     return {
       success: true,
       screenshot: screenshotDataUrl,

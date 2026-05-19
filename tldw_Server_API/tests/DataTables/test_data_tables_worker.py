@@ -19,6 +19,64 @@ class _StubAdapter:
         return {"choices": [{"message": {"content": json.dumps(self._payload)}}]}
 
 
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        self.debugs: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def warning(self, message, *args, **kwargs):
+        self.warnings.append((str(message), args, kwargs))
+
+    def debug(self, message, *args, **kwargs):
+        self.debugs.append((str(message), args, kwargs))
+
+
+class _FailingCloseDb:
+    def close_connection(self):
+        raise RuntimeError("data tables backend exploded /private/data-tables.db")
+
+
+def _assert_sanitized_warning(logger_stub: _LoggerStub, expected_message: str) -> None:
+    rendered = repr(logger_stub.warnings)
+    assert logger_stub.warnings == [(expected_message, (), {})]
+    assert "data tables backend exploded" not in rendered
+    assert "/private/data-tables.db" not in rendered
+    assert "user-4242" not in rendered
+    assert "424242" not in rendered
+
+
+def _assert_sanitized_debug(logger_stub: _LoggerStub, expected_message: str) -> None:
+    rendered = repr(logger_stub.debugs)
+    assert logger_stub.debugs == [(expected_message, (), {})]
+    assert "data tables backend exploded" not in rendered
+    assert "/private/data-tables.db" not in rendered
+    assert "424242" not in rendered
+
+
+def test_close_media_db_sanitizes_close_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(jobs_worker, "logger", logger_stub)
+
+    jobs_worker._close_media_db("user-4242", _FailingCloseDb())
+
+    _assert_sanitized_warning(
+        logger_stub,
+        "data_tables: failed to close media db",
+    )
+
+
+def test_close_chacha_db_sanitizes_close_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(jobs_worker, "logger", logger_stub)
+
+    jobs_worker._close_chacha_db("user-4242", _FailingCloseDb())
+
+    _assert_sanitized_warning(
+        logger_stub,
+        "data_tables: failed to close chacha db",
+    )
+
+
 @pytest.mark.asyncio
 async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
     media_path = tmp_path / "media.db"
@@ -185,3 +243,68 @@ def test_extract_media_text_uses_transcript_when_document_version_missing(monkey
 
     result = jobs_worker._extract_media_text(StubDb(), 8)
     assert result == "transcript fallback"
+
+
+def test_extract_media_text_sanitizes_document_version_failure_log(monkeypatch):
+    class StubDb:
+        def get_media_by_id(
+            self,
+            media_id: int,
+            include_deleted: bool = False,
+            include_trash: bool = False,
+        ):
+            return {"id": media_id, "content": ""}
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(jobs_worker, "logger", logger_stub)
+
+    def _raise_backend_failure(*args, **kwargs):
+        raise RuntimeError("data tables backend exploded /private/data-tables.db")
+
+    monkeypatch.setattr(jobs_worker, "get_document_version", _raise_backend_failure)
+    monkeypatch.setattr(
+        jobs_worker,
+        "get_latest_transcription",
+        lambda db, media_id: "transcript fallback",
+    )
+
+    result = jobs_worker._extract_media_text(StubDb(), 424242)
+
+    assert result == "transcript fallback"
+    _assert_sanitized_debug(
+        logger_stub,
+        "data_tables: get_document_version failed while extracting media text",
+    )
+
+
+def test_extract_media_text_sanitizes_latest_transcription_failure_log(monkeypatch):
+    class StubDb:
+        def get_media_by_id(
+            self,
+            media_id: int,
+            include_deleted: bool = False,
+            include_trash: bool = False,
+        ):
+            return {"id": media_id, "content": ""}
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(jobs_worker, "logger", logger_stub)
+    monkeypatch.setattr(
+        jobs_worker,
+        "get_document_version",
+        lambda db, media_id, version_number=None, include_content=True: None,
+    )
+
+    def _raise_backend_failure(*args, **kwargs):
+        raise RuntimeError("data tables backend exploded /private/data-tables.db")
+
+    monkeypatch.setattr(jobs_worker, "get_latest_transcription", _raise_backend_failure)
+
+    with pytest.raises(DataTablesJobError) as exc:
+        jobs_worker._extract_media_text(StubDb(), 424242)
+
+    assert "media_missing_content:424242" in str(exc.value)
+    _assert_sanitized_debug(
+        logger_stub,
+        "data_tables: get_latest_transcription failed while extracting media text",
+    )

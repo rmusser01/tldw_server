@@ -3,7 +3,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { EditMessageForm } from "./EditMessageForm"
-import { Image, Tag, Tooltip } from "antd"
+import { Image, Tooltip } from "antd"
 import {
   CheckIcon,
   CopyIcon,
@@ -19,13 +19,43 @@ import { DocumentChip } from "./DocumentChip"
 import { DocumentFile } from "./DocumentFile"
 import { buildChatTextClass } from "@/utils/chat-style"
 import { IconButton } from "../IconButton"
-import { tagColors } from "@/utils/color"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
+
+const MESSAGE_TYPE_BADGE_VARIANT: Record<string, BadgeVariant> = {
+  summary: "info",
+  explain: "success",
+  translate: "demo",
+  custom: "primary",
+  rephrase: "warning",
+  greeting: "demo",
+  "character:greeting": "demo"
+}
+
+const getMessageTypeBadgeVariant = (messageType?: string): BadgeVariant => {
+  if (!messageType) return "secondary"
+  if (messageType.startsWith("compare")) return "secondary"
+  return MESSAGE_TYPE_BADGE_VARIANT[messageType] ?? "info"
+}
+
+const formatMessageTypeFallback = (messageType?: string): string => {
+  if (!messageType) return "Unknown"
+  const words = messageType
+    .split(/[:_\-\s]+/)
+    .filter(Boolean)
+  if (words.length === 0) return "Unknown"
+  return words
+    .map((word) => word.toLowerCase())
+    .map((word, index) =>
+      index === 0 ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word
+    )
+    .join(" ")
+}
 
 type Props = {
   message: string
@@ -42,13 +72,13 @@ type Props = {
   onRegenerate: () => void
   onEditFormSubmit: (value: string, isSend: boolean) => void
   isProcessing: boolean
-  webSearch?: {}
+  webSearch?: unknown
   isSearchingInternet?: boolean
-  sources?: any[]
+  sources?: unknown[]
   hideEditAndRegenerate?: boolean
-  onSourceClick?: (source: any) => void
+  onSourceClick?: (source: unknown) => void
   isTTSEnabled?: boolean
-  generationInfo?: any
+  generationInfo?: unknown
   isStreaming: boolean
   reasoningTimeTaken?: number
   openReasoning?: boolean
@@ -168,9 +198,14 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
       <div className="flex w-full flex-wrap items-center justify-end gap-2">
         <div className="flex flex-wrap items-center gap-2">
           {isSystemMessage ? (
-            <span className="inline-flex items-center rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn">
+            <Badge
+              data-testid="playground-system-message-badge"
+              variant="warning"
+              size="sm"
+              outline
+            >
               {systemLabel}
-            </span>
+            </Badge>
           ) : (
             <span className="text-caption font-semibold text-text">
               {userDisplayName.trim() || t("common:you", "You")}
@@ -182,11 +217,17 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
             </span>
           )}
           {!editMode && props?.message_type && (
-            <Tag
+            <Badge
+              data-testid="playground-message-type-badge"
+              variant={getMessageTypeBadgeVariant(props.message_type)}
+              size="sm"
               className="!m-0"
-              color={tagColors[props?.message_type] || "default"}>
-              {t(`copilot.${props?.message_type}`)}
-            </Tag>
+            >
+              {t(
+                `copilot.${props.message_type}`,
+                formatMessageTypeFallback(props.message_type)
+              )}
+            </Badge>
           )}
         </div>
       </div>

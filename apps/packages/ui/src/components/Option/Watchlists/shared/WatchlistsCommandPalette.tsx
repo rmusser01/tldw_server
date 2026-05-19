@@ -171,10 +171,10 @@ export const useWatchlistsCommands = (actions: {
       },
       {
         id: "nav-articles",
-        label: t("watchlists:commandPalette.commands.openArticles", "Open Articles"),
+        label: t("watchlists:commandPalette.commands.openArticles", "Open Updates"),
         icon: <Newspaper className="h-4 w-4" />,
         category: "navigate" as const,
-        keywords: ["items", "articles", "content"],
+        keywords: ["items", "updates", "content"],
         onExecute: () => actions.setActiveTab("items")
       },
       {

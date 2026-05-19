@@ -8,6 +8,45 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type SourceType = "rss" | "site" | "forum"
+export type WatchlistDomain = "cti_osint" | "news" | "general"
+export type WatchlistStatus = "active" | "paused" | "archived"
+export type WatchlistPriority = "low" | "medium" | "high" | "critical"
+
+export interface WatchlistContainer {
+  id: number
+  name: string
+  description?: string | null
+  objective?: string | null
+  domain: WatchlistDomain
+  status: WatchlistStatus
+  priority: WatchlistPriority
+  tags: string[]
+  archived_at?: string | null
+  deleted_at?: string | null
+  restore_expires_at?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface WatchlistCreate {
+  name: string
+  description?: string | null
+  objective?: string | null
+  domain?: WatchlistDomain
+  status?: WatchlistStatus
+  priority?: WatchlistPriority
+  tags?: string[]
+}
+
+export interface WatchlistUpdate {
+  name?: string
+  description?: string | null
+  objective?: string | null
+  domain?: WatchlistDomain
+  status?: WatchlistStatus
+  priority?: WatchlistPriority
+  tags?: string[]
+}
 
 export interface WatchlistSource {
   id: number
@@ -17,6 +56,7 @@ export interface WatchlistSource {
   active: boolean
   tags: string[]
   group_ids?: number[]
+  watchlist_ids?: number[]
   settings?: Record<string, unknown> | null
   last_scraped_at?: string | null
   status?: string | null
@@ -30,8 +70,9 @@ export interface WatchlistSourceCreate {
   source_type: SourceType
   active?: boolean
   tags?: string[]
-  settings?: Record<string, unknown>
+  settings?: Record<string, unknown> | null
   group_ids?: number[]
+  watchlist_id?: number
 }
 
 export interface WatchlistSourceUpdate {
@@ -40,7 +81,7 @@ export interface WatchlistSourceUpdate {
   source_type?: SourceType
   active?: boolean
   tags?: string[]
-  settings?: Record<string, unknown>
+  settings?: Record<string, unknown> | null
   group_ids?: number[]
 }
 
@@ -100,12 +141,31 @@ export interface JobScope {
 }
 
 export interface JobOutputPrefs {
+  auto_output?: {
+    enabled?: boolean
+    type?: string
+    format?: "md" | "html"
+    template_name?: string
+    template_version?: number
+  }
   generate_audio?: boolean
   target_audio_minutes?: number
+  audio_model?: string
   audio_voice?: string
   audio_speed?: number
   background_audio_uri?: string
+  background_volume?: number
+  background_delay_ms?: number
+  background_fade_seconds?: number
+  audio_language?: string
+  llm_provider?: string
+  llm_model?: string
+  persona_summarize?: boolean
+  persona_id?: string
+  persona_provider?: string
+  persona_model?: string
   voice_map?: Record<string, string>
+  audio_cast?: WatchlistAudioCast
   retention?: {
     default_seconds?: number
     temporary_seconds?: number
@@ -151,6 +211,7 @@ export interface WatchlistJob {
   id: number
   name: string
   description?: string | null
+  watchlist_id?: number | null
   scope: JobScope
   schedule_expr?: string | null
   timezone?: string | null
@@ -179,6 +240,7 @@ export interface WatchlistJobCreate {
   retry_policy?: Record<string, unknown>
   output_prefs?: JobOutputPrefs
   job_filters?: WatchlistFiltersPayload
+  watchlist_id?: number
 }
 
 export interface WatchlistJobUpdate {
@@ -193,6 +255,7 @@ export interface WatchlistJobUpdate {
   retry_policy?: Record<string, unknown> | null
   output_prefs?: JobOutputPrefs | null
   job_filters?: WatchlistFiltersPayload | null
+  watchlist_id?: number | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,11 +304,63 @@ export interface RunDetailResponse {
   filtered_sample?: Array<Record<string, unknown>> | null
 }
 
+export interface WatchlistAudioCastSpeaker {
+  id: string
+  label: string
+  role?: string
+  voice: string
+  persona?: string
+}
+
+export interface WatchlistAudioCast {
+  speaker_count: 1 | 2 | 3 | 4
+  speakers: WatchlistAudioCastSpeaker[]
+}
+
+export interface WatchlistRunAudioStatus {
+  run_id: number
+  task_id?: string | null
+  status: "pending" | "running" | "completed" | "failed" | "unknown" | string
+  audio_uri?: string | null
+  download_url?: string | null
+  artifact_id?: string | number | null
+  size_bytes?: number | null
+  mime_type?: string | null
+  script_artifact?: Record<string, unknown> | null
+  speaker_artifacts?: Array<Record<string, unknown>>
+  final_artifact?: Record<string, unknown> | null
+  fallback_reason?: string | null
+  error?: string | null
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scraped Item Types
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ItemStatus = "ingested" | "filtered"
+export type ItemMutableStatus = ItemStatus | "ignored" | "reviewed"
+export type ScrapedItemSortMode =
+  | "created_desc"
+  | "created_asc"
+  | "published_desc"
+  | "published_asc"
+  | "unread_first"
+  | "source_asc"
+  | "alert_severity_desc"
+
+export interface ScrapedItemAlertSummary {
+  total: number
+  unread: number
+  read: number
+  dismissed: number
+  highest_severity?: WatchlistContentAlertSeverity | null
+  latest_alert_id?: number | null
+  latest_alert_status?: WatchlistContentAlertStatus | null
+  latest_alert_created_at?: string | null
+  latest_matched_text?: string | null
+  rule_ids: number[]
+  severities: WatchlistContentAlertSeverity[]
+}
 
 export interface ScrapedItem {
   id: number
@@ -264,6 +379,7 @@ export interface ScrapedItem {
   reviewed: boolean
   queued_for_briefing?: boolean
   created_at: string
+  alert_summary?: ScrapedItemAlertSummary | null
 }
 
 export interface ScrapedItemSmartCounts {
@@ -277,8 +393,212 @@ export interface ScrapedItemSmartCounts {
 
 export interface ScrapedItemUpdate {
   reviewed?: boolean
-  status?: ItemStatus
+  status?: ItemMutableStatus
   queued_for_briefing?: boolean
+}
+
+export interface ScrapedItemAlertFilterParams {
+  has_alert?: boolean
+  alert_status?: WatchlistContentAlertStatus
+  alert_severity?: WatchlistContentAlertSeverity
+  alert_rule_id?: number
+}
+
+export interface ScrapedItemBatchScope extends ScrapedItemAlertFilterParams {
+  run_id?: number
+  job_id?: number
+  source_id?: number
+  status?: string
+  reviewed?: boolean
+  queued_for_briefing?: boolean
+  q?: string
+  search?: string
+  since?: string
+  until?: string
+}
+
+export interface ScrapedItemBatchUpdateRequest {
+  watchlist_id: number
+  item_ids?: number[]
+  scope?: ScrapedItemBatchScope
+  reviewed?: boolean
+  status?: ItemMutableStatus
+  queued_for_briefing?: boolean
+  limit?: number
+}
+
+export interface ScrapedItemBatchUpdateResponse {
+  matched: number
+  changed: number
+  unchanged: number
+  failed: number
+  matched_ids: number[]
+  changed_ids: number[]
+  unchanged_ids: number[]
+  failed_ids: number[]
+  capped: boolean
+  exhausted: boolean
+  limit: number
+}
+
+export type WatchlistItemSavedViewSmartFilter =
+  | "all"
+  | "today"
+  | "today_unread"
+  | "todayUnread"
+  | "unread"
+  | "reviewed"
+  | "queued"
+
+export interface WatchlistItemSavedViewFilters extends ScrapedItemAlertFilterParams {
+  run_id?: number
+  job_id?: number
+  source_id?: number
+  status?: string
+  reviewed?: boolean
+  queued_for_briefing?: boolean
+  q?: string
+  search?: string
+  since?: string
+  until?: string
+  smart_filter?: WatchlistItemSavedViewSmartFilter
+}
+
+export interface WatchlistItemSavedViewCreate {
+  name: string
+  filters: WatchlistItemSavedViewFilters
+  sort: ScrapedItemSortMode
+  is_default?: boolean
+}
+
+export interface WatchlistItemSavedViewUpdate {
+  name?: string
+  filters?: WatchlistItemSavedViewFilters
+  sort?: ScrapedItemSortMode
+  is_default?: boolean
+}
+
+export interface WatchlistItemSavedView {
+  id: number
+  watchlist_id: number
+  name: string
+  filters: WatchlistItemSavedViewFilters
+  sort: ScrapedItemSortMode
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Alert Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type WatchlistContentAlertRuleKind =
+  | "keyword"
+  | "regex"
+  | "descriptor"
+  | "classification"
+  | "entity"
+  | "ioc"
+  | "cve"
+
+export type WatchlistContentAlertMatchMode = "contains" | "exact" | "regex"
+export type WatchlistContentAlertSeverity = "info" | "low" | "medium" | "high" | "critical"
+export type WatchlistContentAlertStatus = "unread" | "read" | "dismissed"
+
+export interface WatchlistContentAlertSourceConstraints {
+  source_ids?: number[]
+  source_types?: SourceType[]
+  source_tags?: string[]
+  url_contains?: string[]
+  [key: string]: unknown
+}
+
+export interface WatchlistContentAlertRuleCreate {
+  name: string
+  rule_kind: WatchlistContentAlertRuleKind
+  match_mode?: WatchlistContentAlertMatchMode
+  pattern: string
+  severity?: WatchlistContentAlertSeverity
+  enabled?: boolean
+  classification?: string | null
+  descriptor?: string | null
+  entity_type?: string | null
+  source_constraints?: WatchlistContentAlertSourceConstraints | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface WatchlistContentAlertRuleUpdate {
+  name?: string
+  enabled?: boolean
+  rule_kind?: WatchlistContentAlertRuleKind
+  match_mode?: WatchlistContentAlertMatchMode
+  pattern?: string
+  severity?: WatchlistContentAlertSeverity
+  classification?: string | null
+  descriptor?: string | null
+  entity_type?: string | null
+  source_constraints?: WatchlistContentAlertSourceConstraints | null
+  metadata?: Record<string, unknown> | null
+}
+
+export interface WatchlistContentAlertRule {
+  id: number
+  watchlist_id: number
+  name: string
+  enabled: boolean
+  rule_kind: WatchlistContentAlertRuleKind
+  match_mode: WatchlistContentAlertMatchMode
+  pattern: string
+  severity: WatchlistContentAlertSeverity
+  classification?: string | null
+  descriptor?: string | null
+  entity_type?: string | null
+  source_constraints?: WatchlistContentAlertSourceConstraints | null
+  metadata?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WatchlistContentAlertEvidence {
+  url?: string | null
+  title?: string | null
+  summary?: string | null
+  published_at?: string | null
+  source_id?: number
+  source_name?: string | null
+  source_url?: string | null
+  source_type?: SourceType | string | null
+  source_tags?: string[]
+  rule_kind?: WatchlistContentAlertRuleKind | string
+  match_mode?: WatchlistContentAlertMatchMode | string
+  pattern?: string | null
+  matched_text?: string | null
+  [key: string]: unknown
+}
+
+export interface WatchlistContentAlert {
+  id: number
+  watchlist_id: number
+  rule_id: number
+  item_id: number
+  run_id: number
+  job_id: number
+  source_id: number
+  severity: WatchlistContentAlertSeverity
+  status: WatchlistContentAlertStatus
+  title?: string | null
+  snippet?: string | null
+  matched_text?: string | null
+  evidence: WatchlistContentAlertEvidence
+  dedupe_key: string
+  created_at: string
+  read_at?: string | null
+  dismissed_at?: string | null
+}
+
+export interface WatchlistContentAlertUpdate {
+  status: WatchlistContentAlertStatus
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,6 +606,85 @@ export interface ScrapedItemUpdate {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type OutputFormat = "md" | "html" | "mp3" | "wav" | "ogg" | "m4a" | "aac" | "flac" | string
+
+export type WatchlistReportPreset = "auto" | "cti_osint" | "news_briefing" | "general_research"
+export type WatchlistReportReadinessState = "ready" | "warning" | "blocked" | "legacy_live_only"
+export type WatchlistReportReadinessWarningSeverity = "info" | "warning" | "blocking"
+
+export interface WatchlistReportReadinessWarning {
+  code: string
+  severity: WatchlistReportReadinessWarningSeverity
+  message: string
+  affected_item_ids: number[]
+}
+
+export interface WatchlistReportReadiness {
+  state: WatchlistReportReadinessState
+  score: number
+  warnings: WatchlistReportReadinessWarning[]
+}
+
+export interface WatchlistReportEvidenceAlert {
+  id: number
+  rule_id: number
+  rule_name?: string | null
+  severity: string
+  status: string
+  title?: string | null
+  snippet?: string | null
+  matched_text?: string | null
+  evidence: Record<string, unknown>
+  created_at?: string | null
+}
+
+export interface WatchlistReportEvidenceItem {
+  id: number
+  title?: string | null
+  url?: string | null
+  source_id?: number | null
+  source_name?: string | null
+  published_at?: string | null
+  summary?: string | null
+  tags: string[]
+  reviewed: boolean
+  queued_for_briefing: boolean
+  alerts: WatchlistReportEvidenceAlert[]
+}
+
+export interface WatchlistReportExcludedItem {
+  id: number
+  title?: string | null
+  url?: string | null
+  reason: string
+}
+
+export interface WatchlistReportEvidenceSnapshot {
+  schema_version: number
+  snapshot_id: string
+  generated_at: string
+  preset: WatchlistReportPreset
+  watchlist_id?: number | null
+  job_id: number
+  run_id: number
+  output_id?: number | null
+  included_items: WatchlistReportEvidenceItem[]
+  excluded_items: WatchlistReportExcludedItem[]
+  source_summary: Record<string, unknown>
+  included_count: number
+  excluded_count: number
+  excluded_total_count?: number | null
+  excluded_items_truncated: boolean
+  alert_count: number
+  critical_alert_count: number
+  readiness: WatchlistReportReadiness
+}
+
+export interface WatchlistOutputEvidenceResponse {
+  output_id: number
+  immutable_snapshot: boolean
+  snapshot?: WatchlistReportEvidenceSnapshot | null
+  readiness: WatchlistReportReadiness
+}
 
 export interface WatchlistOutput {
   id: number
@@ -312,8 +711,31 @@ export interface WatchlistOutputCreate {
   type?: string
   format?: OutputFormat
   metadata?: Record<string, unknown>
+  report_preset?: WatchlistReportPreset
+  include_evidence_table?: boolean
+  include_excluded_items?: boolean
+  require_reviewed_items?: boolean
+  allow_weak_evidence?: boolean
   template_name?: string
   template_version?: number
+  generate_audio?: boolean
+  target_audio_minutes?: number
+  audio_model?: string
+  audio_voice?: string
+  audio_speed?: number
+  background_audio_uri?: string
+  background_volume?: number
+  background_delay_ms?: number
+  background_fade_seconds?: number
+  audio_language?: string
+  llm_provider?: string
+  llm_model?: string
+  persona_summarize?: boolean
+  persona_id?: string
+  persona_provider?: string
+  persona_model?: string
+  voice_map?: Record<string, string>
+  audio_cast?: WatchlistAudioCast
   retention_seconds?: number
   temporary?: boolean
   deliveries?: {
@@ -571,6 +993,17 @@ export interface JobPreviewResult {
   total: number
   ingestable: number
   filtered: number
+  diagnostics?: SourcePreviewDiagnostics | null
+}
+
+export interface SourcePreviewDiagnostics {
+  fetch_mode?: string | null
+  selector_errors?: string[]
+  selector_warnings?: string[]
+  no_match_warnings?: string[]
+  non_unique_warnings?: string[]
+  fragile_selector_warnings?: string[]
+  dedupe_preview_key?: string | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -604,6 +1037,7 @@ export type WatchlistTab =
   | "jobs"
   | "runs"
   | "items"
+  | "alerts"
   | "outputs"
   | "templates"
   | "settings"

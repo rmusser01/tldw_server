@@ -23,8 +23,6 @@ import {
   Typography
 } from "antd"
 import { Filter, Plus, LayoutList, List as ListIcon, Keyboard, Check, CheckCheck } from "lucide-react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -49,12 +47,27 @@ import {
   type DueStatus,
   type ManageSortBy
 } from "../hooks"
-import { MarkdownWithBoundary, FlashcardActionsMenu, FlashcardEditDrawer, FlashcardCreateDrawer } from "../components"
+import {
+  FlashcardActionsMenu,
+  FlashcardCreateDrawer,
+  FlashcardEditDrawer,
+  MarkdownWithBoundary,
+  FlashcardMarkdownSnippet
+} from "../components"
 import { FlashcardDocumentView } from "../components/FlashcardDocumentView"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../constants"
 import { formatCardType } from "../utils/model-type-labels"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
 import { getFlashcardSourceMeta } from "../utils/source-reference"
+import {
+  formatDeckHierarchyLabel,
+  getDeckDescendantIds
+} from "../utils/deck-display"
+import {
+  formatFlashcardAbsoluteDateTime,
+  formatFlashcardRelativeTime,
+  isFlashcardTimestampBefore
+} from "../utils/date-display"
 import {
   formatFlashcardsUiErrorMessage,
   mapFlashcardsUiError
@@ -70,8 +83,6 @@ import {
   type Flashcard,
   type FlashcardUpdate
 } from "@/services/flashcards"
-
-dayjs.extend(relativeTime)
 
 const { Text } = Typography
 
@@ -315,6 +326,33 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     },
     [decksQuery.data, mDeckId]
   )
+  const deckMap = React.useMemo(
+    () => new Map((decksQuery.data || []).map((deck) => [deck.id, deck])),
+    [decksQuery.data]
+  )
+  const resolveDeckLabel = React.useCallback(
+    (deckId: number | null | undefined) => {
+      if (deckId == null) {
+        return t("option:flashcards.noDeck", { defaultValue: "No deck" })
+      }
+      return formatDeckHierarchyLabel(deckMap.get(deckId), deckMap, `Deck ${deckId}`)
+    },
+    [deckMap, t]
+  )
+  const deckParentOptions = React.useMemo(() => {
+    if (!selectedDeck) {
+      return []
+    }
+    const decks = decksQuery.data || []
+    const blockedDeckIds = getDeckDescendantIds(decks, selectedDeck.id)
+    blockedDeckIds.add(selectedDeck.id)
+    return decks
+      .filter((deck) => !blockedDeckIds.has(deck.id))
+      .map((deck) => ({
+        label: formatDeckHierarchyLabel(deck, deckMap, `Deck ${deck.id}`),
+        value: deck.id
+      }))
+  }, [deckMap, decksQuery.data, selectedDeck])
   const workspaceFilterOptions = React.useMemo(() => {
     const workspaceIds = new Set<string>()
     ;(decksQuery.data || []).forEach((deck) => {
@@ -656,7 +694,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const openDeckScopeEditor = () => {
     if (!selectedDeck) return
     deckScopeForm.setFieldsValue({
-      workspaceId: selectedDeck.workspace_id ?? ""
+      workspaceId: selectedDeck.workspace_id ?? "",
+      parentDeckId: selectedDeck.parent_deck_id ?? undefined
     })
     setDeckScopeOpen(true)
   }
@@ -678,10 +717,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     try {
       const values = await deckScopeForm.validateFields()
       const workspaceId = typeof values.workspaceId === "string" ? values.workspaceId.trim() : ""
+      const parentDeckId = typeof values.parentDeckId === "number" ? values.parentDeckId : null
       await updateDeckMutation.mutateAsync({
         deckId: selectedDeck.id,
         update: {
           workspace_id: workspaceId.length > 0 ? workspaceId : null,
+          parent_deck_id: parentDeckId,
           expected_version: selectedDeck.version
         }
       })
@@ -1618,7 +1659,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               className="min-w-44"
               data-testid="flashcards-manage-deck-select"
               options={(decksQuery.data || []).map((d) => ({
-                label: d.name,
+                label: formatDeckHierarchyLabel(d, deckMap, `Deck ${d.id}`),
                 value: d.id
               }))}
             />
@@ -2007,6 +2048,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             const compactSchedule = compactSchedulingLabels(item)
             const expandedSchedule = expandedSchedulingLabels(item)
             const sourceMeta = getFlashcardSourceMeta(item)
+            const dueRelativeLabel = item.due_at
+              ? formatFlashcardRelativeTime(item.due_at)
+              : null
+            const dueAbsoluteLabel = item.due_at
+              ? formatFlashcardAbsoluteDateTime(item.due_at)
+              : null
+            const isDue = item.due_at
+              ? isFlashcardTimestampBefore(item.due_at)
+              : false
             return (
             <List.Item
               data-testid={`flashcard-item-${item.uuid}`}
@@ -2048,12 +2098,18 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   title={
                     <div className="flex items-center gap-2">
                       {/* Due status indicator */}
-                      {item.due_at && dayjs(item.due_at).isBefore(dayjs()) && (
+                      {isDue && (
                         <Tooltip title={t("option:flashcards.dueNow", { defaultValue: "Due now" })}>
                           <span className="inline-block w-2 h-2 rounded-full bg-success" />
                         </Tooltip>
                       )}
-                      <Text className="flex-1 truncate">{item.front}</Text>
+                      <div className="min-w-0 flex-1 text-sm text-text">
+                        <div className="line-clamp-1">
+                          <FlashcardMarkdownSnippet
+                            content={item.front}
+                          />
+                        </div>
+                      </div>
                     </div>
                   }
                   description={
@@ -2061,12 +2117,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                       <div className="flex items-center gap-2">
                         {item.deck_id != null && (
                           <span className="text-text-muted">
-                            {(decksQuery.data || []).find((d) => d.id === item.deck_id)?.name || `Deck ${item.deck_id}`}
+                            {resolveDeckLabel(item.deck_id)}
                           </span>
                         )}
                         {item.due_at && (
                           <span className="text-text-subtle">
-                            {dayjs(item.due_at).fromNow()}
+                            {dueRelativeLabel ?? item.due_at}
                           </span>
                         )}
                         {sourceMeta && (
@@ -2126,19 +2182,29 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 <>
                   <List.Item.Meta
                     title={
-                      <div className="flex items-center gap-2">
-                        <Text strong>{item.front.slice(0, 80)}</Text>
+                      <div className="flex min-w-0 items-start gap-2">
+                        <div className="min-w-0 flex-1 text-sm font-semibold text-text">
+                          <div className="line-clamp-1">
+                            <FlashcardMarkdownSnippet
+                              content={item.front}
+                            />
+                          </div>
+                        </div>
                         <span className="text-text-subtle">-</span>
-                        <Text type="secondary">{item.back.slice(0, 80)}</Text>
+                        <div className="min-w-0 flex-1 text-sm text-text-muted">
+                          <div className="line-clamp-1">
+                            <FlashcardMarkdownSnippet
+                              content={item.back}
+                            />
+                          </div>
+                        </div>
                       </div>
                     }
                     description={
                       <div className="flex items-center gap-2 flex-wrap">
                         {item.deck_id != null && (
                           <Tag color="blue">
-                            {(decksQuery.data || []).find(
-                              (d) => d.id === item.deck_id
-                            )?.name || `Deck ${item.deck_id}`}
+                            {resolveDeckLabel(item.deck_id)}
                           </Tag>
                         )}
                         <Tag>{formatCardType(item, t)}</Tag>
@@ -2173,8 +2239,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         {item.due_at && (
                           <Tag color="green">
                             {t("option:flashcards.due", { defaultValue: "Due" })}:{" "}
-                            {dayjs(item.due_at).fromNow()} (
-                            {dayjs(item.due_at).format("YYYY-MM-DD HH:mm")})
+                            {dueRelativeLabel ?? item.due_at} (
+                            {dueAbsoluteLabel ?? item.due_at})
                           </Tag>
                         )}
                         <Tooltip
@@ -2424,6 +2490,18 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               })}
             />
           </Form.Item>
+          <Form.Item
+            name="parentDeckId"
+            label={t("option:flashcards.parentDeck", { defaultValue: "Parent deck" })}
+          >
+            <Select<number>
+              allowClear
+              placeholder={t("option:flashcards.topLevelDeck", {
+                defaultValue: "Top-level deck"
+              })}
+              options={deckParentOptions}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -2472,7 +2550,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           value={moveDeckId ?? undefined}
           onChange={(v) => setMoveDeckId(v ?? null)}
           options={(decksQuery.data || []).map((d) => ({
-            label: d.name,
+            label: formatDeckHierarchyLabel(d, deckMap, `Deck ${d.id}`),
             value: d.id
           }))}
         />
@@ -2500,6 +2578,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         onClose={() => setCreateOpen(false)}
         decks={decksQuery.data || []}
         decksLoading={decksQuery.isLoading}
+        includeWorkspaceItems={workspaceVisibilityOptions.includeWorkspaceItems}
+        workspaceId={workspaceVisibilityOptions.workspaceId}
       />
 
       {/* Floating Action Button for creating cards */}

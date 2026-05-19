@@ -3,6 +3,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Tooltip } from "antd"
 import { CloudOff, Globe, Search, Sparkles, Square, X } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
@@ -101,6 +102,8 @@ export function SearchBar({
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const hasResults = results.length > 0 || Boolean(answer)
+  const hasSources = settings.sources.length > 0
+  const noSourcesBlocked = !hasSources && !settings.enable_web_fallback
   const showHintEmphasis = !query && !isSearching && cycleCount === 0
   const showCharacterCount = query.length >= Math.floor(MAX_QUERY_LENGTH * 0.8)
   const historyQueries = useMemo(
@@ -219,12 +222,12 @@ export function SearchBar({
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault()
-      if (query.trim() && !isSearching) {
+      if (query.trim() && !isSearching && !noSourcesBlocked) {
         setShowSuggestions(false)
         search()
       }
     },
-    [query, isSearching, search]
+    [query, isSearching, noSourcesBlocked, search]
   )
 
   const applySuggestion = useCallback(
@@ -393,21 +396,30 @@ export function SearchBar({
         )}
 
         {/* Submit button */}
-        <button
-          type="submit"
-          disabled={!query.trim() || isSearching}
-          className={cn(
-            "absolute right-2 top-1/2 -translate-y-1/2",
-            "px-4 py-2 rounded-lg",
-            "bg-primary text-white",
-            "font-medium text-sm",
-            "transition-all duration-200",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-            "hover:bg-primaryStrong"
-          )}
+        <Tooltip
+          title={
+            noSourcesBlocked
+              ? "Select source categories or enable web fallback to search"
+              : null
+          }
         >
-          {isSearching ? "Searching..." : "Ask"}
-        </button>
+          <span className="absolute right-2 top-1/2 inline-flex -translate-y-1/2">
+            <button
+              type="submit"
+              disabled={!query.trim() || isSearching || noSourcesBlocked}
+              className={cn(
+                "px-4 py-2 rounded-lg",
+                "bg-primary text-white",
+                "font-medium text-sm",
+                "transition-all duration-200",
+                "disabled:opacity-50 disabled:cursor-not-allowed",
+                "hover:bg-primaryStrong"
+              )}
+            >
+              {isSearching ? "Searching..." : "Ask"}
+            </button>
+          </span>
+        </Tooltip>
       </div>
 
       {isSearching && (
@@ -461,15 +473,17 @@ export function SearchBar({
             </button>
           )}
           {isSearching && (
-            <button
-              type="button"
-              onClick={cancelSearch}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-warn/40 bg-warn/10 text-warn hover:bg-warn/20 transition-colors whitespace-nowrap"
-              aria-label="Cancel search"
-            >
-              <Square className="w-3 h-3" />
-              Stop
-            </button>
+            <Tooltip title="Stop search. Partial results will be kept if available.">
+              <button
+                type="button"
+                onClick={cancelSearch}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-warn/40 bg-warn/10 text-warn hover:bg-warn/20 transition-colors whitespace-nowrap"
+                aria-label="Cancel search"
+              >
+                <Square className="w-3 h-3" />
+                Stop
+              </button>
+            </Tooltip>
           )}
           {showWebToggle ? (
             <button

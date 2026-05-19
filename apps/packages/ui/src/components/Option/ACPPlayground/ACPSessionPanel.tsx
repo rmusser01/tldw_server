@@ -15,6 +15,7 @@ interface ACPSessionPanelProps {
   onHide?: () => void
   onRefreshSessions?: () => Promise<void> | void
   isRefreshing?: boolean
+  acpHealthy?: boolean
 }
 
 type SessionSortKey = "recent" | "oldest" | "name_asc" | "name_desc"
@@ -23,6 +24,7 @@ export const ACPSessionPanel: React.FC<ACPSessionPanelProps> = ({
   onHide,
   onRefreshSessions,
   isRefreshing = false,
+  acpHealthy,
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
 
@@ -375,19 +377,42 @@ export const ACPSessionPanel: React.FC<ACPSessionPanelProps> = ({
       {/* Sessions list */}
       <div className="flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("playground:acp.noSessions", "No active sessions")}
-            className="py-8"
-          >
-            <Button
-              type="primary"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={handleCreateSession}
+          acpHealthy === false ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <div className="space-y-2 text-sm text-text-muted">
+                  <p>
+                    {t(
+                      "playground:acp.notConfigured",
+                      "ACP (Agent Client Protocol) is not configured or the backend is unreachable."
+                    )}
+                  </p>
+                  <p>
+                    {t(
+                      "playground:acp.notConfiguredHelp",
+                      "ACP lets you interact with AI coding agents like Claude Code from your browser. Enable the [ACP] section in config.txt and restart the server to get started."
+                    )}
+                  </p>
+                </div>
+              }
+              className="py-8"
+            />
+          ) : (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("playground:acp.noSessions", "No active sessions")}
+              className="py-8"
             >
-              {t("playground:acp.createFirst", "Create Session")}
-            </Button>
-          </Empty>
+              <Button
+                type="primary"
+                icon={<Plus className="h-4 w-4" />}
+                onClick={handleCreateSession}
+              >
+                {t("playground:acp.createFirst", "Create Session")}
+              </Button>
+            </Empty>
+          )
         ) : (
           <>
             <div className="border-b border-border p-2">

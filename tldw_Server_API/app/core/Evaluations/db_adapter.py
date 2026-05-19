@@ -6,6 +6,7 @@ Provides an abstraction layer to support multiple database backends
 """
 
 import sqlite3
+import threading
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,6 +18,14 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType as UnifiedBackendType,
+    DatabaseBackend as UnifiedDatabaseBackend,
+)
+from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
+    prepare_backend_many_statement,
+    prepare_backend_statement,
 )
 
 
@@ -203,6 +212,141 @@ class SQLiteAdapter(DatabaseAdapter):
         """Close database connection."""
         if hasattr(self, 'conn'):
             self.conn.close()
+
+
+class BackendAdapter(DatabaseAdapter):
+    """Adapter that bridges DatabaseBackend to the Evaluations adapter interface."""
+
+    def __init__(self, backend: UnifiedDatabaseBackend):
+        if backend is None:
+            raise ValueError("backend must not be None")
+        self.backend = backend
+        self.backend_type = getattr(backend, "backend_type", None)
+        self._local = threading.local()
+
+    def _active_connection(self) -> Any:
+        return getattr(self._local, "connection", None)
+
+    def _prepare_statement(
+        self,
+        query: str,
+        params: Optional[tuple] = None,
+        *,
+        ensure_returning: bool = False,
+    ) -> tuple[str, Any]:
+        backend_type = getattr(self.backend, "backend_type", None)
+        if backend_type == UnifiedBackendType.POSTGRESQL:
+            return prepare_backend_statement(
+                backend_type,
+                query,
+                params,
+                apply_default_transform=True,
+                ensure_returning=ensure_returning,
+            )
+        return query, params
+
+    def _prepare_many(
+        self,
+        query: str,
+        params_list: list[tuple],
+    ) -> tuple[str, list[Any]]:
+        backend_type = getattr(self.backend, "backend_type", None)
+        if backend_type == UnifiedBackendType.POSTGRESQL:
+            return prepare_backend_many_statement(
+                backend_type,
+                query,
+                params_list,
+                apply_default_transform=True,
+            )
+        return query, params_list
+
+    def execute(self, query: str, params: Optional[tuple] = None) -> Any:
+        prepared_query, prepared_params = self._prepare_statement(query, params)
+        return self.backend.execute(prepared_query, prepared_params, connection=self._active_connection())
+
+    def execute_many(self, query: str, params_list: list[tuple]) -> Any:
+        prepared_query, prepared_params = self._prepare_many(query, params_list)
+        return self.backend.execute_many(prepared_query, prepared_params, connection=self._active_connection())
+
+    def fetch_one(self, query: str, params: Optional[tuple] = None) -> Optional[dict]:
+        result = self.execute(query, params)
+        return result.first if getattr(result, "first", None) else None
+
+    def fetch_all(self, query: str, params: Optional[tuple] = None) -> list[dict]:
+        result = self.execute(query, params)
+        return list(getattr(result, "rows", []) or [])
+
+    def fetch_value(self, query: str, params: Optional[tuple] = None) -> Any:
+        result = self.execute(query, params)
+        return getattr(result, "scalar", None)
+
+    
+    @contextmanager
+    def transaction(self):
+        existing = self._active_connection()
+        if existing is not None:
+            yield self
+            return
+
+        with self.backend.transaction() as connection:
+            self._local.connection = connection
+            try:
+                yield self
+            finally:
+                self._local.connection = None
+
+    def init_schema(self, schema_sql: str):
+        statements = [statement.strip() for statement in schema_sql.split(";") if statement.strip()]
+        with self.transaction():
+            for statement in statements:
+                self.execute(statement)
+
+    def insert(self, query: str, params: Optional[tuple] = None) -> int:
+        prepared_query, prepared_params = self._prepare_statement(
+            query,
+            params,
+            ensure_returning=True,
+        )
+        result = self.backend.execute(prepared_query, prepared_params, connection=self._active_connection())
+
+        lastrowid = getattr(result, "lastrowid", None)
+        if lastrowid is not None:
+            try:
+                return int(lastrowid)
+            except (TypeError, ValueError):
+                return 0
+
+        first = getattr(result, "first", None)
+        if isinstance(first, dict):
+            for key in ("id", "webhook_id"):
+                value = first.get(key)
+                if value is not None:
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        return 0
+
+        scalar = getattr(result, "scalar", None)
+        try:
+            return int(scalar) if scalar is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    def update(self, query: str, params: Optional[tuple] = None) -> int:
+        result = self.execute(query, params)
+        try:
+            return int(getattr(result, "rowcount", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def close(self):
+        """Backends are managed by the shared backend pool lifecycle."""
+        return None
+
+
+def create_adapter_from_backend(backend: UnifiedDatabaseBackend) -> DatabaseAdapter:
+    """Create an evaluations adapter from a shared content backend instance."""
+    return BackendAdapter(backend)
 
 
 class PostgreSQLAdapter(DatabaseAdapter):

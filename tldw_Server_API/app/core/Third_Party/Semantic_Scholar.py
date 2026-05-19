@@ -80,8 +80,8 @@ def search_papers_semantic_scholar(
         # Optional pacing if needed; retries/backoff handled centrally
         # time.sleep(0.2)
         return data, None
-    except Exception as e:
-        return None, f"An unexpected error occurred during Semantic Scholar search: {e}"
+    except Exception:
+        return None, "Semantic Scholar search failed."
 
 
 def get_paper_details_semantic_scholar(
@@ -97,8 +97,8 @@ def get_paper_details_semantic_scholar(
         data = fetch_json(method="GET", url=url, params=params, timeout=10)
         # time.sleep(0.2)
         return data, None
-    except Exception as e:
-        return None, f"Unexpected error fetching paper details (ID: {paper_id}): {e}"
+    except Exception:
+        return None, "Semantic Scholar paper details lookup failed."
 
 
 def format_paper_info(paper: dict[str, Any]) -> str:

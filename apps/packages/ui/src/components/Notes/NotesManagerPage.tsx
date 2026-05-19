@@ -1,5 +1,6 @@
 import React from 'react'
 import { Input, Typography, Button } from 'antd'
+import type { InputRef } from 'antd'
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,6 +16,7 @@ import { useServerCapabilities } from '@/hooks/useServerCapabilities'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
 import { useStoreMessageOption } from "@/store/option"
+import { useTutorialStore } from "@/store/tutorials"
 import { shallow } from "zustand/shallow"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
@@ -32,6 +34,8 @@ import {
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { buildSourcesNewPath } from "@/routes/route-paths"
 import { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from "@/services/notes-studio"
 import { useMobile } from "@/hooks/useMediaQuery"
 import {
@@ -73,6 +77,9 @@ import {
   TRASH_LOOKUP_PAGE_SIZE,
   TRASH_LOOKUP_MAX_PAGES,
   sortNotesByPinnedIds,
+  promptModal,
+  NOTES_TUTORIAL_SHOWN_STORAGE_KEY,
+  notesUiStorage,
 } from './notes-manager-utils'
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
@@ -149,6 +156,7 @@ const NotesManagerPage: React.FC = () => {
   const conversationLabelRetryAttemptsRef = React.useRef<Record<string, number>>({})
   const conversationLabelRetryTimeoutRef = React.useRef<number | null>(null)
   const [conversationLabelRetryTick, setConversationLabelRetryTick] = React.useState(0)
+  const searchInputRef = React.useRef<InputRef | null>(null)
 
   // ---- Notebook keyword tokens (needed before list hook) ----
   // We compute this after list hook provides selectedNotebook
@@ -244,6 +252,24 @@ const NotesManagerPage: React.FC = () => {
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
     editorDisabled,
   })
+  const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
+  const resetEditorToEmptyState = React.useCallback(() => {
+    setHasActiveDraft(false)
+    ed.resetEditor()
+  }, [ed.resetEditor])
+  const startDraftSession = React.useCallback(() => {
+    setHasActiveDraft(true)
+    ed.resetEditor()
+  }, [ed.resetEditor])
+  const focusSearchInput = React.useCallback(() => {
+    searchInputRef.current?.focus()
+  }, [])
+
+  React.useEffect(() => {
+    if (ed.selectedId != null) {
+      setHasActiveDraft(false)
+    }
+  }, [ed.selectedId])
 
   const [notesStudioCreateOpen, setNotesStudioCreateOpen] = React.useState(false)
   const [notesStudioCreateLoading, setNotesStudioCreateLoading] = React.useState(false)
@@ -337,7 +363,8 @@ const NotesManagerPage: React.FC = () => {
   const {
     data: noteNeighborsData,
     isLoading: noteNeighborsLoading,
-    isError: noteNeighborsError
+    isError: noteNeighborsError,
+    refetch: refetchNoteNeighbors
   } = useQuery({
     queryKey: ['note-graph-neighbors', ed.selectedId, ed.graphMutationTick],
     enabled: isOnline && ed.selectedId != null,
@@ -695,7 +722,7 @@ const NotesManagerPage: React.FC = () => {
     if (!ok) return
     if (list.listMode !== 'active') list.setListMode('active')
     if (isMobileViewport) setMobileSidebarOpen(false)
-    ed.resetEditor()
+    startDraftSession()
     const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId)
     if (template) {
       ed.setTitle(template.title)
@@ -707,7 +734,63 @@ const NotesManagerPage: React.FC = () => {
     setTimeout(() => {
       ed.titleInputRef.current?.focus()
     }, 0)
-  }, [ed, isMobileViewport, list, message])
+  }, [
+    ed.confirmDiscardIfDirty,
+    ed.setContent,
+    ed.setIsDirty,
+    ed.setSaveIndicator,
+    ed.setTitle,
+    ed.titleInputRef,
+    isMobileViewport,
+    list.listMode,
+    list.setListMode,
+    message,
+    startDraftSession
+  ])
+
+  const handleCreateStudyPackFromNote = React.useCallback(() => {
+    const selectedNoteId = ed.selectedId
+    if (selectedNoteId == null) {
+      message.warning(
+        t('option:notesSearch.createStudyPackMissingSelection', {
+          defaultValue: 'Select a note before creating a study pack.'
+        })
+      )
+      return
+    }
+
+    if (ed.isDirty) {
+      message.warning(
+        t('option:notesSearch.createStudyPackDirty', {
+          defaultValue: 'Save this note before creating a study pack.'
+        })
+      )
+      return
+    }
+
+    const noteTitle = ed.title.trim()
+    if (!noteTitle) {
+      message.warning(
+        t('option:notesSearch.createStudyPackEmpty', {
+          defaultValue: 'Save and title this note before creating a study pack.'
+        })
+      )
+      return
+    }
+
+    navigate(
+      buildStudyPackRoute({
+        title: noteTitle,
+        sourceItems: [
+          {
+            sourceType: 'note',
+            sourceId: String(selectedNoteId),
+            sourceTitle: noteTitle
+          }
+        ]
+      })
+    )
+  }, [ed.isDirty, ed.selectedId, ed.title, message, navigate, t])
 
   const duplicateSelectedNote = React.useCallback(async () => {
     if (editorDisabled) return
@@ -724,7 +807,7 @@ const NotesManagerPage: React.FC = () => {
     const duplicateContent = ed.content
     const duplicateKeywords = [...kw.editorKeywords]
 
-    ed.resetEditor()
+    startDraftSession()
     ed.setTitle(duplicateTitle)
     ed.setContent(duplicateContent)
     kw.setEditorKeywords(duplicateKeywords)
@@ -735,12 +818,22 @@ const NotesManagerPage: React.FC = () => {
       ed.titleInputRef.current?.focus()
     }, 0)
   }, [
-    ed,
+    ed.content,
+    ed.selectedId,
+    ed.setContent,
+    ed.setIsDirty,
+    ed.setSaveIndicator,
+    ed.setTitle,
+    ed.title,
+    ed.titleInputRef,
     editorDisabled,
     isMobileViewport,
-    kw,
-    list,
+    kw.editorKeywords,
+    kw.setEditorKeywords,
+    list.listMode,
+    list.setListMode,
     message,
+    startDraftSession
   ])
 
   // Manual links
@@ -971,7 +1064,7 @@ const NotesManagerPage: React.FC = () => {
         headers: { "expected-version": String(expectedVersion) }
       })
       showDeleteUndoToast(targetId)
-      if (ed.selectedId != null && String(ed.selectedId) === targetId) ed.resetEditor()
+      if (ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()
       await list.refetch()
     } catch (e: any) {
       if (ed.isVersionConflictError(e)) {
@@ -1056,7 +1149,7 @@ const NotesManagerPage: React.FC = () => {
     if (deleted > 0) {
       message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
       if (ed.selectedId != null && deletedIds.has(String(ed.selectedId))) {
-        ed.resetEditor()
+        resetEditorToEmptyState()
       }
       list.setBulkSelectedIds((current) => current.filter((id) => !deletedIds.has(id)))
       await list.refetch()
@@ -1074,20 +1167,23 @@ const NotesManagerPage: React.FC = () => {
     const okToLeave = await ed.confirmDiscardIfDirty()
     if (!okToLeave) return
     const suggested = kw.keywordTokens.join(', ')
-    const rawInput = window.prompt(
-      'Assign keywords to selected notes (comma-separated):',
-      suggested
-    )
+    const rawInput = await promptModal({
+      title: 'Assign tags to selected notes',
+      label: 'Enter tag names separated by commas.',
+      defaultValue: suggested,
+      placeholder: 'tag1, tag2, tag3',
+      okText: 'Assign',
+    })
     if (rawInput == null) return
     const keywords = rawInput.split(',').map((entry) => entry.trim()).filter(Boolean)
     if (keywords.length === 0) {
-      message.warning('Enter at least one keyword to assign')
+      message.warning('Enter at least one tag to assign')
       return
     }
     const confirmed = await confirmDanger({
-      title: 'Apply keywords to selected notes?',
+      title: 'Apply tags to selected notes?',
       content: `Apply ${keywords.join(', ')} to ${list.selectedBulkNotes.length} selected notes?`,
-      okText: 'Apply keywords',
+      okText: 'Apply tags',
       cancelText: 'Cancel'
     })
     if (!confirmed) return
@@ -1115,14 +1211,14 @@ const NotesManagerPage: React.FC = () => {
     }
 
     if (updated > 0) {
-      message.success(`Updated keywords on ${updated} selected note${updated === 1 ? '' : 's'}`)
+      message.success(`Updated tags on ${updated} selected note${updated === 1 ? '' : 's'}`)
       await list.refetch()
       if (ed.selectedId != null && list.selectedBulkNotes.some((note) => String(note.id) === String(ed.selectedId))) {
         await ed.loadDetail(ed.selectedId)
       }
     }
     if (failed > 0) {
-      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed keyword update`)
+      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed tag update`)
     }
   }, [confirmDanger, ed, kw.keywordTokens, list, message])
 
@@ -1150,10 +1246,12 @@ const NotesManagerPage: React.FC = () => {
       if (ed.editorInputMode === 'wysiwyg') {
         const richEditor = ed.richEditorRef.current
         if (!richEditor) return
-        richEditor.focus()
-        const execute = (command: string, value?: string) => {
+        const execute = (command: string, value?: string, options?: { focus?: boolean }) => {
           if (typeof document === 'undefined') return
           if (typeof document.execCommand !== 'function') return
+          if (options?.focus !== false) {
+            richEditor.focus()
+          }
           document.execCommand(command, false, value)
         }
         if (action === 'bold') execute('bold')
@@ -1161,10 +1259,41 @@ const NotesManagerPage: React.FC = () => {
         else if (action === 'heading') execute('formatBlock', '<h2>')
         else if (action === 'list') execute('insertUnorderedList')
         else if (action === 'link') {
-          const href = typeof window !== 'undefined' ? window.prompt('Link URL', 'https://') : 'https://'
-          const normalizedHref = String(href || '').trim()
-          if (!normalizedHref) return
-          execute('createLink', normalizedHref)
+          ;(async () => {
+            const savedSelection =
+              typeof window !== 'undefined'
+                ? (() => {
+                    const selection = window.getSelection()
+                    if (!selection || selection.rangeCount === 0) return null
+                    const currentRange = selection.getRangeAt(0)
+                    return richEditor.contains(currentRange.commonAncestorContainer)
+                      ? currentRange.cloneRange()
+                      : null
+                  })()
+                : null
+            const href = await promptModal({
+              title: 'Insert link',
+              defaultValue: 'https://',
+              placeholder: 'https://example.com',
+              okText: 'Insert',
+            })
+            const normalizedHref = String(href || '').trim()
+            if (!normalizedHref) return
+            richEditor.focus()
+            if (savedSelection) {
+              const selection = window.getSelection()
+              selection?.removeAllRanges()
+              selection?.addRange(savedSelection)
+            }
+            execute('createLink', normalizedHref, { focus: false })
+            const nextHtml = richEditor.innerHTML
+            ed.setWysiwygHtml(nextHtml)
+            ed.setWysiwygSessionDirty(true)
+            const nextMarkdown = wysiwygHtmlToMarkdown(nextHtml)
+            ed.setContentDirty(nextMarkdown)
+            ed.setEditorCursorIndex(nextMarkdown.length)
+          })()
+          return
         } else if (action === 'code') execute('insertText', '`code`')
 
         const nextHtml = richEditor.innerHTML
@@ -1691,14 +1820,21 @@ const NotesManagerPage: React.FC = () => {
     const effectiveQuery = list.query.trim() || list.queryInput.trim()
     const details: string[] = []
     if (effectiveQuery) details.push(`${t('option:notesSearch.summaryQueryLabel', { defaultValue: 'Query' })}: "${effectiveQuery}"`)
-    if (list.selectedNotebook != null) details.push(`${t('option:notesSearch.summaryNotebookLabel', { defaultValue: 'Smart collection' })}: ${list.selectedNotebook.name}`)
-    if (kw.keywordTokens.length > 0) details.push(`${t('option:notesSearch.summaryKeywordsLabel', { defaultValue: 'Keywords' })}: ${kw.keywordTokens.join(', ')}`)
+    if (list.selectedNotebook != null) details.push(`${t('option:notesSearch.summaryNotebookLabel', { defaultValue: 'Saved filter' })}: ${list.selectedNotebook.name}`)
+    if (kw.keywordTokens.length > 0) details.push(`${t('option:notesSearch.summaryKeywordsLabel', { defaultValue: 'Tags' })}: ${kw.keywordTokens.join(', ')}`)
     const countText = `${t('option:notesSearch.summaryShowing', { defaultValue: 'Showing' })} ${filteredCount} ${t('option:notesSearch.summaryOf', { defaultValue: 'of' })} ${list.total} ${t('option:notesSearch.summaryNotes', { defaultValue: 'notes' })}`
     return { countText, detailsText: details.join(' + ') }
   }, [kw.keywordTokens, list, t])
 
   const showLargeListPaginationHint =
     list.listMode === 'active' && list.listViewMode !== 'moodboard' && list.total >= LARGE_NOTES_PAGINATION_THRESHOLD
+  const showEditorEmptyState =
+    ed.selectedId == null &&
+    !hasActiveDraft &&
+    !ed.isDirty &&
+    ed.title.trim().length === 0 &&
+    ed.content.trim().length === 0 &&
+    kw.editorKeywords.length === 0
 
   // Timeline sections
   const timelineSections = React.useMemo(() => {
@@ -1738,7 +1874,7 @@ const NotesManagerPage: React.FC = () => {
   const searchableTips = React.useMemo(() => [
     { id: 'phrase', text: t('option:notesSearch.searchTipPhrase', { defaultValue: 'Use quotes for phrases, e.g. "project roadmap".' }) },
     { id: 'prefix', text: t('option:notesSearch.searchTipPrefix', { defaultValue: 'Use prefix terms (like analy*) for broader matches.' }) },
-    { id: 'and', text: t('option:notesSearch.searchTipAnd', { defaultValue: 'Text query + selected keywords are combined with AND.' }) },
+    { id: 'and', text: t('option:notesSearch.searchTipAnd', { defaultValue: 'Text query + selected tags are combined with AND.' }) },
     { id: 'in-note', text: t('option:notesSearch.searchTipInNote', { defaultValue: 'To find text inside the open note, use browser Ctrl/Cmd+F.' }) }
   ], [t])
 
@@ -1807,26 +1943,104 @@ const NotesManagerPage: React.FC = () => {
     setSidebarCollapsed(desktopSidebarCollapsedRef.current)
   }, [isMobileViewport])
 
-  // Shortcut help
+  // Global keyboard shortcuts
   React.useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.key !== '?' || event.metaKey || event.ctrlKey || event.altKey) return
-      if (shouldIgnoreGlobalShortcut(event.target)) return
-      event.preventDefault()
-      setShortcutHelpOpen(true)
+      if (event.defaultPrevented) return
+
+      // ? — open shortcut help (only when not typing in an input)
+      if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        event.preventDefault()
+        setShortcutHelpOpen(true)
+        return
+      }
+
+      // Alt+N — create new note
+      if (event.altKey && (event.key === 'n' || event.key === 'N') && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        event.preventDefault()
+        void handleNewNote()
+        return
+      }
+
+      // Ctrl/Cmd+K — focus search
+      if ((event.ctrlKey || event.metaKey) && event.key === 'k' && !event.shiftKey && !event.altKey) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        event.preventDefault()
+        focusSearchInput()
+        return
+      }
+
+      // / — focus search (only when not typing in an input)
+      if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        event.preventDefault()
+        focusSearchInput()
+        return
+      }
+
+      // Ctrl/Cmd+Shift+E/S/P — switch editor mode
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
+        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (event.key === 'E' || event.key === 'e') {
+          event.preventDefault()
+          ed.setEditorMode('edit')
+          return
+        }
+        if (event.key === 'S' || event.key === 's') {
+          event.preventDefault()
+          ed.setEditorMode('split')
+          return
+        }
+        if (event.key === 'P' || event.key === 'p') {
+          event.preventDefault()
+          ed.setEditorMode('preview')
+          return
+        }
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+  }, [ed.setEditorMode, focusSearchInput, handleNewNote])
+
+  // Auto-trigger notes tutorial on first visit
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+    let cancelled = false
+    let timer: number | null = null
+
+    void (async () => {
+      const alreadyShown = await notesUiStorage
+        .get<string | null>(NOTES_TUTORIAL_SHOWN_STORAGE_KEY)
+        .catch(() => null)
+      if (cancelled || alreadyShown) return
+      timer = window.setTimeout(() => {
+        void notesUiStorage
+          .set(NOTES_TUTORIAL_SHOWN_STORAGE_KEY, '1')
+          .catch(() => undefined)
+        useTutorialStore.getState().startTutorial('notes-basics')
+      }, 1000)
+    })()
+
+    return () => {
+      cancelled = true
+      if (timer != null) window.clearTimeout(timer)
+    }
   }, [])
 
-  // Cleanup
+  const clearSearchQueryTimeout = list.clearSearchQueryTimeout
+  const keywordSearchTimeoutRef = kw.keywordSearchTimeoutRef
+  const clearAutosaveTimeout = ed.clearAutosaveTimeout
+
+  // Use stable cleanup handles so debounce timers survive normal re-renders.
   React.useEffect(() => {
     return () => {
-      list.clearSearchQueryTimeout()
-      if (kw.keywordSearchTimeoutRef.current != null) clearTimeout(kw.keywordSearchTimeoutRef.current)
-      ed.clearAutosaveTimeout()
+      clearSearchQueryTimeout()
+      if (keywordSearchTimeoutRef.current != null) clearTimeout(keywordSearchTimeoutRef.current)
+      clearAutosaveTimeout()
     }
-  }, [ed, kw, list])
+  }, [clearAutosaveTimeout, clearSearchQueryTimeout, keywordSearchTimeoutRef])
 
   const handleSkipLinkActivate = React.useCallback(
     (targetId: string) => (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -1857,6 +2071,17 @@ const NotesManagerPage: React.FC = () => {
       <p id={NOTES_SHORTCUTS_SUMMARY_ID} className="sr-only">
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
+      <div className="absolute right-4 top-4 z-20">
+        <Button
+          type="primary"
+          size="small"
+          onClick={handleCreateStudyPackFromNote}
+          disabled={ed.selectedId == null || ed.isDirty || !ed.title.trim()}
+          data-testid="notes-create-study-pack-button"
+        >
+          {t('option:notesSearch.createStudyPack', { defaultValue: 'Create study pack' })}
+        </Button>
+      </div>
       {isMobileViewport && mobileSidebarOpen && (
         <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}
@@ -1915,12 +2140,15 @@ const NotesManagerPage: React.FC = () => {
         setPageSize={list.setPageSize}
         setSortOption={list.setSortOption}
         setQueryInput={list.setQueryInput}
+        searchInputRef={searchInputRef}
         setSelectedMoodboardId={list.setSelectedMoodboardId}
         setSelectedNotebookId={list.setSelectedNotebookId}
         setSearchTipsQuery={list.setSearchTipsQuery}
         handleNewNote={handleNewNote}
         switchListMode={ed.switchListMode}
-        handleSelectNote={ed.handleSelectNote}
+        handleSelectNote={async (id) => {
+          await ed.handleSelectNote(id)
+        }}
         handleClearFilters={list.handleClearFilters}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
@@ -1943,7 +2171,8 @@ const NotesManagerPage: React.FC = () => {
         exportAllCSV={exp.exportAllCSV}
         exportAllJSON={exp.exportAllJSON}
         openImportPicker={imp.openImportPicker}
-        resetEditor={ed.resetEditor}
+        onSyncFolder={() => navigate(buildSourcesNewPath({ preset: "notes-folder-sync" }))}
+        resetEditor={resetEditorToEmptyState}
         renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}
         onOpenSettings={() => navigate('/settings/tldw')}
         onOpenHealth={() => navigate('/settings/health')}
@@ -1965,6 +2194,7 @@ const NotesManagerPage: React.FC = () => {
         isMobileViewport={isMobileViewport}
         setMobileSidebarOpen={setMobileSidebarOpen}
         selectedId={ed.selectedId}
+        showEmptyState={showEditorEmptyState}
         title={ed.title}
         content={ed.content}
         editorDisabled={editorDisabled}
@@ -1978,6 +2208,9 @@ const NotesManagerPage: React.FC = () => {
         noteRelations={noteRelations}
         noteNeighborsLoading={noteNeighborsLoading}
         noteNeighborsError={noteNeighborsError}
+        onRetryNeighbors={() => {
+          void refetchNoteNeighbors()
+        }}
         selectedNotePinned={ed.selectedNotePinned}
         editorMode={ed.editorMode}
         editorInputMode={ed.editorInputMode}
@@ -2014,6 +2247,8 @@ const NotesManagerPage: React.FC = () => {
         manualLinkOptions={manualLinkOptions}
         manualLinkDeletingEdgeId={ed.manualLinkDeletingEdgeId}
         assistLoadingAction={ed.assistLoadingAction}
+        canUndoAssist={ed.canUndoAssist}
+        undoAssist={ed.undoAssist}
         shouldShowToc={wl.shouldShowToc}
         tocEntries={wl.tocEntries}
         previewContent={wl.previewContent}
@@ -2049,11 +2284,16 @@ const NotesManagerPage: React.FC = () => {
         toggleNotePinned={ed.toggleNotePinned}
         copySelected={exp.copySelected}
         handleGenerateFlashcardsFromNote={handleGenerateFlashcardsFromNote}
+        handleCreateStudyPackFromNote={handleCreateStudyPackFromNote}
         handleOpenNotesStudio={handleOpenNotesStudio}
         exportSelected={exp.exportSelected}
         saveNote={ed.saveNote}
-        deleteNote={deleteNote}
-        handleSelectNote={ed.handleSelectNote}
+        deleteNote={async () => {
+          await deleteNote()
+        }}
+        handleSelectNote={async (id) => {
+          await ed.handleSelectNote(id)
+        }}
         openGraphModal={openGraphModal}
         createManualLink={createManualLink}
         removeManualLink={removeManualLink}

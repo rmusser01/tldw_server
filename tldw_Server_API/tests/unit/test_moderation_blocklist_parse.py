@@ -5,6 +5,7 @@ from typing import Optional, Set
 
 import pytest
 
+import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module
 from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService, ModerationPolicy, PatternRule
 
 
@@ -164,6 +165,179 @@ def test_invalid_and_dangerous_regex_lines_are_skipped():
             os.unlink(tmp_path)
         except Exception:
             _ = None
+
+
+@pytest.mark.unit
+def test_blocklist_pattern_warnings_sanitize_raw_regex_details(tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text(
+        "\n".join(
+            [
+                "/(private_secret/ -> block #pii",
+                "/(private_secret+)+$/ -> block #pii",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Invalid blocklist pattern" in joined
+    assert "Skipped dangerous regex in blocklist" in joined
+    assert "private_secret" not in joined
+    assert "missing )" not in joined
+
+
+@pytest.mark.unit
+def test_blocklist_invalid_action_warning_sanitizes_line_details(tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text(
+        "private_secret -> exfiltrate:/private/moderation_blocklist.txt #pii\n",
+        encoding="utf-8",
+    )
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Invalid moderation action in blocklist; skipping line" in joined
+    assert "exfiltrate" not in joined
+    assert "private_secret" not in joined
+    assert "moderation_blocklist.txt" not in joined
+
+
+@pytest.mark.unit
+def test_load_block_patterns_missing_file_sanitizes_warning_path(tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "private_moderation_blocklist.txt"
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Moderation blocklist file not found" in joined
+    assert "private_moderation_blocklist.txt" not in joined
+    assert str(tmp_path) not in joined
+
+
+@pytest.mark.unit
+def test_load_block_patterns_sanitizes_outer_failure_log(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("secret\n", encoding="utf-8")
+
+    def _raise_load_failure(*_args, **_kwargs):
+        raise OSError("blocklist load failed at /private/moderation_blocklist.txt")
+
+    monkeypatch.setattr(moderation_service_module, "open", _raise_load_failure, raising=False)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Failed to load moderation blocklist" in joined
+    assert "blocklist load failed" not in joined
+    assert "moderation_blocklist.txt" not in joined
+
+
+@pytest.mark.unit
+def test_build_block_patterns_sanitizes_builtin_pii_failure_log(monkeypatch):
+    svc = ModerationService()
+    svc._pii_enabled = True
+
+    def _raise_pii_failure():
+        raise RuntimeError("builtin pii load failed at /private/pii-rules.py")
+
+    monkeypatch.setattr(svc, "_load_builtin_pii_rules", _raise_pii_failure)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        patterns = svc._build_block_patterns(None)
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert patterns == []
+    assert "Failed to load builtin PII rules" in joined
+    assert "builtin pii load failed" not in joined
+    assert "pii-rules.py" not in joined
+
+
+@pytest.mark.unit
+def test_get_blocklist_lines_sanitizes_read_failure_log(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("secret\n", encoding="utf-8")
+    svc._blocklist_path = str(blocklist_path)
+
+    def _raise_read_failure(*_args, **_kwargs):
+        raise OSError("blocklist read failed at /private/moderation_blocklist.txt")
+
+    monkeypatch.setattr(moderation_service_module, "open", _raise_read_failure, raising=False)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        lines = svc.get_blocklist_lines()
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert lines == []
+    assert "Failed to read blocklist" in joined
+    assert "blocklist read failed" not in joined
+    assert "moderation_blocklist.txt" not in joined
+
+
+@pytest.mark.unit
+def test_set_blocklist_lines_sanitizes_write_failure_log(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    svc._blocklist_path = str(blocklist_path)
+
+    def _raise_write_failure(*_args, **_kwargs):
+        raise OSError("blocklist write failed at /private/moderation_blocklist.txt")
+
+    monkeypatch.setattr(moderation_service_module.os, "replace", _raise_write_failure)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        ok = svc.set_blocklist_lines(["secret"])
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert ok is False
+    assert "Failed to write blocklist" in joined
+    assert "blocklist write failed" not in joined
+    assert "moderation_blocklist.txt" not in joined
 
 
 @pytest.mark.unit

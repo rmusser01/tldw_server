@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class ReferenceEntry(BaseModel):
     """A single reference/citation extracted from the document."""
@@ -84,6 +86,7 @@ class DocumentReferencesResponse(BaseModel):
         ge=0,
         description="Offset to request for the next page when has_more=true",
     )
+    pagination: OffsetPaginationMeta
 
 
 __all__ = ["ReferenceEntry", "DocumentReferencesResponse"]

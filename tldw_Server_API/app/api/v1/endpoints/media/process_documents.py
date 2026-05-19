@@ -5,12 +5,14 @@ import functools
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from loguru import logger
 from starlette.responses import JSONResponse
 
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files as docs
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_documents_form,
@@ -24,7 +26,10 @@ from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessDocumentsForm
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
-    prepare_chunking_options_dict,
+    async_resolve_chunking_for_result,
+    attach_chunking_plan_to_result,
+    resolve_chunking_options_and_plan,
+    uses_hierarchical_chunking,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
@@ -66,9 +71,14 @@ ALLOWED_DOC_EXTENSIONS = [
     "/process-documents",
     summary="Extract, chunk, analyse Documents (NO DB Persistence)",
     tags=["Media Processing (No DB)"],
-    dependencies=[Depends(guard_storage_quota)],
+    dependencies=[
+        Depends(guard_storage_quota),
+        Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
+        Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
+    ],
 )
 async def process_documents_endpoint(
+    injected_response: Response,
     db: Any = Depends(get_media_db_for_user),
     form_data: ProcessDocumentsForm = Depends(get_process_documents_form),
     files: list[UploadFile] | None = File(
@@ -92,12 +102,11 @@ async def process_documents_endpoint(
             tags=["no_db"],
             metadata={"has_urls": bool(form_data.urls), "has_files": bool(files)},
         )
-    except Exception as usage_log_error:
+    except Exception:
         # Usage logging is best-effort; never fail the request.
-        logger.debug("Document process endpoint usage logging failed", exc_info=usage_log_error)
+        logger.debug("Document process endpoint usage logging failed")
     logger.debug(
-        "Form data for /process-documents: has_urls={}, has_files={}, "
-        "perform_analysis={}, perform_chunking={}",
+        "Form data for /process-documents: has_urls={}, has_files={}, " "perform_analysis={}, perform_chunking={}",
         bool(form_data.urls),
         bool(files),
         form_data.perform_analysis,
@@ -105,9 +114,7 @@ async def process_documents_endpoint(
     )
     legacy_urls_empty_sentinel_used = bool(form_data.urls and form_data.urls == [""])
     if legacy_urls_empty_sentinel_used:
-        logger.info(
-            "Received urls=[''], treating as no URLs provided for document processing."
-        )
+        logger.info("Received urls=[''], treating as no URLs provided for document processing.")
     form_data.urls = normalize_urls_field(form_data.urls)
     legacy_signal = (
         build_media_legacy_signal(
@@ -166,10 +173,7 @@ async def process_documents_endpoint(
             saved_files_info = list(saved_files)
             # Add file saving/validation errors to batch_result
             for err_info in upload_errors:
-                original_filename = (
-                    err_info.get("input")
-                    or err_info.get("original_filename", "Unknown Upload")
-                )
+                original_filename = err_info.get("input") or err_info.get("original_filename", "Unknown Upload")
                 err_detail = f"Upload error: {err_info['error']}"
                 batch_result["results"].append(
                     {
@@ -264,7 +268,7 @@ async def process_documents_endpoint(
                             error,
                             exc_info=False,
                         )
-                        err_detail = f"Download/preparation failed: {str(error)}"
+                        err_detail = "Download/preparation failed"
                         batch_result["results"].append(
                             {
                                 "status": "Error",
@@ -291,9 +295,7 @@ async def process_documents_endpoint(
                             type(result),
                             original_url,
                         )
-                        err_detail = (
-                            f"Unexpected download result type: {type(result).__name__}"
-                        )
+                        err_detail = f"Unexpected download result type: {type(result).__name__}"
                         batch_result["results"].append(
                             {
                                 "status": "Error",
@@ -317,15 +319,11 @@ async def process_documents_endpoint(
 
         # --- Check if any files are ready for processing ---
         if not local_paths_to_process:
-            logger.warning(
-                "No valid document sources found or prepared after handling uploads/URLs."
-            )
+            logger.warning("No valid document sources found or prepared after handling uploads/URLs.")
             # When uploads/URLs were rejected, surface counts like other process-* endpoints.
             if batch_result["results"]:
                 batch_result["errors_count"] = sum(
-                    1
-                    for r in batch_result["results"]
-                    if str(r.get("status", "")).lower() == "error"
+                    1 for r in batch_result["results"] if str(r.get("status", "")).lower() == "error"
                 )
                 batch_result["processed_count"] = 0
                 status_code = status.HTTP_207_MULTI_STATUS
@@ -337,25 +335,27 @@ async def process_documents_endpoint(
             response = JSONResponse(status_code=status_code, content=batch_result)
             if legacy_signal is not None:
                 apply_media_legacy_headers(response, legacy_signal)
+            propagate_billing_headers(injected_response, response)
             return response
 
-        logger.info(
-            "Starting processing for {} document(s).", len(local_paths_to_process)
-        )
+        logger.info("Starting processing for {} document(s).", len(local_paths_to_process))
 
         # --- Prepare options for the worker ---
+        chunking_plan: dict[str, Any] | None = None
         if form_data.perform_chunking:
-            chunk_options_dict: dict[str, Any] | None = prepare_chunking_options_dict(
-                form_data
+            first_url = (form_data.urls or [None])[0]
+            first_filename = None
+            if saved_files_info:
+                first_filename = saved_files_info[0].get("original_filename")
+
+            chunk_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type="document",
+                source_name=first_filename or first_url,
             )
             TemplateClassifier = getattr(media_mod, "TemplateClassifier", None)
 
-            if chunk_options_dict is not None:
-                first_url = (form_data.urls or [None])[0]
-                first_filename = None
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
-
+            if chunk_options_dict is not None and chunking_plan is None:
                 chunk_options_dict = apply_chunking_template_if_any(
                     form_data=form_data,
                     db=db,
@@ -433,9 +433,7 @@ async def process_documents_endpoint(
                         res,
                         exc_info=res,
                     )
-                    error_detail = (
-                        f"Task execution failed: {type(res).__name__}: {res}"
-                    )
+                    error_detail = "Document processing failed"
                     results.append(
                         {
                             "status": "Error",
@@ -499,23 +497,16 @@ async def process_documents_endpoint(
         final_status_code = status.HTTP_200_OK
     elif batch_result.get("errors_count", 0) > 0:
         final_status_code = status.HTTP_207_MULTI_STATUS
-    elif (
-        batch_result.get("processed_count", 0) == 0
-        and batch_result.get("errors_count", 0) == 0
-    ):
+    elif batch_result.get("processed_count", 0) == 0 and batch_result.get("errors_count", 0) == 0:
         final_status_code = status.HTTP_207_MULTI_STATUS if batch_result["results"] else status.HTTP_400_BAD_REQUEST
     else:
-        logger.warning(
-            "Reached unexpected state for final status code determination "
-            "in /process-documents."
-        )
+        logger.warning("Reached unexpected state for final status code determination " "in /process-documents.")
         final_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
     log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
     logger.log(
         log_level,
-        "/process-documents request finished with status {}. "
-        "Processed: {}, Errors: {}",
+        "/process-documents request finished with status {}. " "Processed: {}, Errors: {}",
         final_status_code,
         batch_result.get("processed_count", 0),
         batch_result.get("errors_count", 0),
@@ -531,11 +522,10 @@ async def process_documents_endpoint(
                 Chunker as _Chunker,
             )
 
-            use_hier = bool(
-                chunk_options_dict.get("hierarchical")
-                or isinstance(chunk_options_dict.get("hierarchical_template"), dict)
-            )
-            ck = _Chunker() if use_hier else None
+            ck: _Chunker | None = None
+            batch_auto_chunk_options = chunk_options_dict
+            batch_auto_chunking_plan = chunking_plan
+            batch_llm_chunking_resolved = False
 
             for res in batch_result.get("results", []):
                 if not isinstance(res, dict):
@@ -545,31 +535,50 @@ async def process_documents_endpoint(
                     continue
                 text = res.get("content")
                 if not isinstance(text, str) or not text.strip():
+                    attach_chunking_plan_to_result(res, chunking_plan)
                     continue
 
-                if use_hier and ck is not None:
+                result_chunk_options, result_chunking_plan = await async_resolve_chunking_for_result(
+                    form_data,
+                    res,
+                    media_type="document",
+                    default_chunk_options=batch_auto_chunk_options,
+                    default_chunking_plan=batch_auto_chunking_plan,
+                    allow_llm_assist=not batch_llm_chunking_resolved,
+                )
+                attach_chunking_plan_to_result(res, result_chunking_plan)
+                if getattr(form_data, "auto_chunking_use_llm", False) and result_chunking_plan:
+                    batch_auto_chunk_options = result_chunk_options
+                    batch_auto_chunking_plan = result_chunking_plan
+                    batch_llm_chunking_resolved = True
+                if not result_chunk_options:
+                    continue
+
+                if uses_hierarchical_chunking(result_chunk_options):
+                    ck = ck or _Chunker()
                     chunks = ck.chunk_text_hierarchical_flat(
                         text,
-                        method=chunk_options_dict.get("method") or "sentences",
-                        max_size=chunk_options_dict.get("max_size") or 500,
-                        overlap=chunk_options_dict.get("overlap") or 200,
-                        language=chunk_options_dict.get("language"),
-                        template=chunk_options_dict.get("hierarchical_template")
-                        if isinstance(
-                            chunk_options_dict.get("hierarchical_template"), dict
-                        )
-                        else None,
+                        method=result_chunk_options.get("method") or "sentences",
+                        max_size=result_chunk_options.get("max_size") or 500,
+                        overlap=result_chunk_options.get("overlap") or 200,
+                        language=result_chunk_options.get("language"),
+                        template=(
+                            result_chunk_options.get("hierarchical_template")
+                            if isinstance(result_chunk_options.get("hierarchical_template"), dict)
+                            else None
+                        ),
                     )
                 else:
-                    chunks = _improved_chunking_process(text, chunk_options_dict)
+                    chunks = _improved_chunking_process(text, result_chunk_options)
 
                 res["chunks"] = chunks
     except Exception:
-        logger.debug("Re-chunking failed during metadata normalization", exc_info=True)
+        logger.debug("Re-chunking failed during metadata normalization")
 
     response = JSONResponse(status_code=final_status_code, content=batch_result)
     if legacy_signal is not None:
         apply_media_legacy_headers(response, legacy_signal)
+    propagate_billing_headers(injected_response, response)
     return response
 
 

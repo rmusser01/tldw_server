@@ -1,4 +1,13 @@
 import type { ThemeDefinition } from "./types"
+import {
+  defaultTypography,
+  defaultShape,
+  defaultLayout,
+  defaultComponents,
+  defaultLightShadows,
+  defaultDarkShadows,
+} from "./defaults"
+import { primerTheme } from "./primer-preset"
 
 /**
  * Default theme — matches the existing CSS custom properties in tailwind-shared.css.
@@ -8,6 +17,7 @@ const defaultTheme: ThemeDefinition = {
   id: "default",
   name: "Default",
   description: "The original tldw palette",
+  version: 1 as const,
   builtin: true,
   palette: {
     light: {
@@ -28,6 +38,7 @@ const defaultTheme: ThemeDefinition = {
       textMuted: "91 100 114",
       textSubtle: "110 120 135",
       focus: "13 134 119",
+      ...defaultLightShadows(),
     },
     dark: {
       bg: "15 17 19",
@@ -47,8 +58,13 @@ const defaultTheme: ThemeDefinition = {
       textMuted: "179 186 198",
       textSubtle: "144 152 166",
       focus: "79 209 176",
+      ...defaultDarkShadows(),
     },
   },
+  typography: defaultTypography(),
+  shape: defaultShape(),
+  layout: defaultLayout(),
+  components: defaultComponents(),
 }
 
 /**
@@ -58,6 +74,7 @@ const solarizedTheme: ThemeDefinition = {
   id: "solarized",
   name: "Solarized",
   description: "Warm academic tones with yellow and orange accents",
+  version: 1 as const,
   builtin: true,
   palette: {
     light: {
@@ -78,6 +95,8 @@ const solarizedTheme: ThemeDefinition = {
       textMuted: "78 98 105",   // darkened for AA on surface/surface2
       textSubtle: "101 123 131",// base00
       focus: "34 145 136",      // darkened for >=3:1 focus indicator contrast
+      shadowSm: "0 1px 3px rgba(88,66,20,0.10)",
+      shadowMd: "0 6px 18px rgba(88,66,20,0.08)",
     },
     dark: {
       bg: "0 43 54",            // base03
@@ -97,8 +116,14 @@ const solarizedTheme: ThemeDefinition = {
       textMuted: "238 232 213", // base2
       textSubtle: "147 161 161",// base1
       focus: "42 161 152",
+      shadowSm: "0 1px 2px rgba(0,0,0,0.30)",
+      shadowMd: "0 4px 12px rgba(0,0,0,0.25)",
     },
   },
+  typography: defaultTypography(),
+  shape: defaultShape(),
+  layout: defaultLayout(),
+  components: defaultComponents(),
 }
 
 /**
@@ -108,6 +133,7 @@ const nordTheme: ThemeDefinition = {
   id: "nord",
   name: "Nord",
   description: "Cool blue-gray arctic tones",
+  version: 1 as const,
   builtin: true,
   palette: {
     light: {
@@ -128,6 +154,8 @@ const nordTheme: ThemeDefinition = {
       textMuted: "67 76 94",    // nord1
       textSubtle: "104 117 140",
       focus: "94 129 172",      // align with primary for >=3:1 focus contrast
+      shadowSm: "0 1px 3px rgba(46,52,64,0.10)",
+      shadowMd: "0 6px 18px rgba(46,52,64,0.08)",
     },
     dark: {
       bg: "46 52 64",           // Polar Night nord0
@@ -147,8 +175,14 @@ const nordTheme: ThemeDefinition = {
       textMuted: "229 233 240", // nord5
       textSubtle: "216 222 233",// nord4
       focus: "136 192 208",
+      shadowSm: "0 1px 2px rgba(0,0,0,0.28)",
+      shadowMd: "0 4px 12px rgba(0,0,0,0.22)",
     },
   },
+  typography: defaultTypography(),
+  shape: defaultShape(),
+  layout: defaultLayout(),
+  components: defaultComponents(),
 }
 
 /**
@@ -158,6 +192,7 @@ const highContrastTheme: ThemeDefinition = {
   id: "high-contrast",
   name: "High Contrast",
   description: "Maximum readability, WCAG AAA compliant",
+  version: 1 as const,
   builtin: true,
   palette: {
     light: {
@@ -178,6 +213,8 @@ const highContrastTheme: ThemeDefinition = {
       textMuted: "50 50 50",
       textSubtle: "75 75 75",
       focus: "0 70 180",
+      shadowSm: "0 1px 3px rgba(0,0,0,0.15)",
+      shadowMd: "0 6px 18px rgba(0,0,0,0.12)",
     },
     dark: {
       bg: "0 0 0",
@@ -197,8 +234,14 @@ const highContrastTheme: ThemeDefinition = {
       textMuted: "210 210 210",
       textSubtle: "180 180 180",
       focus: "100 160 255",
+      shadowSm: "0 1px 2px rgba(0,0,0,0.40)",
+      shadowMd: "0 4px 12px rgba(0,0,0,0.35)",
     },
   },
+  typography: defaultTypography(),
+  shape: defaultShape(),
+  layout: defaultLayout(),
+  components: defaultComponents(),
 }
 
 /**
@@ -208,6 +251,7 @@ const rosePineTheme: ThemeDefinition = {
   id: "rose-pine",
   name: "Rose Pine",
   description: "Muted purple-pink tones for a cozy feel",
+  version: 1 as const,
   builtin: true,
   palette: {
     light: {
@@ -228,6 +272,8 @@ const rosePineTheme: ThemeDefinition = {
       textMuted: "107 102 132", // darkened for AA on surface/surface2
       textSubtle: "134 128 152",// darkened for >=3:1 subtle floor
       focus: "168 110 122",     // darkened for >=3:1 focus indicator contrast
+      shadowSm: "0 1px 3px rgba(87,82,121,0.08)",
+      shadowMd: "0 6px 18px rgba(87,82,121,0.06)",
     },
     dark: {
       bg: "25 23 36",           // Main base
@@ -247,12 +293,19 @@ const rosePineTheme: ThemeDefinition = {
       textMuted: "144 140 170", // Main subtle
       textSubtle: "112 108 136",// brightened to meet subtle floor on surface2
       focus: "235 188 186",
+      shadowSm: "0 1px 2px rgba(0,0,0,0.30)",
+      shadowMd: "0 4px 12px rgba(0,0,0,0.25)",
     },
   },
+  typography: defaultTypography(),
+  shape: defaultShape(),
+  layout: defaultLayout(),
+  components: defaultComponents(),
 }
 
 const PRESETS: ThemeDefinition[] = [
   defaultTheme,
+  primerTheme,
   solarizedTheme,
   nordTheme,
   highContrastTheme,

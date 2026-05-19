@@ -1,7 +1,9 @@
 import React from "react"
-import { Tag, Tooltip } from "antd"
-import { Cloud, CloudOff, AlertTriangle, RefreshCw, HardDrive } from "lucide-react"
+import { Tooltip } from "antd"
+import { Cloud, AlertTriangle, RefreshCw, HardDrive } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { Badge, getBadgeVariantForDesignSystemSeverity } from "@/components/ui/primitives"
 import type { PromptSyncStatus, PromptSourceSystem } from "@/db/dexie/types"
 
 interface SyncStatusBadgeProps {
@@ -11,6 +13,14 @@ interface SyncStatusBadgeProps {
   lastSyncedAt?: number | null
   compact?: boolean
   onClick?: () => void
+  onRetry?: () => void
+}
+
+type SyncStatusConfig = {
+  icon: React.ReactNode
+  stateKey: DesignSystemStateKey
+  label: string
+  tooltip: string
 }
 
 export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
@@ -19,7 +29,8 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
   serverId,
   lastSyncedAt,
   compact = false,
-  onClick
+  onClick,
+  onRetry
 }) => {
   const { t } = useTranslation(["settings", "common"])
   const isInteractive = typeof onClick === "function"
@@ -39,12 +50,12 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
     return t("common:daysAgo", "{{count}}d ago", { count: diffDays })
   }
 
-  const getStatusConfig = () => {
+  const getStatusConfig = (): SyncStatusConfig => {
     switch (syncStatus) {
       case "synced":
         return {
           icon: <Cloud className="size-3" />,
-          color: "green",
+          stateKey: "ready",
           label: t("settings:managePrompts.sync.synced", "Synced"),
           tooltip: t("settings:managePrompts.sync.syncedTooltip", "Synced with server{{time}}", {
             time: lastSyncedAt ? ` (${formatLastSync(lastSyncedAt)})` : ""
@@ -53,14 +64,14 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
       case "pending":
         return {
           icon: <RefreshCw className="size-3" />,
-          color: "gold",
+          stateKey: "degraded",
           label: t("settings:managePrompts.sync.pending", "Pending"),
           tooltip: t("settings:managePrompts.sync.pendingTooltip", "Local changes not yet synced")
         }
       case "conflict":
         return {
           icon: <AlertTriangle className="size-3" />,
-          color: "red",
+          stateKey: "blocked",
           label: t("settings:managePrompts.sync.conflict", "Conflict"),
           tooltip: t("settings:managePrompts.sync.conflictTooltip", "Local and server versions differ")
         }
@@ -68,7 +79,7 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
       default:
         return {
           icon: <HardDrive className="size-3" />,
-          color: "default",
+          stateKey: "empty",
           label: t("settings:managePrompts.sync.local", "Local"),
           tooltip: t("settings:managePrompts.sync.localTooltip", "Stored locally only")
         }
@@ -98,32 +109,56 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
 
   const statusConfig = getStatusConfig()
   const sourceConfig = getSourceConfig()
+  const showRetry = syncStatus === "pending" && typeof onRetry === "function"
+
+  const retryButton = showRetry ? (
+    <Tooltip title={t("settings:managePrompts.sync.retryTooltip", { defaultValue: "Retry sync" })}>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          onRetry?.()
+        }}
+        className="inline-flex items-center text-primary hover:underline focus:outline-none"
+        aria-label={t("settings:managePrompts.sync.retry", { defaultValue: "Retry sync" })}
+        data-testid="sync-retry-button"
+      >
+        <RefreshCw className="size-3" />
+      </button>
+    </Tooltip>
+  ) : null
 
   if (compact) {
     return (
       <Tooltip title={`${statusConfig.tooltip} | ${sourceConfig.tooltip}`}>
-        {isInteractive ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              onClick?.()
-            }}
-            className="inline-flex items-center gap-1 rounded p-0.5 text-text-muted hover:text-text focus:outline-none focus:ring-2 focus:ring-primary"
-            aria-label={t("settings:managePrompts.sync.resolveConflict", {
-              defaultValue: "Resolve conflict"
-            })}
-          >
-            {statusConfig.icon}
-          </button>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-text-muted">
-            {statusConfig.icon}
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1">
+          {isInteractive ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onClick?.()
+              }}
+              className="inline-flex items-center gap-1 rounded p-0.5 text-text-muted hover:text-text focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label={t("settings:managePrompts.sync.resolveConflict", {
+                defaultValue: "Resolve conflict"
+              })}
+            >
+              {statusConfig.icon}
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-text-muted">
+              {statusConfig.icon}
+            </span>
+          )}
+          {retryButton}
+        </span>
       </Tooltip>
     )
   }
+
+  const state = getDesignSystemState(statusConfig.stateKey)
+  const badgeVariant = getBadgeVariantForDesignSystemSeverity(state.severity)
 
   return (
     <div className="inline-flex items-center gap-1">
@@ -140,24 +175,26 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({
               defaultValue: "Resolve conflict"
             })}
           >
-            <Tag
-              color={statusConfig.color}
-              className="inline-flex items-center gap-1 text-xs cursor-pointer"
+            <Badge
+              className="cursor-pointer"
+              size="sm"
+              variant={badgeVariant}
             >
               {statusConfig.icon}
               {statusConfig.label}
-            </Tag>
+            </Badge>
           </button>
         ) : (
-          <Tag
-            color={statusConfig.color}
-            className="inline-flex items-center gap-1 text-xs"
+          <Badge
+            size="sm"
+            variant={badgeVariant}
           >
             {statusConfig.icon}
             {statusConfig.label}
-          </Tag>
+          </Badge>
         )}
       </Tooltip>
+      {retryButton}
       {serverId && (
         <Tooltip title={`Server ID: ${serverId}`}>
           <span className="text-xs text-text-muted">

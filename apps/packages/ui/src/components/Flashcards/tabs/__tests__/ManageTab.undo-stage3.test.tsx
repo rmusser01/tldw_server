@@ -8,8 +8,10 @@ import {
   useUpdateFlashcardsBulkMutation,
   useDecksQuery,
   useFlashcardDocumentQuery,
+  useGlobalFlashcardTagSuggestionsQuery,
   useManageQuery,
   useTagSuggestionsQuery,
+  useUpdateDeckMutation,
   useUpdateFlashcardMutation,
   useResetFlashcardSchedulingMutation,
   useDeleteFlashcardMutation,
@@ -92,8 +94,10 @@ vi.mock("../../hooks", () => ({
   getFlashcardDocumentQueryKey: vi.fn(() => ["flashcards:document", 1]),
   useDecksQuery: vi.fn(),
   useFlashcardDocumentQuery: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useManageQuery: vi.fn(),
   useTagSuggestionsQuery: vi.fn(),
+  useUpdateDeckMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useUpdateFlashcardsBulkMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -187,6 +191,9 @@ describe("ManageTab stage3 undo controls", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     trackErrorRecoveryTelemetryMock.mockClear()
+    updateMutationMock.mockReset()
+    vi.mocked(getFlashcard).mockReset()
+    vi.mocked(updateFlashcard).mockReset()
     Object.values(messageSpies).forEach((spy) => spy.mockReset())
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
 
@@ -242,8 +249,18 @@ describe("ManageTab stage3 undo controls", () => {
       data: ["biology", "chemistry"],
       isLoading: false
     } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false
+    } as any)
     vi.mocked(useUpdateFlashcardMutation).mockReturnValue({
       mutateAsync: updateMutationMock,
+      isPending: false
+    } as any)
+    vi.mocked(useUpdateDeckMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
       isPending: false
     } as any)
     vi.mocked(useUpdateFlashcardsBulkMutation).mockReturnValue({

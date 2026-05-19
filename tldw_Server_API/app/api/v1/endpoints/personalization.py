@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_personalization_db_for_user,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 from tldw_Server_API.app.api.v1.schemas.personalization import (
     DetailResponse,
     ExplanationListResponse,
@@ -27,10 +28,24 @@ from tldw_Server_API.app.api.v1.schemas.personalization import (
     PreferencesUpdate,
     PurgeResponse,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import (
+    build_offset_pagination_meta,
+    build_page_pagination_meta,
+)
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB, SemanticMemory
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
 
 router = APIRouter()
+
+
+def _memory_pagination(*, total: int, page: int, size: int) -> PagePaginationMeta:
+    total_pages = (total + size - 1) // size if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=size,
+        total=total,
+        total_pages=total_pages,
+    )
 
 
 def _profile_from_dict(prof_dict: dict, db: PersonalizationDB, user_id: str) -> PersonalizationProfile:
@@ -41,7 +56,7 @@ def _profile_from_dict(prof_dict: dict, db: PersonalizationDB, user_id: str) -> 
     elif isinstance(raw_updated, datetime):
         updated_at = raw_updated
     else:
-        logger.warning("Profile for user {} has missing/unparseable updated_at: {!r}", user_id, raw_updated)
+        logger.warning("Profile updated_at missing or unparseable")
         updated_at = datetime.now(timezone.utc)
     return PersonalizationProfile(
         enabled=bool(prof_dict.get("enabled")),
@@ -79,7 +94,7 @@ async def personalization_opt_in(
         log.log_event("personalization.opt-in", metadata={"enabled": prof.enabled})
         return prof
     except Exception as e:
-        logger.warning(f"Opt-in failed: {e}")
+        logger.warning("Opt-in failed")
         raise HTTPException(status_code=500, detail="Failed to update personalization profile") from e
 
 
@@ -101,7 +116,7 @@ async def personalization_purge(
             purged_at=datetime.now(timezone.utc),
         )
     except Exception as e:
-        logger.warning(f"Purge failed: {e}")
+        logger.warning("Purge failed")
         raise HTTPException(status_code=500, detail="Failed to purge personalization data") from e
 
 
@@ -170,12 +185,24 @@ async def list_memories(
     offset = (page - 1) * size
     # Only semantic implemented; episodic not yet
     if memory_type and memory_type != "semantic":
-        return MemoryListResponse(items=[], total=0, page=page, size=size)
+        return MemoryListResponse(
+            items=[],
+            total=0,
+            page=page,
+            size=size,
+            pagination=_memory_pagination(total=0, page=page, size=size),
+        )
     items, total = db.list_semantic_memories(
         log.user_id, q=q, limit=size, offset=offset, include_hidden=include_hidden,
     )
     log.log_event("personalization.memories.view", metadata={"count": len(items)})
-    return MemoryListResponse(items=items, total=total, page=page, size=size)
+    return MemoryListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=size,
+        pagination=_memory_pagination(total=total, page=page, size=size),
+    )
 
 
 @router.get("/memories/export", tags=["personalization"], status_code=status.HTTP_200_OK)
@@ -278,6 +305,18 @@ async def import_memories(
 
 
 @router.get("/explanations", response_model=ExplanationListResponse, tags=["personalization"], status_code=status.HTTP_200_OK)
-async def list_explanations(limit: int = Query(10, ge=1, le=100)) -> ExplanationListResponse:
+async def list_explanations(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> ExplanationListResponse:
     """Return recent personalization explanations (scaffold: returns empty)."""
-    return ExplanationListResponse(items=[], total=0)
+    return ExplanationListResponse(
+        items=[],
+        total=0,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=0,
+            count=0,
+        ),
+    )

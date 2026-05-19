@@ -251,6 +251,159 @@ def test_rag_agentic_search_smoke_api(client_with_agentic_overrides, monkeypatch
     assert meta.get("source") == "agentic"
     # Top-level metadata should advertise agentic strategy
     assert out.get("metadata", {}).get("strategy") == "agentic"
+    assert out.get("metadata", {}).get("derived_from_document_ids") == ["m1"]
+
+
+def test_rag_agentic_search_uses_shared_request_resolution_and_retrieval_plan(
+    client_with_agentic_overrides,
+    monkeypatch,
+):
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    captured: dict[str, object] = {"context_builder_calls": 0}
+
+    def fake_build_agentic_execution_context(*, resolved_request, retrieval_plan, payload_override=None):  # noqa: ANN001
+        captured["context_builder_calls"] = int(captured["context_builder_calls"]) + 1
+        captured["context_builder_resolved_request"] = resolved_request
+        captured["context_builder_retrieval_plan"] = retrieval_plan
+        payload = dict(payload_override or resolved_request.payload)
+        payload["agentic_enable_tools"] = True
+        payload["agentic_max_tool_calls"] = 11
+        payload["agentic_coverage_target"] = 0.91
+        payload["agentic_enable_metrics"] = False
+        payload["agentic_debug_trace"] = True
+        return (
+            payload,
+            rag_ep.AgenticConfig(
+                top_k_docs=4,
+                enable_tools=True,
+                max_tool_calls=11,
+                coverage_target=0.91,
+                enable_metrics=False,
+                debug_trace=True,
+            ),
+        )
+
+    async def fake_agentic_rag_pipeline(**kwargs):  # noqa: ANN001
+        captured["kwargs"] = kwargs
+        return rag_ep.UnifiedSearchResult(
+            documents=[
+                Document(
+                    id="synthetic-agentic",
+                    content="Synthetic agentic chunk",
+                    metadata={"title": "Synthetic", "source": "agentic"},
+                    source=DataSource.MEDIA_DB,
+                    score=1.0,
+                )
+            ],
+            query=str(kwargs.get("query", "")),
+            expanded_queries=[],
+            metadata={"strategy": "agentic"},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    monkeypatch.setattr(rag_ep, "build_agentic_execution_context", fake_build_agentic_execution_context)
+    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+
+    payload = {
+        "query": "shared contract parity",
+        "strategy": "agentic",
+        "rag_profile": "fast",
+        "sources": ["notes", "media_db", "notes"],
+        "corpus": "tenant-x",
+        "agentic_top_k_docs": 4,
+        "enable_generation": False,
+    }
+
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    assert captured["context_builder_calls"] == 1
+    kwargs = captured["kwargs"]
+    assert kwargs["query"] == "shared contract parity"
+    assert kwargs["top_k"] == 6
+    assert kwargs["index_namespace"] == "tenant-x"
+    assert kwargs["sources"] == ["notes", "media_db"]
+    assert kwargs["agentic"].top_k_docs == 4
+    assert kwargs["agentic"].enable_tools is True
+    assert kwargs["agentic"].max_tool_calls == 11
+    assert kwargs["agentic"].coverage_target == 0.91
+    assert kwargs["agentic"].enable_metrics is False
+    assert kwargs["agentic"].debug_trace is True
+
+    resolved_request = kwargs["resolved_request"]
+    retrieval_plan = kwargs["retrieval_plan"]
+    assert captured["context_builder_resolved_request"] is resolved_request
+    assert captured["context_builder_retrieval_plan"] is retrieval_plan
+    assert resolved_request.payload["generation_prompt"] == "instruction_tuned"
+    assert resolved_request.payload["top_k"] == 6
+    assert retrieval_plan.top_k == 6
+    assert retrieval_plan.sources == ("notes", "media_db")
+    assert retrieval_plan.index_namespace == "tenant-x"
+
+
+def test_rag_agentic_search_preserves_legacy_coarse_docs_metadata_window(
+    client_with_agentic_overrides,
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def retrieve(self, *args, **kwargs):
+            return [
+                Document(
+                    id="m1",
+                    content="Primary evidence",
+                    metadata={"title": "Doc 1", "source": "media_db", "ingestion_date": "2024-01-01"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.95,
+                ),
+                Document(
+                    id="m2",
+                    content="Secondary evidence",
+                    metadata={"title": "Doc 2", "source": "media_db", "ingestion_date": "2024-01-01"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.9,
+                ),
+                Document(
+                    id="m3",
+                    content="Tertiary evidence",
+                    metadata={"title": "Doc 3", "source": "media_db", "ingestion_date": "2024-01-01"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.85,
+                ),
+            ]
+
+    import tldw_Server_API.app.core.RAG.rag_service.agentic_chunker as ac
+
+    monkeypatch.setattr(ac, "MultiDatabaseRetriever", FakeRetriever)
+
+    payload = {
+        "query": "coarse docs compatibility",
+        "strategy": "agentic",
+        "search_mode": "fts",
+        "top_k": 5,
+        "agentic_top_k_docs": 2,
+        "enable_generation": False,
+    }
+
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json=payload)
+    assert resp.status_code == 200, resp.text
+    out = resp.json()
+
+    assert [entry["id"] for entry in out["metadata"]["coarse_docs"]] == ["m1", "m2"]
 
 
 def test_rag_agentic_search_verification_flags(client_with_agentic_overrides, monkeypatch):

@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 
 import pytest
@@ -41,6 +42,59 @@ async def test_eviction_stop_delays_on_recent_use(monkeypatch, tmp_path):
     assert not stopped.is_set()
 
     await asyncio.wait_for(stopped.wait(), timeout=0.5)
+
+
+class _LoopOwnedDummyService:
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._owner_loop = loop
+        self._tldw_stop_scheduled = False
+        self._last_used_ts = time.monotonic() - 10.0
+        self._tldw_evicted_at = None
+        self.stopped = threading.Event()
+
+    @property
+    def owner_loop(self):
+        return self._owner_loop
+
+    async def stop(self) -> None:
+        self.stopped.set()
+
+
+def _start_owner_loop_thread() -> tuple[asyncio.AbstractEventLoop, threading.Thread]:
+    owner_loop = asyncio.new_event_loop()
+    ready = threading.Event()
+
+    def _runner() -> None:
+        asyncio.set_event_loop(owner_loop)
+        owner_loop.call_soon(ready.set)
+        owner_loop.run_forever()
+        owner_loop.close()
+
+    thread = threading.Thread(target=_runner, name="audit-owner-loop", daemon=True)
+    thread.start()
+    assert ready.wait(timeout=1.0)
+    return owner_loop, thread
+
+
+@pytest.mark.asyncio
+async def test_schedule_stop_tracks_owner_loop_future_until_drained(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setattr(audit_deps, "EVICTION_GRACE_SECONDS", 0.0)
+    audit_deps._services_stopping.clear()
+    audit_deps._scheduled_stop_futures.clear()
+
+    owner_loop, owner_thread = _start_owner_loop_thread()
+    service = _LoopOwnedDummyService(owner_loop)
+
+    try:
+        audit_deps._schedule_service_stop(321, service, "test-owner-loop")
+        await audit_deps._drain_scheduled_audit_stops(timeout=1.0)
+        assert service.stopped.wait(timeout=0.2)
+        assert not audit_deps._scheduled_stop_futures
+    finally:
+        owner_loop.call_soon_threadsafe(owner_loop.stop)
+        owner_thread.join(timeout=1.0)
+
 
 
 @pytest.mark.asyncio

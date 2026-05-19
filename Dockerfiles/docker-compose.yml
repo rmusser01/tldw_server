@@ -17,6 +17,10 @@ services:
       # Placeholder values (change-me, CHANGE_ME*, etc.) are auto-replaced
       # by the entrypoint with a secure random key on first run.
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      # Multi-user admin bootstrap (uncomment for first run):
+      # - ADMIN_USERNAME=myadmin
+      # - ADMIN_PASSWORD=change-me-to-secure-password
+      # - ADMIN_EMAIL=admin@example.com
       # In production set: tldw_production=true (masks API key in logs and docs-info responses)
       - tldw_production=${tldw_production:-false}
       # Database URL: use Postgres in multi_user
@@ -87,4 +91,7 @@ volumes:
 #   #   export DATABASE_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users
 #   #   # Optional: point Jobs to Postgres as well (uses same DB by default)
 #   #   export JOBS_DB_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users
+#   #   # Bootstrap first admin user (only needed on first run):
+#   #   export ADMIN_USERNAME=myadmin
+#   #   export ADMIN_PASSWORD='YourSecurePassword1!'
 #   #   docker compose up --build

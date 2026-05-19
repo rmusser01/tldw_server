@@ -1,5 +1,7 @@
 import os
+
 import pytest
+from fastapi import HTTPException
 
 
 @pytest.mark.integration
@@ -121,3 +123,31 @@ def test_chat_command_replace_mode_truncates_injected_text(monkeypatch, test_cli
         text = parts
     assert text.startswith("[/time]")
     assert len(text) <= 24
+
+
+@pytest.mark.integration
+def test_chat_command_non_audit_503_does_not_abort_request(monkeypatch, test_client, auth_headers):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
+
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+    from tldw_Server_API.app.core.Chat import command_router
+
+    async def fake_dispatch(_ctx, _name, _args):
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "upstream_unavailable", "message": "temporary outage"},
+        )
+
+    monkeypatch.setattr(command_router, "async_dispatch_command", fake_dispatch)
+
+    def fake_call(**_kwargs):
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+
+    payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
+    resp = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "ok"

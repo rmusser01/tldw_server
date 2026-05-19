@@ -57,6 +57,7 @@ import {
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
 import {
+  parseProviderQualifiedModelSelection,
   resolveApiProviderForModel,
   resolveExplicitProviderForSelectedModel
 } from "@/utils/resolve-api-provider"
@@ -81,6 +82,7 @@ import {
   type ChatResearchContext,
   type ConversationState
 } from "@/services/tldw/TldwApiClient"
+import type { ChatScope } from "@/types/chat-scope"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { generateTitle } from "@/services/title"
 import { trackCompareMetric } from "@/utils/compare-metrics"
@@ -90,7 +92,19 @@ import {
   discardAbortedTurnIfRequested,
   isAbortLikeError
 } from "@/hooks/chat/abort-turn-cleanup"
+import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
+import {
+  aggregateChatSubmitResults,
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  normalizeChatSubmitResult,
+  resolveCompareModelSelection,
+  resolveTurnFileRetrievalEnabled,
+  resolveTurnRagMediaIds,
+  shouldUseRagForTurn,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 import {
   isPersonaAssistantSelection,
   type AssistantSelection
@@ -128,6 +142,12 @@ type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
 }
 
+const applySelectionProviderToSettings = (
+  settings: ChatModelSettingsStore,
+  provider?: string
+): ChatModelSettingsStore =>
+  provider ? { ...settings, apiProvider: provider } : settings
+
 type ChatModeOverrides = {
   historyId?: string | null
   serverChatId?: string | null
@@ -138,16 +158,21 @@ type ChatModeOverrides = {
   webSearch?: boolean
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
   researchContext?: ChatResearchContext
+  ragMediaIds?: number[] | null
+  fileRetrievalEnabled?: boolean
+  selectedKnowledge?: Knowledge | null
 } & Record<string, unknown>
 
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
+const toChatSubmitResult = normalizeChatSubmitResult
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
   setHistoryId?: SaveMessageData["setHistoryId"]
   conversationId?: string | number | null
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
+  serverMessagesAlreadyPersisted?: boolean
 }
 
 type TldwChatMeta =
@@ -247,6 +272,7 @@ type UseChatActionsOptions = {
   serverChatClusterId: string | null
   serverChatSource: string | null
   serverChatExternalRef: string | null
+  scope?: ChatScope
   setServerChatId: (id: string | null) => void
   setServerChatTitle: (title: string | null) => void
   setServerChatCharacterId: (id: string | number | null) => void
@@ -659,6 +685,10 @@ export const useChatActions = ({
       }
     }
 
+    if (payload?.serverMessagesAlreadyPersisted) {
+      skipServerWrite = true
+    }
+
     // When resuming a server-backed chat, mirror new turns to /api/v1/chats.
     if (
       resolvedServerConversationId &&
@@ -845,8 +875,12 @@ export const useChatActions = ({
       serverChatId: resolvedServerChatId
     })
 
-    const effectiveSelectedModel = getEffectiveSelectedModel(
-      overrides.selectedModel
+    const effectiveModelSelection = parseProviderQualifiedModelSelection(
+      getEffectiveSelectedModel(overrides.selectedModel)
+    )
+    const effectiveChatModelSettings = applySelectionProviderToSettings(
+      currentChatModelSettings,
+      effectiveModelSelection.provider
     )
     const resolvedSelectedSystemPrompt = Object.prototype.hasOwnProperty.call(
       overrides,
@@ -868,12 +902,12 @@ export const useChatActions = ({
         : webSearch
 
     return {
-      selectedModel: effectiveSelectedModel || "",
+      selectedModel: effectiveModelSelection.modelId || "",
       useOCR: resolvedUseOCR,
       selectedSystemPrompt: resolvedSelectedSystemPrompt,
       selectedKnowledge,
       toolChoice: resolvedToolChoice,
-      currentChatModelSettings,
+      currentChatModelSettings: effectiveChatModelSettings,
       setMessages,
       setIsSearchingInternet,
       saveMessageOnSuccess,
@@ -1004,7 +1038,7 @@ export const useChatActions = ({
       impersonateUser: boolean
       forceNarrate: boolean
     }
-  }) => {
+  }): Promise<ChatSubmitResult> => {
     const activeCharacter = character ?? selectedCharacter
     if (!activeCharacter?.id) {
       throw new Error("No character selected")
@@ -1153,7 +1187,7 @@ export const useChatActions = ({
         })
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("No model selected for character chat")
       }
 
       const hasImageInput =
@@ -1168,7 +1202,7 @@ export const useChatActions = ({
         })
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("Empty character chat message")
       }
 
       await tldwClient.initialize().catch(() => null)
@@ -1566,35 +1600,43 @@ export const useChatActions = ({
       const finalPersistedContent = finalContent.trim()
 
       if (finalPersistedContent.length > 0) {
+        let fallbackSpeakerId: number | undefined
+        let speakerCharacterId: number | undefined
+        let detectedMood: ReturnType<typeof detectCharacterMood> | undefined
+        let resolvedMoodLabel: string | undefined
+        let resolvedMoodConfidence: number | undefined
+        let resolvedMoodTopic: string | undefined
+        let metadataExtra: Record<string, unknown> | undefined
         try {
-          const fallbackSpeakerId = Number.parseInt(
+          fallbackSpeakerId = Number.parseInt(
             String(activeCharacter.id),
             10
           )
-          const speakerCharacterId =
+          speakerCharacterId =
             Number.isFinite(directedCharacterId ?? NaN) &&
             (directedCharacterId ?? 0) > 0
               ? directedCharacterId
               : Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
                 ? fallbackSpeakerId
                 : undefined
-          const detectedMood = detectCharacterMood({
+          detectedMood = detectCharacterMood({
             assistantText: finalPersistedContent,
             userText: message
           })
-          const resolvedMoodLabel = detectedMood.label
-          const resolvedMoodConfidence =
+          resolvedMoodLabel = detectedMood.label
+          resolvedMoodConfidence =
             typeof detectedMood.confidence === "number" &&
             Number.isFinite(detectedMood.confidence)
               ? detectedMood.confidence
               : undefined
-          const resolvedMoodTopic =
+          resolvedMoodTopic =
             typeof detectedMood.topic === "string" && detectedMood.topic.trim()
               ? detectedMood.topic.trim()
               : undefined
 
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
+            assistant_message_id: generateMessageId,
             speaker_character_id: speakerCharacterId,
             speaker_character_name: characterName
           }
@@ -1609,6 +1651,13 @@ export const useChatActions = ({
           }
           if (persistedUserServerMessageId) {
             persistPayload.user_message_id = persistedUserServerMessageId
+          }
+          metadataExtra = {
+            speaker_character_id: speakerCharacterId ?? null,
+            speaker_character_name: characterName,
+            mood_label: resolvedMoodLabel,
+            mood_confidence: resolvedMoodConfidence ?? null,
+            mood_topic: resolvedMoodTopic ?? null
           }
 
           const persisted = (await tldwClient.persistCharacterCompletion(
@@ -1628,13 +1677,6 @@ export const useChatActions = ({
             persisted?.id
           const createdAsstVersion = persisted?.version
           assistantPersistedToServer = createdAsstServerId != null
-          const metadataExtra = {
-            speaker_character_id: speakerCharacterId ?? null,
-            speaker_character_name: characterName,
-            mood_label: resolvedMoodLabel,
-            mood_confidence: resolvedMoodConfidence ?? null,
-            mood_topic: resolvedMoodTopic ?? null
-          }
           setMessages((prev) =>
             ((prev as any[]).map((m) => {
               if (m.id !== generateMessageId) return m
@@ -1659,28 +1701,59 @@ export const useChatActions = ({
             "Failed to persist assistant message via completions/persist:",
             e
           )
-          try {
-            const createdAsst = (await tldwClient.addChatMessage(chatId, {
-              role: "assistant",
-              content: finalPersistedContent
-            })) as { id?: string | number; version?: number } | null
-            assistantPersistedToServer = createdAsst?.id != null
+          const savedOutcome = resolveSavedDegradedCharacterPersist(e)
+          if (savedOutcome?.saved) {
+            assistantPersistedToServer = true
             setMessages((prev) =>
               ((prev as any[]).map((m) => {
                 if (m.id !== generateMessageId) return m
                 const serverMessageId =
-                  createdAsst?.id != null ? String(createdAsst.id) : undefined
+                  savedOutcome.assistantMessageId != null
+                    ? String(savedOutcome.assistantMessageId)
+                    : undefined
                 return updateActiveVariant(m, {
                   serverMessageId,
-                  serverMessageVersion: createdAsst?.version
+                  serverMessageVersion: savedOutcome.version,
+                  metadataExtra,
+                  speakerCharacterId: speakerCharacterId ?? null,
+                  speakerCharacterName: characterName,
+                  moodLabel: resolvedMoodLabel,
+                  moodConfidence: resolvedMoodConfidence ?? null,
+                  moodTopic: resolvedMoodTopic ?? null
                 })
               }) as Message[])
             )
-          } catch (fallbackError) {
-            console.error(
-              "Failed fallback assistant persistence with addChatMessage:",
-              fallbackError
-            )
+          } else {
+            try {
+              const createdAsst = (await tldwClient.addChatMessage(chatId, {
+                role: "assistant",
+                content: finalPersistedContent
+              })) as { id?: string | number; version?: number } | null
+              assistantPersistedToServer = createdAsst?.id != null
+              setMessages((prev) =>
+                ((prev as any[]).map((m) => {
+                  if (m.id !== generateMessageId) return m
+                  const serverMessageId =
+                    createdAsst?.id != null ? String(createdAsst.id) : undefined
+                return updateActiveVariant(m, {
+                  serverMessageId,
+                  serverMessageVersion: createdAsst?.version,
+                  metadataExtra,
+                  speakerCharacterId: speakerCharacterId ?? null,
+                  speakerCharacterName: characterName,
+                  moodLabel: resolvedMoodLabel,
+                  moodConfidence: resolvedMoodConfidence ?? null,
+                  moodTopic: resolvedMoodTopic ?? null
+                })
+                }) as Message[])
+              )
+            } catch (fallbackError) {
+              assistantPersistedToServer = false
+              console.error(
+                "Failed fallback assistant persistence with addChatMessage:",
+                fallbackError
+              )
+            }
           }
         }
       } else {
@@ -1740,11 +1813,15 @@ export const useChatActions = ({
         reasoning_time_taken: timetaken,
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
-        assistantParentMessageId: resolvedAssistantParentMessageId ?? null
+        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        conversationId: activeChatId,
+        saveToDb: true,
+        serverMessagesAlreadyPersisted: assistantPersistedToServer
       })
 
       setIsProcessing(false)
       setStreaming(false)
+      return toChatSubmitResult()
     } catch (e) {
       if (
         discardAbortedTurnIfRequested({
@@ -1758,7 +1835,7 @@ export const useChatActions = ({
       ) {
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("Character chat turn aborted")
       }
 
       cancelStreamingUpdate()
@@ -1832,6 +1909,7 @@ export const useChatActions = ({
       }
       setIsProcessing(false)
       setStreaming(false)
+      return chatSubmitFailed(interruptionReason)
     } finally {
       discardCurrentTurnOnAbortRef.current = false
       cancelStreamingUpdate()
@@ -1998,7 +2076,9 @@ export const useChatActions = ({
   }
 
   const validateBeforeSubmitFn = () => {
-    const effectiveSelectedModel = getEffectiveSelectedModel()
+    const effectiveModelSelection = parseProviderQualifiedModelSelection(
+      getEffectiveSelectedModel()
+    )
     if (compareModeActive) {
       const maxModels =
         typeof compareMaxModels === "number" && compareMaxModels > 0
@@ -2028,7 +2108,11 @@ export const useChatActions = ({
       }
       return true
     }
-    return validateBeforeSubmit(effectiveSelectedModel || "", t, notification)
+    return validateBeforeSubmit(
+      effectiveModelSelection.modelId || "",
+      t,
+      notification
+    )
   }
 
   const onSubmit = async ({
@@ -2077,9 +2161,17 @@ export const useChatActions = ({
     continueOutputTarget?: "chat" | "composer_input"
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
-  }) => {
+  }): Promise<ChatSubmitResult> => {
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
+    )
+    const effectiveModelSelection = parseProviderQualifiedModelSelection(
+      effectiveSelectedModel
+    )
+    const effectiveRequestModel = effectiveModelSelection.modelId || ""
+    const effectiveProviderSettings = applySelectionProviderToSettings(
+      currentChatModelSettings,
+      effectiveModelSelection.provider
     )
     setStreaming(true)
     const trimmedImageBackendOverride =
@@ -2122,8 +2214,25 @@ export const useChatActions = ({
       }
     }
 
+    const turnRagMediaIds = resolveTurnRagMediaIds({
+      requestOverrides,
+      ragMediaIds
+    })
+    const turnFileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+      requestOverrides,
+      fileRetrievalEnabled
+    })
+    const turnSelectedKnowledge = Object.prototype.hasOwnProperty.call(
+      requestOverrides ?? {},
+      "selectedKnowledge"
+    )
+      ? requestOverrides?.selectedKnowledge
+      : selectedKnowledge
     const chatModeParams = await buildChatModeParams({
       ...(requestOverrides ?? {}),
+      ragMediaIds: turnRagMediaIds,
+      fileRetrievalEnabled: turnFileRetrievalEnabled,
+      selectedKnowledge: turnSelectedKnowledge,
       selectedModel: effectiveSelectedModel,
       messageSteering: messageSteeringForTurn,
       userMessageType,
@@ -2176,14 +2285,18 @@ export const useChatActions = ({
         }))
 
         markSteeringApplied()
-        await continueChatMode(
+        const continueResult = await continueChatMode(
           continueMessages,
           continueHistory,
           signal,
           chatModeParams
         )
 
-        if (continueOutputTarget === "composer_input") {
+        const shouldApplyComposerRollback =
+          continueResult.status === "submitted" &&
+          continueOutputTarget === "composer_input"
+
+        if (shouldApplyComposerRollback) {
           const currentMessages = messagesRef.current
           const continuedMessage = continueTargetMessage?.id
             ? currentMessages.find((entry) => entry.id === continueTargetMessage.id)
@@ -2237,24 +2350,24 @@ export const useChatActions = ({
           }
         }
 
-        return
+        return toChatSubmitResult(continueResult)
       }
 
       const hasExplicitImageBackend = trimmedImageBackendOverride.length > 0
       const imageBackendCandidates = hasExplicitImageBackend
         ? [trimmedImageBackendOverride]
         : resolveImageBackendCandidates(
-            currentChatModelSettings?.apiProvider,
-            effectiveSelectedModel
+            effectiveProviderSettings?.apiProvider,
+            effectiveRequestModel
           )
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         const resolvedImageModelLabel = hasExplicitImageBackend
           ? trimmedImageBackendOverride ||
-            (effectiveSelectedModel || "").trim() ||
-            currentChatModelSettings?.apiProvider ||
+            effectiveRequestModel ||
+            effectiveProviderSettings?.apiProvider ||
             "image-generation"
-          : (effectiveSelectedModel || "").trim() ||
-            currentChatModelSettings?.apiProvider ||
+          : effectiveRequestModel ||
+            effectiveProviderSettings?.apiProvider ||
             "image-generation"
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
@@ -2264,7 +2377,7 @@ export const useChatActions = ({
             ? trimmedImageBackendOverride
             : undefined
         }
-        await normalChatMode(
+        const imageResult = await normalChatMode(
           message,
           image,
           isRegenerate,
@@ -2273,12 +2386,12 @@ export const useChatActions = ({
           signal,
           enhancedChatModeParams
         )
-        return
+        return toChatSubmitResult(imageResult)
       }
       // console.log("contextFiles", contextFiles)
       if (contextFiles.length > 0) {
         markSteeringApplied()
-        await documentChatMode(
+        const documentResult = await documentChatMode(
           message,
           image,
           isRegenerate,
@@ -2289,7 +2402,7 @@ export const useChatActions = ({
           chatModeParamsWithRegen
         )
         // setFileRetrievalEnabled(false)
-        return
+        return toChatSubmitResult(documentResult)
       }
 
       if (docs?.length > 0 || documentContext?.length > 0) {
@@ -2301,7 +2414,7 @@ export const useChatActions = ({
           )
         }
         markSteeringApplied()
-        await tabChatMode(
+        const tabResult = await tabChatMode(
           message,
           image,
           processingTabs,
@@ -2311,17 +2424,17 @@ export const useChatActions = ({
           signal,
           chatModeParamsWithRegen
         )
-        return
+        return toChatSubmitResult(tabResult)
       }
 
-      const hasScopedRagMediaIds =
-        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-      const shouldUseRag =
-        Boolean(selectedKnowledge) ||
-        (fileRetrievalEnabled && hasScopedRagMediaIds)
+      const shouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge: turnSelectedKnowledge,
+        fileRetrievalEnabled: turnFileRetrievalEnabled,
+        ragMediaIds: turnRagMediaIds
+      })
       if (shouldUseRag) {
         markSteeringApplied()
-        await ragMode(
+        const ragResult = await ragMode(
           message,
           image,
           isRegenerate,
@@ -2330,6 +2443,7 @@ export const useChatActions = ({
           signal,
           chatModeParamsWithRegen
         )
+        return toChatSubmitResult(ragResult)
       } else {
         // Include uploaded files info even in normal mode
         const enhancedChatModeParams = {
@@ -2342,7 +2456,7 @@ export const useChatActions = ({
         if (!compareModeActive) {
           const resolvedSelectedCharacter = await resolveSelectedCharacter()
           if (resolvedSelectedCharacter?.id) {
-            const resolvedModel = effectiveSelectedModel?.trim()
+            const resolvedModel = effectiveRequestModel
             if (!resolvedModel) {
               notification.error({
                 message: t("error"),
@@ -2351,10 +2465,10 @@ export const useChatActions = ({
               setIsProcessing(false)
               setStreaming(false)
               setAbortController(null)
-              return
+              return chatSubmitSkipped("No model selected for character chat")
             }
             markSteeringApplied()
-            await characterChatMode({
+            const characterResult = await characterChatMode({
               message,
               image,
               isRegenerate,
@@ -2367,11 +2481,11 @@ export const useChatActions = ({
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride
             })
-            return
+            return toChatSubmitResult(characterResult)
           }
 
           if (isPersonaAssistantSelection(selectedAssistant)) {
-            const resolvedModel = effectiveSelectedModel?.trim()
+            const resolvedModel = effectiveRequestModel
             if (!resolvedModel) {
               notification.error({
                 message: t("error"),
@@ -2380,7 +2494,7 @@ export const useChatActions = ({
               setIsProcessing(false)
               setStreaming(false)
               setAbortController(null)
-              return
+              return chatSubmitSkipped("No model selected for persona chat")
             }
 
             const personaServerChat = await ensurePersonaServerChatWithState({
@@ -2395,7 +2509,7 @@ export const useChatActions = ({
                   : undefined
             }
             markSteeringApplied()
-            await normalChatMode(
+            const personaResult = await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -2414,13 +2528,13 @@ export const useChatActions = ({
                   })
               }
             )
-            return
+            return toChatSubmitResult(personaResult)
           }
         }
 
         if (!compareModeActive) {
           markSteeringApplied()
-          await normalChatMode(
+          const normalResult = await normalChatMode(
             message,
             image,
             isRegenerate,
@@ -2429,6 +2543,7 @@ export const useChatActions = ({
             signal,
             enhancedChatModeParams
           )
+          return toChatSubmitResult(normalResult)
         } else {
           const maxModels =
             typeof compareMaxModels === "number" && compareMaxModels > 0
@@ -2438,8 +2553,8 @@ export const useChatActions = ({
           const modelsRaw =
             compareSelectedModels && compareSelectedModels.length > 0
               ? compareSelectedModels
-              : effectiveSelectedModel
-                ? [effectiveSelectedModel]
+              : effectiveRequestModel
+                ? [effectiveRequestModel]
                 : []
           if (modelsRaw.length === 0) {
             throw new Error("No models selected for Compare mode")
@@ -2510,8 +2625,11 @@ export const useChatActions = ({
             }
             activeHistoryId = "temp"
           } else if (!activeHistoryId) {
+            const firstModelSelection = parseProviderQualifiedModelSelection(
+              uniqueModels[0] || effectiveRequestModel
+            )
             const title = await generateTitle(
-              uniqueModels[0] || effectiveSelectedModel || "",
+              firstModelSelection.modelId || effectiveRequestModel,
               message,
               message
             )
@@ -2527,7 +2645,7 @@ export const useChatActions = ({
             await saveMessage({
               id: compareUserMessageId,
               history_id: activeHistoryId,
-              name: effectiveSelectedModel || uniqueModels[0] || "You",
+              name: effectiveRequestModel || uniqueModels[0] || "You",
               role: "user",
               content: message,
               images: resolvedImage ? [resolvedImage] : [],
@@ -2560,25 +2678,38 @@ export const useChatActions = ({
             uploadedFiles: uploadedFiles
           }
 
-          const comparePromises = models.map((modelId) => {
-            const historyForModel = buildHistoryForModel(baseMessages, modelId)
-            return normalChatMode(
-              message,
-              image,
-              true,
+          const comparePromises = models.map(async (modelKey) => {
+            const modelSelection = resolveCompareModelSelection(modelKey)
+            const historyForModel = buildHistoryForModel(
               baseMessages,
-              baseHistory,
-              signal,
-              {
-                ...compareEnhancedParams,
-                selectedModel: modelId,
-                clusterId,
-                assistantMessageType: "compare:reply",
-                modelIdOverride: modelId,
-                assistantParentMessageId: compareUserMessageId,
-                historyForModel
-              }
-            ).catch((e) => {
+              modelSelection.historyModelKey
+            )
+            try {
+              return toChatSubmitResult(
+                await normalChatMode(
+                  message,
+                  image,
+                  true,
+                  baseMessages,
+                  baseHistory,
+                  signal,
+                  {
+                    ...compareEnhancedParams,
+                    currentChatModelSettings:
+                      applySelectionProviderToSettings(
+                        compareEnhancedParams.currentChatModelSettings,
+                        modelSelection.provider
+                      ),
+                    selectedModel: modelSelection.selectedModel,
+                    clusterId,
+                    assistantMessageType: "compare:reply",
+                    modelIdOverride: modelSelection.historyModelKey,
+                    assistantParentMessageId: compareUserMessageId,
+                    historyForModel
+                  }
+                )
+              )
+            } catch (e) {
               const errorMessage =
                 e instanceof Error
                   ? e.message
@@ -2587,15 +2718,17 @@ export const useChatActions = ({
                 message: t("error"),
                 description: errorMessage
               })
-            })
+              return chatSubmitFailed(errorMessage)
+            }
           })
 
           markSteeringApplied()
-          await Promise.allSettled(comparePromises)
+          const compareResults = await Promise.all(comparePromises)
           refreshHistoryFromMessages()
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
+          return aggregateChatSubmitResults(compareResults)
         }
       }
     } catch (e) {
@@ -2607,6 +2740,7 @@ export const useChatActions = ({
       })
       setIsProcessing(false)
       setStreaming(false)
+      return chatSubmitFailed(errorMessage)
     } finally {
       if (replyActive && capturedReplyTargetId != null) {
         const currentReplyTarget = useStoreMessageOption.getState().replyTarget
@@ -2659,10 +2793,11 @@ export const useChatActions = ({
     const baseHistory = history
     const userMessageId = generateID()
     const assistantMessageId = generateID()
+    const modelSelection = resolveCompareModelSelection(modelId)
     const userParentMessageId = getLastThreadMessageId(
       baseMessages,
       clusterId,
-      modelId
+      modelSelection.historyModelKey
     )
 
     try {
@@ -2673,13 +2808,20 @@ export const useChatActions = ({
         ...chatModeParams,
         uploadedFiles: uploadedFiles
       }
-      const historyForModel = buildHistoryForModel(baseMessages, modelId)
+      const historyForModel = buildHistoryForModel(
+        baseMessages,
+        modelSelection.historyModelKey
+      )
       const perModelOverrides = {
-        selectedModel: modelId,
+        selectedModel: modelSelection.selectedModel,
+        currentChatModelSettings: applySelectionProviderToSettings(
+          enhancedChatModeParams.currentChatModelSettings,
+          modelSelection.provider
+        ),
         clusterId,
         userMessageType: "compare:perModelUser",
         assistantMessageType: "compare:reply",
-        modelIdOverride: modelId,
+        modelIdOverride: modelSelection.historyModelKey,
         userMessageId,
         assistantMessageId,
         userParentMessageId,
@@ -2721,11 +2863,14 @@ export const useChatActions = ({
         return
       }
 
-      const hasScopedRagMediaIds =
-        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-      const shouldUseRag =
-        Boolean(selectedKnowledge) ||
-        (fileRetrievalEnabled && hasScopedRagMediaIds)
+      const shouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge,
+        fileRetrievalEnabled,
+        ragMediaIds: resolveTurnRagMediaIds({
+          requestOverrides: null,
+          ragMediaIds
+        })
+      })
       if (shouldUseRag) {
         await ragMode(
           trimmed,
@@ -3021,7 +3166,12 @@ export const useChatActions = ({
       return null
     }
 
-    const messageIds = getCompareBranchMessageIds(messages, clusterId, modelId)
+    const modelSelection = resolveCompareModelSelection(modelId)
+    const messageIds = getCompareBranchMessageIds(
+      messages,
+      clusterId,
+      modelSelection.historyModelKey
+    )
     if (messageIds.length === 0) {
       return null
     }

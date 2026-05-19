@@ -320,6 +320,7 @@ Section `[Web-Scraper]`:
 - `web_scraper_ua_mode`: `fixed|rotate`
 - `web_scraper_stealth_playwright`: enable stealth mode when available
 - `web_scraper_respect_robots`: honor robots.txt (default true)
+- `web_outbound_policy_mode`: `compat|strict` shared scrape/websearch outbound mode (default `compat`)
 - `web_scraper_retry_count`: retry count for fetch failures
 - `custom_scrapers_yaml_path`: custom scraper routing rules file
 
@@ -346,6 +347,26 @@ Outbound HTTP requests are gated by the central egress policy:
 - `EGRESS_ALLOWLIST`, `EGRESS_DENYLIST`
 - `PROXY_ALLOWLIST`
 - `HTTP_*` timeouts and retry settings (see `tldw_Server_API/Config_Files/README.md`)
+
+Wave 4 adds one shared rollout switch for scrape and websearch data-plane callers:
+
+- `WEB_OUTBOUND_POLICY_MODE` env var
+- `[Web-Scraper] web_outbound_policy_mode` in `config.txt`
+
+Mode behavior:
+
+- `compat`
+  - keeps the legacy scrape-path behavior when robots.txt cannot be fetched
+  - raw egress denials still block immediately
+- `strict`
+  - blocks scrape-style fetches when robots.txt is unreachable or disallows the target
+  - blocks before lightweight fetches and before Playwright/browser navigation starts
+
+Scope note:
+
+- provider API requests used by `POST /api/v1/research/websearch` stay on raw egress-only policy in this wave
+- strict mode does not synthesize robots checks for provider endpoints
+- the default mode remains `compat` in this rollout
 
 ## Custom scrapers (per-domain rules)
 

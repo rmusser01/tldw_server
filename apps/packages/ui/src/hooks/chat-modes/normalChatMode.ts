@@ -29,6 +29,7 @@ import {
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 interface WebSearchPayload {
   query: string
@@ -136,6 +137,7 @@ type NormalChatModeParams = {
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
   historyId: string | null
+  serverChatId?: string | null
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
@@ -151,6 +153,7 @@ type NormalChatModeParams = {
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
+  messageForModel?: string
   regenerateFromMessage?: Message
 }
 
@@ -366,11 +369,12 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     let promptContent: string | undefined = undefined
     let webSearchSources: any[] = []
     let webSearchSystemMessage: any | null = null
+    const messageForModel = ctx.messageForModel ?? ctx.message
 
     let humanMessage = await humanMessageFormatter({
       content: [
         {
-          text: ctx.message,
+          text: messageForModel,
           type: "text"
         }
       ],
@@ -381,7 +385,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       humanMessage = await humanMessageFormatter({
         content: [
           {
-            text: ctx.message,
+            text: messageForModel,
             type: "text"
           },
           {
@@ -553,12 +557,12 @@ export const normalChatMode = async (
   history: ChatHistory,
   signal: AbortSignal,
   params: NormalChatModeParams
-) => {
+): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
   const resolvedImage =
     image.length > 0 ? `data:image/jpeg;base64,${image.split(",")[1]}` : ""
 
-  await runChatPipeline(
+  return runChatPipeline(
     normalChatModeDefinition,
     message,
     resolvedImage,

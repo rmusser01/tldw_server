@@ -12,6 +12,7 @@ const INSPECTOR_DRAWER_WIDTH_PX = 360
 
 type WritingPlaygroundShellProps = {
   children: ReactNode
+  focusMode?: boolean
   libraryOpen: boolean
   inspectorOpen: boolean
   onLibraryToggle: () => void
@@ -24,6 +25,7 @@ type WritingPlaygroundShellProps = {
 
 export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
   children,
+  focusMode,
   libraryOpen,
   inspectorOpen,
   onLibraryToggle,
@@ -55,7 +57,7 @@ export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
       data-layout-mode={layoutMode}
       className="flex h-full w-full overflow-hidden">
       {/* Pinned library sidebar for expanded mode */}
-      {!isCompact && libraryOpen && (
+      {!isCompact && libraryOpen && !focusMode && (
         <div
           data-testid="writing-library-sidebar"
           style={{ width: LIBRARY_SIDEBAR_WIDTH_PX }}
@@ -65,7 +67,7 @@ export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
       )}
 
       {/* Compact mode library drawer */}
-      {isCompact && (
+      {isCompact && !focusMode && (
         <Drawer
           title="Sessions"
           placement="left"
@@ -83,7 +85,7 @@ export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
       </div>
 
       {/* Pinned inspector sidebar for expanded mode */}
-      {!isCompact && inspectorOpen && (
+      {!isCompact && inspectorOpen && !focusMode && (
         <div
           data-testid="writing-inspector-sidebar"
           style={{ width: INSPECTOR_SIDEBAR_WIDTH_PX }}
@@ -93,7 +95,7 @@ export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
       )}
 
       {/* Compact mode inspector drawer */}
-      {isCompact && (
+      {isCompact && !focusMode && (
         <Drawer
           title="Settings"
           placement="right"

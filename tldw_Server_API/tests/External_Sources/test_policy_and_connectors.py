@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 import pytest
 
 
@@ -28,16 +29,20 @@ def test_policy_is_file_type_allowed_cases():
 
 
 @pytest.mark.unit
-def test_policy_fail_closed_on_error():
-    from tldw_Server_API.app.core.External_Sources.policy import evaluate_policy_constraints
+def test_policy_fail_closed_on_error(monkeypatch):
+    import tldw_Server_API.app.core.External_Sources.policy as policy_mod
 
     class _BadProvider:
         def __str__(self):
-            raise RuntimeError("boom")
+            raise RuntimeError("policy backend exploded /private/policy.db")
 
-    ok, reason = evaluate_policy_constraints({"enabled_providers": [_BadProvider()]}, provider="drive")
+    fake_logger = MagicMock()
+    monkeypatch.setattr(policy_mod, "logger", fake_logger)
+
+    ok, reason = policy_mod.evaluate_policy_constraints({"enabled_providers": [_BadProvider()]}, provider="drive")
     assert ok is False
     assert reason == "Policy evaluation failed"
+    fake_logger.warning.assert_called_once_with("Policy evaluation error")
 
 
 @pytest.mark.unit

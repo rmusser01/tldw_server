@@ -15,6 +15,10 @@ const internalApiOrigin = validatedInternalApiOrigin.replace(/\/$/, '');
 const nextConfig = {
   reactStrictMode: true,
   reactCompiler: false,
+  // Preserve backend API paths exactly in quickstart mode. FastAPI routes such as
+  // POST /api/v1/chats/ are slash-sensitive and otherwise bounce through redirects
+  // before the same-origin rewrite reaches the real backend.
+  skipTrailingSlashRedirect: true,
   // Support loopback-origin access during local dev, e.g. 127.0.0.1 -> localhost.
   allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]'],
   async redirects() {
@@ -32,6 +36,10 @@ const nextConfig = {
     }
 
     return [
+      {
+        source: '/api/:path*/',
+        destination: `${internalApiOrigin}/api/:path*/`,
+      },
       {
         source: '/api/:path*',
         destination: `${internalApiOrigin}/api/:path*`,
@@ -90,4 +98,18 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry wrapping (optional — only active when NEXT_PUBLIC_SENTRY_DSN is set)
+let withSentryConfig = (/** @type {import('next').NextConfig} */ c) => c;
+if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+  try {
+    const sentry = await import('@sentry/nextjs');
+    withSentryConfig = sentry.withSentryConfig;
+  } catch (error) {
+    console.warn('[next.config] Skipping Sentry integration:', error)
+  }
+}
+
+export default withSentryConfig(nextConfig, {
+  silent: true,
+  disableLogger: true,
+});

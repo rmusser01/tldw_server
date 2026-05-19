@@ -24,6 +24,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     get_chacha_db_for_user_id,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceActionType,
     VoiceAnalytics,
@@ -36,6 +37,8 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceCommandResponse,
     VoiceCommandToggleRequest,
     VoiceCommandUsage,
+    VoiceCommandValidationResponse,
+    VoiceCommandValidationStep,
     VoiceSessionInfo,
     VoiceSessionListResponse,
     VoiceWorkflowTemplateInfo,
@@ -57,7 +60,7 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     WSWorkflowCompleteMessage,
     WSWorkflowProgressMessage,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_request_resolution import (
@@ -69,6 +72,7 @@ from tldw_Server_API.app.core.VoiceAssistant import (
     VoiceCommand,
     VoiceCommandRouter,
     VoiceSessionManager,
+    count_user_voice_sessions,
     get_active_voice_session_count,
     get_user_voice_sessions,
     get_voice_analytics_summary_stats,
@@ -274,8 +278,8 @@ async def _generate_tts_audio(
 
         return audio_bytes, mime_type
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"TTS generation failed: {e}")
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.error("TTS generation failed")
         return b"", "audio/mpeg"
 
 
@@ -600,6 +604,61 @@ async def toggle_voice_command(
     return _voice_command_to_info(saved)
 
 
+@router.post(
+    "/commands/{command_id}/validate",
+    response_model=VoiceCommandValidationResponse,
+    summary="Validate voice command (dry run)",
+    description=(
+        "Validate a voice command's action configuration without executing it. "
+        "Checks config schema, target existence (MCP tool, workflow template, "
+        "custom handler), and trigger phrases."
+    ),
+)
+async def validate_voice_command(
+    command_id: str,
+    persona_id: Optional[str] = Query(None, description="Optional persona scope"),
+    current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> VoiceCommandValidationResponse:
+    """Dry-run validation: check config without executing the command."""
+    registry = get_voice_command_registry()
+    registry.load_defaults()
+
+    command = get_voice_command_db(db, command_id, current_user.id, persona_id=persona_id)
+    if not command:
+        command = registry.get_command(command_id, current_user.id, persona_id=persona_id)
+
+    if not command:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Command not found",
+        )
+
+    if command.user_id not in (0, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to validate this command",
+        )
+
+    router_instance = get_voice_command_router()
+    raw_steps = await router_instance.validate_command_config(
+        command,
+        db=db,
+        persona_id=persona_id,
+    )
+
+    steps = [VoiceCommandValidationStep(**s) for s in raw_steps]
+    all_passed = all(s.passed for s in steps)
+
+    return VoiceCommandValidationResponse(
+        command_id=command.id,
+        command_name=command.name,
+        action_type=_action_type_to_voice(command.action_type),
+        valid=all_passed,
+        steps=steps,
+    )
+
+
 @router.get(
     "/commands/{command_id}/usage",
     response_model=VoiceCommandUsage,
@@ -663,21 +722,29 @@ async def delete_voice_command(
 async def list_voice_sessions(
     active_only: bool = Query(True, description="Only return active sessions"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum sessions to return"),
+    offset: int = Query(0, ge=0, description="Zero-based pagination offset"),
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceSessionListResponse:
     """List active voice sessions."""
+    active_after = None
+    if active_only:
+        from datetime import datetime, timedelta
+
+        active_after = datetime.utcnow() - timedelta(seconds=VoiceSessionManager.SESSION_TIMEOUT)
+
     sessions = get_user_voice_sessions(
         db,
         user_id=current_user.id,
         limit=limit,
+        offset=offset,
+        active_after=active_after,
     )
-
-    if active_only:
-        from datetime import datetime, timedelta
-
-        cutoff = datetime.utcnow() - timedelta(seconds=VoiceSessionManager.SESSION_TIMEOUT)
-        sessions = [s for s in sessions if s.last_activity >= cutoff]
+    total = count_user_voice_sessions(
+        db,
+        user_id=current_user.id,
+        active_after=active_after,
+    )
 
     session_infos = [
         VoiceSessionInfo(
@@ -690,10 +757,17 @@ async def list_voice_sessions(
         )
         for session in sessions
     ]
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=len(session_infos),
+    )
 
     return VoiceSessionListResponse(
         sessions=session_infos,
-        total=len(session_infos),
+        total=total,
+        pagination=pagination,
     )
 
 
@@ -1016,8 +1090,8 @@ async def websocket_voice_assistant(
             registry = get_voice_command_registry()
             registry.load_defaults()
             registry.refresh_user_commands(db, user_id, include_disabled=True)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as _db_err:
-            logger.warning(f"Voice assistant DB init failed (session={session_id}): {_db_err}")
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.warning("Voice assistant DB init failed")
 
         await websocket.send_json(
             WSAuthOKMessage(
@@ -1186,7 +1260,7 @@ async def websocket_voice_assistant(
         logger.info(f"Voice assistant WebSocket disconnected: session={session_id}")
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Voice assistant WebSocket error: {e}")
+        logger.error("Voice assistant WebSocket error")
         try:
             await websocket.send_json(
                 WSErrorMessage(
@@ -1253,7 +1327,7 @@ async def _process_audio_command(
         )
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"Transcription failed: {e}")
+        logger.error("Transcription failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"Transcription failed: {e}",
@@ -1302,8 +1376,8 @@ async def _transcribe_audio(
             return result.get("text", "")
         return str(result) if result else ""
 
-    except Exception as e:
-        logger.error(f"Audio transcription failed: {e}")
+    except Exception:
+        logger.error("Audio transcription failed")
         raise
 
 
@@ -1425,7 +1499,7 @@ async def _stream_tts_response(
         )
 
     except (TTSError, AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.error(f"TTS streaming failed: {e}")
+        logger.error("TTS streaming failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"TTS failed: {e}",
@@ -1474,7 +1548,7 @@ async def _stream_workflow_progress(
                 )
 
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Workflow progress streaming failed: {e}")
+        logger.error("Workflow progress streaming failed")
         await websocket.send_json(
             WSErrorMessage(
                 error=f"Workflow progress failed: {e}",
@@ -1571,13 +1645,13 @@ async def voice_command_dry_run(
     except ImportError as exc:
         raise HTTPException(
             status_code=501,
-            detail=f"Voice assistant module not available: {exc}",
+            detail="Voice assistant module not available",
         ) from exc
     except Exception as exc:
-        logger.error("Voice command dry-run failed: {}", exc)
+        logger.error("Voice command dry-run failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Dry-run failed: {exc}",
+            detail="Dry-run failed",
         ) from exc
 
 

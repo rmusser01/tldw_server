@@ -60,7 +60,7 @@ if (typeof globalThis !== "undefined") {
   }
 
   if (!isRecord(globalScope.chrome)) {
-    globalScope.chrome = browser as unknown as Record<string, unknown>
+    ;(globalScope as any).chrome = browser
   } else {
     mergeMissingProperties(
       globalScope.chrome as Record<string, unknown>,
@@ -291,6 +291,8 @@ void seedTldwConfigFromEnv()
 const WEB_DEFAULTS_MIRRORED_KEY = "tldw:web-defaults:mirrored"
 const WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY =
   "tldw:web-defaults:header-shortcuts-document-workspace:v1"
+const WEB_HEADER_SHORTCUT_MCP_HUB_BACKFILL_KEY =
+  "tldw:web-defaults:header-shortcuts-mcp-hub:v1"
 
 const isWebRuntime = () => {
   if (typeof window === "undefined") return false
@@ -384,15 +386,18 @@ const mirrorWebDefaultsFromExtension = () => {
   writeLocalStorageValue(WEB_DEFAULTS_MIRRORED_KEY, "true")
 }
 
-const backfillDocumentWorkspaceHeaderShortcutForWeb = () => {
+const backfillHeaderShortcutForWeb = (
+  shortcutId: string,
+  markerKey: string
+) => {
   if (!isWebRuntime()) return
-  if (getLocalStorageValue(WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY) === "true") {
+  if (getLocalStorageValue(markerKey) === "true") {
     return
   }
 
   const rawSelection = getLocalStorageValue(HEADER_SHORTCUT_SELECTION_SETTING.key)
   if (rawSelection === null) {
-    writeLocalStorageValue(WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY, "true")
+    writeLocalStorageValue(markerKey, "true")
     return
   }
 
@@ -400,12 +405,12 @@ const backfillDocumentWorkspaceHeaderShortcutForWeb = () => {
   try {
     parsedSelection = JSON.parse(rawSelection)
   } catch {
-    writeLocalStorageValue(WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY, "true")
+    writeLocalStorageValue(markerKey, "true")
     return
   }
 
   if (!Array.isArray(parsedSelection)) {
-    writeLocalStorageValue(WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY, "true")
+    writeLocalStorageValue(markerKey, "true")
     return
   }
 
@@ -414,14 +419,18 @@ const backfillDocumentWorkspaceHeaderShortcutForWeb = () => {
       (entry): entry is string => typeof entry === "string"
     )
   )
-  selectedIds.add("document-workspace")
+  selectedIds.add(shortcutId)
 
   const nextSelection = DEFAULT_HEADER_SHORTCUT_SELECTION.filter((id) =>
     selectedIds.has(id)
   )
   writeLocalStorageValue(HEADER_SHORTCUT_SELECTION_SETTING.key, nextSelection)
-  writeLocalStorageValue(WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY, "true")
+  writeLocalStorageValue(markerKey, "true")
 }
 
 mirrorWebDefaultsFromExtension()
-backfillDocumentWorkspaceHeaderShortcutForWeb()
+backfillHeaderShortcutForWeb(
+  "document-workspace",
+  WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY
+)
+backfillHeaderShortcutForWeb("mcp-hub", WEB_HEADER_SHORTCUT_MCP_HUB_BACKFILL_KEY)

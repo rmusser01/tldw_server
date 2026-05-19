@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react"
 import type { MessageInstance } from "antd/es/message/interface"
+import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { fetchTldwVoiceCatalog, type TldwVoice } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
@@ -101,7 +102,7 @@ export interface UseAudioTtsSettingsDeps {
   audioSettings: AudioGenerationSettings
   setAudioSettings: (patch: Partial<AudioGenerationSettings>) => void
   messageApi: MessageInstance
-  t: (key: string, fallback?: string, opts?: Record<string, any>) => string
+  t: TFunction
 }
 
 export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {

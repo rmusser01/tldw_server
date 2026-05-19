@@ -205,6 +205,138 @@ describe("useSelectedAssistant", () => {
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
   })
 
+  it("keeps selected assistant identity stable across unchanged rerenders", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "character",
+      id: "char-stable",
+      name: "Stable Guide",
+      greeting: "Ready"
+    })
+
+    const { result, rerender } = renderHook(() => useSelectedAssistant())
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-stable",
+        name: "Stable Guide"
+      })
+    })
+
+    const firstSelection = result.current[0]
+    rerender()
+
+    expect(result.current[0]).toBe(firstSelection)
+  })
+
+  it("normalizes and preserves mirrored persona buddy summaries from stored selections", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "persona",
+      id: "garden-helper",
+      name: "Garden Helper",
+      buddySummary: {
+        hasBuddy: "true",
+        personaName: "Garden Helper",
+        roleSummary: "Old greenhouse guide",
+        visual: {
+          speciesId: "fox",
+          silhouetteId: "sprout",
+          paletteId: "fern"
+        }
+      }
+    })
+
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper",
+        buddy_summary: {
+          has_buddy: true,
+          persona_name: "Garden Helper",
+          role_summary: "Old greenhouse guide",
+          visual: {
+            species_id: "fox",
+            silhouette_id: "sprout",
+            palette_id: "fern"
+          }
+        }
+      })
+    })
+  })
+
+  it("keeps current-surface persona buddy summaries ahead of stale mirrored storage", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "persona",
+      id: "garden-helper",
+      name: "Garden Helper",
+      buddySummary: {
+        hasBuddy: true,
+        personaName: "Garden Helper",
+        roleSummary: "Old greenhouse guide"
+      }
+    })
+
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    await waitFor(() => {
+      expect(result.current[0]?.kind).toBe("persona")
+    })
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper",
+        buddy_summary: {
+          has_buddy: true,
+          persona_name: "Garden Helper",
+          role_summary: "Fresh route summary",
+          visual: {
+            species_id: "owl",
+            silhouette_id: "perch",
+            palette_id: "sky"
+          }
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "persona",
+        id: "garden-helper",
+        buddy_summary: {
+          has_buddy: true,
+          persona_name: "Garden Helper",
+          role_summary: "Fresh route summary",
+          visual: {
+            species_id: "owl",
+            silhouette_id: "perch",
+            palette_id: "sky"
+          }
+        }
+      })
+    })
+
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({
+      kind: "persona",
+      id: "garden-helper",
+      name: "Garden Helper",
+      buddy_summary: {
+        has_buddy: true,
+        persona_name: "Garden Helper",
+        role_summary: "Fresh route summary",
+        visual: {
+          species_id: "owl",
+          silhouette_id: "perch",
+          palette_id: "sky"
+        }
+      }
+    })
+  })
+
   it("keeps useSelectedCharacter scoped to character assistant selections", async () => {
     const { result } = renderHook(() => {
       const assistantState = useSelectedAssistant()

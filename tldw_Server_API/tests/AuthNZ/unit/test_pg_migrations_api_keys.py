@@ -49,6 +49,19 @@ async def test_ensure_api_keys_tables_pg_emits_core_ddl() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ensure_api_keys_tables_pg_does_not_emit_scope_default() -> None:
+    from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_api_keys_tables_pg
+
+    pool = _StubPostgresPool()
+    ok = await ensure_api_keys_tables_pg(pool)
+
+    assert ok is True
+    ddl_blob = "\n".join(pool.executed_sql)
+    assert "scope VARCHAR(50) DEFAULT 'read'" not in ddl_blob
+    assert "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS scope VARCHAR(50) DEFAULT 'read'" not in ddl_blob
+
+
+@pytest.mark.asyncio
 async def test_ensure_api_keys_tables_pg_reports_missing_tables() -> None:
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_api_keys_tables_pg
 

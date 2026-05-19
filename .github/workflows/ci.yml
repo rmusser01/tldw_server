@@ -75,7 +75,6 @@ jobs:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -89,21 +88,25 @@ jobs:
             pyproject.toml
             uv.lock
 
-      - name: Install mypy
+      - name: Install tools
         run: |
           python -m pip install --upgrade pip
-          pip install mypy
+          pip install "mypy==1.20.1" "ruff==0.15.10"
 
-      - name: MyPy (non-blocking)
-        run: |
-          set +e
-          mypy tldw_Server_API/
-          set -e
+      - name: Ruff lint (non-blocking, baseline 1419 errors)
+        continue-on-error: true
+        run: ruff check tldw_Server_API/
+
+      - name: MyPy (non-blocking, baseline 10191 errors)
+        continue-on-error: true
+        run: mypy tldw_Server_API/
 
   frontend-lint:
     name: Frontend Lint (Next.js)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SKIP_WXT_PREPARE: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -215,6 +218,8 @@ jobs:
             psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE ${DB_NAME}"
 
       - name: Run wizard tests (coverage gate)
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           # Keep this as a non-regression floor until wizard CLI coverage is expanded.
           pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin \
@@ -526,7 +531,7 @@ jobs:
         shell: bash
         run: |
           RESULTS_DIR="test-results-linux-${{ matrix.python }}"; MOD="Admin"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
+          PYTEST_ADDOPTS='' pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
             tldw_Server_API/tests/Admin \
             --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
             --junit-xml="$RESULTS_DIR/Admin.xml"; status=$?
@@ -1569,7 +1574,7 @@ jobs:
 
       - name: Upload coverage to Codecov (Ubuntu 3.12)
         if: matrix.python == '3.12'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: ./coverage.xml
           flags: fullsuite
@@ -1772,7 +1777,7 @@ jobs:
         shell: bash
         run: |
           RESULTS_DIR="test-results-${{ matrix.os }}-3.12"; MOD="Admin"; set +e
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
+          PYTEST_ADDOPTS='' pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -m "not jobs and not e2e" \
             tldw_Server_API/tests/Admin \
             --cov=tldw_Server_API --cov-report=xml --cov-report=term-missing --cov-append \
             --junit-xml="$RESULTS_DIR/Admin.xml"; status=$?

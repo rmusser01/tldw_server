@@ -270,6 +270,8 @@ def get_user_voice_sessions(
     db,
     user_id: int,
     limit: int = 10,
+    offset: int = 0,
+    active_after: Optional[datetime] = None,
 ) -> list[VoiceSessionContext]:
     """
     Get recent voice sessions for a user.
@@ -278,22 +280,65 @@ def get_user_voice_sessions(
         db: CharactersRAGDB instance
         user_id: User ID
         limit: Maximum sessions to return
+        offset: Zero-based pagination offset
+        active_after: Optional lower bound for active session last activity
 
     Returns:
         List of VoiceSessionContext objects
     """
-    result = db.execute_query(
-        """
+    query = """
         SELECT * FROM voice_sessions
         WHERE user_id = ?
-        ORDER BY last_activity DESC
-        LIMIT ?
-        """,
-        (user_id, limit),
-    )
+    """
+    params: list[Any] = [user_id]
+
+    if active_after is not None:
+        query += " AND last_activity >= ?"
+        params.append(active_after.isoformat())
+
+    query += " ORDER BY last_activity DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    result = db.execute_query(query, tuple(params))
     rows = result.fetchall() if hasattr(result, 'fetchall') else list(result)
 
     return [_row_to_voice_session(row) for row in rows]
+
+
+def count_user_voice_sessions(
+    db,
+    user_id: int,
+    active_after: Optional[datetime] = None,
+) -> int:
+    """
+    Count voice sessions for a user.
+
+    Args:
+        db: CharactersRAGDB instance
+        user_id: User ID
+        active_after: Optional lower bound for active session last activity
+
+    Returns:
+        Number of matching voice sessions
+    """
+    query = """
+        SELECT COUNT(*) FROM voice_sessions
+        WHERE user_id = ?
+    """
+    params: list[Any] = [user_id]
+
+    if active_after is not None:
+        query += " AND last_activity >= ?"
+        params.append(active_after.isoformat())
+
+    result = db.execute_query(query, tuple(params))
+    rows = result.fetchall() if hasattr(result, 'fetchall') else list(result)
+    if not rows:
+        return 0
+    row = rows[0]
+    if isinstance(row, dict):
+        return int(next(iter(row.values())))
+    return int(row[0])
 
 
 def delete_voice_session(

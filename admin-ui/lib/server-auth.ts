@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { generateRequestId } from '@/lib/correlation-id';
 
 export const ACCESS_TOKEN_COOKIE = 'access_token';
 export const REFRESH_TOKEN_COOKIE = 'refresh_token';
@@ -141,6 +142,11 @@ export const appendProxyHeaders = (request: NextRequest, headers: Headers): void
       headers.set(name, value);
     }
   }
+
+  // Ensure every backend call carries a correlation ID —
+  // middleware generates one for page routes, but /api routes
+  // are excluded from middleware so we generate here when missing.
+  headers.set('x-request-id', request.headers.get('x-request-id') || generateRequestId());
 };
 
 export const getBackendAuthHeaders = (request: NextRequest): Headers => {

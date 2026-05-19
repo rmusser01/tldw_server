@@ -22,8 +22,8 @@ from fastapi.responses import StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_auth_principal,
-    require_roles,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -57,7 +57,7 @@ _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS = (
 )
 
 router = APIRouter(
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 
 
@@ -151,7 +151,7 @@ def _enforce_domain_scope_unified(
     Unified domain-scoped RBAC enforcement for jobs admin endpoints.
 
     All jobs-admin endpoints in this module use this helper alongside the
-    router-level require_roles(\"admin\") guard. It always derives the
+    router-level RequireRole(\"admin\") guard. It always derives the
     admin_user from the AuthPrincipal so callers can reuse the same user
     mapping for downstream operations (e.g., Postgres RLS). When
     JOBS_DOMAIN_RBAC_PRINCIPAL is enabled, enforcement is driven from the
@@ -361,7 +361,7 @@ async def prune_jobs_endpoint(
         # Preserve intended HTTP errors (e.g., RBAC 403)
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Prune failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Prune failed") from e
 
 
 # --- Queue controls (pause/resume/drain) ---
@@ -632,6 +632,181 @@ async def list_sla_policies_endpoint(
         conn.close()
 
 
+class SlaPolicyDeleteRequest(BaseModel):
+    domain: str
+    queue: str
+    job_type: str
+
+
+@router.delete("/jobs/sla/policy")
+async def delete_sla_policy_endpoint(
+    req: SlaPolicyDeleteRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> dict:
+    _enforce_domain_scope_unified(principal, req.domain)
+    db_url = os.getenv("JOBS_DB_URL")
+    backend = "postgres" if (db_url and db_url.startswith("postgres")) else None
+    jm = JobManager(backend=backend, db_url=db_url)
+    deleted = jm.delete_sla_policy(
+        domain=req.domain,
+        queue=req.queue,
+        job_type=req.job_type,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="sla_policy_not_found")
+    return {"ok": True}
+
+
+@router.get("/jobs/sla/breaches")
+async def list_sla_breaches_endpoint(
+    domain: str | None = None,
+    queue: str | None = None,
+    job_type: str | None = None,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> list[dict]:
+    """Return active jobs that currently breach their SLA policy thresholds.
+
+    Compares processing time and wait time of active (queued/processing) jobs
+    against the configured SLA policies.
+    """
+    admin_user = _enforce_domain_scope_unified(principal, domain)
+    db_url = os.getenv("JOBS_DB_URL")
+    backend = "postgres" if (db_url and db_url.startswith("postgres")) else None
+    jm = JobManager(backend=backend, db_url=db_url)
+    conn = jm._connect()
+    try:
+        # 1. Load enabled SLA policies
+        policies: list[dict] = []
+        if backend == "postgres":
+            _set_pg_rls_for_user(admin_user, domain)
+            with jm._pg_cursor(conn) as cur:
+                cur.execute(
+                    "SELECT * FROM job_sla_policies WHERE enabled=true ORDER BY domain,queue,job_type"
+                )
+                policies = [dict(r) for r in (cur.fetchall() or [])]
+        else:
+            policies = [
+                dict(r) for r in conn.execute(
+                    "SELECT * FROM job_sla_policies WHERE enabled=1 ORDER BY domain,queue,job_type"
+                ).fetchall()
+            ]
+
+        if not policies:
+            return []
+
+        # Build lookup: (domain, queue, job_type) -> policy
+        policy_lookup: dict[tuple[str, str, str], dict] = {}
+        for pol in policies:
+            key = (str(pol.get("domain", "")), str(pol.get("queue", "")), str(pol.get("job_type", "")))
+            policy_lookup[key] = pol
+
+        # 2. Load active jobs (queued + processing)
+        active_jobs: list[dict] = []
+        if backend == "postgres":
+            with jm._pg_cursor(conn) as cur:
+                where = ["status IN ('queued', 'processing')"]
+                params: list = []
+                if domain:
+                    where.append("domain=%s")
+                    params.append(domain)
+                if queue:
+                    where.append("queue=%s")
+                    params.append(queue)
+                if job_type:
+                    where.append("job_type=%s")
+                    params.append(job_type)
+                cur.execute(
+                    f"SELECT id, domain, queue, job_type, status, created_at, acquired_at, started_at FROM jobs WHERE {' AND '.join(where)} ORDER BY created_at",  # nosec B608
+                    tuple(params),
+                )
+                active_jobs = [dict(r) for r in (cur.fetchall() or [])]
+        else:
+            where2 = ["status IN ('queued', 'processing')"]
+            params2: list = []
+            if domain:
+                where2.append("domain=?")
+                params2.append(domain)
+            if queue:
+                where2.append("queue=?")
+                params2.append(queue)
+            if job_type:
+                where2.append("job_type=?")
+                params2.append(job_type)
+            active_jobs = [
+                dict(r) for r in conn.execute(
+                    f"SELECT id, domain, queue, job_type, status, created_at, acquired_at, started_at FROM jobs WHERE {' AND '.join(where2)} ORDER BY created_at",  # nosec B608
+                    tuple(params2),
+                ).fetchall()
+            ]
+
+        # 3. Check each active job against its policy
+        now = datetime.utcnow()
+        breaches: list[dict] = []
+        for job in active_jobs:
+            jd = str(job.get("domain", ""))
+            jq = str(job.get("queue", ""))
+            jjt = str(job.get("job_type", ""))
+            pol = policy_lookup.get((jd, jq, jjt))
+            if not pol:
+                continue
+
+            breach_kinds: list[str] = []
+            breach_details: dict[str, Any] = {}
+
+            # Check wait time (time in queue before being acquired)
+            max_qlat = pol.get("max_queue_latency_seconds")
+            if max_qlat is not None:
+                created_at = _parse_dt_safe(job.get("created_at"))
+                if created_at:
+                    if job.get("status") == "queued":
+                        wait_seconds = max(0.0, (now - created_at).total_seconds())
+                    else:
+                        acquired_at = _parse_dt_safe(job.get("acquired_at"))
+                        wait_seconds = max(0.0, (acquired_at - created_at).total_seconds()) if acquired_at else 0.0
+                    if wait_seconds > float(max_qlat):
+                        breach_kinds.append("queue_latency")
+                        breach_details["wait_seconds"] = round(wait_seconds, 1)
+                        breach_details["max_wait_seconds"] = int(max_qlat)
+
+            # Check processing duration
+            max_dur = pol.get("max_duration_seconds")
+            if max_dur is not None and job.get("status") == "processing":
+                started_at = _parse_dt_safe(job.get("started_at")) or _parse_dt_safe(job.get("acquired_at"))
+                if started_at:
+                    processing_seconds = max(0.0, (now - started_at).total_seconds())
+                    if processing_seconds > float(max_dur):
+                        breach_kinds.append("duration")
+                        breach_details["processing_seconds"] = round(processing_seconds, 1)
+                        breach_details["max_processing_seconds"] = int(max_dur)
+
+            if breach_kinds:
+                breaches.append({
+                    "job_id": job.get("id"),
+                    "domain": jd,
+                    "queue": jq,
+                    "job_type": jjt,
+                    "status": job.get("status"),
+                    "breach_kinds": breach_kinds,
+                    **breach_details,
+                })
+
+        return breaches
+    finally:
+        conn.close()
+
+
+def _parse_dt_safe(value: Any) -> datetime | None:
+    """Parse a datetime string safely, returning None on failure."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00").replace("+00:00", ""))
+    except (ValueError, TypeError):
+        return None
+
+
 # --- Maintenance: Encryption key rotation ---
 class CryptoRotateRequest(BaseModel):
     old_key_b64: str
@@ -803,7 +978,18 @@ async def list_job_events(
             conn.close()
 
 
-@router.get("/jobs/events/stream")
+@router.get(
+    "/jobs/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream of job outbox events.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+)
 async def stream_job_events(
     after_id: int = 0,
     domain: str | None = None,
@@ -1098,7 +1284,7 @@ async def ttl_sweep_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"TTL sweep failed: {e}") from e
+        raise HTTPException(status_code=500, detail="TTL sweep failed") from e
 
 
 class IntegritySweepRequest(BaseModel):
@@ -1178,7 +1364,7 @@ async def integrity_sweep_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Integrity sweep failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Integrity sweep failed") from e
 
 
 class QueueStatsResponse(BaseModel):
@@ -1224,7 +1410,7 @@ async def get_jobs_stats(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Stats failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Stats failed") from e
 
 
 class ArchiveMetaResponse(BaseModel):
@@ -1377,7 +1563,7 @@ async def list_jobs_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"List failed: {e}") from e
+        raise HTTPException(status_code=500, detail="List failed") from e
 
 
 class StaleGroup(BaseModel):
@@ -1440,7 +1626,7 @@ async def stale_processing_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Stale groups failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Stale groups failed") from e
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
@@ -1674,7 +1860,7 @@ async def batch_cancel_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Batch cancel failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Batch cancel failed") from e
 
 
 class BatchRescheduleRequest(BaseModel):
@@ -1813,7 +1999,7 @@ async def batch_reschedule_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Batch reschedule failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Batch reschedule failed") from e
 
 
 class BatchRequeueQuarantinedRequest(BaseModel):
@@ -2023,4 +2209,4 @@ async def batch_requeue_quarantined_endpoint(
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Batch requeue quarantined failed: {e}") from e
+        raise HTTPException(status_code=500, detail="Batch requeue quarantined failed") from e

@@ -1,6 +1,7 @@
 import { Button, Descriptions, Input, InputNumber, Tag } from "antd"
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { LabelWithHelp } from "@/components/Common/LabelWithHelp"
 
 type TextDiffSegment = {
   type: "unchanged" | "removed" | "added"
@@ -151,7 +152,13 @@ export const DictionaryPreviewPanel: React.FC<DictionaryPreviewPanelProps> = ({
         className="grid grid-cols-1 gap-2 md:grid-cols-2">
         <div className="space-y-1 min-w-0">
           <div className="text-xs font-medium text-text">
-            {t("option:dictionariesTools.tokenBudgetLabel", "Token budget")}
+            <LabelWithHelp
+              label={t("option:dictionariesTools.tokenBudgetLabel", "Processing limit")}
+              help={t(
+                "option:dictionariesTools.tokenBudgetHelp",
+                "Maximum amount of text processed. Leave empty for no limit."
+              )}
+            />
           </div>
           <InputNumber
             min={0}
@@ -164,7 +171,13 @@ export const DictionaryPreviewPanel: React.FC<DictionaryPreviewPanelProps> = ({
         </div>
         <div className="space-y-1 min-w-0">
           <div className="text-xs font-medium text-text">
-            {t("option:dictionariesTools.maxIterationsLabel", "Max iterations")}
+            <LabelWithHelp
+              label={t("option:dictionariesTools.maxIterationsLabel", "Max passes")}
+              help={t(
+                "option:dictionariesTools.maxIterationsHelp",
+                "Number of passes over the text. Usually 1 is enough. Increase if rules can trigger other rules."
+              )}
+            />
           </div>
           <InputNumber
             min={1}

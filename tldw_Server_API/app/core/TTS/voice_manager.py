@@ -104,6 +104,13 @@ PROVIDER_REQUIREMENTS = {
         "duration": {"min": 3, "max": 30},
         "sample_rate": 24000,
         "convert_to": "wav"
+    },
+    "omnivoice": {
+        "formats": [".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus"],
+        "max_size_mb": 50,
+        "duration": {"min": 3, "max": 30},
+        "sample_rate": 24000,
+        "convert_to": "wav",
     }
 }
 
@@ -1198,6 +1205,22 @@ class VoiceManager:
                 provider=provider_key,
                 cached=False,
                 ref_codes_len=len(ref_codes),
+                reference_text=ref_text,
+            )
+
+        if provider_key == "omnivoice":
+            ref_text = metadata.reference_text
+            if not ref_text:
+                raise VoiceProcessingError("reference_text is required to encode OmniVoice references")
+            metadata.provider_artifacts[provider_key] = {
+                "reference_text": ref_text,
+            }
+            await self.save_reference_metadata(user_id, metadata)
+            return VoiceEncodeResult(
+                voice_id=voice_id,
+                provider=provider_key,
+                cached=False,
+                ref_codes_len=None,
                 reference_text=ref_text,
             )
 

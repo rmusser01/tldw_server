@@ -1,5 +1,6 @@
 import type { ThemeDefinition } from "./types"
-import { validateThemeDefinition, generateThemeId } from "./validation"
+import { validateThemeDefinition, validateLegacyThemeDefinition, generateThemeId } from "./validation"
+import { migrateTheme } from "./migration"
 import { CUSTOM_THEMES_SETTING } from "@/services/settings/ui-settings"
 import { getStorageForSetting } from "@/services/settings/registry"
 
@@ -10,7 +11,25 @@ function readCustomThemes(): ThemeDefinition[] {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(validateThemeDefinition)
+
+    let needsPersist = false
+    const themes: ThemeDefinition[] = []
+
+    for (const item of parsed) {
+      if (validateThemeDefinition(item)) {
+        themes.push(item)
+      } else if (validateLegacyThemeDefinition(item)) {
+        themes.push(migrateTheme(item as Record<string, unknown>))
+        needsPersist = true
+      }
+      // else: invalid entry, skip
+    }
+
+    if (needsPersist) {
+      writeCustomThemes(themes)
+    }
+
+    return themes
   } catch {
     return []
   }
@@ -64,10 +83,16 @@ export function duplicateTheme(source: ThemeDefinition, newName: string): ThemeD
     ...source,
     id: generateThemeId(newName),
     name: newName,
+    version: 1,
     builtin: false,
     palette: {
       light: { ...source.palette.light },
       dark: { ...source.palette.dark },
     },
+    typography: { ...source.typography },
+    shape: { ...source.shape },
+    layout: { ...source.layout },
+    components: { ...source.components },
+    basePresetId: source.id,
   }
 }

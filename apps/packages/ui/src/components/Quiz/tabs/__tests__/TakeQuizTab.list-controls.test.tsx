@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
@@ -8,6 +9,10 @@ import {
   useStartAttemptMutation,
   useSubmitAttemptMutation
 } from "../../hooks"
+
+vi.mock("react-router-dom", () => ({
+  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+}))
 
 const interpolate = (template: string, values: Record<string, unknown> | undefined) => {
   return template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_, key: string) => {
@@ -204,10 +209,12 @@ describe("TakeQuizTab list controls and default passing policy", () => {
 
   it("forwards search query to quiz list hook", async () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     const input = screen.getByPlaceholderText("Search quizzes...")
@@ -222,10 +229,12 @@ describe("TakeQuizTab list controls and default passing policy", () => {
 
   it("shows explicit default passing score policy when quiz has no passing score", async () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
@@ -249,10 +258,12 @@ describe("TakeQuizTab list controls and default passing policy", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     expect(screen.getByTestId("take-loading-skeleton")).toBeInTheDocument()
@@ -260,10 +271,12 @@ describe("TakeQuizTab list controls and default passing policy", () => {
 
   it("shows source badges for mixed-source quizzes", async () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     await waitFor(() => {
@@ -301,12 +314,14 @@ describe("TakeQuizTab list controls and default passing policy", () => {
     } as any))
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-        startQuizId={42}
-        highlightQuizId={42}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+          startQuizId={42}
+          highlightQuizId={42}
+        />
+      </MemoryRouter>
     )
 
     const dialog = await screen.findByRole("dialog")

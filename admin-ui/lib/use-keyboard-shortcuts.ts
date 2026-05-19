@@ -90,15 +90,15 @@ export function useKeyboardShortcuts() {
       category: 'Navigation',
     },
     {
-      key: 'g j',
-      action: () => router.push('/jobs'),
-      description: 'Go to Jobs',
-      category: 'Navigation',
-    },
-    {
       key: 'g b',
       action: () => router.push('/budgets'),
       description: 'Go to Budgets',
+      category: 'Navigation',
+    },
+    {
+      key: 'g j',
+      action: () => router.push('/jobs'),
+      description: 'Go to Jobs',
       category: 'Navigation',
     },
     {
@@ -175,7 +175,7 @@ export function useKeyboardShortcuts() {
       }
 
       // Handle "g" prefix for navigation
-      // Note: No preventDefault() on the initial "g" to avoid conflicting with screen reader nav keys
+      // Don't preventDefault on the initial chord key — screen readers use single-letter keys
       if (key === 'g' && !pendingPrefix && !event.ctrlKey && !event.metaKey) {
         setPendingPrefix('g');
 

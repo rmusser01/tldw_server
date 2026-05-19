@@ -31,6 +31,62 @@ async def test_egress_denied_enhanced_scraper(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_article_scrape_blocks_on_shared_policy_before_network(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+    from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+        WebOutboundPolicyDecision,
+    )
+
+    monkeypatch.setattr(ael, "load_and_log_configs", lambda: {"web_scraper": {}})
+    async def fake_policy(*args, **kwargs):
+        return WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="robots_unreachable",
+            stage="pre_fetch",
+            source="article_extract",
+        )
+
+    monkeypatch.setattr(
+        ael,
+        "decide_web_outbound_policy",
+        fake_policy,
+        raising=False,
+    )
+
+    def fail_http_fetch(*args, **kwargs):
+        raise AssertionError("network fetch should not run when outbound policy blocks")
+
+    monkeypatch.setattr(ael, "http_fetch", fail_http_fetch)
+    monkeypatch.setattr(ael, "_fetch_with_curl", fail_http_fetch)
+
+    result = await ael.scrape_article("https://example.com/blocked")
+
+    assert result["extraction_successful"] is False
+    assert result["error"] == "Blocked by outbound policy"
+    assert result["policy_reason"] == "robots_unreachable"
+
+
+def test_scrape_article_blocking_sanitizes_policy_evaluation_error(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+
+    def fail_policy(*args, **kwargs):
+        raise RuntimeError("secret-token")
+
+    monkeypatch.setattr(
+        ael,
+        "decide_web_outbound_policy_sync",
+        fail_policy,
+        raising=False,
+    )
+
+    result = ael.scrape_article_blocking("https://example.com/private")
+
+    assert result["extraction_successful"] is False
+    assert result["error"] == "Outbound policy evaluation failed"
+
+
+@pytest.mark.asyncio
 async def test_extract_links_text_vs_html(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
 
@@ -58,6 +114,59 @@ async def test_extract_links_text_vs_html(monkeypatch):
     # Case 2: HTML content provided should be parsed directly
     links_html = await scraper._extract_links("https://example.com", "<a href='https://example.com/b'>B</a>")
     assert "https://example.com/b" in links_html
+
+
+@pytest.mark.asyncio
+async def test_sitemap_scrape_blocks_on_async_policy_before_fetch(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as ews
+    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
+
+    scraper = EnhancedWebScraper(config={"web_scraper_respect_robots": True})
+    calls = {"async": 0, "sync": 0}
+
+    async def fake_policy(url, *, respect_robots, user_agent, source, stage, config, robots_filter=None):
+        calls["async"] += 1
+        assert url == "https://example.com/sitemap.xml"
+        assert respect_robots is True
+        assert user_agent == ews.DEFAULT_USER_AGENT
+        assert source == "enhanced_sitemap"
+        assert stage == "pre_fetch"
+        assert config == {"web_scraper": {"web_scraper_respect_robots": True}}
+        return ews.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="robots_unreachable",
+            stage=stage,
+            source=source,
+        )
+
+    def fake_sync_policy(*args, **kwargs):
+        calls["sync"] += 1
+        return ews.WebOutboundPolicyDecision(
+            allowed=True,
+            mode="strict",
+            reason="allowed",
+            stage="pre_fetch",
+            source="enhanced_sitemap",
+        )
+
+    class DummyResp:
+        text = "<urlset></urlset>"
+
+        async def aclose(self):
+            return None
+
+    async def fake_afetch(*args, **kwargs):
+        return DummyResp()
+
+    monkeypatch.setattr(ews, "decide_web_outbound_policy", fake_policy, raising=False)
+    monkeypatch.setattr(ews, "decide_web_outbound_policy_sync", fake_sync_policy, raising=False)
+    monkeypatch.setattr(ews, "afetch", fake_afetch, raising=False)
+
+    results = await scraper.scrape_sitemap("https://example.com/sitemap.xml")
+
+    assert results == []
+    assert calls == {"async": 1, "sync": 0}
 
 
 def test_provider_missing_keys_google(monkeypatch):

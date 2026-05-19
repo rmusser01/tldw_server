@@ -20,7 +20,7 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from .base import ChunkerConfig, ChunkingMethod, ChunkMetadata, ChunkResult
 from .constants import FRONTMATTER_SENTINEL_KEY
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
@@ -97,6 +97,17 @@ except _CHUNKER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - safety fallback
 
 
 _LLM_UNSET = object()
+
+
+def _coerce_bool_option(value: Any, default: bool = False) -> bool:
+    """Normalize loose option values into stable booleans."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return is_truthy(value.strip().lower())
+    return bool(value)
 
 def _ensure_chunker_metrics_registered() -> None:
     """Register chunker-specific cache metrics once."""
@@ -1491,7 +1502,7 @@ class Chunker:
 
         # Use defaults if not specified
         options_raw: dict[str, Any] = dict(options)
-        bool(options_raw.pop("align_text_to_source", False))
+        options_raw.pop("align_text_to_source", None)
         method = self._normalize_method_argument(method) or self.config.default_method.value
         max_size = max_size if max_size is not None else self.config.default_max_size
         overlap = overlap if overlap is not None else self.config.default_overlap
@@ -1669,7 +1680,7 @@ class Chunker:
         # Use defaults if not specified
         options_raw: dict[str, Any] = dict(options)
         align_text_to_source_opt = options_raw.pop("align_text_to_source", None)
-        align_text_to_source = bool(align_text_to_source_opt) if align_text_to_source_opt is not None else False
+        align_text_to_source = _coerce_bool_option(align_text_to_source_opt, False)
         method = self._normalize_method_argument(method) or self.config.default_method.value
         max_size = max_size if max_size is not None else self.config.default_max_size
         overlap = overlap if overlap is not None else self.config.default_overlap
@@ -1701,7 +1712,7 @@ class Chunker:
         strategy_options: dict[str, Any] = dict(options_raw)
         if align_text_to_source_opt is not None:
             # Allow strategies to opt into/out of source-aligned text
-            strategy_options["align_text_to_source"] = bool(align_text_to_source_opt)
+            strategy_options["align_text_to_source"] = align_text_to_source
         strategy_options.pop("code_mode", None)
         strategy_options.pop("tokenizer_name", None)
         strategy_options.pop("tokenizer_name_or_path", None)
@@ -1819,10 +1830,12 @@ class Chunker:
         strategy_options.pop("tokenizer_name_or_path", None)
 
         effective_llm_call, effective_llm_cfg = self._get_effective_llm_hooks()
+        use_ephemeral_strategy = self._strategy_cache_mode == "shared"
         strategy_lock = self._strategy_lock if self._strategy_cache_mode == "shared" else nullcontext()
         with strategy_lock:
-            # Get strategy lazily (supports factory registration); force per-call strategy for tokenizer overrides
-            strategy = self._create_strategy_instance(method) if use_per_call_strategy else self._get_strategy_for_call(method)
+            # A yielded generator must not keep the shared strategy locked across
+            # consumer-controlled pauses, so shared mode uses a per-call instance here.
+            strategy = self._create_strategy_instance(method) if (use_per_call_strategy or use_ephemeral_strategy) else self._get_strategy_for_call(method)
             self._sync_strategy_llm(strategy, llm_call_func=effective_llm_call, llm_config=effective_llm_cfg)
             if method == ChunkingMethod.TOKENS.value and tokenizer_override:
                 try:
@@ -1842,12 +1855,13 @@ class Chunker:
             # Use generator method when available, otherwise fall back to eager chunking
             chunk_gen = getattr(strategy, 'chunk_generator', None)
             if callable(chunk_gen):
-                for chunk in chunk_gen(text, max_size, overlap, **strategy_options):
-                    yield chunk
+                chunk_iter = chunk_gen(text, max_size, overlap, **strategy_options)
             else:
                 logger.debug(f"{strategy.__class__.__name__} lacks chunk_generator; falling back to chunk()")
-                for chunk in strategy.chunk(text, max_size, overlap, **strategy_options):
-                    yield chunk
+                chunk_iter = iter(strategy.chunk(text, max_size, overlap, **strategy_options))
+
+        for chunk in chunk_iter:
+            yield chunk
 
     def get_available_methods(self) -> list[str]:
         """
@@ -2456,7 +2470,8 @@ class Chunker:
             method_options_for_chunk['code_mode'] = code_mode_for_method
 
         # Adaptive sizing (simple heuristic parity)
-        if bool(opts.get('adaptive', False)) and method not in ('semantic', 'json', 'xml', 'ebook_chapters', 'rolling_summarize'):
+        adaptive = _coerce_bool_option(opts.get('adaptive'), False)
+        if adaptive and method not in ('semantic', 'json', 'xml', 'ebook_chapters', 'rolling_summarize'):
             try:
                 base_adaptive = int(opts.get('base_adaptive_chunk_size') or max_size)
                 min_adaptive = int(opts.get('min_adaptive_chunk_size') or max_size)
@@ -2466,7 +2481,7 @@ class Chunker:
                 scaled = int(base_adaptive * (1.0 + 0.2 * density))
                 max_size = max(min_adaptive, min(max_adaptive_hi, scaled))
                 # Optional adaptive overlap tuned by density
-                if bool(opts.get('adaptive_overlap', False)):
+                if _coerce_bool_option(opts.get('adaptive_overlap'), False):
                     try:
                         base_overlap = int(opts.get('base_overlap') or overlap or 0)
                         max_overlap = int(opts.get('max_adaptive_overlap') or max(0, base_overlap + 100))
@@ -2479,7 +2494,7 @@ class Chunker:
                 pass
 
         # Choose hierarchical vs normal
-        hierarchical = bool(opts.get('hierarchical'))
+        hierarchical = _coerce_bool_option(opts.get('hierarchical'), False)
         hier_template = opts.get('hierarchical_template') if isinstance(opts.get('hierarchical_template'), dict) else None
 
         # Set per-call LLM overrides without mutating shared state
@@ -2491,7 +2506,7 @@ class Chunker:
             self._thread_local.llm_overrides = (o_func, o_cfg)
 
         # Multi-level paragraph-aware chunking for words/sentences (parity with legacy)
-        multi_level = bool(opts.get('multi_level', False)) and method in ('words', 'sentences') and not (hierarchical or hier_template)
+        multi_level = _coerce_bool_option(opts.get('multi_level'), False) and method in ('words', 'sentences') and not (hierarchical or hier_template)
 
         norm_chunks: list[dict[str, Any]] = []
         try:
@@ -2518,7 +2533,7 @@ class Chunker:
                     if not segment:
                         continue
                     try:
-                        align_text_to_source = bool(opts.get('align_text_to_source', True))
+                        align_text_to_source = _coerce_bool_option(opts.get('align_text_to_source'), True)
                         base_results = self.chunk_text_with_metadata(
                             segment,
                             method=method,
@@ -2685,7 +2700,7 @@ class Chunker:
             md.setdefault('max_size', max_size)
             md.setdefault('overlap', overlap)
             md.setdefault('language', language)
-            md.setdefault('adaptive_chunking_used', bool(opts.get('adaptive', False)))
+            md.setdefault('adaptive_chunking_used', adaptive)
             if method_lower in ('code', 'code_ast'):
                 effective_code_mode = code_mode_for_method
                 if effective_code_mode is None:
@@ -2761,15 +2776,16 @@ class Chunker:
         observe_histogram("chunker_input_bytes", float(len(text)), labels=labels)
         observe_histogram("chunker_process_total_seconds", time.perf_counter() - overall_start, labels={**labels, "method": method, "hierarchical": str(bool(hierarchical or hier_template)).lower()})
         try:
-            with start_span("chunker.process_text") as span:
-                set_span_attribute(span, "chunk.method", method)
-                set_span_attribute(span, "chunk.lang", language)
-                set_span_attribute(span, "chunk.hierarchical", bool(hierarchical or hier_template))
-                set_span_attribute(span, "chunk.multi_level", multi_level)
-                set_span_attribute(span, "chunk.count", len(out))
-                add_span_event(span, "chunker.completed")
+            with start_span("chunker.process_text"):
+                set_span_attribute("chunk.method", method)
+                set_span_attribute("chunk.lang", language)
+                set_span_attribute("chunk.hierarchical", bool(hierarchical or hier_template))
+                set_span_attribute("chunk.multi_level", multi_level)
+                set_span_attribute("chunk.count", len(out))
+                add_span_event("chunker.completed")
         except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
-            record_span_exception(None, e)
+            with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
+                record_span_exception(e, escaped=False)
 
         return out
 

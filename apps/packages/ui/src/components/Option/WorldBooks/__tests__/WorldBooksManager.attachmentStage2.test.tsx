@@ -219,7 +219,9 @@ describe("WorldBooksManager attachment stage-2 toggle feedback", () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+      // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
       expect(await screen.findByText("Matrix view active (2 characters).")).toBeInTheDocument()
 
       await user.click(screen.getByLabelText("Toggle attachment Arcana / Bob"))
@@ -255,7 +257,9 @@ describe("WorldBooksManager attachment stage-2 toggle feedback", () => {
 
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+    // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
     expect(await screen.findByText("Matrix view active (2 characters).")).toBeInTheDocument()
 
     await user.click(screen.getByLabelText("Toggle attachment Arcana / Bob"))
@@ -277,7 +281,9 @@ describe("WorldBooksManager attachment stage-2 toggle feedback", () => {
 
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+      // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
       expect(await screen.findByText("List view active (2 characters).")).toBeInTheDocument()
 
       await user.click(screen.getByLabelText("Attachment selector for Arcana"))

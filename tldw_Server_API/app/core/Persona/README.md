@@ -11,6 +11,7 @@
   - Persona exemplar bank with CRUD, transcript import, review flow, and adaptive retrieval
   - Live websocket session flow with tool-plan proposal, policy enforcement, personalization memory/state-doc usage, and shared persona exemplar guidance
   - Ordinary persona-backed chat and live Persona Garden both consume the shared exemplar retrieval/prompt-assembly layer
+  - Defensive dialogue-tree robustness checks for persona and character targets
 - Inputs/Outputs:
   - Input: persona profile/session HTTP requests, websocket JSON frames, transcript import payloads, persona configuration writes
   - Output: persisted persona metadata, session history, live stream events (`notice`, `tool_plan`, `tool_call`, `tool_result`, `assistant_delta`), exemplar retrieval influence in prompt/planning inputs
@@ -26,6 +27,13 @@
   - Persona profiles, sessions, state docs, scope rules, policy rules, and exemplars persist in `ChaChaNotes_DB`.
   - Persona websocket sessions use the process-local `SessionManager` for live turn snapshots while also persisting turn history through `memory_integration.persist_persona_turn(...)`.
   - Persona exemplar retrieval is deterministic today: turn classification -> exemplar selection -> shared prompt assembly.
+  - Dialogue-tree evaluation is a defensive adaptation only. It explores candidate persona behavior for robustness, policy, and privacy failures; it is not a roleplay feature and must not expand persona authority.
+  - Offline dialogue-tree runs use the shared Evaluations recipe and Jobs execution path. Do not add a persona-specific eval queue or run-history store.
+  - The runtime persona explorer wraps websocket plan proposal only when `PERSONA_RUNTIME_EXPLORER_ENABLED=true`; it is off by default.
+  - Runtime explorer prompt inputs are filtered through the dialogue-tree context redaction boundary before generator calls. They contain bounded user text, sanitized plan shape, IDs, and counts rather than raw memory rows, raw tool output, or secrets.
+  - Runtime hard blockers are deterministic policy/safety pruners. LLM judges are offline-only by default, can rank or warn, and cannot authorize actions.
+  - Runtime-selected plans still pass the existing persona policy evaluator and confirmation flow before emission/execution.
+  - Character Chat support is offline robustness coverage only; there is no `/complete-v2` runtime response explorer in this design.
   - Ordinary persona-backed chat and live Persona Garden both reuse the same shared exemplar prompt assembly helpers.
   - Policy/scope enforcement remains authoritative over tools and capabilities; exemplars shape in-character guidance only.
 - Key Modules:
@@ -54,6 +62,7 @@
   - websocket auth supports JWT and API key flows
   - scope and policy rules gate tool execution
   - rate limits apply on persona exemplar CRUD/import endpoints
+  - dialogue-tree traces and reports are redacted; red-team fixtures must never write into persona memory, exemplars, state docs, or chat history
 
 ## 3. Developer Notes
 
@@ -64,6 +73,7 @@
   - websocket-specific exemplar debug events are not yet exposed to clients
   - richer live assistant generation beyond plan/tool scaffolding can build on the shared exemplar/state/memory seam
   - future retrieval improvements can evolve classifier/ranking behavior without changing storage shape
+  - runtime dialogue-tree generators must declare their input contract and consume only the filtered context bundle
 - Coding Patterns:
   - keep persona layers distinct:
     - profile = top-level identity/config
@@ -76,13 +86,17 @@
   - websocket behavior: `tldw_Server_API/tests/Persona/test_persona_ws.py`
   - session routes: `tldw_Server_API/tests/Persona/test_persona_sessions.py`
   - exemplar retrieval/ingestion/eval: `tldw_Server_API/tests/Persona/`
+  - dialogue-tree robustness/runtime: `tldw_Server_API/tests/Persona/test_dialogue_tree*.py`, `test_persona_dialogue_tree_robustness_eval.py`, `test_runtime_explorer.py`, `test_persona_ws_dialogue_tree_runtime.py`
+  - character offline robustness: `tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py`
   - prompt assembly and persona-backed chat: `tldw_Server_API/tests/Chat/`
 - Local Dev Tips:
   - connect to `/api/v1/persona/stream` with a websocket client and send `{ "type": "user_message", "text": "<query>" }`
   - inspect persisted persona sessions via `/api/v1/persona/sessions`
+  - when the optional runtime explorer is enabled, fallback, circuit-open, and safe-denial paths emit a `notice` event with `RUNTIME_EXPLORER_*` reason codes and bounded `runtime_explorer` diagnostics; disabled mode emits no runtime-explorer notice
 - Pitfalls & Gotchas:
   - personas are created from characters conceptually, but evolve independently after creation
   - do not store exemplar text snapshots in turn metadata when compact IDs/reasons are sufficient
   - keep websocket protocol changes separate from runtime retrieval/persistence changes unless explicitly scoped together
+  - keep runtime explorer changes behind feature flags and preserve disabled-mode websocket behavior
 - Current Limitation:
   - live websocket turns now use shared exemplar retrieval and persist compact selection metadata, but websocket-specific exemplar debug events are still not exposed to clients

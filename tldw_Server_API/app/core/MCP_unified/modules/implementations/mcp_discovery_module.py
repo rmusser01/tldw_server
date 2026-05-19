@@ -248,8 +248,8 @@ class MCPDiscoveryModule(BaseModule):
                 except (TypeError, ValueError):
                     continue
                 org_ids.add(org_id)
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.debug(f"MCP discovery: org membership lookup failed: {exc}")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("MCP discovery: org membership lookup failed; details redacted")
 
         try:
             pool = await get_db_pool()
@@ -263,8 +263,8 @@ class MCPDiscoveryModule(BaseModule):
                     team_ids.add(int(val))
                 except (TypeError, ValueError):
                     continue
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.debug(f"MCP discovery: team membership lookup failed: {exc}")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("MCP discovery: team membership lookup failed; details redacted")
 
         return org_ids, team_ids
 

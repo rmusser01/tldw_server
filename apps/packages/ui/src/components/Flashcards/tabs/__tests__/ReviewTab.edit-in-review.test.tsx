@@ -16,6 +16,7 @@ import {
   useUpdateFlashcardMutation,
   useResetFlashcardSchedulingMutation,
   useDeleteFlashcardMutation,
+  useGlobalFlashcardTagSuggestionsQuery,
   useFlashcardShortcuts,
   useDebouncedFormField,
   useDueCountsQuery,
@@ -51,6 +52,14 @@ vi.mock("react-i18next", () => ({
     }
   })
 }))
+
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return {
+    ...actual,
+    useNavigate: () => vi.fn()
+  }
+})
 
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({
@@ -92,6 +101,9 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useFlashcardAssistantQuery: vi.fn(),
   useFlashcardAssistantRespondMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
@@ -189,6 +201,12 @@ describe("ReviewTab edit-in-review workflow", () => {
     vi.mocked(useDeleteFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
+    } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false
     } as any)
     vi.mocked(useFlashcardShortcuts).mockImplementation(() => undefined)
     vi.mocked(useDebouncedFormField).mockReturnValue(undefined as any)

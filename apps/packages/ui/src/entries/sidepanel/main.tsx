@@ -1,5 +1,6 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
+import "@/assets/react-pdf.css"
 import IndexSidepanel from "./App"
 import { checkReactInstance } from "@/utils/react-instance-check"
 

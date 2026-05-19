@@ -7,10 +7,12 @@ import {
   Trash2,
   CloudUpload,
   CloudDownload,
+  RefreshCw,
   Unlink,
   AlertTriangle,
   Link,
-  Play
+  Play,
+  History
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -28,10 +30,12 @@ interface PromptActionsMenuProps {
   onQuickTest?: () => void
   onDelete: () => void
   onShareLink?: () => void
+  onRetrySync?: () => void
   onPushToServer?: () => void
   onPullFromServer?: () => void
   onUnlink?: () => void
   onResolveConflict?: () => void
+  onViewHistory?: () => void
 }
 
 export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
@@ -46,10 +50,12 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
   onQuickTest,
   onDelete,
   onShareLink,
+  onRetrySync,
   onPushToServer,
   onPullFromServer,
   onUnlink,
-  onResolveConflict
+  onResolveConflict,
+  onViewHistory
 }) => {
   const { t } = useTranslation(["settings", "common", "option"])
 
@@ -67,6 +73,20 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       onClick: onResolveConflict
     }] : []),
     ...(onResolveConflict && isConflict ? [{ type: "divider" as const }] : []),
+    // Retry sync option (for pending prompts)
+    ...(onRetrySync ? [{
+      key: "retrySync",
+      label: (
+        <span
+          data-testid="menu-item-retrySync"
+          className="inline-flex items-center gap-1.5"
+        >
+          {t("managePrompts.sync.retrySync", { defaultValue: "Retry sync" })}
+        </span>
+      ),
+      icon: <RefreshCw className="size-4" />,
+      onClick: onRetrySync
+    }] : []),
     // Push to server option (for local or pending prompts)
     ...(onPushToServer && !isSynced ? [{
       key: "push",
@@ -148,6 +168,17 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       disabled,
       onClick: onDuplicate
     },
+    ...(onViewHistory
+      ? [
+          {
+            key: "viewHistory",
+            label: t("managePrompts.versionHistory", { defaultValue: "Version history" }),
+            icon: <History className="size-4" />,
+            disabled,
+            onClick: onViewHistory
+          }
+        ]
+      : []),
     {
       type: "divider"
     },

@@ -90,13 +90,20 @@ def test_audio_ingestion_persists_normalized_transcript_and_chunks(
         # Transcripts: expect at most one primary transcript per media/model
         rows = list(
             media_database.execute_query(
-                "SELECT media_id, whisper_model, transcription FROM Transcripts WHERE media_id = ?",
+                """
+                SELECT media_id, whisper_model, transcription, transcription_run_id, idempotency_key
+                FROM Transcripts
+                WHERE media_id = ?
+                ORDER BY transcription_run_id DESC, created_at DESC, id DESC
+                """,
                 (media_id,),
             ) or []
         )
         assert rows, "Expected at least one transcript row for ingested audio"
 
         t_row = rows[0]
+        assert t_row["transcription_run_id"] is not None
+        assert t_row["idempotency_key"] is None
         stored = t_row["transcription"]
 
         # Transcription is stored as JSON string; parse and inspect shape.
@@ -118,6 +125,13 @@ def test_audio_ingestion_persists_normalized_transcript_and_chunks(
             model_in_meta = artifact.get("metadata", {}).get("model")
             if model_in_meta:
                 assert isinstance(model_in_meta, str)
+
+        latest_run_row = media_database.execute_query(
+            "SELECT latest_transcription_run_id FROM Media WHERE id = ?",
+            (media_id,),
+        ).fetchone()
+        assert latest_run_row is not None
+        assert latest_run_row["latest_transcription_run_id"] == t_row["transcription_run_id"]
 
         # Chunks: ensure that at least one chunk row exists for this media
         chunk_rows = list(

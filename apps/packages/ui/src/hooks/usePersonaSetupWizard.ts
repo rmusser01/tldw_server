@@ -1,6 +1,7 @@
 import React from "react"
 
 export type PersonaSetupStep =
+  | "archetype"
   | "persona"
   | "voice"
   | "commands"
@@ -25,6 +26,7 @@ type UsePersonaSetupWizardArgs = {
 }
 
 const VALID_SETUP_STEPS = new Set<PersonaSetupStep>([
+  "archetype",
   "persona",
   "voice",
   "commands",

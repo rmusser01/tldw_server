@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 import time
@@ -10,13 +11,26 @@ from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
 
-from .config_schema import ExternalMCPServerConfig, load_external_server_registry
+from .config_schema import (
+    ExternalMCPServerConfig,
+    ExternalServerRegistryPartialLoadError,
+    load_external_server_registry,
+)
 from .transports import (
     BrokeredExternalCredential,
     ExternalMCPTransportAdapter,
     ExternalToolCallResult,
+    adapter_supports_runtime_auth,
     build_transport_adapter,
 )
+
+
+_EXTERNAL_SERVER_INITIALIZATION_FAILED = "external_server_initialization_failed"
+_EXTERNAL_SERVER_DISCOVERY_FAILED = "external_server_discovery_failed"
+_EXTERNAL_SERVER_HEALTH_CHECK_FAILED = "external_server_health_check_failed"
+_EXTERNAL_SERVER_CONNECT_FAILED = "external_server_connect_failed"
+_EXTERNAL_SERVER_CALL_TIMEOUT = "external_server_call_timeout"
+_EXTERNAL_SERVER_CALL_FAILED = "external_server_call_failed"
 
 
 @dataclass(slots=True)
@@ -110,6 +124,7 @@ class ExternalServerManager:
         self._discovery_errors: dict[str, str] = {}
         self._telemetry: dict[str, ExternalServerTelemetry] = {}
         self._initialized = False
+        self._runtime_lock = asyncio.Lock()
         self._credential_broker: Callable[..., Awaitable[BrokeredExternalCredential | None] | BrokeredExternalCredential | None] | None = None
 
     def with_server_loader(
@@ -133,16 +148,11 @@ class ExternalServerManager:
     async def initialize(self) -> None:
         """Load config, construct adapters, and attempt initial discovery."""
 
-        if self._server_loader is not None:
-            loaded = self._server_loader()
-            servers = await loaded if inspect.isawaitable(loaded) else loaded
-        else:
-            cfg = load_external_server_registry(self.config_path)
-            servers = list(cfg.servers)
+        servers, load_errors = await self._load_configured_server_snapshot()
         self._servers = {s.id: s for s in servers if s.enabled}
         self._adapters = {}
         self._virtual_tools = {}
-        self._discovery_errors = {}
+        self._discovery_errors = dict(load_errors)
         self._telemetry = {
             server.id: ExternalServerTelemetry()
             for server in self._servers.values()
@@ -156,12 +166,11 @@ class ExternalServerManager:
                 await self._refresh_server_tools(server.id)
                 self._discovery_errors.pop(server.id, None)
             except Exception as exc:
-                self._discovery_errors[server.id] = str(exc)
+                self._discovery_errors[server.id] = _EXTERNAL_SERVER_INITIALIZATION_FAILED
                 self._clear_server_tools(server.id)
                 logger.warning(
-                    "External MCP server '{}' failed initialization/discovery: {}",
-                    server.id,
-                    exc,
+                    "External MCP server initialization/discovery failed",
+                    error_type=type(exc).__name__,
                 )
 
         self._initialized = True
@@ -169,40 +178,164 @@ class ExternalServerManager:
     async def shutdown(self) -> None:
         """Close all external transport adapters."""
 
-        for server_id, adapter in list(self._adapters.items()):
-            try:
-                await adapter.close()
-            except Exception as exc:
-                logger.warning(f"External MCP adapter close failed for {server_id}: {exc}")
-        self._adapters = {}
-        self._virtual_tools = {}
-        self._discovery_errors = {}
-        self._telemetry = {}
-        self._initialized = False
+        async with self._runtime_lock:
+            for server_id, adapter in list(self._adapters.items()):
+                try:
+                    await adapter.close()
+                except Exception as exc:
+                    logger.warning(
+                        "External MCP adapter close failed for {}; error_type={}",
+                        server_id,
+                        type(exc).__name__,
+                    )
+            self._adapters = {}
+            self._virtual_tools = {}
+            self._discovery_errors = {}
+            self._telemetry = {}
+            self._initialized = False
 
     async def refresh_discovery(self, server_id: Optional[str] = None) -> dict[str, Any]:
         """Refresh virtual tool cache for one server or all configured servers."""
 
-        target_ids = [server_id] if server_id else sorted(self._adapters.keys())
+        async with self._runtime_lock:
+            target_ids = [server_id] if server_id else sorted(self._adapters.keys())
+            refreshed = 0
+            errors: dict[str, str] = {}
+
+            for sid in target_ids:
+                if sid not in self._adapters:
+                    errors[sid] = "unknown_server"
+                    continue
+                try:
+                    await self._refresh_server_tools(sid)
+                    refreshed += 1
+                    self._discovery_errors.pop(sid, None)
+                except Exception as exc:
+                    errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                    self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                    self._clear_server_tools(sid)
+                    logger.warning(
+                        "External MCP server discovery refresh failed for server '{}'",
+                        sid,
+                        error_type=type(exc).__name__,
+                    )
+
+            return {
+                "refreshed_servers": refreshed,
+                "total_servers": len(target_ids),
+                "virtual_tools": len(self._virtual_tools),
+                "errors": errors,
+            }
+
+    async def reconcile_servers(self, server_id: Optional[str] = None) -> dict[str, Any]:
+        """Reconcile runtime adapters with current external-server configuration."""
+
+        async with self._runtime_lock:
+            return await self._reconcile_servers_unlocked(server_id=server_id)
+
+    async def _reconcile_servers_unlocked(self, server_id: Optional[str] = None) -> dict[str, Any]:
+        servers, load_errors = await self._load_configured_server_snapshot()
+        configured_by_id = {server.id: server for server in servers}
+        enabled_by_id = {
+            server.id: server
+            for server in servers
+            if server.enabled
+        }
+        scope_ids = (
+            {server_id}
+            if server_id
+            else set(configured_by_id) | set(load_errors) | set(self._servers) | set(self._adapters)
+        )
+        reconciled = 0
         refreshed = 0
         errors: dict[str, str] = {}
 
-        for sid in target_ids:
-            if sid not in self._adapters:
-                errors[sid] = "unknown_server"
+        for sid in sorted(scope_ids):
+            load_error = load_errors.get(sid)
+            if load_error is not None:
+                errors[sid] = load_error
+                self._discovery_errors[sid] = load_error
+                if sid not in self._servers and sid not in self._adapters:
+                    self._clear_server_tools(sid)
                 continue
+
+            next_server = enabled_by_id.get(sid)
+            if next_server is None:
+                if sid in self._servers or sid in self._adapters:
+                    await self._remove_server_runtime(sid)
+                    reconciled += 1
+                    continue
+                if server_id is not None:
+                    errors[sid] = "unknown_server"
+                continue
+
+            current_server = self._servers.get(sid)
+            current_adapter = self._adapters.get(sid)
+            materially_changed = (
+                current_server is None
+                or current_adapter is None
+                or self._server_fingerprint(current_server) != self._server_fingerprint(next_server)
+            )
+
+            if materially_changed:
+                replacement_adapter: ExternalMCPTransportAdapter | None = None
+                try:
+                    replacement_adapter = build_transport_adapter(next_server)
+                    await self._connect_adapter(sid, replacement_adapter)
+                    replacement_tools = await self._discover_server_tools(
+                        server_id=sid,
+                        server_cfg=next_server,
+                        adapter=replacement_adapter,
+                    )
+                except Exception as exc:
+                    self._get_telemetry(sid)
+                    errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                    self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                    if current_server is None:
+                        self._servers[sid] = next_server
+                        self._clear_server_tools(sid)
+                    if replacement_adapter is not None:
+                        await self._close_adapter(sid, replacement_adapter)
+                    logger.warning(
+                        "External MCP adapter replacement failed during reconcile for server '{}'",
+                        sid,
+                        error_type=type(exc).__name__,
+                    )
+                    continue
+
+                if current_adapter is not None:
+                    await self._close_adapter(sid, current_adapter)
+                self._servers[sid] = next_server
+                self._adapters[sid] = replacement_adapter
+                self._clear_server_tools(sid)
+                self._virtual_tools.update(replacement_tools)
+                self._discovery_errors.pop(sid, None)
+                reconciled += 1
+                refreshed += 1
+                continue
+
+            self._servers[sid] = next_server
+            self._get_telemetry(sid)
             try:
+                await self._connect_server(sid)
                 await self._refresh_server_tools(sid)
                 refreshed += 1
                 self._discovery_errors.pop(sid, None)
             except Exception as exc:
-                errors[sid] = str(exc)
-                self._discovery_errors[sid] = str(exc)
+                errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
+                self._discovery_errors[sid] = _EXTERNAL_SERVER_DISCOVERY_FAILED
                 self._clear_server_tools(sid)
+                logger.warning(
+                    "External MCP server refresh failed during reconcile for server '{}'",
+                    sid,
+                    error_type=type(exc).__name__,
+                )
 
         return {
+            "server_id": server_id,
+            "reconciled_servers": reconciled,
             "refreshed_servers": refreshed,
-            "total_servers": len(target_ids),
+            "total_servers": len(scope_ids),
             "virtual_tools": len(self._virtual_tools),
             "errors": errors,
         }
@@ -218,9 +351,9 @@ class ExternalServerManager:
             if adapter is not None:
                 try:
                     checks = await adapter.health_check()
-                except Exception as exc:
+                except Exception:
                     checks = {"configured": True, "connected": False, "error": True}
-                    self._discovery_errors[server_id] = str(exc)
+                    self._discovery_errors[server_id] = _EXTERNAL_SERVER_HEALTH_CHECK_FAILED
 
             connected = bool(checks.get("connected"))
             discovery_ok = server_id not in self._discovery_errors
@@ -259,6 +392,19 @@ class ExternalServerManager:
     ) -> dict[str, Any]:
         """Route a namespaced virtual tool execution to its external adapter."""
 
+        async with self._runtime_lock:
+            return await self._execute_virtual_tool_unlocked(
+                virtual_tool_name=virtual_tool_name,
+                arguments=arguments,
+                context=context,
+            )
+
+    async def _execute_virtual_tool_unlocked(
+        self,
+        virtual_tool_name: str,
+        arguments: dict[str, Any],
+        context: Optional[Any] = None,
+    ) -> dict[str, Any]:
         virtual_tool = self._virtual_tools.get(virtual_tool_name)
         if virtual_tool is None:
             raise ValueError(f"Unknown external virtual tool '{virtual_tool_name}'")
@@ -343,13 +489,30 @@ class ExternalServerManager:
     async def _refresh_server_tools(self, server_id: str) -> None:
         """Refresh discovery cache for a single server."""
 
+        server_tools = await self._discover_server_tools(
+            server_id=server_id,
+            server_cfg=self._servers[server_id],
+            adapter=self._adapters[server_id],
+        )
+
+        # Replace only this server's tools while preserving other caches.
+        self._clear_server_tools(server_id)
+        self._virtual_tools.update(server_tools)
+
+    async def _discover_server_tools(
+        self,
+        *,
+        server_id: str,
+        server_cfg: ExternalMCPServerConfig,
+        adapter: ExternalMCPTransportAdapter,
+    ) -> dict[str, VirtualExternalTool]:
+        """List and normalize tools for a server without mutating the live tool cache."""
+
         telemetry = self._get_telemetry(server_id)
         telemetry.discovery_attempts += 1
         started_at = time.perf_counter()
-        adapter = self._adapters[server_id]
         try:
             tools = await adapter.list_tools()
-            server_cfg = self._servers[server_id]
 
             server_tools: dict[str, VirtualExternalTool] = {}
 
@@ -368,19 +531,64 @@ class ExternalServerManager:
                     is_write=self._is_write_tool(tool.name, tool_metadata),
                 )
 
-            # Replace only this server's tools while preserving other caches.
-            self._clear_server_tools(server_id)
-            self._virtual_tools.update(server_tools)
             telemetry.discovery_successes += 1
             telemetry.last_discovered_tool_count = len(server_tools)
-        except Exception as exc:
+            return server_tools
+        except Exception:
             telemetry.discovery_failures += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_DISCOVERY_FAILED
             raise
         finally:
             latency_ms = self._elapsed_ms(started_at)
             telemetry.last_discovery_latency_ms = latency_ms
             telemetry.total_discovery_latency_ms += latency_ms
+
+    async def _load_configured_servers(self) -> list[ExternalMCPServerConfig]:
+        if self._server_loader is not None:
+            loaded = self._server_loader()
+            return list(await loaded if inspect.isawaitable(loaded) else loaded)
+        cfg = load_external_server_registry(self.config_path)
+        return list(cfg.servers)
+
+    async def _load_configured_server_snapshot(
+        self,
+    ) -> tuple[list[ExternalMCPServerConfig], dict[str, str]]:
+        try:
+            return await self._load_configured_servers(), {}
+        except ExternalServerRegistryPartialLoadError as exc:
+            return list(exc.servers), dict(exc.errors)
+
+    async def _remove_server_runtime(self, server_id: str) -> None:
+        adapter = self._adapters.pop(server_id, None)
+        if adapter is not None:
+            try:
+                await adapter.close()
+            except Exception as exc:
+                logger.warning(
+                    "External MCP adapter close failed for {}; error_type={}",
+                    server_id,
+                    type(exc).__name__,
+                )
+        self._servers.pop(server_id, None)
+        self._clear_server_tools(server_id)
+        self._discovery_errors.pop(server_id, None)
+        self._telemetry.pop(server_id, None)
+
+    async def _close_adapter(self, server_id: str, adapter: ExternalMCPTransportAdapter) -> None:
+        try:
+            await adapter.close()
+        except Exception as exc:
+            logger.warning(
+                "External MCP adapter close failed for {}; error_type={}",
+                server_id,
+                type(exc).__name__,
+            )
+
+    @staticmethod
+    def _server_fingerprint(server: ExternalMCPServerConfig) -> dict[str, Any]:
+        if hasattr(server, "model_dump"):
+            return server.model_dump(mode="json")  # type: ignore[attr-defined]
+        return server.dict()
 
     @staticmethod
     def _virtual_tool_name(server_id: str, tool_name: str) -> str:
@@ -407,15 +615,18 @@ class ExternalServerManager:
         return self._get_telemetry(server_id).snapshot()
 
     async def _connect_server(self, server_id: str) -> None:
+        await self._connect_adapter(server_id, self._adapters[server_id])
+
+    async def _connect_adapter(self, server_id: str, adapter: ExternalMCPTransportAdapter) -> None:
         telemetry = self._get_telemetry(server_id)
         telemetry.connect_attempts += 1
         started_at = time.perf_counter()
         try:
-            await self._adapters[server_id].connect()
+            await adapter.connect()
             telemetry.connect_successes += 1
-        except Exception as exc:
+        except Exception:
             telemetry.connect_failures += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_CONNECT_FAILED
             raise
         finally:
             latency_ms = self._elapsed_ms(started_at)
@@ -436,13 +647,16 @@ class ExternalServerManager:
         telemetry.call_attempts += 1
         started_at = time.perf_counter()
         try:
+            call_kwargs: dict[str, Any] = {"context": context}
+            supports_runtime_auth = adapter_supports_runtime_auth(adapter)
+            if supports_runtime_auth:
+                call_kwargs["runtime_auth"] = runtime_auth
             result = await adapter.call_tool(
                 upstream_tool_name,
                 call_args,
-                context=context,
-                runtime_auth=runtime_auth,
+                **call_kwargs,
             )
-            if runtime_auth is not None:
+            if runtime_auth is not None and supports_runtime_auth:
                 metadata = dict(result.metadata or {})
                 metadata.update(self._public_runtime_auth_metadata(runtime_auth))
                 metadata["credential_injection"] = self._summarize_runtime_auth(runtime_auth)
@@ -454,14 +668,14 @@ class ExternalServerManager:
                 if error_text:
                     telemetry.last_error = error_text
             return result
-        except TimeoutError as exc:
+        except TimeoutError:
             telemetry.call_failures += 1
             telemetry.call_timeouts += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_CALL_TIMEOUT
             raise
-        except Exception as exc:
+        except Exception:
             telemetry.call_failures += 1
-            telemetry.last_error = str(exc)
+            telemetry.last_error = _EXTERNAL_SERVER_CALL_FAILED
             raise
         finally:
             latency_ms = self._elapsed_ms(started_at)

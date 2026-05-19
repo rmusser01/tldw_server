@@ -10,6 +10,7 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 
 ### Core Capabilities
 - **Multi-Provider Support**: OpenAI, ElevenLabs, and local adapters (Kokoro, KittenTTS, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, VibeVoice Realtime, Qwen3-TTS, IndexTTS2, NeuTTS, Supertonic, Supertonic2, EchoTTS) with a mock adapter for testing.
+- **Managed Sidecars**: OmniVoice runs behind a dedicated loopback sidecar runtime instead of sharing the main server interpreter.
 - **Voice Cloning**: Voice reference audio accepted by PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, Qwen3-TTS, NeuTTS, IndexTTS2, and EchoTTS (ElevenLabs supports user voices via API).
 - **Streaming Audio**: Real-time chunked streaming across adapters; NeuTTS enables streaming when a quantized (GGUF) backbone is loaded; VibeVoice Realtime uses a WS backend.
 - **Format Support**: Adapter-specific coverage spanning MP3, WAV, OPUS, FLAC, PCM, AAC, and OGG via the shared `AudioFormat` enum.
@@ -40,6 +41,7 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 | **Supertonic** | Local ONNX | Varies (model) | ❌ | User-supplied voice styles |
 | **Supertonic2** | Local ONNX | Varies (model) | ❌ | User-supplied voice styles |
 | **EchoTTS** | Local PyTorch | EN | ✅ (reference) | CUDA-only voice cloning |
+| **OmniVoice** | Local sidecar | EN | ✅ (reference / stored custom voices) | Dedicated managed runtime, default `voice="auto"` when omitted |
 
 \* Current adapter configuration targets English (`tts-1` / `tts-1-hd`). Additional languages depend on OpenAI model availability.
 
@@ -165,6 +167,9 @@ python Helper_Scripts/TTS_Installers/install_tts_dia.py
 python Helper_Scripts/TTS_Installers/install_tts_higgs.py
 python Helper_Scripts/TTS_Installers/install_tts_vibevoice.py --variant 1.5B
 
+# OmniVoice sidecar runtime
+python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py
+
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
 
@@ -214,6 +219,16 @@ providers:
 ```
 
 If you want to prefetch assets during setup instead of waiting for first synthesis, use the setup UI advanced TTS installer and select `kitten_tts`.
+
+### OmniVoice
+
+OmniVoice uses a managed sidecar process with its own virtual environment under `models/omnivoice_sidecar`.
+
+- Installer: `python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py`
+- Preferred local source checkout: `../OmniVoice`
+- Runtime layout: `.venv`, `runtime`, and `logs` under `models/omnivoice_sidecar`
+- Provider requests that explicitly resolve to OmniVoice and omit `voice` normalize to `auto`
+- The sidecar supervisor consumes the configured interpreter path so the dedicated installer-created runtime is the one that launches
 
 Configuration notes (providers.kokoro in tts_providers_config.yaml):
 - model_path: path to ONNX file

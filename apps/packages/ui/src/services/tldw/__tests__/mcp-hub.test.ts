@@ -16,6 +16,7 @@ import {
   listGovernancePacks,
   listCapabilityAdapterMappings,
   previewCapabilityAdapterMapping,
+  refreshExternalServerDiscovery,
   setExternalServerSecret,
   updateGovernancePackTrustPolicy
 } from "../mcp-hub"
@@ -41,6 +42,28 @@ describe("mcp hub service client", () => {
         path: "/api/v1/mcp/hub/external-servers/docs/secret",
         method: "POST",
         body: { secret: "my-secret" }
+      })
+    )
+  })
+
+  it("returns structured external discovery refresh errors for completed refresh responses", async () => {
+    const partialRefresh = {
+      ok: false,
+      message: "Discovery refreshed with errors",
+      errors: { docs: "external_server_discovery_failed" },
+      refreshed_servers: 1,
+      total_servers: 2
+    }
+    mocks.bgRequestClient.mockResolvedValueOnce(partialRefresh)
+
+    const out = await refreshExternalServerDiscovery("docs")
+
+    expect(out).toEqual(partialRefresh)
+    expect(mocks.bgRequestClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/mcp/hub/external-servers/refresh-discovery",
+        method: "POST",
+        body: { server_id: "docs" }
       })
     )
   })

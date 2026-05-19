@@ -57,6 +57,23 @@ vi.mock("@/hooks/useUndoNotification", () => ({
   useUndoNotification: () => undoNotificationMock
 }))
 
+const isoForLocalDate = (value: string, boundary: "start" | "end") => {
+  const [year, month, day] = value.split("-").map(Number)
+  const date =
+    boundary === "start"
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 999)
+  return date.toISOString()
+}
+
+const localDateLabel = (value: string) => {
+  const date = new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 describe("ItemsWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -113,6 +130,80 @@ describe("ItemsWorkspace", () => {
       expect(apiMock.getItems).toHaveBeenCalled()
     })
     expect(await screen.findByText("Shared Item")).toBeTruthy()
+  })
+
+  it("applies native date range filters with local day boundaries", async () => {
+    render(<ItemsWorkspace />)
+
+    expect(await screen.findByText("Shared Item")).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText("Date from"), {
+      target: { value: "2026-02-10" }
+    })
+
+    await waitFor(() => {
+      expect(apiMock.getItems).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          date_from: isoForLocalDate("2026-02-10", "start")
+        })
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText("Date to"), {
+      target: { value: "2026-02-12" }
+    })
+
+    await waitFor(() => {
+      expect(apiMock.getItems).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          date_from: isoForLocalDate("2026-02-10", "start"),
+          date_to: isoForLocalDate("2026-02-12", "end")
+        })
+      )
+    })
+
+    fireEvent.change(screen.getByLabelText("Date from"), {
+      target: { value: "" }
+    })
+
+    await waitFor(() => {
+      expect(apiMock.getItems).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          date_from: undefined,
+          date_to: isoForLocalDate("2026-02-12", "end")
+        })
+      )
+    })
+  })
+
+  it("formats valid published dates without changing invalid labels", async () => {
+    apiMock.getItems.mockResolvedValue({
+      items: [
+        {
+          id: "101",
+          title: "Dated Item",
+          status: "reading",
+          tags: [],
+          published_at: "2026-02-18T08:20:00.000Z"
+        },
+        {
+          id: "202",
+          title: "Raw Date Item",
+          status: "saved",
+          tags: [],
+          published_at: "not-a-date"
+        }
+      ],
+      total: 2,
+      page: 1,
+      size: 25
+    })
+
+    render(<ItemsWorkspace />)
+
+    expect(await screen.findByText("Dated Item")).toBeTruthy()
+    expect(screen.getByText(localDateLabel("2026-02-18T08:20:00.000Z"))).toBeTruthy()
+    expect(screen.getByText("not-a-date")).toBeTruthy()
   })
 
   it("generates output from selected item ids", async () => {

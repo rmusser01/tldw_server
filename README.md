@@ -26,6 +26,7 @@
 <summary>Expand table of contents</summary>
 
 - [Overview](#overview)
+- [Start Here](#start-here)
 - [Current Status](#current-status)
 - [What's New (in the last few releases)](#whats-new-in-the-last-few-releases)
 - [Privacy & Security](#privacy--security)
@@ -81,16 +82,18 @@ Good fit for:
 
 ## Start Here
 
-1. **Check prerequisites:** `make quickstart-prereqs` (or verify Python 3.10+ and ffmpeg manually; Docker is only required for the Docker-based profiles)
-2. **Pick your setup profile:**
+1. **Check prerequisites:** `make quickstart-prereqs` (or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile)
+2. **Pick one peer setup profile:**
 
-| Profile | Best for | Command |
-|---------|----------|---------|
-| [Docker single-user + WebUI](Docs/Getting_Started/Profile_Docker_Single_User.md) | Most users (Recommended) | `make quickstart` |
-| [Docker multi-user + Postgres](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) | Teams, public deployments | See profile guide |
-| [Local single-user](Docs/Getting_Started/Profile_Local_Single_User.md) | Development, debugging | `make quickstart-install` |
+| Profile | Best for | Prepare | Start | Verify |
+|---------|----------|---------|-------|--------|
+| [Docker single-user + WebUI](Docs/Getting_Started/Profile_Docker_Single_User.md) | Most users (recommended) | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
+| [Docker multi-user + Postgres](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) | Teams, public deployments | Export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| [Local single-user](Docs/Getting_Started/Profile_Local_Single_User.md) | Development, debugging | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
 
-1. **Follow your profile guide** end-to-end — it covers install, run, verify, and next steps.
+`make quickstart` remains the shortest Docker single-user + WebUI alias. It runs setup, start, and verification for the first profile.
+
+1. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 
 Developers working on the WebUI, extension, or shared app packages should also start with [apps/DEVELOPMENT.md](apps/DEVELOPMENT.md).
 
@@ -101,10 +104,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 
 ## Current Status
 
-Latest release:
-- 0.1.28 (2026-03-15) Beta status - expect rough edges;
-  * please report issues.
-- See `CHANGELOG.md` for release history.
+Current release line:
+- `0.1.31` Beta status. Expect rough edges and please report issues.
+- Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
+- The `dev` branch currently contains additional unreleased work beyond `0.1.31`; see [CHANGELOG.md](CHANGELOG.md) for branch-level detail and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -138,17 +141,27 @@ Latest release:
 
 ## What's New (in the last few releases)
 
-- FastAPI-first backend with OpenAI-compatible Chat, Audio (STT/TTS + voice catalog), Embeddings, and Evals APIs
-- Unified RAG + Evaluations modules (hybrid BM25 + vector with re-ranking; unified metrics)
-- Expanded audio stack: multi-provider TTS/STT, streaming, and audio jobs queue
-- MCP Unified module with JWT/RBAC, tool execution APIs, WebSockets, and metrics
-- Next.js WebUI and Admin UI (primary web client)
-- Research & ingestion upgrades: OCR, web search + academic search, connectors, outputs/artifacts, watchlists/workflows
-- Reminder tasks + in-app notifications inbox, including realtime SSE stream and snooze actions
-- Strict OpenAI compatibility mode for local/self-hosted providers
-- PostgreSQL content mode + backup/restore helpers; Prometheus/Grafana monitoring + admin usage reporting
+Recently shipped:
+- Evaluations Recipe Framework for guided retrieval tuning, answer-quality runs, and recipe-first eval workflows.
+- MCP Virtual CLI plus follow-on hardening for governed, workspace-bounded command execution.
+- Writing Suite Phase 1 with manuscript CRUD, TipTap editor surfaces, tree/focus mode, and reorder support.
+- Study Packs Phase 1 for jobs-backed study-material generation and remediation handoffs.
+- Container snapshot publishing to GHCR with a unified `container-build-check` rollup job.
+- FTUE / FTUX expansion across onboarding, LLM setup, chat, watchlists, MCP Hub, moderation, quiz, and flashcards.
+- Deep Research with jobs-backed runs, SSE progress, checkpoint review, and chat handoffs.
+- Shared workspace cloning plus "Shared With Me" flows and privilege-aware sharing rules.
+- Companion Home dashboard, notifications surfaces, and integrations / scheduled-task management.
+- MCP Hub governance pack management and broader ACP workspace discovery/health support.
+- Audio installer and bundle follow-through, including curated `kitten_tts` and `pocket_tts_cpp` paths.
 
-See: `Docs/Published/RELEASE_NOTES.md` for detailed release notes.
+Currently landing on `dev` (post-`0.1.31` branch work):
+- Writing Suite Phases 2-4 with characters, world info, plot/research tools, AI analysis, agent chat, and live writing feedback.
+- Persona-routed onboarding, Mission Control home flows, and storage quota warnings.
+- Browser web clipper support for capturing pages into the research workflow.
+- Study suggestions for quiz and flashcard workflows.
+- Additional sandbox / ACP ergonomics and `llama.cpp` / `chatllm` OCR backend expansion.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
 
 ## Privacy & Security
 
@@ -176,7 +189,7 @@ See: `Docs/Published/RELEASE_NOTES.md` for detailed release notes.
 - Audiobooks: parse + chapter detection, per-chapter voice settings, optional TTS provider overrides (alignment/subtitles Kokoro-only), and M4B packaging (API-only).
 - Search & retrieval (RAG): hybrid BM25 + vector (ChromaDB/pgvector), re-ranking, contextual retrieval, OpenAI-compatible embeddings, vector stores API, and media embeddings ingestion. 50+ optional parameters available for tuning.
 - Chat & providers: `/api/v1/chat/completions` (OpenAI-compatible), 16+ providers (commercial + self-hosted), character chat, budgets/allowlists, moderation endpoint.
-- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export, flashcards (.apkg), reading items/highlights.
+- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export including OpenWebUI chat JSON migration, OpenWebUI webui.db migration, and post-import attachment hydration, flashcards (.apkg), reading items/highlights.
 - Prompt Studio & evaluations: projects, prompt testing/optimization, unified evaluation APIs (G-Eval, RAG, OCR, embeddings A/B tests, batch metrics). Full evaluations and prompt management.
 - Research & web scraping: multi-provider web search, academic paper search (arXiv/PubMed/etc.), scraping jobs with cookies/progress, aggregation/final answers.
 - Connectors: Google Drive + Notion OAuth import; connector policies/quotas.
@@ -213,35 +226,47 @@ docker --version    # only if using Docker paths
 
 ### At-a-Glance Commands
 
-Choose one install path:
+Choose one public setup profile:
 
-| Goal | Command |
-|------|---------|
-| API only (local Python, no Docker) | `make quickstart-install` |
-| API only (Docker) | `make quickstart-docker` |
-| API + WebUI (Docker) | `make quickstart-docker-webui` |
-| No `make` available (common on Windows) | See [No-Make Path (Windows-Friendly)](#no-make-path-windows-friendly) |
+| Profile | Prepare | Start | Verify |
+|------|---------|-------|--------|
+| Docker single-user + WebUI | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
+| Docker multi-user + Postgres | Export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| Local single-user | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
 
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git && cd tldw_server
 
-# Recommended default: Docker single-user + WebUI
+# Shortest Docker single-user + WebUI alias:
 make quickstart
 
-# API-only Docker path:
-# make quickstart-docker
+# Equivalent explicit Docker single-user + WebUI lifecycle:
+make setup-docker-single
+make start-docker-single
+make verify-docker-single
 
-# Explicit full-stack Docker path:
-# make quickstart-docker-webui
+# Docker multi-user + Postgres:
+export ADMIN_USERNAME=tldw-admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+make start-docker-multi
+make verify-docker-multi
 
-# Local development path (API only):
-# make quickstart-install
+# Local single-user:
+make install-local
+make setup-local-single
+make start-local-single
+make verify-local-single
+
+# Compatibility aliases:
+# make quickstart-docker-webui  # same as make quickstart
+# make quickstart-docker        # Docker single-user API only
+# make quickstart-install       # local install only; does not start the server
 # If `python3` is older than 3.10 on your machine:
-# make quickstart-install PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
 
 # Force a full image rebuild when needed:
-# make quickstart-docker DOCKER_BUILD=true
-# make quickstart-docker-webui DOCKER_BUILD=true
+# make start-docker-single DOCKER_BUILD=true
 ```
 
 If `make` is unavailable, use [No-Make Path (Windows-Friendly)](#no-make-path-windows-friendly).
@@ -254,8 +279,8 @@ make quickstart
 ```
 
 This target:
-- Starts the Docker single-user + WebUI setup.
-- Uses the existing `quickstart-docker-webui` flow under the hood.
+- Runs `make setup-docker-single`, `make start-docker-single`, and `make verify-docker-single`.
+- Matches the existing `quickstart-docker-webui` compatibility alias.
 - Brings up the API at `http://localhost:8000` and WebUI at `http://localhost:8080`.
 - Keeps the default browser path on same-origin browser API requests through the WebUI proxy.
 
@@ -268,12 +293,14 @@ Want a more advanced deployment?
 
 ```bash
 # from repo root
-make quickstart-install
+make install-local
+make setup-local-single
+make start-local-single
 # If `python3` is older than 3.10 on your machine:
-# make quickstart-install PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
 ```
 
-This target:
+These targets:
 - Creates `.venv` if missing and installs dependencies.
 - Creates `tldw_Server_API/Config_Files/.env` from `.env.example` if missing.
 - Initializes AuthNZ (non-interactive).
@@ -281,34 +308,43 @@ This target:
 
 Verify with:
 ```bash
-curl http://localhost:8000/health  # No auth needed!
+make verify-local-single
 ```
 
-Already have dependencies installed and a Python 3.10+ interpreter selected? Use `make quickstart-local` (or set `PYTHON=python3.13` / `PYTHON=python3.12` / `PYTHON=.venv/bin/python`).
+`make quickstart-install` remains a compatibility alias for local installation only. It does not start the server.
 
 ### No-Make Path (Windows-Friendly)
 
 Use these paths when `make` is not available.
 
-API only (local Python, no Docker):
-- Follow [Manual Setup](#manual-setup) below (includes PowerShell commands).
+Local single-user:
+- Shortcut scripts from the repository root:
+  - macOS/Linux terminal: `./quick-launch.sh`
+  - macOS Finder: double-click `quick-launch.command`
+  - Windows PowerShell: `.\quick-launch.ps1`
+- These scripts create or update `.venv`, run the `local-single` setup wizard, and start the API at `http://127.0.0.1:8000`.
+- For manual control, follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
 
-API only (Docker):
+Docker single-user + WebUI:
 ```powershell
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml up -d --build
+# For non-localhost browser access, uncomment both advanced/custom-host overrides:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
+docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 curl http://localhost:8000/health
 ```
 
-API + WebUI (Docker):
+Docker multi-user + Postgres:
 ```powershell
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
-# Optional for non-localhost deployments:
-# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
-# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
+$env:ADMIN_USERNAME="tldw-admin"
+$env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
+# Run the tldw-setup init command from the multi-user profile guide first.
+$env:TLDW_ENV_FILE=(Resolve-Path "tldw_Server_API/Config_Files/.env").Path
+docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
 ```
 
 ### Manual Setup
@@ -584,8 +620,10 @@ Quickstart targets skip forced rebuilds by default; pass `DOCKER_BUILD=true` to 
 
 Or manually:
 ```bash
-# Single-user mode (simplest)
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml up -d --build
+# Docker single-user + WebUI
+docker compose --env-file tldw_Server_API/Config_Files/.env \
+  -f Dockerfiles/docker-compose.single-user.yml \
+  -f Dockerfiles/docker-compose.webui.yml up -d --build
 curl http://localhost:8000/health  # Verify
 ```
 
@@ -601,20 +639,22 @@ grep '^SINGLE_USER_API_KEY=' tldw_Server_API/Config_Files/.env
 <summary>More Docker options (multi-user, overlays)</summary>
 
 ```bash
-# Multi-user (Postgres users DB)
-export AUTH_MODE=multi_user
-export DATABASE_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users
-docker compose -f Dockerfiles/docker-compose.postgres.yml up -d
+# Multi-user + Postgres users DB
+export TLDW_ENV_FILE="$(pwd)/tldw_Server_API/Config_Files/.env"
+docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
 
 # Dev overlay — unified streaming (non-prod)
 docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.dev.yml up -d --build
 
-# WebUI overlay (Next.js container on :8080)
-docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
+# WebUI overlay with single-user profile (Next.js container on :8080)
+# PowerShell advanced/custom-host browser access:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
+docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 
 # Check status
-docker compose -f Dockerfiles/docker-compose.yml ps
-docker compose -f Dockerfiles/docker-compose.yml logs -f app
+docker compose -f Dockerfiles/docker-compose.single-user.yml ps
+docker compose -f Dockerfiles/docker-compose.single-user.yml logs -f app
 
 # Proxy overlays
 #   - Dockerfiles/docker-compose.proxy.yml (Caddy)
@@ -626,7 +666,7 @@ docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.p
 </details>
 
 Notes
-- Run compose commands from the repository root. The base compose file at `Dockerfiles/docker-compose.yml` builds with context at the repo root and includes Postgres and Redis services.
+- Run compose commands from the repository root. The public profile compose files are `Dockerfiles/docker-compose.single-user.yml` and `Dockerfiles/docker-compose.multi-user-postgres.yml`.
 - For `Dockerfiles/docker-compose.webui.yml`, the default quickstart leaves `NEXT_PUBLIC_API_URL` empty so browsers stay on same-origin browser API requests through the WebUI proxy. Set `NEXT_PUBLIC_API_URL` only for the advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access.
 - `NEXT_PUBLIC_API_VERSION` and `NEXT_PUBLIC_X_API_KEY` are also build-time public values in the client bundle; set them explicitly for your target deployment/auth mode.
 - If you need per-environment API URLs without rebuilding the WebUI image, switch to a runtime env-substitution strategy instead of compile-time `NEXT_PUBLIC_*` build args.
@@ -1073,9 +1113,9 @@ Run locally
 
 **Getting Started Guides:**
 - [Getting Started Index](Docs/Getting_Started/README.md) - choose the right setup path
-- [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) - local API development path
-- [Docker Single-User Profile](Docs/Getting_Started/Profile_Docker_Single_User.md) - self-host with Docker
+- [Docker Single-User + WebUI Profile](Docs/Getting_Started/Profile_Docker_Single_User.md) - self-host with Docker and the WebUI
 - [Docker Multi-User + Postgres Profile](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) - team deployment baseline
+- [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) - local API development path
 - [First-time audio setup: CPU systems](Docs/Getting_Started/First_Time_Audio_Setup_CPU.md) - local-first STT and TTS for CPU boxes
 - [First-time audio setup: GPU/accelerated systems](Docs/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md) - NVIDIA and Apple Silicon speech setup
 - [GPU/STT Add-on](Docs/Getting_Started/GPU_STT_Addon.md) - legacy pointer to the accelerated guide
@@ -1108,8 +1148,10 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 ### Chatbook Tools Guide
 
+- User guide: `Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md` covers Chatbook backup/restore, OpenWebUI "Export Chats" JSON import, OpenWebUI `webui.db` database import, and post-import OpenWebUI attachment hydration for restoring referenced images/files from a server-local data root.
 - Getting started: `Docs/User_Guides/WebUI_Extension/Chatbook_Tools_Getting_Started.md`
 - Product spec (PRD): `Docs/Product/Completed/Chatbook-Tools-PRD.md`
+- API reference: `Docs/API-related/Chatbook_API_Documentation.md`
 - Related endpoints (also listed above under Key Endpoints):
   - `GET /api/v1/chat/commands` — list slash commands (RBAC-filtered when enabled; returns empty list when disabled)
   - `POST /api/v1/chat/dictionaries/validate` — validate chat dictionaries (schema, regex, templates)

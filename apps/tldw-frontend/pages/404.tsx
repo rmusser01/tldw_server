@@ -31,9 +31,9 @@ export default function NotFoundPage() {
                 void router.push('/');
               });
             }}
-            data-testid="not-found-go-chat"
+            data-testid="not-found-open-home"
           >
-            Go to Chat
+            Open Home
           </button>
           <Link
             href="/research"

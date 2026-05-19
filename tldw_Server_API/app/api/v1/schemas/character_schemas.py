@@ -9,6 +9,7 @@ from typing import Any, Literal, Optional, Union
 #
 # Third-party imports
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 #
 ######################################################################################################################
@@ -190,6 +191,16 @@ class CharacterListQueryResponse(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=25, ge=1)
     has_more: bool = False
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def default_pagination_aliases(self) -> "CharacterListQueryResponse":
+        if "has_more" not in self.__pydantic_fields_set__:
+            self.has_more = self.pagination.has_more
+        if self.next_offset is None:
+            self.next_offset = self.pagination.next_offset
+        return self
 
 
 class CharacterTagOperationRequest(BaseModel):
@@ -236,9 +247,25 @@ class CharacterImportResponse(BaseModel):
     )
 
 
-class DeletionResponse(BaseModel):
+class MessageResponse(BaseModel):
     message: str
-    character_id: int
+
+
+class DeletionResponse(MessageResponse):
+    character_id: int = Field(gt=0)
+
+
+class WorldBookDeletionResponse(MessageResponse):
+    world_book_id: int = Field(gt=0)
+
+
+class WorldBookEntryDeletionResponse(MessageResponse):
+    entry_id: int = Field(gt=0)
+
+
+class CharacterWorldBookDetachDeletionResponse(MessageResponse):
+    world_book_id: int = Field(gt=0)
+    detached_from_character_id: int = Field(gt=0)
 
 
 class CharacterExemplarSource(BaseModel):
@@ -315,6 +342,7 @@ class CharacterExemplarSearchRequest(BaseModel):
 class CharacterExemplarSearchResponse(BaseModel):
     items: list[CharacterExemplarResponse]
     total: int = Field(default=0, ge=0)
+    pagination: OffsetPaginationMeta
 
 
 class CharacterExemplarSelectionConfig(BaseModel):

@@ -12,7 +12,7 @@ FallbackChain, HealthMonitor, ErrorRecoveryCoordinator).
 
 import asyncio
 import contextlib
-import random
+import secrets
 import time
 import traceback
 from collections import deque
@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
 )
 
 T = TypeVar('T')
+_JITTER_RANDOM = secrets.SystemRandom()
 
 
 # ---------------------------------------------------------------------------
@@ -176,20 +177,20 @@ class CircuitBreaker:
             for cb in self.on_open_callbacks:
                 try:
                     cb(self)
-                except Exception as e:  # noqa: BLE001
-                    logger.error(f"Error in open callback: {e}")
+                except Exception:  # noqa: BLE001
+                    logger.error("Error in open callback")
         elif new_state == _UnifiedState.CLOSED:
             for cb in self.on_close_callbacks:
                 try:
                     cb(self)
-                except Exception as e:  # noqa: BLE001
-                    logger.error(f"Error in close callback: {e}")
+                except Exception:  # noqa: BLE001
+                    logger.error("Error in close callback")
         elif new_state == _UnifiedState.HALF_OPEN:
             for cb in self.on_half_open_callbacks:
                 try:
                     cb(self)
-                except Exception as e:  # noqa: BLE001
-                    logger.error(f"Error in half-open callback: {e}")
+                except Exception:  # noqa: BLE001
+                    logger.error("Error in half-open callback")
 
     # -- core API ------------------------------------------------------------
 
@@ -254,14 +255,13 @@ class RetryPolicy:
                 should_retry = self._should_retry(e)
 
                 if not should_retry or attempt == self.config.max_attempts:
-                    logger.error(f"Retry failed after {attempt} attempts: {e}")
+                    logger.error(f"Retry failed after {attempt} attempts")
                     raise
 
                 delay = self._calculate_delay(attempt)
 
                 logger.warning(
-                    f"Attempt {attempt} failed: {e}. "
-                    f"Retrying in {delay:.2f}s..."
+                    f"Attempt {attempt} failed. Retrying in {delay:.2f}s..."
                 )
 
                 await asyncio.sleep(delay)
@@ -283,7 +283,7 @@ class RetryPolicy:
         delay = min(delay, self.config.max_delay)
 
         if self.config.jitter:
-            jitter = delay * 0.25 * (2 * random.random() - 1)
+            jitter = delay * 0.25 * (2 * _JITTER_RANDOM.random() - 1)
             delay += jitter
 
         return max(0, delay)
@@ -315,7 +315,7 @@ class FallbackChain:
             else:
                 return await asyncio.to_thread(primary_func, *args, **kwargs)
         except Exception as primary_error:  # noqa: BLE001 - fallback chain best-effort
-            logger.warning(f"Primary function failed: {primary_error}")
+            logger.warning("Primary function failed")
 
             for fallback_func, condition in self.strategies:
                 if condition is None or condition(primary_error):
@@ -327,8 +327,8 @@ class FallbackChain:
                         else:
                             return await asyncio.to_thread(fallback_func, *args, **kwargs)
 
-                    except Exception as fallback_error:  # noqa: BLE001 - fallback chain best-effort
-                        logger.warning(f"Fallback failed: {fallback_error}")
+                    except Exception:  # noqa: BLE001 - fallback chain best-effort
+                        logger.warning("Fallback failed")
                         continue
 
             logger.error("All fallback strategies failed")
@@ -379,8 +379,8 @@ class HealthMonitor:
             try:
                 await self.check_all_health()
                 await asyncio.sleep(self.check_interval)
-            except Exception as e:  # noqa: BLE001 - keep monitoring loop alive
-                logger.error(f"Error in health monitoring: {e}")
+            except Exception:  # noqa: BLE001 - keep monitoring loop alive
+                logger.error("Error in health monitoring")
                 await asyncio.sleep(self.check_interval)
 
     async def check_all_health(self) -> dict[str, HealthStatus]:
@@ -400,8 +400,8 @@ class HealthMonitor:
                 if not is_healthy and component.critical:
                     logger.error(f"Critical component '{name}' is unhealthy")
 
-            except Exception as e:  # noqa: BLE001 - health checks are best-effort
-                logger.error(f"Health check failed for '{name}': {e}")
+            except Exception:  # noqa: BLE001 - health checks are best-effort
+                logger.error(f"Health check failed for '{name}'")
                 component.update_health(False)
                 results[name] = HealthStatus.UNKNOWN
 
@@ -529,7 +529,7 @@ class ErrorRecoveryCoordinator:
                     "component": e.component,
                     "operation": e.operation,
                     "timestamp": e.timestamp,
-                    "error": str(e.error)
+                    "error": "Error details unavailable"
                 }
                 for e in list(self.error_history)[-10:]
             ]
@@ -650,8 +650,8 @@ async def check_component_health(
         if not is_healthy and kwargs.get("critical", False):
             raise Exception(f"Critical component '{component}' is unhealthy")
 
-    except Exception as e:  # noqa: BLE001 - health checks are best-effort
-        logger.error(f"Health check failed for '{component}': {e}")
+    except Exception:  # noqa: BLE001 - health checks are best-effort
+        logger.error(f"Health check failed for '{component}'")
         context.metadata[f"health_{component}"] = "unknown"
 
         if kwargs.get("critical", False):

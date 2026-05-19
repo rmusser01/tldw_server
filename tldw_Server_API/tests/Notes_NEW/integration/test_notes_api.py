@@ -241,6 +241,22 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     d1, d2 = page1.json(), page2.json()
     assert isinstance(d1, dict) and isinstance(d2, dict)
     assert isinstance(d1.get("notes"), list) and isinstance(d2.get("notes"), list)
+    assert d1["pagination"]["mode"] == "offset"
+    assert d1["pagination"]["limit"] == 2
+    assert d1["pagination"]["offset"] == 0
+    assert d1["pagination"]["total"] == d1["total"]
+    assert d1["pagination"]["has_more"] is True
+    assert d1["pagination"]["next_offset"] == 2
+    assert d1["has_more"] is True
+    assert d1["next_offset"] == 2
+    assert d2["pagination"]["mode"] == "offset"
+    assert d2["pagination"]["limit"] == 2
+    assert d2["pagination"]["offset"] == 2
+    assert d2["pagination"]["total"] == d2["total"]
+    assert d2["pagination"]["has_more"] is True
+    assert d2["pagination"]["next_offset"] == 4
+    assert d2["has_more"] is True
+    assert d2["next_offset"] == 4
     # Verify disjointness of pages by IDs
     ids1 = {n.get("id") for n in d1.get("notes", [])}
     ids2 = {n.get("id") for n in d2.get("notes", [])}
@@ -342,6 +358,56 @@ def test_keywords_list_pagination_and_search_limit(client_with_notes_db: TestCli
     results = search.json()
     assert isinstance(results, list)
     assert len(results) <= 7
+
+
+def test_keyword_collections_list_includes_canonical_pagination(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    first = client.post("/api/v1/notes/collections", json={"name": "Collection A"})
+    second = client.post("/api/v1/notes/collections", json={"name": "Collection B"})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+
+    page1 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 0})
+    page2 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 1})
+    assert page1.status_code == 200, page1.text
+    assert page2.status_code == 200, page2.text
+
+    payload1 = page1.json()
+    payload2 = page2.json()
+    assert len(payload1["collections"]) == 1
+    assert len(payload2["collections"]) == 1
+    page1_ids = {collection["id"] for collection in payload1["collections"]}
+    page2_ids = {collection["id"] for collection in payload2["collections"]}
+    assert page1_ids.isdisjoint(page2_ids)
+    assert payload1["total"] == 2
+    assert payload1["count"] == 1
+    assert payload1["limit"] == 1
+    assert payload1["offset"] == 0
+    assert payload1["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert payload1["has_more"] is True
+    assert payload1["next_offset"] == 1
+    assert payload2["total"] == 2
+    assert payload2["count"] == 1
+    assert payload2["limit"] == 1
+    assert payload2["offset"] == 1
+    assert payload2["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload2["has_more"] is False
+    assert payload2["next_offset"] is None
 
 
 def test_keywords_list_without_trailing_slash_does_not_hit_note_lookup(client_with_notes_db: TestClient):

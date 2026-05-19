@@ -17,6 +17,7 @@ import type {
 } from "@/types/collections"
 import type {
   CreateIngestionSourceRequest,
+  IngestionSourceDirectoryBrowseResponse,
   IngestionSourceItem,
   IngestionSourceItemFilters,
   IngestionSourceItemsListResponse,
@@ -26,13 +27,14 @@ import type {
   UpdateIngestionSourceRequest
 } from "@/types/ingestion-sources"
 import {
+  normalizeIngestionSourceDirectoryBrowseResponse,
   normalizeIngestionSource,
   normalizeIngestionSourceItem,
   normalizeIngestionSourceItemsListResponse,
   normalizeIngestionSourceListResponse,
   normalizeIngestionSourceSyncTrigger,
   normalizeReadingDigestSchedule
-} from "../TldwApiClient"
+} from "../collections-normalizers"
 
 export interface TldwApiClientCore {
   resolveApiPath(key: string, candidates: string[]): Promise<string>
@@ -126,7 +128,7 @@ export const collectionsMethods = {
       "/api/v1/prompts",
       "/api/v1/prompts/"
     ])
-    return await bgRequest<any>({ path, method: "GET" })
+    return await bgRequest<any>({ path: path as any, method: "GET" })
   },
 
   async searchPrompts(query: string): Promise<any> {
@@ -162,7 +164,7 @@ export const collectionsMethods = {
       "/api/v1/prompts/"
     ])
     return await bgRequest<any>({
-      path,
+      path: path as any,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: normalized
@@ -937,6 +939,19 @@ export const collectionsMethods = {
       method: "GET"
     })
     return normalizeIngestionSourceItemsListResponse(response)
+  },
+
+  async browseIngestionSourceDirectories(
+    this: TldwApiClientCore,
+    path?: string | null
+  ): Promise<IngestionSourceDirectoryBrowseResponse> {
+    const normalizedPath = typeof path === "string" ? path.trim() : ""
+    const query = buildQuery(normalizedPath ? { path: normalizedPath } : undefined)
+    const response = await this.request<any>({
+      path: `/api/v1/ingestion-sources/browse-directories${query}`,
+      method: "GET"
+    })
+    return normalizeIngestionSourceDirectoryBrowseResponse(response)
   },
 
   async createIngestionSource(

@@ -5,16 +5,23 @@
 import React from "react"
 import { Tooltip } from "antd"
 import { HelpCircle } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { cn } from "@/libs/utils"
+import { getRagSourceOptions } from "@/services/rag/sourceMetadata"
 
 export function BasicSettings() {
-  const { settings, updateSetting } = useKnowledgeQA()
+  const { t } = useTranslation(["sidepanel"])
+  const { settings, updateSetting, preset } = useKnowledgeQA()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const webFallbackHelpId = React.useId()
   const webFallbackHelpText =
-    "Requires a configured web search provider on the server (e.g., DuckDuckGo/Brave/Bing/Google/Tavily)."
+    "Uses your configured server default web provider when enabled. Queries stay on your tldw server unless fallback is enabled."
+  const sourceOptions = React.useMemo(
+    () => getRagSourceOptions((key, fallback) => t(key, fallback)),
+    [t]
+  )
 
   return (
     <div className="space-y-6">
@@ -52,19 +59,18 @@ export function BasicSettings() {
         <p className="text-xs text-text-muted">
           How many documents to retrieve (5-10 for quick, 20+ for thorough)
         </p>
+        {settings.top_k > 30 && preset === "thorough" && (
+          <p className="text-xs text-warn">
+            High source count with Deep preset may cause slow responses.
+          </p>
+        )}
       </div>
 
       {/* Source Types */}
       <div className="space-y-2">
         <label className="text-sm font-medium">Search Sources</label>
         <div className="space-y-2">
-          {[
-            { value: "media_db", label: "Documents & Media" },
-            { value: "notes", label: "Notes" },
-            { value: "characters", label: "Character Cards" },
-            { value: "chats", label: "Chat History" },
-            { value: "kanban", label: "Kanban" },
-          ].map((source) => (
+          {sourceOptions.map((source) => (
             <label key={source.value} className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -121,7 +127,7 @@ export function BasicSettings() {
           </button>
         </div>
         <p className="text-xs text-text-muted">
-          When local sources are weak, Knowledge QA can pull web results.
+          When local sources are weak, Knowledge QA can pull web results using your server default provider.
         </p>
         {settings.enable_web_fallback && !capsLoading && capabilities && !capabilities.hasWebSearch && (
           <div className="text-xs text-warn">

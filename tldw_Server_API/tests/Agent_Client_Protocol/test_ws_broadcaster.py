@@ -42,7 +42,7 @@ async def test_ws_broadcaster_delivers_events_full_verbosity():
         received.append(json.loads(msg))
 
     await broadcaster.start(bus)
-    broadcaster.add_connection("conn-1", fake_send, verbosity="full")
+    await broadcaster.add_connection("conn-1", fake_send, verbosity="full")
 
     for kind in (AgentEventKind.THINKING, AgentEventKind.TOOL_CALL, AgentEventKind.COMPLETION):
         await bus.publish(_make_event(kind))
@@ -68,7 +68,7 @@ async def test_ws_broadcaster_summary_filters_thinking():
         received.append(json.loads(msg))
 
     await broadcaster.start(bus)
-    broadcaster.add_connection("conn-1", fake_send, verbosity="summary")
+    await broadcaster.add_connection("conn-1", fake_send, verbosity="summary")
 
     await bus.publish(_make_event(AgentEventKind.THINKING))
     await bus.publish(_make_event(AgentEventKind.TOOL_CALL))
@@ -98,7 +98,7 @@ async def test_ws_broadcaster_remove_connection():
         received.append(json.loads(msg))
 
     await broadcaster.start(bus)
-    broadcaster.add_connection("conn-1", fake_send, verbosity="full")
+    await broadcaster.add_connection("conn-1", fake_send, verbosity="full")
 
     await bus.publish(_make_event(AgentEventKind.THINKING))
     await _wait_for(lambda: len(received) >= 1)
@@ -126,7 +126,7 @@ async def test_ws_broadcaster_change_verbosity():
         received.append(json.loads(msg))
 
     await broadcaster.start(bus)
-    broadcaster.add_connection("conn-1", fake_send, verbosity="summary")
+    await broadcaster.add_connection("conn-1", fake_send, verbosity="summary")
 
     # Thinking should be filtered at summary level
     await bus.publish(_make_event(AgentEventKind.THINKING))

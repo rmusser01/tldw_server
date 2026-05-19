@@ -3,6 +3,7 @@ Pytest configuration for the main test suite.
 
 Registers shared test plugins and provides common fixtures.
 """
+from __future__ import annotations
 
 pytest_plugins = ["tldw_Server_API.tests._plugins.http_client_patch_guard"]
 
@@ -604,7 +605,7 @@ def pytest_sessionfinish(session, exitstatus):  # pragma: no cover - diagnostics
 
         try:
             from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
-            _run_coro_sync_best_effort(shutdown_all_audit_services())
+            _run_coro_sync_best_effort(shutdown_all_audit_services(raise_on_error=False))
         except Exception:
             _ = None
         try:

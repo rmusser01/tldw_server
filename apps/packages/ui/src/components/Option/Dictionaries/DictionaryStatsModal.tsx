@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, Descriptions, Modal, Tag } from "antd"
+import { Button, Collapse, Descriptions, Modal, Tag } from "antd"
+import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { formatRelativeTimestamp } from "./listUtils"
 
@@ -14,6 +15,7 @@ export function DictionaryStatsModal({
   stats,
   onClose
 }: DictionaryStatsModalProps) {
+  const { t } = useTranslation(["option", "common"])
   const [activityPages, setActivityPages] = React.useState<Record<number, any[]>>({})
   const [activityPage, setActivityPage] = React.useState(1)
   const [activityTotal, setActivityTotal] = React.useState(0)
@@ -65,7 +67,11 @@ export function DictionaryStatsModal({
         return true
       } catch (error: any) {
         setActivityError(
-          error?.message || "Could not load additional activity events."
+          error?.message ||
+            t(
+              "option:dictionaries.stats.activityLoadFailed",
+              "Could not load additional activity events."
+            )
         )
         return false
       } finally {
@@ -87,57 +93,137 @@ export function DictionaryStatsModal({
   )
 
   return (
-    <Modal title="Dictionary Statistics" open={open} onCancel={onClose} footer={null}>
+    <Modal
+      title={t("option:dictionaries.stats.title", "Dictionary Statistics")}
+      open={open}
+      onCancel={onClose}
+      footer={null}
+    >
       {stats && (
         <div className="space-y-3">
-          <Descriptions size="small" bordered column={1}>
-            <Descriptions.Item label="ID">{stats.dictionary_id}</Descriptions.Item>
-            <Descriptions.Item label="Name">{stats.name}</Descriptions.Item>
-            <Descriptions.Item label="Total Entries">{stats.total_entries}</Descriptions.Item>
-            <Descriptions.Item label="Regex Entries">{stats.regex_entries}</Descriptions.Item>
-            <Descriptions.Item label="Literal Entries">{stats.literal_entries}</Descriptions.Item>
-            <Descriptions.Item label="Enabled Entries">
-              {toDisplayStatNumber(stats.enabled_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Disabled Entries">
-              {toDisplayStatNumber(stats.disabled_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Probabilistic Entries">
-              {toDisplayStatNumber(stats.probabilistic_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Timed Effect Entries">
-              {toDisplayStatNumber(stats.timed_effect_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Unused Entries">
-              {toDisplayStatNumber(stats.zero_usage_entries)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Pattern Conflicts">
-              {toDisplayStatNumber(stats.pattern_conflict_count)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Groups">{toDisplayGroupSummary(stats.groups)}</Descriptions.Item>
-            <Descriptions.Item label="Average Probability">
-              {toDisplayProbabilitySummary(stats.average_probability)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Default Token Budget">
-              {toDisplayTokenBudgetSummary(stats.default_token_budget)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Created">
-              {formatRelativeTimestamp(stats.created_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Updated">
-              {formatRelativeTimestamp(stats.updated_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Last Used">
-              {formatRelativeTimestamp(stats.last_used)}
-            </Descriptions.Item>
-            <Descriptions.Item label="Total Usage Count">
-              {toDisplayStatNumber(stats.total_usage_count)}
-            </Descriptions.Item>
-          </Descriptions>
+          <p className="text-sm text-text mb-3">
+            {stats.total_entries ?? 0}{" "}
+            {t("option:dictionaries.stats.entries", "entries")}
+            {(typeof stats.pattern_conflict_count === "number" &&
+              stats.pattern_conflict_count > 0) &&
+              ` \u00b7 ${stats.pattern_conflict_count} ${t("option:dictionaries.stats.conflicts", "conflicts")}`}
+            {(typeof stats.zero_usage_entries === "number" &&
+              stats.zero_usage_entries > 0) &&
+              ` \u00b7 ${stats.zero_usage_entries} ${t("option:dictionaries.stats.unused", "unused")}`}
+            {(typeof stats.total_usage_count === "number" &&
+              stats.total_usage_count > 0) &&
+              ` \u00b7 ${t("option:dictionaries.stats.usedCount", {
+                defaultValue: "used {{count}} times",
+                count: stats.total_usage_count
+              })}`}
+          </p>
+          <Collapse
+            ghost
+            defaultActiveKey={["overview", "usage"]}
+            items={[
+              {
+                key: "overview",
+                label: t("option:dictionaries.stats.overview", "Overview"),
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item label={t("common:name", "Name")}>
+                      {stats.name}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.totalEntries", "Total Entries")}>
+                      {stats.total_entries ?? 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.literalEntries", "Literal Entries")}>
+                      {stats.literal_entries ?? 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.regexEntries", "Regex Entries")}>
+                      {stats.regex_entries ?? 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("common:created", "Created")}>
+                      {formatRelativeTimestamp(stats.created_at)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("common:updated", "Updated")}>
+                      {formatRelativeTimestamp(stats.updated_at)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: "usage",
+                label: t("option:dictionaries.stats.usage", "Usage"),
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.totalUsageCount", "Total Usage Count")}>
+                      {toDisplayStatNumber(stats.total_usage_count)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("option:dictionaries.stats.lastUsed", "Last Used")}>
+                      {formatRelativeTimestamp(stats.last_used)}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.enabledEntries", "Enabled Entries")}>
+                      {toDisplayStatNumber(stats.enabled_entries)}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.disabledEntries", "Disabled Entries")}>
+                      {toDisplayStatNumber(stats.disabled_entries)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: "health",
+                label: t("option:dictionaries.stats.health", "Health"),
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.unusedEntries", "Unused Entries")}>
+                      {toDisplayStatNumber(stats.zero_usage_entries)}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.patternConflicts", "Pattern Conflicts")}>
+                      {toDisplayStatNumber(stats.pattern_conflict_count)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("option:dictionaries.stats.groups", "Groups")}>
+                      {toDisplayGroupSummary(stats.groups)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: "advanced",
+                label: t("option:dictionaries.stats.advanced", "Advanced"),
+                children: (
+                  <Descriptions size="small" column={1} bordered>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.probabilisticEntries", "Probabilistic Entries")}>
+                      {toDisplayStatNumber(stats.probabilistic_entries)}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.timedEffectEntries", "Timed Effect Entries")}>
+                      {toDisplayStatNumber(stats.timed_effect_entries)}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.averageProbability", "Average Probability")}>
+                      {toDisplayProbabilitySummary(stats.average_probability)}
+                    </Descriptions.Item>
+                    <Descriptions.Item
+                      label={t("option:dictionaries.stats.processingLimit", "Processing limit")}>
+                      {toDisplayTokenBudgetSummary(stats.default_token_budget, t)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+            ]}
+          />
 
           {Array.isArray(stats.entry_usage) && stats.entry_usage.length > 0 && (
             <div className="space-y-2">
-              <div className="text-xs font-medium text-text">Entry usage snapshot</div>
+              <div className="text-xs font-medium text-text">
+                {t("option:dictionaries.stats.entryUsageSnapshot", "Entry usage snapshot")}
+              </div>
               <div className="space-y-1 rounded border border-border bg-surface2/40 p-2">
                 {stats.entry_usage.slice(0, 6).map((item: any) => (
                   <div
@@ -145,12 +231,14 @@ export function DictionaryStatsModal({
                     className="flex items-center justify-between gap-2 text-xs"
                   >
                     <span className="truncate font-mono text-text">
-                      {item?.pattern || `Entry ${item?.entry_id}`}
+                      {item?.pattern ||
+                        `${t("option:dictionaries.entryLabelFallback", "Entry")} ${item?.entry_id}`}
                     </span>
                     <span className="shrink-0 text-text-muted">
-                      {toDisplayStatNumber(item?.usage_count)} uses
+                      {toDisplayStatNumber(item?.usage_count)}{" "}
+                      {t("option:dictionaries.stats.uses", "uses")}
                       {item?.last_used_at
-                        ? ` · last ${formatRelativeTimestamp(item.last_used_at)}`
+                        ? ` · ${t("option:dictionaries.stats.lastUsedShort", "last")} ${formatRelativeTimestamp(item.last_used_at)}`
                         : ""}
                     </span>
                   </div>
@@ -159,7 +247,9 @@ export function DictionaryStatsModal({
             </div>
           )}
           <div className="space-y-2">
-            <div className="text-xs font-medium text-text">Recent activity</div>
+            <div className="text-xs font-medium text-text">
+              {t("option:dictionaries.stats.recentActivity", "Recent activity")}
+            </div>
             {currentActivityPageEvents.length > 0 ? (
               <div className="space-y-2 rounded border border-border bg-surface2/40 p-2">
                 {currentActivityPageEvents.map((event: any, index: number) => (
@@ -170,26 +260,38 @@ export function DictionaryStatsModal({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-text">{formatRelativeTimestamp(event?.created_at)}</span>
                       <span className="text-text-muted">
-                        {toDisplayStatNumber(event?.replacements)} replacements ·{" "}
-                        {toDisplayStatNumber(event?.iterations)} iterations
+                        {toDisplayStatNumber(event?.replacements)} {t("option:dictionaries.stats.replacements", "replacements")} ·{" "}
+                        {toDisplayStatNumber(event?.iterations)} {t("option:dictionaries.stats.iterations", "iterations")}
                         {event?.token_budget_used
-                          ? ` · budget ${toDisplayStatNumber(event.token_budget_used)}`
+                          ? ` · ${t("option:dictionaries.stats.budgetShort", "budget")} ${toDisplayStatNumber(event.token_budget_used)}`
                           : ""}
                       </span>
                     </div>
                     <div className="text-text-muted">
-                      Chat: {String(event?.chat_id || "Preview/API call")}
+                      {t("option:dictionaries.stats.chatLabel", "Chat")}:{" "}
+                      {String(
+                        event?.chat_id ||
+                          t(
+                            "option:dictionaries.stats.previewApiCall",
+                            "Preview/API call"
+                          )
+                      )}
                     </div>
                     <div className="text-text-muted">
-                      Entries: {formatActivityEntriesUsed(event?.entries_used)}
+                      {t("option:dictionaries.stats.entriesLabel", "Entries")}:{" "}
+                      {formatActivityEntriesUsed(event?.entries_used)}
                     </div>
                     <div className="space-y-1">
                       <div className="text-text">
-                        <span className="font-medium">Before:</span>{" "}
+                        <span className="font-medium">
+                          {t("option:dictionaries.stats.before", "Before")}:
+                        </span>{" "}
                         {String(event?.original_text_preview || "—")}
                       </div>
                       <div className="text-text">
-                        <span className="font-medium">After:</span>{" "}
+                        <span className="font-medium">
+                          {t("option:dictionaries.stats.after", "After")}:
+                        </span>{" "}
                         {String(event?.processed_text_preview || "—")}
                       </div>
                     </div>
@@ -198,7 +300,7 @@ export function DictionaryStatsModal({
                 {activityTotal > activityPageSize && (
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
                     <div className="text-xs text-text-muted">
-                      Page {activityPage} of {totalActivityPages}
+                      {`${t("common:page", "Page")} ${activityPage} ${t("common:of", "of")} ${totalActivityPages}`}
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
@@ -209,7 +311,7 @@ export function DictionaryStatsModal({
                           void goToActivityPage(activityPage - 1)
                         }}
                       >
-                        Previous
+                        {t("common:previous", "Previous")}
                       </Button>
                       <Button
                         size="small"
@@ -219,7 +321,7 @@ export function DictionaryStatsModal({
                           void goToActivityPage(activityPage + 1)
                         }}
                       >
-                        Next
+                        {t("common:next", "Next")}
                       </Button>
                     </div>
                   </div>
@@ -227,18 +329,25 @@ export function DictionaryStatsModal({
               </div>
             ) : (
               <div className="text-xs text-text-muted">
-                No transformation activity recorded yet.
+                {t(
+                  "option:dictionaries.stats.noRecentActivity",
+                  "No transformation activity recorded yet."
+                )}
               </div>
             )}
             {activityLoading && (
-              <div className="text-xs text-text-muted">Loading activity…</div>
+              <div className="text-xs text-text-muted">
+                {t("option:dictionaries.stats.loadingActivity", "Loading activity…")}
+              </div>
             )}
             {activityError && (
               <div className="text-xs text-danger">{activityError}</div>
             )}
           </div>
           <div className="space-y-2">
-            <div className="text-xs font-medium text-text">Pattern conflicts</div>
+            <div className="text-xs font-medium text-text">
+              {t("option:dictionaries.stats.patternConflictsSection", "Pattern conflicts")}
+            </div>
             {Array.isArray(stats.pattern_conflicts) && stats.pattern_conflicts.length > 0 ? (
               <div className="space-y-1 rounded border border-border bg-surface2/40 p-2">
                 {stats.pattern_conflicts.slice(0, 8).map((item: any, index: number) => (
@@ -250,7 +359,13 @@ export function DictionaryStatsModal({
                       <Tag color={toPatternConflictTagColor(item?.severity)}>
                         {String(item?.severity || "low").toUpperCase()}
                       </Tag>
-                      <span className="text-text">{item?.reason || "Potential overlap detected."}</span>
+                      <span className="text-text">
+                        {item?.reason ||
+                          t(
+                            "option:dictionaries.stats.patternConflictFallback",
+                            "Potential overlap detected."
+                          )}
+                      </span>
                     </div>
                     <div className="font-mono text-text-muted">
                       {item?.pattern_a || "—"} {"\u2194"} {item?.pattern_b || "—"}
@@ -260,7 +375,10 @@ export function DictionaryStatsModal({
               </div>
             ) : (
               <div className="text-xs text-text-muted">
-                No potential conflicts detected.
+                {t(
+                  "option:dictionaries.stats.noPatternConflicts",
+                  "No potential conflicts detected."
+                )}
               </div>
             )}
           </div>
@@ -303,17 +421,20 @@ function toDisplayProbabilitySummary(value: unknown): string {
   return "0.00"
 }
 
-function toDisplayTokenBudgetSummary(value: unknown): string {
+function toDisplayTokenBudgetSummary(
+  value: unknown,
+  t: (key: string, fallbackOrOptions?: any) => string
+): string {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return `${Math.floor(value)} tokens`
+    return `${Math.floor(value)} ${t("option:dictionaries.stats.tokens", "tokens")}`
   }
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value)
     if (Number.isFinite(parsed) && parsed > 0) {
-      return `${Math.floor(parsed)} tokens`
+      return `${Math.floor(parsed)} ${t("option:dictionaries.stats.tokens", "tokens")}`
     }
   }
-  return "Not set"
+  return t("option:dictionaries.stats.notSet", "Not set")
 }
 
 function formatActivityEntriesUsed(value: unknown): string {

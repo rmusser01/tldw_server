@@ -24,6 +24,7 @@ import {
 } from "@/utils/message-steering"
 import { MyChatIdentityMenu } from "@/components/Common/MyChatIdentityMenu"
 import { IconButton } from "@/components/Common/IconButton"
+import { useSetBuddyShellRenderContext } from "@/components/Common/PersonaBuddy"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useAntdModal } from "@/hooks/useAntdModal"
 import { useConfirmModal } from "@/hooks/useConfirmModal"
@@ -37,6 +38,7 @@ import {
   buildCharactersRoute as buildCharactersRouteUrl,
   resolveCharactersDestinationMode
 } from "@/utils/characters-route"
+import type { PersonaInfo } from "@/routes/personaTypes"
 import type {
   Character as StoredCharacter,
   CharacterApiResponse
@@ -73,12 +75,6 @@ type FavoriteCharacter = {
 type ImageOnlyErrorDetail = {
   code?: string
   message?: string
-}
-
-type PersonaApiResponse = Record<string, unknown> & {
-  id?: string | number
-  name?: string | null
-  avatar_url?: string | null
 }
 
 const GREETING_RETRY_DELAY_MS = 800
@@ -122,6 +118,7 @@ export const CharacterSelect: React.FC<Props> = ({
   const notification = useAntdNotification()
   const modal = useAntdModal()
   const confirmWithModal = useConfirmModal()
+  const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
   const [menuDensity] = useStorage("menuDensity", "comfortable")
   const [favoriteCharacters, setFavoriteCharacters] = useStorage<FavoriteCharacter[]>(
     "favoriteCharacters",
@@ -228,12 +225,12 @@ export const CharacterSelect: React.FC<Props> = ({
     enabled: !!hasCharacters,
     staleTime: 5 * 60 * 1000 // 5 minutes
   })
-  const { data: personas = [] } = useQuery<PersonaApiResponse[]>({
+  const { data: personas = [] } = useQuery<PersonaInfo[]>({
     queryKey: ["persona-profiles", "sidepanel-character-select"],
     queryFn: async () => {
       await tldwClient.initialize().catch(() => null)
-      const result = await tldwClient.listPersonaProfiles().catch(() => [])
-      return Array.isArray(result) ? (result as PersonaApiResponse[]) : []
+      const result = await tldwClient.listPersonaProfiles()
+      return Array.isArray(result) ? (result as PersonaInfo[]) : []
     },
     enabled: !!hasPersona,
     staleTime: 5 * 60 * 1000
@@ -251,7 +248,7 @@ export const CharacterSelect: React.FC<Props> = ({
         char.tags?.some((tag) => tag.toLowerCase().includes(q))
     )
   }, [characters, searchText])
-  const filteredPersonas = useMemo<PersonaApiResponse[]>(() => {
+  const filteredPersonas = useMemo<PersonaInfo[]>(() => {
     if (!personas) return []
     if (!searchText.trim()) return personas
     const q = searchText.toLowerCase()
@@ -345,6 +342,14 @@ export const CharacterSelect: React.FC<Props> = ({
       selectedAssistant
     )
   }, [personas, selectedAssistant])
+  const selectedPersonaSource = useMemo(() => {
+    if (selectedAssistant?.kind !== "persona") return null
+    return personas.some(
+      (persona) => String(persona.id ?? "") === String(selectedAssistant.id)
+    )
+      ? "catalog"
+      : "selected-assistant-fallback"
+  }, [personas, selectedAssistant])
   const selectedCharacterMoodImages = useMemo(
     () =>
       getCharacterMoodImagesFromExtensions(
@@ -364,6 +369,34 @@ export const CharacterSelect: React.FC<Props> = ({
       userPersonaImage.trim().length > 0
     )
   }, [userPersonaImage])
+
+  useEffect(() => {
+    let context: Parameters<typeof setBuddyShellRenderContext>[0] = null
+
+    if (selectedAssistant?.kind === "persona") {
+      const personaId = String(selectedAssistant.id || "").trim()
+      if (personaId) {
+        context = {
+          surface_id: "sidepanel-chat",
+          surface_active: true,
+          active_persona_id: personaId,
+          position_bucket: "sidepanel-desktop",
+          buddy_summary: selectedPersona?.buddy_summary ?? null,
+          persona_source: selectedPersonaSource
+        }
+      }
+    }
+
+    setBuddyShellRenderContext(context)
+    return () => {
+      setBuddyShellRenderContext(null)
+    }
+  }, [
+    selectedAssistant,
+    selectedPersona,
+    selectedPersonaSource,
+    setBuddyShellRenderContext
+  ])
   const trimmedDisplayName = userDisplayName.trim()
   const displayNameActionLabel = trimmedDisplayName
     ? (t("sidepanel:characterSelect.displayNameCurrent", {
@@ -1043,7 +1076,7 @@ export const CharacterSelect: React.FC<Props> = ({
   )
 
   const handlePersonaSelect = React.useCallback(
-    async (persona: PersonaApiResponse) => {
+    async (persona: PersonaInfo) => {
       const selection = personaToAssistantSelection({
         ...persona,
         id: String(persona.id ?? ""),

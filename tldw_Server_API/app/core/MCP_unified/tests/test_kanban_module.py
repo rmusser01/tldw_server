@@ -8,6 +8,11 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import ConflictError, NotFoundError, InputError
 
 
+def _ensure(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
 class FakeKanbanDB:
     def __init__(self) -> None:
         self._boards: Dict[int, Dict[str, Any]] = {}
@@ -871,7 +876,7 @@ async def test_kanban_module_basic_flow(tmp_path):
     ctx = SimpleNamespace(user_id="1", db_paths={"kanban": db_path})
 
     empty = await mod.execute_tool("kanban.boards.list", {}, context=ctx)
-    assert empty["total"] == 0
+    _ensure(empty["total"] == 0, f"Unexpected board list payload: {empty!r}")
 
     created_board = await mod.execute_tool(
         "kanban.boards.create",
@@ -885,7 +890,7 @@ async def test_kanban_module_basic_flow(tmp_path):
         {"board_id": board_id},
         context=ctx,
     )
-    assert fetched["board"]["name"] == "Work Board"
+    _ensure(fetched["board"]["name"] == "Work Board", f"Unexpected board payload: {fetched!r}")
 
     created_list = await mod.execute_tool(
         "kanban.lists.create",
@@ -899,7 +904,7 @@ async def test_kanban_module_basic_flow(tmp_path):
         {"board_id": board_id},
         context=ctx,
     )
-    assert len(lists["lists"]) == 1
+    _ensure(len(lists["lists"]) == 1, f"Unexpected list payload: {lists!r}")
 
     created_card = await mod.execute_tool(
         "kanban.cards.create",
@@ -907,14 +912,14 @@ async def test_kanban_module_basic_flow(tmp_path):
         context=ctx,
     )
     card_id = created_card["card"]["id"]
-    assert created_card["card"]["title"] == "Ship MCP"
+    _ensure(created_card["card"]["title"] == "Ship MCP", f"Unexpected card payload: {created_card!r}")
 
     cards = await mod.execute_tool(
         "kanban.cards.list",
         {"list_id": list_id},
         context=ctx,
     )
-    assert len(cards["cards"]) == 1
+    _ensure(len(cards["cards"]) == 1, f"Unexpected cards payload: {cards!r}")
 
     created_label = await mod.execute_tool(
         "kanban.labels.create",
@@ -927,7 +932,7 @@ async def test_kanban_module_basic_flow(tmp_path):
         {"card_id": card_id, "label_id": label_id},
         context=ctx,
     )
-    assert any(lbl["id"] == label_id for lbl in assigned["labels"])
+    _ensure(any(lbl["id"] == label_id for lbl in assigned["labels"]), f"Unexpected assigned labels: {assigned!r}")
 
     comments = await mod.execute_tool(
         "kanban.comments.create",
@@ -940,7 +945,7 @@ async def test_kanban_module_basic_flow(tmp_path):
         {"card_id": card_id},
         context=ctx,
     )
-    assert comment_list["total"] == 1
+    _ensure(comment_list["total"] == 1, f"Unexpected comment list payload: {comment_list!r}")
 
     checklist = await mod.execute_tool(
         "kanban.checklists.create",
@@ -959,7 +964,7 @@ async def test_kanban_module_basic_flow(tmp_path):
         {"item_id": item_id, "checked": True},
         context=ctx,
     )
-    assert updated_item["item"]["checked"] is True
+    _ensure(updated_item["item"]["checked"] is True, f"Unexpected checklist item payload: {updated_item!r}")
 
     moved_list = await mod.execute_tool(
         "kanban.lists.create",
@@ -972,14 +977,14 @@ async def test_kanban_module_basic_flow(tmp_path):
         {"card_id": card_id, "target_list_id": moved_list_id},
         context=ctx,
     )
-    assert moved["card"]["list_id"] == moved_list_id
+    _ensure(moved["card"]["list_id"] == moved_list_id, f"Unexpected moved card payload: {moved!r}")
 
     searched = await mod.execute_tool(
         "kanban.cards.search",
         {"query": "mcp"},
         context=ctx,
     )
-    assert searched["total"] == 1
+    _ensure(searched["total"] == 1, f"Unexpected search payload: {searched!r}")
 
 
 @pytest.mark.asyncio
@@ -1098,7 +1103,7 @@ async def test_kanban_workflow_tool_roundtrip(tmp_path):
         },
         context=admin_ctx,
     )
-    assert policy["policy"]["board_id"] == board_id
+    _ensure(policy["policy"]["board_id"] == board_id, f"Unexpected workflow policy payload: {policy!r}")
 
     state = await mod.execute_tool("kanban.workflow.task.state.get", {"card_id": card_id}, context=admin_ctx)
     transitioned = await mod.execute_tool(
@@ -1114,14 +1119,14 @@ async def test_kanban_workflow_tool_roundtrip(tmp_path):
         },
         context=admin_ctx,
     )
-    assert transitioned["state"]["workflow_status_key"] == "impl"
+    _ensure(transitioned["state"]["workflow_status_key"] == "impl", f"Unexpected transition payload: {transitioned!r}")
 
     events = await mod.execute_tool(
         "kanban.workflow.task.events.list",
         {"card_id": card_id, "limit": 10, "offset": 0},
         context=admin_ctx,
     )
-    assert events["events"][0]["correlation_id"] == "corr-mcp-transition-1"
+    _ensure(events["events"][0]["correlation_id"] == "corr-mcp-transition-1", f"Unexpected workflow events payload: {events!r}")
 
 
 @pytest.mark.asyncio
@@ -1162,6 +1167,100 @@ async def test_kanban_workflow_policy_upsert_omits_metadata_when_not_supplied(tm
         context=ctx,
     )
 
-    assert out["policy"]["board_id"] == 42
-    assert spy_db.last_kwargs is not None
-    assert "metadata" not in spy_db.last_kwargs
+    _ensure(out["policy"]["board_id"] == 42, f"Unexpected policy payload: {out!r}")
+    _ensure(spy_db.last_kwargs is not None, "workflow policy upsert kwargs were not captured")
+    _ensure("metadata" not in spy_db.last_kwargs, f"Unexpected metadata passthrough: {spy_db.last_kwargs!r}")
+
+
+@pytest.mark.asyncio
+async def test_kanban_workflow_policy_upsert_parses_boolean_like_inputs(tmp_path):
+    mod = KanbanModule(ModuleConfig(name="kanban"))
+
+    class SpyDB:
+        def __init__(self) -> None:
+            self.last_kwargs: Dict[str, Any] | None = None
+
+        def upsert_workflow_policy(self, **kwargs: Any) -> Dict[str, Any]:
+            self.last_kwargs = dict(kwargs)
+            return {
+                "id": 1,
+                "board_id": int(kwargs["board_id"]),
+                "version": 1,
+                "is_paused": kwargs["is_paused"],
+                "is_draining": kwargs["is_draining"],
+                "default_lease_ttl_sec": int(kwargs.get("default_lease_ttl_sec", 900)),
+                "strict_projection": kwargs["strict_projection"],
+                "metadata": None,
+                "statuses": [],
+                "transitions": [],
+                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+    spy_db = SpyDB()
+    mod._open_db = lambda ctx: spy_db  # type: ignore[assignment]
+    ctx = SimpleNamespace(user_id="1", db_paths={"kanban": tmp_path / "kanban.db"}, metadata={"roles": ["admin"]})
+
+    out = await mod.execute_tool(
+        "kanban.workflow.policy.upsert",
+        {
+            "board_id": 42,
+            "is_paused": "false",
+            "is_draining": "yes",
+            "strict_projection": "0",
+            "default_lease_ttl_sec": 1800,
+        },
+        context=ctx,
+    )
+
+    _ensure(out["policy"]["is_paused"] is False, f"Unexpected parsed policy payload: {out!r}")
+    _ensure(out["policy"]["is_draining"] is True, f"Unexpected parsed policy payload: {out!r}")
+    _ensure(out["policy"]["strict_projection"] is False, f"Unexpected parsed policy payload: {out!r}")
+    _ensure(spy_db.last_kwargs is not None, "workflow policy kwargs were not captured")
+    _ensure(spy_db.last_kwargs["is_paused"] is False, f"Unexpected parsed kwargs: {spy_db.last_kwargs!r}")
+    _ensure(spy_db.last_kwargs["is_draining"] is True, f"Unexpected parsed kwargs: {spy_db.last_kwargs!r}")
+    _ensure(spy_db.last_kwargs["strict_projection"] is False, f"Unexpected parsed kwargs: {spy_db.last_kwargs!r}")
+
+
+@pytest.mark.asyncio
+async def test_kanban_workflow_policy_upsert_rejects_invalid_boolean_like_inputs(tmp_path):
+    mod = KanbanModule(ModuleConfig(name="kanban"))
+    fake_db = FakeKanbanDB()
+    mod._open_db = lambda ctx: fake_db  # type: ignore[assignment]
+    ctx = SimpleNamespace(user_id="1", db_paths={"kanban": tmp_path / "kanban.db"}, metadata={"roles": ["admin"]})
+
+    with pytest.raises(ValueError, match="strict_projection must be a boolean-like value"):
+        await mod.execute_tool(
+            "kanban.workflow.policy.upsert",
+            {
+                "board_id": 42,
+                "strict_projection": "maybe",
+            },
+            context=ctx,
+        )
+
+
+@pytest.mark.asyncio
+async def test_kanban_workflow_policy_schema_allows_boolean_like_inputs():
+    mod = KanbanModule(ModuleConfig(name="kanban"))
+
+    tools = await mod.get_tools()
+    tool = next(tool for tool in tools if tool["name"] == "kanban.workflow.policy.upsert")
+    properties = tool["inputSchema"]["properties"]
+
+    for field_name in ("is_paused", "is_draining", "strict_projection"):
+        variants = properties[field_name]["oneOf"]
+        variant_types = {variant["type"] for variant in variants}
+        _ensure(
+            variant_types == {"boolean", "integer", "string"},
+            f"Unexpected schema variants for {field_name}: {variants!r}",
+        )
+        string_variant = next(variant for variant in variants if variant["type"] == "string")
+        _ensure(
+            {"0", "1", "false", "n", "no", "off", "on", "true", "y", "yes"}.issubset(set(string_variant["enum"])),
+            f"Unexpected boolean-like token allowlist for {field_name}: {string_variant!r}",
+        )
+        _ensure(
+            {"TRUE", "False", "YES", "NO", "ON", "OFF"}.issubset(set(string_variant["enum"])),
+            f"Schema should include case variants accepted by runtime parsing for {field_name}: {string_variant!r}",
+        )

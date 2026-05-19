@@ -65,28 +65,32 @@ Team Facilitator and Compliance Officer / Admin personas operate within this per
 ## 6. User Journeys
 
 - **Export:** Select assets via WebUI or API (filters, tags, time range). Receive synchronous download for small sets or asynchronous job reference with download URL and expiry for large sets.
-- **Import:** Upload chatbook, preview manifest, choose conflict strategy (`skip`, `overwrite`, `rename`, `merge`), monitor job status, inspect imported items with provenance notes.
+- **Import:** Upload chatbook, preview manifest, choose a supported conflict strategy (`skip` or `rename` today; `overwrite` and `merge` planned), monitor job status, inspect imported items with provenance notes.
 - **Preview:** Inspect manifest without writing to storage; validate before import.
 - **Job Management:** List, inspect, or cancel export/import jobs; download completed exports; trigger cleanup of expired archives.
 
 ## 7. Functional Requirements
 
 1. **Endpoints**
-   - `POST /api/v1/chatbooks/export` - accepts metadata, filters, sync/async flag; returns file (sync) or job reference (async) with download URL + expiry.
-   - `POST /api/v1/chatbooks/import` - accepts upload, conflict strategy, async option; records warnings/errors per item.
-   - `POST /api/v1/chatbooks/preview` - validates archive and returns manifest summary without persisting data.
+   - `POST /api/v1/chatbooks/export` - accepts metadata, filters, sync/async flag; sync returns `job_id` plus a job-backed `download_url`, async returns a job reference.
+   - `POST /api/v1/chatbooks/export/continue` - continues a truncated export in sync mode; `async_mode=true` is currently rejected.
+   - `POST /api/v1/chatbooks/import` - accepts upload plus direct multipart form fields for import options; sync imports return `imported_items` plus `warnings`.
+   - `POST /api/v1/chatbooks/preview` - validates archive and returns manifest summary without persisting data; invalid archives/manifests return `400`.
    - `GET /api/v1/chatbooks/export/jobs` and `GET /api/v1/chatbooks/import/jobs` - list jobs in the caller’s scope (per-user by default; admins/org owners/team leads can add org/team/user filters).
    - `GET /api/v1/chatbooks/export/jobs/{job_id}` and `/import/jobs/{job_id}` - inspect a single job.
-   - `DELETE /api/v1/chatbooks/export/jobs/{job_id}` and `/import/jobs/{job_id}` - cancel in-flight jobs or mark completed jobs as deleted within the caller’s permitted scope.
+   - `DELETE /api/v1/chatbooks/export/jobs/{job_id}` and `/import/jobs/{job_id}` - cancel in-flight jobs.
+   - `DELETE /api/v1/chatbooks/export/jobs/{job_id}/remove` and `/import/jobs/{job_id}/remove` - remove terminal job records within the caller’s permitted scope.
    - `GET /api/v1/chatbooks/download/{job_id}` - serve completed exports; returns either a direct download or a signed URL (with `expires_at`, default 1 hour) depending on deployment mode.
    - `POST /api/v1/chatbooks/cleanup` - authenticated cleanup of expired exports/imports; standard users can clean up their own jobs, while team leads/org owners/admins can clean up within their scopes.
    - `GET /api/v1/chatbooks/health` - report storage readiness and service status.
 
    **Response shapes (high level)**
+   - `POST /api/v1/chatbooks/export` (sync): `{"success", "message", "job_id", "download_url"}`.
    - `POST /api/v1/chatbooks/export` (async): `{"job_id", "status", "mode": "async", "download_url"?, "expires_at"?, "estimated_size_bytes"?, "created_at"}`. For async exports, `download_url` and `expires_at` are only populated once the job reaches `completed` status.
+   - `POST /api/v1/chatbooks/import` (sync): `{"success", "message", "imported_items", "warnings"}`.
    - `POST /api/v1/chatbooks/import` (async): `{"job_id", "status", "mode": "async", "created_at"}`.
-   - `POST /api/v1/chatbooks/preview`: `{"version", "summary": {"counts": {per_type}, "estimated_size_bytes"?, "truncated_flags"?}}`.
-   - `GET /api/v1/chatbooks/*/jobs`: `{"jobs": [...], "next_page_token"?}` with each job including `{"job_id", "kind": "export"|"import", "status", "created_at", "updated_at", "scope": {"user_id", "team_id"?, "org_id"?}}`. `status` is one of `pending`, `in_progress`, `completed`, `failed`, `cancelled`, `expired`, `deleted`.
+   - `POST /api/v1/chatbooks/preview`: success returns a manifest summary; invalid archives/manifests return HTTP `400`.
+   - `GET /api/v1/chatbooks/*/jobs`: `{"jobs": [...], "next_page_token"?}` with each job including `{"job_id", "kind": "export"|"import", "status", "created_at", "updated_at", "scope": {"user_id", "team_id"?, "org_id"?}}`. Current runtime statuses are `pending`, `in_progress`, `completed`, `failed`, `cancelled`, and `expired`; `deleted` remains a planned/admin-oriented state rather than current behavior.
    - `GET /api/v1/chatbooks/download/{job_id}`: either a ZIP file response or `{"download_url", "expires_at"}` when using signed URLs.
 
 2. **Manifest Schema**
@@ -127,8 +131,8 @@ Team Facilitator and Compliance Officer / Admin personas operate within this per
    - Export archives are retained for a configurable period (`CHATBOOKS_EXPORT_RETENTION_DEFAULT_HOURS`, default 24h); after retention, archives are removed and jobs transition to `expired` while metadata is retained for audit unless explicitly deleted.
 
 4. **Job Processing**
-   - Export/import jobs persisted in each user’s ChaChaNotes DB with states `pending → in_progress → completed|failed|cancelled|expired|deleted`.
-   - `expired` indicates archives removed by retention/cleanup while metadata remains for audit; `deleted` indicates job metadata removed by privileged cleanup operations.
+   - Export/import jobs persisted in each user’s ChaChaNotes DB with states `pending → in_progress → completed|failed|cancelled|expired`.
+   - `expired` indicates archives removed by retention/cleanup while metadata remains for audit. A distinct `deleted` state remains planned for future privileged cleanup flows but is not current runtime behavior.
    - Async processing via the core Jobs worker. Cross-scope listings (for example, org-wide views) are backed by an index over per-user job records or by fan-out queries with batching; for large orgs, operators should expect eventual consistency and slightly higher latencies for these aggregated views.
    - Lease renewal and retry semantics align with core Jobs standards.
    - Retention cleanup runs automatically on a schedule via the Chatbooks worker (configurable interval) and can also be triggered manually via `POST /api/v1/chatbooks/cleanup`.

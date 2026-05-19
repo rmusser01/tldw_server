@@ -1,0 +1,39 @@
+# docker-compose.admin-ui.yml
+# Overlay for admin-ui — use alongside the main docker-compose.yml:
+#
+# Usage (from repo root):
+#   docker compose --env-file tldw_Server_API/Config_Files/.env \
+#     -f Dockerfiles/docker-compose.yml \
+#     -f Dockerfiles/docker-compose.admin-ui.yml up -d --build
+
+services:
+  admin-ui:
+    build:
+      context: ..
+      dockerfile: Dockerfiles/Dockerfile.admin-ui
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://app:8000}
+        NEXT_PUBLIC_API_VERSION: ${NEXT_PUBLIC_API_VERSION:-v1}
+        NEXT_PUBLIC_DEFAULT_AUTH_MODE: ${NEXT_PUBLIC_DEFAULT_AUTH_MODE:-multi_user}
+        NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN: ${NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN:-false}
+        NEXT_PUBLIC_BILLING_ENABLED: ${NEXT_PUBLIC_BILLING_ENABLED:-false}
+    image: tldw-admin-ui:prod
+    container_name: tldw-admin-ui
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_UI_PORT:-3001}:3001"
+    environment:
+      - NODE_ENV=production
+      - HOSTNAME=0.0.0.0
+      - PORT=3001
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_SECONDARY_SECRET=${JWT_SECONDARY_SECRET:-}  # optional — omit or leave empty to disable key rotation
+      - AUTH_MODE=${AUTH_MODE:-multi_user}
+      # Set to 'true' when running behind a reverse proxy that sets
+      # X-Forwarded-For / X-Real-IP. Without this, per-IP rate limiting
+      # is disabled (all clients share one bucket).
+      - TRUST_PROXY_HEADERS=${TRUST_PROXY_HEADERS:-false}
+    depends_on:
+      app:
+        condition: service_healthy

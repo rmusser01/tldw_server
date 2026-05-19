@@ -1,5 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { Input, Select, Tag } from "antd"
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { toAllowedPath } from "@/services/tldw/path-utils"
@@ -345,6 +346,146 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
       entries.map((item) => [String(item.command_id || "").trim(), item])
     )
   }, [analytics])
+
+  const [cmdSearchText, setCmdSearchText] = React.useState("")
+  const [cmdFilterBroken, setCmdFilterBroken] = React.useState(false)
+  const [cmdFilterNeverUsed, setCmdFilterNeverUsed] = React.useState(false)
+  const [cmdFilterNeedsConfirmation, setCmdFilterNeedsConfirmation] = React.useState(false)
+  const [cmdFilterMostUsed, setCmdFilterMostUsed] = React.useState(false)
+  const [cmdSortBy, setCmdSortBy] = React.useState<
+    "most_used" | "recent" | "name" | "priority"
+  >("name")
+
+  const mostUsedThreshold = React.useMemo(() => {
+    const allInvocations = commands
+      .map((cmd) => analyticsByCommandId.get(cmd.id)?.total_invocations ?? 0)
+      .sort((a, b) => b - a)
+    const topQuartileIndex = Math.max(1, Math.ceil(allInvocations.length * 0.25))
+    return allInvocations[topQuartileIndex - 1] ?? 0
+  }, [commands, analyticsByCommandId])
+
+  const cmdFilterCounts = React.useMemo(() => {
+    let broken = 0
+    let neverUsed = 0
+    let needsConfirmation = 0
+    let mostUsed = 0
+    for (const cmd of commands) {
+      const a = analyticsByCommandId.get(cmd.id)
+      if (
+        resolveCommandConnectionStatus(cmd, connections) === "missing" ||
+        (a && a.total_invocations > 0 && a.error_count / a.total_invocations > 0.5)
+      ) {
+        broken++
+      }
+      if (!a || a.total_invocations === 0) neverUsed++
+      if (cmd.requires_confirmation) needsConfirmation++
+      if (mostUsedThreshold > 0 && (a?.total_invocations ?? 0) >= mostUsedThreshold) {
+        mostUsed++
+      }
+    }
+    return { broken, neverUsed, needsConfirmation, mostUsed }
+  }, [commands, connections, analyticsByCommandId, mostUsedThreshold])
+
+  const filteredCommands = React.useMemo(() => {
+    let result = commands
+
+    if (cmdSearchText.trim()) {
+      const needle = cmdSearchText.trim().toLowerCase()
+      result = result.filter((cmd) => {
+        const haystack = [cmd.name, cmd.description ?? "", ...cmd.phrases]
+          .join(" ")
+          .toLowerCase()
+        return haystack.includes(needle)
+      })
+    }
+
+    if (cmdFilterBroken) {
+      result = result.filter((cmd) => {
+        if (resolveCommandConnectionStatus(cmd, connections) === "missing") return true
+        const a = analyticsByCommandId.get(cmd.id)
+        if (a && a.total_invocations > 0) {
+          return a.error_count / a.total_invocations > 0.5
+        }
+        return false
+      })
+    }
+
+    if (cmdFilterNeverUsed) {
+      result = result.filter((cmd) => {
+        const a = analyticsByCommandId.get(cmd.id)
+        return !a || a.total_invocations === 0
+      })
+    }
+
+    if (cmdFilterNeedsConfirmation) {
+      result = result.filter((cmd) => cmd.requires_confirmation)
+    }
+
+    if (cmdFilterMostUsed) {
+      if (mostUsedThreshold > 0) {
+        result = result.filter(
+          (cmd) => (analyticsByCommandId.get(cmd.id)?.total_invocations ?? 0) >= mostUsedThreshold
+        )
+      } else {
+        result = []
+      }
+    }
+
+    const sorted = [...result]
+    switch (cmdSortBy) {
+      case "most_used":
+        sorted.sort((a, b) => {
+          const aCount = analyticsByCommandId.get(a.id)?.total_invocations ?? 0
+          const bCount = analyticsByCommandId.get(b.id)?.total_invocations ?? 0
+          return bCount - aCount
+        })
+        break
+      case "recent":
+        sorted.sort((a, b) => {
+          const aDate = analyticsByCommandId.get(a.id)?.last_used ?? null
+          const bDate = analyticsByCommandId.get(b.id)?.last_used ?? null
+          if (!aDate && !bDate) return 0
+          if (!aDate) return 1
+          if (!bDate) return -1
+          return bDate.localeCompare(aDate)
+        })
+        break
+      case "name":
+        sorted.sort((a, b) => a.name.localeCompare(b.name))
+        break
+      case "priority":
+        sorted.sort((a, b) => b.priority - a.priority)
+        break
+    }
+
+    return sorted
+  }, [
+    commands,
+    connections,
+    analyticsByCommandId,
+    cmdSearchText,
+    cmdFilterBroken,
+    cmdFilterNeverUsed,
+    cmdFilterNeedsConfirmation,
+    cmdFilterMostUsed,
+    mostUsedThreshold,
+    cmdSortBy
+  ])
+
+  const activeCmdFilterCount =
+    (cmdSearchText.trim() ? 1 : 0) +
+    (cmdFilterBroken ? 1 : 0) +
+    (cmdFilterNeverUsed ? 1 : 0) +
+    (cmdFilterNeedsConfirmation ? 1 : 0) +
+    (cmdFilterMostUsed ? 1 : 0)
+
+  const clearAllCmdFilters = React.useCallback(() => {
+    setCmdSearchText("")
+    setCmdFilterBroken(false)
+    setCmdFilterNeverUsed(false)
+    setCmdFilterNeedsConfirmation(false)
+    setCmdFilterMostUsed(false)
+  }, [])
 
   const clearCommandEditor = React.useCallback(() => {
     setFormState(DEFAULT_FORM_STATE)
@@ -878,6 +1019,12 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
                     {t("sidepanel:personaGarden.commands.existing", {
                       defaultValue: "Registered commands"
                     })}
+                    {commands.length > 0 &&
+                    filteredCommands.length !== commands.length ? (
+                      <span className="ml-1 font-normal text-text-muted">
+                        ({filteredCommands.length}/{commands.length})
+                      </span>
+                    ) : null}
                   </div>
                   {loading ? (
                     <span className="text-xs text-text-muted">
@@ -885,8 +1032,145 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
                     </span>
                   ) : null}
                 </div>
+
                 {commands.length > 0 ? (
-                  commands.map((command) => {
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        allowClear
+                        size="small"
+                        value={cmdSearchText}
+                        onChange={(e) => setCmdSearchText(e.target.value)}
+                        placeholder={t(
+                          "sidepanel:personaGarden.commands.searchPlaceholder",
+                          { defaultValue: "Search commands..." }
+                        )}
+                        className="w-full sm:w-52"
+                        data-testid="persona-commands-search"
+                      />
+                      <Select
+                        size="small"
+                        value={cmdSortBy}
+                        onChange={(value) => setCmdSortBy(value)}
+                        style={{ width: 140 }}
+                        data-testid="persona-commands-sort"
+                        options={[
+                          {
+                            label: t(
+                              "sidepanel:personaGarden.commands.sort.mostUsed",
+                              { defaultValue: "Most used" }
+                            ),
+                            value: "most_used" as const
+                          },
+                          {
+                            label: t(
+                              "sidepanel:personaGarden.commands.sort.recent",
+                              { defaultValue: "Recent" }
+                            ),
+                            value: "recent" as const
+                          },
+                          {
+                            label: t(
+                              "sidepanel:personaGarden.commands.sort.name",
+                              { defaultValue: "Name" }
+                            ),
+                            value: "name" as const
+                          },
+                          {
+                            label: t(
+                              "sidepanel:personaGarden.commands.sort.priority",
+                              { defaultValue: "Priority" }
+                            ),
+                            value: "priority" as const
+                          }
+                        ]}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Tag.CheckableTag
+                        checked={cmdFilterBroken}
+                        onChange={(checked) => {
+                          setCmdFilterBroken(checked)
+                        }}
+                        data-testid="persona-commands-filter-broken"
+                        aria-label="Filter broken commands"
+                      >
+                        {t(
+                          "sidepanel:personaGarden.commands.filter.broken",
+                          { defaultValue: "Broken" }
+                        )}
+                        {cmdFilterCounts.broken > 0
+                          ? ` (${cmdFilterCounts.broken})`
+                          : ""}
+                      </Tag.CheckableTag>
+                      <Tag.CheckableTag
+                        checked={cmdFilterNeverUsed}
+                        onChange={(checked) => {
+                          setCmdFilterNeverUsed(checked)
+                          if (checked) setCmdFilterMostUsed(false)
+                        }}
+                        data-testid="persona-commands-filter-never-used"
+                        aria-label="Filter never used commands"
+                      >
+                        {t(
+                          "sidepanel:personaGarden.commands.filter.neverUsed",
+                          { defaultValue: "Never used" }
+                        )}
+                        {cmdFilterCounts.neverUsed > 0
+                          ? ` (${cmdFilterCounts.neverUsed})`
+                          : ""}
+                      </Tag.CheckableTag>
+                      <Tag.CheckableTag
+                        checked={cmdFilterNeedsConfirmation}
+                        onChange={(checked) => {
+                          setCmdFilterNeedsConfirmation(checked)
+                        }}
+                        data-testid="persona-commands-filter-needs-confirmation"
+                        aria-label="Filter commands needing confirmation"
+                      >
+                        {t(
+                          "sidepanel:personaGarden.commands.filter.needsConfirmation",
+                          { defaultValue: "Needs confirmation" }
+                        )}
+                        {cmdFilterCounts.needsConfirmation > 0
+                          ? ` (${cmdFilterCounts.needsConfirmation})`
+                          : ""}
+                      </Tag.CheckableTag>
+                      <Tag.CheckableTag
+                        checked={cmdFilterMostUsed}
+                        onChange={(checked) => {
+                          setCmdFilterMostUsed(checked)
+                          if (checked) setCmdFilterNeverUsed(false)
+                        }}
+                        data-testid="persona-commands-filter-most-used"
+                        aria-label="Filter most used commands"
+                      >
+                        {t(
+                          "sidepanel:personaGarden.commands.filter.mostUsed",
+                          { defaultValue: "Most used" }
+                        )}
+                        {cmdFilterCounts.mostUsed > 0
+                          ? ` (${cmdFilterCounts.mostUsed})`
+                          : ""}
+                      </Tag.CheckableTag>
+                      {activeCmdFilterCount > 0 ? (
+                        <button
+                          type="button"
+                          className="ml-1 text-xs text-text-muted underline hover:text-text"
+                          onClick={clearAllCmdFilters}
+                          data-testid="persona-commands-clear-filters"
+                        >
+                          {t(
+                            "sidepanel:personaGarden.commands.filter.clearAll",
+                            { defaultValue: "Clear filters" }
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                {filteredCommands.length > 0 ? (
+                  filteredCommands.map((command) => {
                     const commandAnalytics = analyticsByCommandId.get(command.id)
                     const lastUsedLabel = formatLastUsedLabel(commandAnalytics?.last_used)
 
@@ -1039,10 +1323,15 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
                       ? t("sidepanel:personaGarden.commands.loading", {
                           defaultValue: "Loading commands..."
                         })
-                      : t("sidepanel:personaGarden.commands.empty", {
-                          defaultValue:
-                            "No direct voice commands yet. Start from a template or create one manually."
-                        })}
+                      : commands.length > 0
+                        ? t("sidepanel:personaGarden.commands.noMatches", {
+                            defaultValue:
+                              "No commands match the current filters."
+                          })
+                        : t("sidepanel:personaGarden.commands.empty", {
+                            defaultValue:
+                              "No direct voice commands yet. Start from a template or create one manually."
+                          })}
                   </div>
                 )}
               </div>

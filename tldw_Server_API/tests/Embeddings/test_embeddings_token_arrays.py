@@ -2,7 +2,7 @@ import os
 import base64
 import numpy as np
 import pytest
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from fastapi.testclient import TestClient
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
@@ -92,7 +92,7 @@ def test_token_array_uses_raw_token_length_for_limits(client, monkeypatch):
 
 
 @pytest.mark.unit
-def test_tokens_to_texts_logs_decode_failure(monkeypatch):
+def test_tokens_to_texts_decode_failure_raises_value_error(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as emb_mod
 
     class _BadEncoder:
@@ -103,11 +103,38 @@ def test_tokens_to_texts_logs_decode_failure(monkeypatch):
     warn = Mock()
     monkeypatch.setattr(emb_mod.logger, "warning", warn)
 
-    texts, total, lengths = emb_mod.tokens_to_texts([1, 2], "text-embedding-3-small")
-    assert texts == [""]
-    assert total == 2
-    assert lengths == [2]
+    with pytest.raises(ValueError, match="Invalid token array input"):
+        emb_mod.tokens_to_texts([1, 2], "text-embedding-3-small")
     assert warn.called
+
+
+@pytest.mark.unit
+def test_embeddings_endpoint_decode_failure_short_circuits_downstream_creation(client, monkeypatch):
+    async def override_user():
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+        return User(id=1, username="u", email="u@x", is_active=True, is_admin=False)
+
+    app.dependency_overrides[get_request_user] = override_user
+
+    import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as emb_mod
+
+    class _BadEncoder:
+        def decode(self, _tokens):
+            raise ValueError("boom")
+
+    monkeypatch.setattr(emb_mod, "get_tokenizer", lambda _model: _BadEncoder())
+    create_embeddings_mock = AsyncMock()
+    monkeypatch.setattr(emb_mod, "create_embeddings_batch_async", create_embeddings_mock)
+
+    payload = {
+        "model": "sentence-transformers/all-MiniLM-L6-v2",
+        "input": [101, 102, 103, 104],
+    }
+    r = client.post("/api/v1/embeddings", json=payload, headers={"x-provider": "huggingface"})
+
+    assert r.status_code == 400
+    assert r.json()["detail"] == "Invalid token array input"
+    create_embeddings_mock.assert_not_awaited()
 
 
 @pytest.mark.unit

@@ -1,0 +1,21 @@
+# Minimal Alertmanager config that works out of the box without SMTP.
+# Sends alerts to a webhook endpoint (configurable via ALERTMANAGER_WEBHOOK_URL).
+#
+# For email or Slack alerting, override with the full config:
+#   ALERTMANAGER_CONFIG=../../Docs/Operations/monitoring/alertmanager_email_webhook.yml
+#
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: tldw-webhook
+  group_by: [service, alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+
+receivers:
+  - name: tldw-webhook
+    webhook_configs:
+      - url: "http://host.docker.internal:9095/webhook"
+        send_resolved: true

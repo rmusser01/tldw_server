@@ -33,6 +33,8 @@ EXPECTED_MEDIA_COLUMNS = {
     "team_id",
     "visibility",
     "owner_user_id",
+    "latest_transcription_run_id",
+    "next_transcription_run_id",
     "client_id",
     "deleted",
     "prev_version",

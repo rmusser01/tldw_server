@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
+import { buildUnknownResearchStudioCapabilities } from "../research-studio-capabilities"
 
 const {
   mockRagSearch,
@@ -39,6 +40,7 @@ const {
   mockMessageSuccess,
   mockMessageError,
   mockMessageInfo,
+  mockMessageWarning,
   workspaceStoreState
 } = vi.hoisted(() => {
   const ragSearch = vi.fn()
@@ -62,6 +64,7 @@ const {
   const messageSuccess = vi.fn()
   const messageError = vi.fn()
   const messageInfo = vi.fn()
+  const messageWarning = vi.fn()
   const setSelectedModel = vi.fn()
   const setRagSearchMode = vi.fn()
   const setRagTopK = vi.fn()
@@ -201,6 +204,7 @@ const {
     mockMessageSuccess: messageSuccess,
     mockMessageError: messageError,
     mockMessageInfo: messageInfo,
+    mockMessageWarning: messageWarning,
     workspaceStoreState: state
   }
 })
@@ -320,7 +324,7 @@ vi.mock("antd", async () => {
           success: mockMessageSuccess,
           error: mockMessageError,
           info: mockMessageInfo,
-          warning: vi.fn()
+          warning: mockMessageWarning
         },
         <></>
       ]
@@ -357,8 +361,8 @@ const expandGeneratedOutputsSection = () => {
   }
 }
 
-const renderExpandedStudioPane = () => {
-  const renderResult = render(<StudioPane />)
+const renderExpandedStudioPane = (props: Record<string, unknown> = {}) => {
+  const renderResult = render(<StudioPane {...props} />)
   expandStudioOptionsSection()
   expandOutputTypesSection()
   expandGeneratedOutputsSection()
@@ -497,11 +501,66 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     ])
   })
 
+  it("starts no-source Studio with source readiness and hides subordinate controls", async () => {
+    workspaceStoreState.selectedSourceIds = []
+    workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "existing-summary",
+        type: "summary",
+        title: "Existing Summary",
+        status: "completed",
+        content: "Previously generated summary",
+        createdAt: new Date("2026-02-18T10:00:00.000Z")
+      }
+    ]
+    const onRequestSources = vi.fn()
+
+    render(<StudioPane onRequestSources={onRequestSources} />)
+
+    const readiness = screen.getByTestId("studio-source-readiness")
+    expect(readiness).toBeInTheDocument()
+    expect(readiness).toHaveTextContent("Select sources first")
+    expect(
+      screen.queryByRole("button", { name: /executive brief/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Summary" })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Slides Settings")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /Audio Settings/ })
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("studio-artifact-card-existing-summary"))
+      .toBeInTheDocument()
+    expect(screen.getByText("Existing Summary")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /quick notes/i }))
+    expect(await screen.findByTestId("quick-notes")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /open sources/i }))
+    expect(onRequestSources).toHaveBeenCalledTimes(1)
+  })
+
+  it("restores generation actions when sources are selected", () => {
+    renderExpandedStudioPane()
+
+    expect(screen.queryByTestId("studio-source-readiness")).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /executive brief/i })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeInTheDocument()
+    expect(screen.getByText("Slides Settings")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /Audio Settings/ })
+    ).toBeInTheDocument()
+  })
+
   it("groups output buttons by category and surfaces description tooltips", async () => {
     renderExpandedStudioPane()
 
     expect(screen.getByText("Study Aids")).toBeInTheDocument()
     expect(screen.getByText("Analysis")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/i }))
     expect(screen.getByText("Creative")).toBeInTheDocument()
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Summary" }))
@@ -518,6 +577,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     ).toBeInTheDocument()
     expect(screen.queryByText("TTS Provider")).not.toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/i }))
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Audio Summary" }))
 
     expect(await screen.findByText("TTS Provider")).toBeInTheDocument()
@@ -531,6 +591,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       target: { value: "builtin::timeline" }
     })
 
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/i }))
     fireEvent.click(screen.getByRole("button", { name: "Slides" }))
 
     await waitFor(() => {
@@ -542,6 +603,58 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
         })
       )
     })
+  })
+
+  it("disables blocked artifact outputs from capability health", () => {
+    const capabilities = buildUnknownResearchStudioCapabilities()
+    capabilities.capabilities.slides_generation = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["slides"],
+      reason_code: "slides_unavailable"
+    }
+
+    renderExpandedStudioPane({ researchStudioCapabilities: capabilities })
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/i }))
+
+    expect(
+      screen.getByText("Slides is unavailable while required services are offline.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Slides" })).toBeDisabled()
+    expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
+  })
+
+  it("refresh-checks capability health before generation and blocks stale actions", async () => {
+    const initialCapabilities = buildUnknownResearchStudioCapabilities()
+    initialCapabilities.capabilities.artifact_text_generation = {
+      status: "ready",
+      mode: "allow",
+      dependencies: ["llm"],
+      reason_code: null
+    }
+    const refreshedCapabilities = buildUnknownResearchStudioCapabilities()
+    refreshedCapabilities.capabilities.artifact_text_generation = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+    const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
+
+    renderExpandedStudioPane({
+      researchStudioCapabilities: initialCapabilities,
+      onRefreshResearchStudioCapabilities: refreshCapabilities
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+
+    await waitFor(() => {
+      expect(refreshCapabilities).toHaveBeenCalledTimes(1)
+    })
+    expect(mockRagSearch).not.toHaveBeenCalled()
+    expect(mockMessageWarning).toHaveBeenCalledWith(
+      "Summary is unavailable while required services are offline."
+    )
   })
 
   it("creates one workspace-owned deck and bulk saves flashcards for a run", async () => {

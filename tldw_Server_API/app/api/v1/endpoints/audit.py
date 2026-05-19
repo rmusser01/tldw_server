@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, User
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
@@ -16,7 +16,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core import config as app_config
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -129,8 +128,8 @@ def _map_event_types(values: list[str] | None | str | None) -> list[AuditEventTy
         try:
             mapped.append(AuditEventType[v])
             continue
-        except Exception as enum_key_error:
-            logger.debug(f"Failed enum-key mapping for audit event type '{v}'", exc_info=enum_key_error)
+        except Exception:
+            logger.debug("Audit event type enum-key mapping failed")
         try:
             mapped.append(AuditEventType(v))
         except Exception:
@@ -159,8 +158,8 @@ def _map_categories(values: list[str] | None | str | None) -> list[AuditEventCat
         try:
             mapped.append(AuditEventCategory[v])
             continue
-        except Exception as enum_key_error:
-            logger.debug(f"Failed enum-key mapping for audit category '{v}'", exc_info=enum_key_error)
+        except Exception:
+            logger.debug("Audit category enum-key mapping failed")
         try:
             mapped.append(AuditEventCategory(v))
         except Exception:
@@ -194,8 +193,18 @@ def _sanitize_filename(name: str, default_name: str) -> str:
 
 @router.get(
     "/audit/export",
+    responses={
+        200: {
+            "description": "Audit export as JSON, NDJSON, or CSV.",
+            "content": {
+                "application/json": {},
+                "application/x-ndjson": {},
+                "text/csv": {},
+            },
+        },
+    },
     summary="Export audit events (JSON/JSONL/CSV)",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def export_audit_events(
     format: str = Query("json"),
@@ -312,6 +321,30 @@ async def export_audit_events(
         fname = _normalize_ext(fname, "csv")
     headers = {"Content-Disposition": f"attachment; filename={fname}"}
 
+    if not do_stream and max_rows is None:
+        default_limit = getattr(audit_service, "non_stream_max_rows", None)
+        count_events_fn = getattr(audit_service, "count_events", None)
+        if isinstance(default_limit, int) and default_limit > 0 and callable(count_events_fn):
+            total_count = await count_events_fn(
+                start_time=st,
+                end_time=et,
+                event_types=ets,
+                categories=cats,
+                user_id=user_id_filter,
+                request_id=request_id,
+                correlation_id=correlation_id,
+                ip_address=ip_address,
+                session_id=session_id,
+                endpoint=endpoint,
+                method=method,
+                min_risk_score=min_risk_score,
+                allow_cross_tenant=allow_cross_tenant,
+            )
+            if int(total_count) > default_limit:
+                headers["X-Audit-Export-Truncated"] = "true"
+                headers["X-Audit-Export-Row-Limit"] = str(default_limit)
+                headers["X-Audit-Export-Total-Count"] = str(int(total_count))
+
     if do_stream:
         # content is an async generator from export_events
         return StreamingResponse(content=content, media_type=media, headers=headers)
@@ -321,7 +354,7 @@ async def export_audit_events(
 @router.get(
     "/audit/count",
     summary="Count audit events for pagination",
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def count_audit_events(
     start_time: str | None = Query(None, description="ISO8601 start timestamp"),

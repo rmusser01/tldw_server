@@ -23,7 +23,7 @@ import type {
 import {
   normalizePersonaProfile,
   normalizePersonaExemplar,
-} from '../TldwApiClient'
+} from '../persona-normalizers'
 
 const CHARACTER_CACHE_TTL_MS = 5 * 60 * 1000
 
@@ -962,7 +962,7 @@ export const characterMethods = {
     })
     const list = Array.isArray(payload) ? payload : []
     return list.map((item) =>
-      normalizePersonaProfile(item as Record<string, unknown>)
+      normalizePersonaProfile(item as unknown as Record<string, unknown>)
     )
   },
 

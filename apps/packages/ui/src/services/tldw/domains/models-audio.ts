@@ -2,6 +2,29 @@ import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type {
+  LlamacppAsset,
+  LlamacppAcquisitionJobListResponse,
+  LlamacppAcquisitionJobResponse,
+  LlamacppAssetDownloadRequest,
+  LlamacppAssetImportPreviewResponse,
+  LlamacppAssetsResponse,
+  LlamacppConfigResponse,
+  LlamacppConfigUpdateRequest,
+  LlamacppHardwareSnapshotResponse,
+  LlamacppInventoryItem,
+  LlamacppInventoryResponse,
+  LlamacppLifecycleActionResponse,
+  LlamacppLogTailResponse,
+  LlamacppProfile,
+  LlamacppProfileCreateRequest,
+  LlamacppProfileListResponse,
+  LlamacppProfileUpdateRequest,
+  LlamacppRuntimeListResponse,
+  LlamacppUseInChatResponse,
+  LlamacppValidationRequest,
+  LlamacppValidationResponse
+} from "@/types/llamacpp-admin"
+import type {
   TldwModel,
   ImageBackend,
   TldwEmbeddingModel,
@@ -298,6 +321,123 @@ export const modelsAudioMethods = {
     })
   },
 
+  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "GET"
+    })
+  },
+
+  async updateLlamacppConfig(
+    payload: LlamacppConfigUpdateRequest
+  ): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async validateLlamacpp(
+    payload: LlamacppValidationRequest
+  ): Promise<LlamacppValidationResponse> {
+    return await bgRequest<LlamacppValidationResponse>({
+      path: "/api/v1/llamacpp/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+    return await bgRequest<LlamacppInventoryResponse>({
+      path: "/api/v1/llamacpp/inventory",
+      method: "GET"
+    })
+  },
+
+  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+    return await bgRequest<LlamacppAssetsResponse>({
+      path: "/api/v1/llamacpp/assets",
+      method: "GET"
+    })
+  },
+
+  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+    return await bgRequest<LlamacppInventoryItem>({
+      path: "/api/v1/llamacpp/models/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/import-folder",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async previewLlamacppAssetFolder(
+    path: string
+  ): Promise<LlamacppAssetImportPreviewResponse> {
+    return await bgRequest<LlamacppAssetImportPreviewResponse>({
+      path: "/api/v1/llamacpp/assets/import-folder/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async startLlamacppAssetDownload(
+    payload: LlamacppAssetDownloadRequest
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: "/api/v1/llamacpp/assets/downloads",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async listLlamacppAssetDownloads(): Promise<LlamacppAcquisitionJobListResponse> {
+    return await bgRequest<LlamacppAcquisitionJobListResponse>({
+      path: "/api/v1/llamacpp/assets/downloads",
+      method: "GET"
+    })
+  },
+
+  async getLlamacppAssetDownload(
+    jobId: string | number
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
+      method: "GET"
+    })
+  },
+
+  async cancelLlamacppAssetDownload(
+    jobId: string | number
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
+      method: "DELETE"
+    })
+  },
+
   async startLlamacppServer(
     modelFilename: string,
     serverArgs?: Record<string, any>
@@ -313,12 +453,163 @@ export const modelsAudioMethods = {
     })
   },
 
+  async startLlamacppModel(
+    modelId: string,
+    serverArgs?: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return await bgRequest<Record<string, unknown>>({
+      path: "/api/v1/llamacpp/start-by-model",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        model_id: modelId,
+        server_args: serverArgs || {}
+      }
+    })
+  },
+
   async stopLlamacppServer(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {}
+    })
+  },
+
+  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: "/api/v1/llamacpp/use-in-chat",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+    const query = buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/logs/tail${query}`,
+      method: "GET"
+    })
+  },
+
+  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+    return await bgRequest<LlamacppProfileListResponse>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "GET"
+    })
+  },
+
+  async createLlamacppProfile(
+    payload: LlamacppProfileCreateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async updateLlamacppProfile(
+    profileId: string,
+    payload: LlamacppProfileUpdateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async deleteLlamacppProfile(
+    profileId: string
+  ): Promise<{ profile_id: string; deleted: boolean }> {
+    return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "DELETE"
+    })
+  },
+
+  async startLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async stopLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async pauseLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async resumeLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async useLlamacppProfileInChat(
+    profileId: string
+  ): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+    return await bgRequest<LlamacppRuntimeListResponse>({
+      path: "/api/v1/llamacpp/instances",
+      method: "GET"
+    })
+  },
+
+  async tailLlamacppInstanceLogs(
+    profileId: string,
+    lines?: number
+  ): Promise<LlamacppLogTailResponse> {
+    const query = buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
+      method: "GET"
+    })
+  },
+
+  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+    return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      path: "/api/v1/llamacpp/hardware",
+      method: "GET"
     })
   },
 

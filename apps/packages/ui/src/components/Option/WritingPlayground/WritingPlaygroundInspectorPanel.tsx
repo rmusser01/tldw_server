@@ -15,6 +15,10 @@ type WritingPlaygroundInspectorPanelProps = {
   context: ReactNode
   setup: ReactNode
   inspect: ReactNode
+  characters?: ReactNode
+  research?: ReactNode
+  agent?: ReactNode
+  feedback?: ReactNode
   tabLabels?: Partial<Record<InspectorTabKey, string>>
   tabBadges?: Partial<Record<InspectorTabKey, ReactNode>>
 }
@@ -39,6 +43,26 @@ const TAB_DEFINITIONS: TabDefinition[] = [
     key: "inspect",
     label: "Analysis",
     testId: "writing-inspector-tab-inspect"
+  },
+  {
+    key: "characters",
+    label: "Characters",
+    testId: "writing-inspector-tab-characters"
+  },
+  {
+    key: "research",
+    label: "Research",
+    testId: "writing-inspector-tab-research"
+  },
+  {
+    key: "agent",
+    label: "Agent",
+    testId: "writing-inspector-tab-agent"
+  },
+  {
+    key: "feedback",
+    label: "Feedback",
+    testId: "writing-inspector-tab-feedback"
   }
 ]
 
@@ -52,6 +76,10 @@ export const WritingPlaygroundInspectorPanel: FC<
   context,
   setup,
   inspect,
+  characters,
+  research,
+  agent,
+  feedback,
   tabLabels,
   tabBadges
 }) => {
@@ -71,7 +99,11 @@ export const WritingPlaygroundInspectorPanel: FC<
     sampling,
     context,
     setup,
-    inspect
+    inspect,
+    characters: characters ?? null,
+    research: research ?? null,
+    agent: agent ?? null,
+    feedback: feedback ?? null
   }
 
   return (

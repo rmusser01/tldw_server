@@ -2994,23 +2994,35 @@ def _fetch_curl_simple(
     timeout: float | None,
     impersonate: str | None,
     proxies: dict[str, str] | None,
-    allow_redirects: bool,
+    session: Any | None = None,
 ) -> HttpResponse:
-    CurlSession = _resolve_curl_session()
-    if CurlSession is None:
-        raise RuntimeError("curl_cffi is not installed")  # noqa: TRY003
+    CurlSession = None
+    if session is None:
+        CurlSession = _resolve_curl_session()
+        if CurlSession is None:
+            raise RuntimeError("curl_cffi is not installed")  # noqa: TRY003
     if proxies:
         _validate_proxies_or_raise(proxies)
 
     req_kwargs: dict[str, Any] = {
         "headers": headers,
         "cookies": cookies,
-        "allow_redirects": allow_redirects,
+        "allow_redirects": False,
     }
     if timeout is not None:
         req_kwargs["timeout"] = timeout
     if proxies:
         req_kwargs["proxies"] = proxies
+
+    if session is not None:
+        resp = session.get(url, **req_kwargs)
+        return HttpResponse(
+            status=int(getattr(resp, "status_code", 0)),
+            headers=dict(getattr(resp, "headers", {}) or {}),
+            text=str(getattr(resp, "text", "")),
+            url=str(getattr(resp, "url", url)),
+            backend="curl",
+        )
 
     with CurlSession(impersonate=impersonate) as session:
         resp = session.get(url, **req_kwargs)
@@ -3088,17 +3100,94 @@ def fetch(*args, **kwargs):
     allow_cross_host = is_truthy(os.getenv("HTTP_ALLOW_CROSS_HOST_REDIRECTS", ""))
     allow_downgrade = is_truthy(os.getenv("HTTP_ALLOW_SCHEME_DOWNGRADE", ""))
 
+    def _extract_redirect_host(redirect_url: str) -> str:
+        try:
+            parsed = urlparse(redirect_url)
+            return (parsed.hostname or "").lower()
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+            return ""
+
+    def _extract_redirect_port(redirect_url: str) -> int | None:
+        try:
+            parsed = urlparse(redirect_url)
+            if parsed.port is not None:
+                return int(parsed.port)
+            scheme = (parsed.scheme or "").lower()
+            if scheme == "https":
+                return 443
+            if scheme == "http":
+                return 80
+            return None
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+            return None
+
+    def _extract_redirect_scheme(redirect_url: str) -> str:
+        try:
+            parsed = urlparse(redirect_url)
+            return (parsed.scheme or "").lower()
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+            return ""
+
+    def _is_cross_host_redirect(prev: str, nxt: str) -> bool:
+        prev_host = _extract_redirect_host(prev)
+        next_host = _extract_redirect_host(nxt)
+        prev_port = _extract_redirect_port(prev)
+        next_port = _extract_redirect_port(nxt)
+        return bool(
+            prev_host
+            and next_host
+            and ((prev_host, prev_port) != (next_host, next_port))
+        )
+
+    def _is_scheme_downgrade(prev: str, nxt: str) -> bool:
+        return (
+            _extract_redirect_scheme(prev) == "https"
+            and _extract_redirect_scheme(nxt) == "http"
+        )
+
+    def _redirect_boundary_headers(current_headers: dict[str, str]) -> dict[str, str]:
+        # Preserve only safe transport headers across origin boundaries.
+        safe_headers: dict[str, str] = {}
+        for header_key, header_value in (current_headers or {}).items():
+            key_lc = str(header_key).lower()
+            if key_lc == "user-agent":
+                safe_headers["User-Agent"] = str(header_value)
+            elif key_lc == "accept-encoding":
+                safe_headers["Accept-Encoding"] = str(header_value)
+        return safe_headers
+
+    def _clear_session_cookie_state(session: Any) -> None:
+        for attr_name in ("cookies", "cookie_jar", "jar"):
+            store = getattr(session, attr_name, None)
+            if store is None:
+                continue
+            clear = getattr(store, "clear", None)
+            if callable(clear):
+                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    clear()
+                continue
+            if isinstance(store, dict):
+                store.clear()
+
     def _redirect_allowed(prev: str, nxt: str) -> bool:
         try:
-            pu = httpx.URL(prev)
-            nu = httpx.URL(nxt)
+            prev_scheme = _extract_redirect_scheme(prev)
+            next_scheme = _extract_redirect_scheme(nxt)
+            prev_host = _extract_redirect_host(prev)
+            next_host = _extract_redirect_host(nxt)
+            prev_port = _extract_redirect_port(prev)
+            next_port = _extract_redirect_port(nxt)
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             return False
         # Disallow scheme downgrade unless explicitly allowed
-        if not allow_downgrade and (pu.scheme or "").lower() == "https" and (nu.scheme or "").lower() == "http":
+        if not allow_downgrade and prev_scheme == "https" and next_scheme == "http":
             return False
-        # Same-host redirects are always allowed (subject to egress checks)
-        if (pu.host or "").lower() == (nu.host or "").lower():
+        same_host = bool(prev_host and next_host and prev_host == next_host)
+        # Same-host scheme changes are governed separately by allow_downgrade.
+        if same_host and prev_scheme != next_scheme:
+            return True
+        # Same-host/same-port redirects are always allowed (subject to egress checks)
+        if (prev_host, prev_port) == (next_host, next_port):
             return True
         # Cross-host redirects configurable (default disabled)
         return bool(allow_cross_host)
@@ -3112,21 +3201,63 @@ def fetch(*args, **kwargs):
         client_kwargs["proxies"] = proxies
 
     if backend_norm == "curl":
-        return _fetch_curl_simple(
-            url=url,
-            headers=req_headers,
-            cookies=cookies,
-            timeout=timeout,
-            impersonate=impersonate,
-            proxies=proxies,
-            allow_redirects=follow_redirects,
-        )
+        CurlSession = _resolve_curl_session()
+        if CurlSession is None:
+            raise RuntimeError("curl_cffi is not installed")  # noqa: TRY003
+
+        cur_url = url
+        hop_headers = req_headers
+        hop_cookies = cookies
+        redirects = 0
+        with CurlSession(impersonate=impersonate) as curl_session:
+            while True:
+                if not _is_url_allowed(cur_url):
+                    raise ValueError("Egress denied for URL")  # noqa: TRY003
+
+                resp = _fetch_curl_simple(
+                    url=cur_url,
+                    headers=hop_headers,
+                    cookies=hop_cookies,
+                    timeout=timeout,
+                    impersonate=impersonate,
+                    proxies=proxies,
+                    session=curl_session,
+                )
+                status = int(resp["status"])
+
+                if not follow_redirects or status not in (301, 302, 303, 307, 308):
+                    return resp
+
+                location = (resp["headers"] or {}).get("location") or (resp["headers"] or {}).get("Location")
+                if not location:
+                    return resp
+
+                base_url = str(resp["url"] or cur_url)
+                next_url = _resolve_redirect_url(base_url, str(location))
+                if not next_url:
+                    return resp
+
+                if not _redirect_allowed(cur_url, next_url):
+                    return resp
+
+                if _is_cross_host_redirect(cur_url, next_url) or _is_scheme_downgrade(cur_url, next_url):
+                    hop_headers = _redirect_boundary_headers(hop_headers)
+                    hop_cookies = None
+                    _clear_session_cookie_state(curl_session)
+
+                redirects += 1
+                if redirects > DEFAULT_MAX_REDIRECTS:
+                    return resp
+
+                cur_url = next_url
 
     # Minimal client lifecycle for simple fetch with explicit redirect handling
     client_cls = getattr(_hx, "Client", object) if _hx is not None else object
     sc = _instantiate_client(client_cls, client_kwargs)
     with sc as sc:
         cur_url = url
+        hop_headers = req_headers
+        hop_cookies = cookies
         redirects = 0
 
         while True:
@@ -3134,7 +3265,7 @@ def fetch(*args, **kwargs):
             if not _is_url_allowed(cur_url):
                 raise ValueError("Egress denied for URL")  # noqa: TRY003
 
-            r = sc.request("GET", cur_url, headers=req_headers, cookies=cookies, follow_redirects=False)
+            r = sc.request("GET", cur_url, headers=hop_headers, cookies=hop_cookies, follow_redirects=False)
             status = int(getattr(r, "status_code", 0))
 
             if not follow_redirects or status not in (301, 302, 303, 307, 308):
@@ -3145,17 +3276,18 @@ def fetch(*args, **kwargs):
             if not location:
                 break
 
-            try:
-                base_url = str(getattr(r, "url", cur_url))
-                next_url = str(httpx.URL(base_url).join(httpx.URL(location)))
-            except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                try:
-                    next_url = str(httpx.URL(location))
-                except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                    break
+            base_url = str(getattr(r, "url", cur_url))
+            next_url = _resolve_redirect_url(base_url, str(location))
+            if not next_url:
+                break
 
             if not _redirect_allowed(cur_url, next_url):
                 break
+
+            if _is_cross_host_redirect(cur_url, next_url) or _is_scheme_downgrade(cur_url, next_url):
+                hop_headers = _redirect_boundary_headers(hop_headers)
+                hop_cookies = None
+                _clear_session_cookie_state(sc)
 
             redirects += 1
             if redirects > DEFAULT_MAX_REDIRECTS:

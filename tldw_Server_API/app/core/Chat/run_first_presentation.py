@@ -55,8 +55,10 @@ def _matches_allow_catalog(tool_name: str, allow_catalog: list[str] | None) -> b
 def _matches_provider_allowlist(
     provider_key: str | None,
     provider_allowlist: list[str] | None,
+    *,
+    fail_closed_when_empty: bool = False,
 ) -> bool:
-    if not provider_allowlist:
+    if provider_allowlist is None:
         return True
 
     candidate = str(provider_key or "").strip().lower()
@@ -67,7 +69,7 @@ def _matches_provider_allowlist(
         str(item or "").strip().lower() for item in provider_allowlist if str(item or "").strip()
     }
     if not normalized_allowlist:
-        return True
+        return not fail_closed_when_empty
     return candidate in normalized_allowlist
 
 
@@ -230,10 +232,14 @@ def present_chat_tools(
         filtered_tools.append(tool)
         effective_tool_names.append(tool_name)
 
-    rollout_token = str(rollout_mode or "").strip().lower()
-    rollout_enabled = rollout_token == "gated"  # nosec B105 - rollout label, not a secret
+    rollout_mode_name = str(rollout_mode or "").strip().lower()
+    rollout_enabled = rollout_mode_name in {"gated", "default_on", "on", "enabled", "true", "1"}
     run_present = _RUN_TOOL_NAME in effective_tool_names
-    provider_allowed = _matches_provider_allowlist(provider_key, provider_allowlist)
+    provider_allowed = _matches_provider_allowlist(
+        provider_key,
+        provider_allowlist,
+        fail_closed_when_empty=rollout_mode_name == "default_on",
+    )
     eligible = rollout_enabled and run_present and provider_allowed
 
     if not effective_tool_names:

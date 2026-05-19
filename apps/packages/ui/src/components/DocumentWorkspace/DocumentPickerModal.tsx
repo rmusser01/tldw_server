@@ -22,6 +22,7 @@ import type { DocumentType } from "./types"
 import { useNavigate } from "react-router-dom"
 import { setSetting } from "@/services/settings/registry"
 import { LAST_MEDIA_ID_SETTING } from "@/services/settings/ui-settings"
+import { useQuickIngestStore } from "@/store/quick-ingest"
 
 export type DocumentPickerTab = "library" | "upload"
 
@@ -118,6 +119,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
   const isOnline = useServerOnline()
+  const recentlyIngestedDocs = useQuickIngestStore(s => s.recentlyIngestedDocs)
 
   const [activeTab, setActiveTab] = React.useState<DocumentPickerTab>(initialTab)
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -332,6 +334,35 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
         />
       </div>
 
+      {/* Recently added from QuickIngest */}
+      {recentlyIngestedDocs.length > 0 && !searchQuery && (
+        <div className="mb-3">
+          <p className="mb-1.5 text-xs font-medium text-text-muted">
+            {t("option:documentWorkspace.recentlyIngested", "Recently added")}
+          </p>
+          <div className="space-y-1">
+            {recentlyIngestedDocs.slice(0, 3).map((doc) => (
+              <button
+                key={doc.id}
+                type="button"
+                onClick={() => {
+                  const normalized = doc.type?.toLowerCase()
+                  const resolvedType = normalized === "document" ? "pdf" : normalized === "ebook" ? "epub" : normalized
+                  handleOpen({ id: doc.id, type: resolvedType, title: doc.title })
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-surface2 transition-colors"
+              >
+                <FileText className="h-4 w-4 flex-shrink-0 text-primary" />
+                <span className="truncate">{doc.title || `Document #${doc.id}`}</span>
+                <span className="ml-auto text-xs text-text-muted">
+                  {t("option:documentWorkspace.justIngested", "Just added")}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent documents */}
       {!searchQuery && recentDocs.length > 0 && (
         <div className="mb-3">
@@ -361,10 +392,11 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       ) : mediaItems.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t(
-            "option:documentWorkspace.noMediaFound",
-            "No matching media found"
-          )}
+          description={
+            searchQuery
+              ? t("option:documentWorkspace.noMediaFound", "No documents match your search")
+              : t("option:documentWorkspace.libraryEmpty", "Your library is empty. Upload a document to get started.")
+          }
         />
       ) : (
         <div className="max-h-96 overflow-y-auto rounded border border-border">
@@ -476,7 +508,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
         <p className="text-xs text-text-muted">
           {t(
             "option:documentWorkspace.uploadNote",
-            "Files are ingested into your media library and kept for document review."
+            "Files are added to your library and kept for document review."
           )}
         </p>
         <div className="mt-4">

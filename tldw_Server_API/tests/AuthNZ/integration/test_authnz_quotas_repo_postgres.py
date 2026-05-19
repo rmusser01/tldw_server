@@ -30,13 +30,14 @@ async def test_authnz_quotas_repo_postgres_increment_and_check(test_db_pool):
         )
         api_key_id = await conn.fetchval(
             """
-            INSERT INTO api_keys (user_id, key_hash, key_prefix, status)
-            VALUES ($1, $2, $3, 'active')
+            INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
+            VALUES ($1, $2, $3, $4, 'active')
             RETURNING id
             """,
             int(user_id),
             "pg-quotas-key-hash",
             "pg-quotas-prefix",
+            "read",
         )
     repo = AuthnzQuotasRepo(db_pool=pool)
     # Ensure vk_* counters schema exists via the repo helper.

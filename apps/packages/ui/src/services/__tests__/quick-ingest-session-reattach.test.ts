@@ -96,4 +96,34 @@ describe("reattachQuickIngestSession", () => {
       }),
     ])
   })
+
+  it("treats completed jobs with error payloads as partial failures during reattach", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: {
+        status: "completed",
+        result: {
+          status: "Error",
+          error: "File preparation/download failed: Port not allowed: 3000"
+        }
+      },
+    })
+
+    const snapshot = await reattachQuickIngestSession({
+      mode: "webui-direct",
+      jobIds: [77],
+      submittedItemIds: ["queued-url-1"],
+      startedAt: Date.now(),
+    })
+
+    expect(snapshot.lifecycle).toBe("partial_failure")
+    expect(snapshot.jobs).toEqual([
+      expect.objectContaining({
+        jobId: 77,
+        status: "completed",
+        error: "File preparation/download failed: Port not allowed: 3000",
+        sourceItemId: "queued-url-1",
+      }),
+    ])
+  })
 })

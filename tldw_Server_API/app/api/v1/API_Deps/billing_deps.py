@@ -29,7 +29,16 @@ from tldw_Server_API.app.core.Resource_Governance import cost_units
 BILLING_WARNING_HEADER = "X-Billing-Warning"
 BILLING_LIMIT_HEADER = "X-Billing-Limit"
 BILLING_USAGE_HEADER = "X-Billing-Usage"
+_BILLING_HEADERS = (BILLING_LIMIT_HEADER, BILLING_USAGE_HEADER, BILLING_WARNING_HEADER)
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+
+
+def propagate_billing_headers(source: Response, target: Response) -> None:
+    """Copy billing headers written by ``require_within_limit`` onto an explicit JSONResponse."""
+    for name in _BILLING_HEADERS:
+        value = source.headers.get(name)
+        if value is not None:
+            target.headers[name] = value
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
@@ -124,13 +133,56 @@ async def _resolve_org_id(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to resolve org_id for user {principal.user_id}: {exc}")
+        logger.error("Failed to resolve org_id for billing enforcement")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to resolve organization for billing enforcement",
         ) from exc
 
     return None
+
+
+async def get_billing_org_id(
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    x_tldw_org_id: int | None = Header(None, alias="X-TLDW-Org-Id"),
+    org_id: int | None = Query(None, description="Organization ID"),
+) -> int | None:
+    """
+    Resolve the billing org ID without enforcing any limit.
+
+    Returns None when enforcement is disabled, the user has no org,
+    or single-user mode is active.  Intended for handler bodies that
+    need an org_id to create a ``LimitEnforcer`` context manager.
+    """
+    if not enforcement_enabled():
+        return None
+    try:
+        resolved = await _resolve_org_id(principal, org_id, x_tldw_org_id)
+    except HTTPException:
+        if _allow_orgless_billing_access():
+            return None
+        raise
+    return resolved
+
+
+async def resolve_org_id_for_principal(principal: AuthPrincipal) -> int | None:
+    """
+    Resolve the billing org ID from an ``AuthPrincipal`` without FastAPI DI.
+
+    Useful in WebSocket handlers where ``Depends()`` is unavailable.
+    Returns None when enforcement is disabled or org context is absent.
+    """
+    if not enforcement_enabled():
+        return None
+    try:
+        return await _resolve_org_id(principal, None, None)
+    except HTTPException:
+        if _allow_orgless_billing_access():
+            return None
+        raise
+    except Exception:
+        logger.debug("resolve_org_id_for_principal failed")
+        return None
 
 
 def require_within_limit(category: LimitCategory, units: int = 1):
@@ -339,8 +391,8 @@ async def add_billing_headers(
         response.headers["X-Billing-Plan-Api-Limit"] = str(limits.get("api_calls_day", "unlimited"))
         response.headers["X-Billing-Api-Usage-Today"] = str(usage.api_calls_today)
 
-    except Exception as exc:
-        logger.debug(f"Failed to add billing headers: {exc}")
+    except Exception:
+        logger.debug("Failed to add billing headers")
 
 
 class LimitEnforcer:
@@ -406,8 +458,8 @@ class LimitEnforcer:
                 # Best-effort in-memory cache delta for billing checks
                 try:
                     cache_updated = self._enforcer.apply_usage_delta(self.org_id, self.category, units)
-                except Exception as exc:
-                    logger.debug(f"LimitEnforcer: apply_usage_delta failed for org_id={self.org_id}: {exc}")
+                except Exception:
+                    logger.debug("LimitEnforcer usage delta recording failed")
 
                 # Mirror usage into the generic cost-units ledger so that
                 # cross-category budgets can reason about org-level usage.
@@ -431,8 +483,8 @@ class LimitEnforcer:
                             minutes=minutes,
                             requests=requests,
                         )
-                except Exception as exc:
-                    logger.debug(f"LimitEnforcer: cost-units ledger write failed for org_id={self.org_id}: {exc}")
+                except Exception:
+                    logger.debug("LimitEnforcer cost-units ledger write failed")
 
         # Invalidate cache so next request gets fresh data
         if self.actual_units is not None and not cache_updated:

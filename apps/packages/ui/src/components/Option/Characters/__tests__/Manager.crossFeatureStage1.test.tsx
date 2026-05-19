@@ -2,6 +2,7 @@ import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { CharactersManager } from "../Manager"
+import { ensureLocalStorageApi } from "./testUtils"
 
 const {
   useQueryMock,
@@ -172,7 +173,7 @@ const makeUseQueryResult = (value: Record<string, unknown>) => ({
 describe("CharactersManager cross-feature integration stage-1", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.localStorage.clear()
+    ensureLocalStorageApi().clear()
     window.history.replaceState(
       {},
       "",

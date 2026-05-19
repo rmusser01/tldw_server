@@ -40,7 +40,7 @@ async def debug_schema(
                     return [col[1] for col in cursor.fetchall()]
                 except Exception as exc:  # pragma: no cover - defensive path
                     logger.warning(
-                        'Failed to introspect columns for table {}: {}',
+                        "Failed to introspect columns for table {}: {}",
                         name,
                         exc,
                     )
@@ -62,7 +62,7 @@ async def debug_schema(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("debug_schema failed: {}", exc, exc_info=True)
+        logger.error("debug_schema failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal error while reading media schema.",

@@ -27,6 +27,10 @@ def _normalize_chunk_type(value: Optional[str]) -> str:
     return str(value).strip().lower() or "text"
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    return type(exc).__name__
+
+
 async def enhanced_chunk_documents(
     context,  # RAGPipelineContext
     enable_pdf_cleaning: Optional[bool] = None,
@@ -183,7 +187,7 @@ async def enhanced_chunk_documents(
                 total_chunks += 1
 
         except Exception as e:
-            logger.error(f"Failed to chunk document {doc.id}: {e}")
+            logger.error(f"Failed to chunk document: {_safe_exception_label(e)}")
             # Fall back to including original document
             chunked_documents.append(doc)
 

@@ -15,3 +15,6 @@ export type { UseWritingInspectorPanelsDeps } from "./useWritingInspectorPanels"
 
 export { useWritingImportExport } from "./useWritingImportExport"
 export type { UseWritingImportExportDeps } from "./useWritingImportExport"
+
+export { useWritingFeedback } from "./useWritingFeedback"
+export type { UseWritingFeedbackReturn } from "./useWritingFeedback"

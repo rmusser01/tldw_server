@@ -80,7 +80,7 @@ jobs:
 
       - name: Build Chrome extension
         working-directory: apps/extension
-        run: bun run build:chrome
+        run: bun run build:chrome:prod
 
       - name: Install Playwright Chromium
         working-directory: apps/extension

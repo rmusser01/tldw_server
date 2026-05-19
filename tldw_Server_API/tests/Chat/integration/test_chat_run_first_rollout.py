@@ -60,11 +60,11 @@ def test_chat_endpoint_records_run_first_rollout_labels(
     collector.track_run_first_completion_proxy = MagicMock()
 
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.chat.get_chat_metrics", lambda: collector)
-    monkeypatch.setattr(chat_service, "resolve_chat_run_first_rollout_mode", lambda raw_mode=None, default="off": "gated")
+    monkeypatch.setattr(chat_service, "resolve_chat_run_first_rollout_mode", lambda raw_mode=None, default="off": "default_on")
     monkeypatch.setattr(
         chat_service,
         "resolve_chat_run_first_presentation_variant",
-        lambda raw_variant=None, default="chat_phase2a_v1": "chat_phase2a_v1",
+        lambda raw_variant=None, default="chat_phase2a_v1": "chat_phase2b_v1",
     )
     monkeypatch.setattr(
         chat_service,
@@ -76,7 +76,6 @@ def test_chat_endpoint_records_run_first_rollout_labels(
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chacha_db
-
     try:
         body = {
             "api_provider": "openai",
@@ -122,8 +121,8 @@ def test_chat_endpoint_records_run_first_rollout_labels(
         collector.track_run_first_completion_proxy.assert_called_once()
 
         _, rollout_kwargs = collector.track_run_first_rollout.call_args
-        assert rollout_kwargs["presentation_variant"] == "chat_phase2a_v1"
-        assert rollout_kwargs["cohort"] == "gated"
+        assert rollout_kwargs["presentation_variant"] == "chat_phase2b_v1"
+        assert rollout_kwargs["cohort"] == "default_on"
         assert rollout_kwargs["provider"] == "openai"
         assert rollout_kwargs["model"] == "gpt-4o-mini"
         assert rollout_kwargs["streaming"] is False

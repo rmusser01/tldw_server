@@ -1,5 +1,6 @@
 import type { ChatScope } from "@/types/chat-scope"
 import type {
+  ArtifactReviewStatus,
   ArtifactStatus,
   ArtifactType,
   WorkspaceNote,
@@ -22,6 +23,7 @@ export interface WorkspaceSyncArtifact {
   type: ArtifactType
   title: string
   status: ArtifactStatus
+  reviewStatus?: ArtifactReviewStatus
   content?: string
   totalTokens?: number
   totalCostUsd?: number
@@ -56,6 +58,7 @@ interface BuildWorkspaceSyncPayloadInput {
     type: ArtifactType
     title: string
     status: ArtifactStatus
+    reviewStatus?: ArtifactReviewStatus
     content?: string
     totalTokens?: number
     totalCostUsd?: number
@@ -96,6 +99,7 @@ export const buildWorkspaceSyncPayload = (
         type: artifact.type,
         title: artifact.title,
         status: artifact.status,
+        reviewStatus: artifact.reviewStatus,
         content: artifact.content,
         totalTokens: artifact.totalTokens,
         totalCostUsd: artifact.totalCostUsd,

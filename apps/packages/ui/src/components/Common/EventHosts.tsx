@@ -11,13 +11,18 @@ const PageHelpModal = lazy(() =>
 
 type EventOnlyHostsProps = {
   commandPaletteProps?: CommandPaletteProps
+  includePromptCommands?: boolean
 }
 
 export const EventOnlyHosts = ({
-  commandPaletteProps
+  commandPaletteProps,
+  includePromptCommands = false
 }: EventOnlyHostsProps) => (
   <>
-    <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
+    <CommandPaletteHost
+      commandPaletteProps={commandPaletteProps}
+      includePromptCommands={includePromptCommands}
+    />
     <Suspense fallback={null}>
       <PageHelpModal />
     </Suspense>

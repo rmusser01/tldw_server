@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { createPortal } from "react-dom"
 import { X, Keyboard } from "lucide-react"
 
@@ -27,6 +28,7 @@ export function DocumentShortcutsModal({
   open,
   onClose
 }: DocumentShortcutsModalProps) {
+  const { t } = useTranslation(["option", "common"])
   const modalRef = useRef<HTMLDivElement | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null)
@@ -192,7 +194,7 @@ export function DocumentShortcutsModal({
               id="doc-shortcuts-modal-title"
               className="text-base font-semibold text-text"
             >
-              Document Viewer Shortcuts
+              {t("option:documentWorkspace.shortcutsTitle", "Document Workspace Shortcuts")}
             </h2>
           </div>
           <button

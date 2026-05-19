@@ -149,6 +149,10 @@ const OUTPUTS = [
   { label: "Flashcards", validation: "flashcards" },
 ] as const
 
+const assertNever = (value: never): never => {
+  throw new Error(`Unhandled artifact validation kind: ${String(value)}`)
+}
+
 const FAILURE_TEXT_PATTERN =
   /failed to generate|generation failed|error encountered|encountered an error|no usable|download failed|could not/i
 const SOURCE_SIGNAL_PATTERN =
@@ -336,7 +340,8 @@ const validateDownloadedArtifact = (
   }
 
   const content = readDownloadedText(artifactPath)
-  switch (output.validation) {
+  const validation = output.validation
+  switch (validation) {
     case "audio_summary":
       validateNarrativeArtifact("Audio Summary", content, { minLength: 80 })
       return
@@ -368,7 +373,7 @@ const validateDownloadedArtifact = (
       validateFlashcardsArtifact(content)
       return
     default:
-      throw new Error(`Unhandled artifact validation kind: ${String(output.validation)}`)
+      return assertNever(validation)
   }
 }
 
@@ -551,7 +556,7 @@ const generateAndDownloadOutput = async (
   await verifyDownloadedArtifact(download, output)
 }
 
-test.describe("Workspace Playground output matrix probe", () => {
+test.describe("Research Studio output matrix probe", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
     await page.setViewportSize(DESKTOP_VIEWPORT)

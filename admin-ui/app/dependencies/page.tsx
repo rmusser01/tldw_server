@@ -1,14 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  CheckCircle2,
   Clock3,
   Cpu,
+  Database,
   RefreshCw,
+  Server,
   Wifi,
   WifiOff,
+  XCircle,
 } from 'lucide-react';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
@@ -19,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api } from '@/lib/api-client';
 import { buildRecentUtcDayKeys, buildSparklinePoints } from '@/lib/provider-token-trends';
+import type { DependencyUptimeStats, SystemDependencyItem, SystemDependencyStatus } from '@/types';
 
 type ProviderHealthStatus = 'reachable' | 'unreachable' | 'unknown';
 
@@ -195,6 +200,29 @@ const statusVariant = (status: ProviderHealthStatus): 'default' | 'secondary' | 
 const hasPrometheusProviderData = (metricsText: string): boolean =>
   /provider|llm/i.test(metricsText);
 
+const sysDepStatusLabel = (status: SystemDependencyStatus): string => {
+  if (status === 'healthy') return 'Healthy';
+  if (status === 'degraded') return 'Degraded';
+  if (status === 'down') return 'Down';
+  return 'Unknown';
+};
+
+const sysDepStatusVariant = (
+  status: SystemDependencyStatus,
+): 'default' | 'secondary' | 'destructive' | 'outline' => {
+  if (status === 'healthy') return 'default';
+  if (status === 'degraded') return 'secondary';
+  if (status === 'down') return 'destructive';
+  return 'outline';
+};
+
+const sysDepStatusIcon = (status: SystemDependencyStatus) => {
+  if (status === 'healthy') return <CheckCircle2 className="mr-1 h-3 w-3" />;
+  if (status === 'degraded') return <AlertTriangle className="mr-1 h-3 w-3" />;
+  if (status === 'down') return <XCircle className="mr-1 h-3 w-3" />;
+  return <AlertTriangle className="mr-1 h-3 w-3" />;
+};
+
 const createDefaultProviderCheck = (): ProviderHealthCheck => ({
   status: 'unknown',
   testing: false,
@@ -254,6 +282,46 @@ function AvailabilitySparkline({
   );
 }
 
+function UptimeBar({ sparkline, label }: { sparkline: number[]; label: string }) {
+  if (!Array.isArray(sparkline) || sparkline.length === 0) {
+    return <span className="text-xs text-muted-foreground">No history</span>;
+  }
+
+  // Downsample to ~56 buckets (one per 3-hour block) for compact display
+  const bucketSize = Math.max(1, Math.floor(sparkline.length / 56));
+  const buckets: number[] = [];
+  for (let i = 0; i < sparkline.length; i += bucketSize) {
+    const slice = sparkline.slice(i, i + bucketSize);
+    const healthy = slice.filter((v) => v === 1).length;
+    buckets.push(healthy / slice.length);
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <svg
+        role="img"
+        aria-label={`${label} uptime sparkline`}
+        viewBox={`0 0 ${buckets.length * 2} 12`}
+        className="h-3"
+        style={{ width: `${Math.min(buckets.length * 2, 112)}px` }}
+      >
+        {buckets.map((ratio, i) => (
+          <rect
+            key={i}
+            x={i * 2}
+            y={0}
+            width={1.5}
+            height={12}
+            rx={0.5}
+            fill={ratio >= 1 ? '#22c55e' : ratio > 0 ? '#eab308' : '#ef4444'}
+            opacity={ratio >= 1 ? 0.8 : 1}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 export default function DependenciesPage() {
   const [loading, setLoading] = useState(true);
   const [runningAllChecks, setRunningAllChecks] = useState(false);
@@ -264,6 +332,11 @@ export default function DependenciesPage() {
   const [availabilityByProvider, setAvailabilityByProvider] = useState<Record<string, number[]>>({});
   const [providerChecks, setProviderChecks] = useState<Record<string, ProviderHealthCheck>>({});
   const [prometheusAvailable, setPrometheusAvailable] = useState(false);
+  const [systemDeps, setSystemDeps] = useState<SystemDependencyItem[]>([]);
+  const [systemDepsCheckedAt, setSystemDepsCheckedAt] = useState<string | null>(null);
+  const [systemDepsLoading, setSystemDepsLoading] = useState(true);
+  const [uptimeByDep, setUptimeByDep] = useState<Record<string, DependencyUptimeStats>>({});
+  const systemDepsSeqRef = useRef(0);
   const [uptimeByService, setUptimeByService] = useState<Record<string, Array<{ bucket: string; uptime_pct: number; probes: number }>>>({});
 
   const runProviderCheck = useCallback(async (provider: Provider): Promise<Omit<ProviderHealthCheck, 'testing'>> => {
@@ -451,12 +524,43 @@ export default function DependenciesPage() {
     setLoading(false);
   }, []);
 
+  const loadSystemDeps = useCallback(async () => {
+    const seq = ++systemDepsSeqRef.current;
+    setSystemDepsLoading(true);
+    try {
+      const result = await api.getSystemDependencies();
+      if (seq !== systemDepsSeqRef.current) return; // stale response
+      const items = Array.isArray(result.items) ? result.items : [];
+      setSystemDeps(items);
+      setSystemDepsCheckedAt(result.checked_at ?? new Date().toISOString());
+
+      // Fetch 7-day uptime stats for each dependency (best-effort)
+      const uptimeResults = await Promise.allSettled(
+        items.map((dep) => api.getDependencyUptime(dep.name, 7)),
+      );
+      if (seq !== systemDepsSeqRef.current) return; // stale response
+      const nextUptime: Record<string, DependencyUptimeStats> = {};
+      uptimeResults.forEach((settledResult, index) => {
+        if (settledResult.status === 'fulfilled' && settledResult.value) {
+          nextUptime[items[index].name] = settledResult.value;
+        }
+      });
+      setUptimeByDep(nextUptime);
+    } catch {
+      if (seq !== systemDepsSeqRef.current) return;
+      setSystemDeps([]);
+    } finally {
+      if (seq === systemDepsSeqRef.current) setSystemDepsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const timerId = window.setTimeout(() => {
       void loadTelemetry();
+      void loadSystemDeps();
     }, 0);
     return () => window.clearTimeout(timerId);
-  }, [loadTelemetry]);
+  }, [loadTelemetry, loadSystemDeps]);
 
   const handleRunAllChecks = useCallback(async () => {
     setRunningAllChecks(true);
@@ -510,6 +614,13 @@ export default function DependenciesPage() {
     };
   }, [providerChecks, providers]);
 
+  const systemDepsSummary = useMemo(() => {
+    const healthy = systemDeps.filter((d) => d.status === 'healthy').length;
+    const degraded = systemDeps.filter((d) => d.status === 'degraded').length;
+    const down = systemDeps.filter((d) => d.status === 'down').length;
+    return { total: systemDeps.length, healthy, degraded, down };
+  }, [systemDeps]);
+
   const hasLoadedData = providers.length > 0 || Object.keys(providerChecks).length > 0;
 
   return (
@@ -524,7 +635,7 @@ export default function DependenciesPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" onClick={() => void loadTelemetry()} loading={loading} loadingText="Refreshing...">
+              <Button variant="outline" onClick={() => { void loadTelemetry(); void loadSystemDeps(); }} loading={loading} loadingText="Refreshing...">
                 <RefreshCw className="h-4 w-4" />
                 Refresh Data
               </Button>
@@ -559,7 +670,23 @@ export default function DependenciesPage() {
             </Alert>
           )}
 
-          <div className="mb-6 grid gap-4 md:grid-cols-4">
+          <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">System Components</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{systemDepsSummary.total}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Components Healthy</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold text-green-600">{systemDepsSummary.healthy}</p>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Configured Providers</CardTitle>
@@ -594,9 +721,107 @@ export default function DependenciesPage() {
             </Card>
           </div>
 
+          <Card className="mb-6">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>System Dependencies</CardTitle>
+                  <CardDescription>
+                    Backend infrastructure health: database, embeddings, workflows, and more.
+                  </CardDescription>
+                </div>
+                {systemDepsCheckedAt && (
+                  <span className="text-xs text-muted-foreground">
+                    Checked: {new Date(systemDepsCheckedAt).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {systemDepsLoading && systemDeps.length === 0 ? (
+                <div className="py-8 text-center text-muted-foreground">Loading system dependencies...</div>
+              ) : systemDeps.length === 0 ? (
+                <div className="py-8 text-center text-muted-foreground">
+                  No system dependency data available. The backend may not support this endpoint yet.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Component</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Latency</TableHead>
+                      <TableHead>7d Uptime</TableHead>
+                      <TableHead>Trend</TableHead>
+                      <TableHead>Error</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {systemDeps.map((dep) => {
+                      const uptime = uptimeByDep[dep.name];
+                      return (
+                        <TableRow
+                          key={dep.name}
+                          className={dep.status === 'down' ? 'bg-red-50/60' : undefined}
+                        >
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {dep.name.toLowerCase().includes('database') ? (
+                                <Database className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <Server className="h-4 w-4 text-muted-foreground" />
+                              )}
+                              <span className="font-medium">{dep.name}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={sysDepStatusVariant(dep.status)}>
+                              {sysDepStatusIcon(dep.status)}
+                              {sysDepStatusLabel(dep.status)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {dep.latency_ms !== null && dep.latency_ms !== undefined
+                              ? `${dep.latency_ms} ms`
+                              : '\u2014'}
+                          </TableCell>
+                          <TableCell>
+                            {uptime ? (
+                              <Badge
+                                variant={uptime.uptime_pct >= 99 ? 'default' : uptime.uptime_pct >= 95 ? 'secondary' : 'destructive'}
+                              >
+                                {uptime.uptime_pct.toFixed(1)}%
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{'\u2014'}</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {uptime ? (
+                              <UptimeBar sparkline={uptime.sparkline} label={dep.name} />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{'\u2014'}</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {dep.error ? (
+                              <span className="text-sm text-red-700">{dep.error}</span>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">{'\u2014'}</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
-              <CardTitle>Dependency Health Grid</CardTitle>
+              <CardTitle>LLM Provider Health Grid</CardTitle>
               <CardDescription>
                 Usage telemetry loads passively. Trigger live reachability checks per provider or run them in batch.
               </CardDescription>

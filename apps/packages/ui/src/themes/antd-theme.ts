@@ -1,5 +1,5 @@
 import { theme, type ThemeConfig } from "antd"
-import type { RGBTriple, ThemeColorTokens } from "./types"
+import type { RGBTriple, ThemeColorTokens, ThemeTypography, ThemeShape, ThemeLayout } from "./types"
 
 /**
  * Convert an RGB space-separated triple (e.g. "47 111 237") to a hex string ("#2f6fed").
@@ -19,10 +19,18 @@ export function rgbTripleToHex(triple: RGBTriple): string {
  */
 export function buildAntdThemeConfig(
   tokens: ThemeColorTokens,
-  isDark: boolean
+  isDark: boolean,
+  typography?: ThemeTypography,
+  shape?: ThemeShape,
+  layout?: ThemeLayout,
 ): ThemeConfig {
+  const algorithms = [isDark ? theme.darkAlgorithm : theme.defaultAlgorithm]
+  if (layout?.density === "compact") {
+    algorithms.push(theme.compactAlgorithm)
+  }
+
   return {
-    algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+    algorithm: algorithms.length === 1 ? algorithms[0] : algorithms,
     token: {
       colorPrimary: rgbTripleToHex(tokens.primary),
       colorSuccess: rgbTripleToHex(tokens.success),
@@ -34,7 +42,15 @@ export function buildAntdThemeConfig(
       colorBgContainer: rgbTripleToHex(tokens.surface),
       colorBgElevated: rgbTripleToHex(tokens.elevated),
       colorLink: rgbTripleToHex(tokens.primary),
-      fontFamily: "Arimo",
+      fontFamily: typography?.fontFamily ?? "Arimo",
+      fontSize: typography?.fontSizeBody ?? 14,
+      ...(shape && {
+        borderRadius: shape.radiusMd,
+        borderRadiusLG: shape.radiusLg,
+        borderRadiusSM: shape.radiusSm,
+      }),
+      boxShadow: tokens.shadowSm,
+      boxShadowSecondary: tokens.shadowMd,
     },
   }
 }

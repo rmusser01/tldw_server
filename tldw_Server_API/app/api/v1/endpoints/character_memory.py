@@ -18,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
     CharacterMemoryArchiveRequest,
     CharacterMemoryCreate,
@@ -27,9 +29,10 @@ from tldw_Server_API.app.api.v1.schemas.character_memory_schemas import (
     CharacterMemoryResponse,
     CharacterMemoryUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
+    CharactersRAGDBError,
     InputError,
 )
 
@@ -50,6 +53,14 @@ def _character_id_from_persona(persona_id: str) -> str:
     if persona_id.startswith("char:"):
         return persona_id[5:]
     return persona_id
+
+
+def _ids_match(left: Any, right: Any) -> bool:
+    """Compare ownership identifiers using int coercion first, then normalized strings."""
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return str(left).strip() == str(right).strip()
 
 
 def get_or_create_character_persona_profile(
@@ -82,7 +93,7 @@ def get_or_create_character_persona_profile(
         existing = db.get_persona_profile(persona_id, user_id=user_id)
         if existing:
             return persona_id
-        logger.error("Failed to create persona profile for character {}: {}", character_id, exc)
+        logger.error("Failed to create persona profile")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to initialize character memory storage.",
@@ -95,9 +106,12 @@ def _fetch_memory_by_id(
     db: CharactersRAGDB, user_id: str, persona_id: str, memory_id: str, character_id: str,
 ) -> CharacterMemoryResponse:
     """Fetch a single memory entry by ID or raise 404."""
-    row = db.get_persona_memory_entry_by_id(
-        entry_id=memory_id, user_id=user_id, persona_id=persona_id,
-    )
+    try:
+        row = db.get_persona_memory_entry_by_id(
+            entry_id=memory_id, user_id=user_id, persona_id=persona_id,
+        )
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch character memory") from exc
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
     return _row_to_response(row, character_id)
@@ -152,24 +166,38 @@ async def list_character_memories(
     persona_id = _persona_id_for_character(character_id)
     user_id = str(current_user.id)
 
-    rows = db.list_persona_memory_entries(
-        user_id=user_id,
-        persona_id=persona_id,
-        memory_type=memory_type,
-        include_archived=include_archived,
-        include_deleted=False,
+    try:
+        rows = db.list_persona_memory_entries(
+            user_id=user_id,
+            persona_id=persona_id,
+            memory_type=memory_type,
+            include_archived=include_archived,
+            include_deleted=False,
+            limit=limit,
+            offset=offset,
+        )
+        total_count = db.count_persona_memory_entries(
+            user_id=user_id,
+            persona_id=persona_id,
+            memory_type=memory_type,
+            include_archived=include_archived,
+            include_deleted=False,
+        )
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list character memories") from exc
+    memories = [_row_to_response(r, character_id) for r in rows]
+    return CharacterMemoryListResponse(
+        memories=memories,
+        total=total_count,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total_count,
+            limit=limit,
+            offset=offset,
+            count=len(memories),
+        ),
     )
-    total_count = db.count_persona_memory_entries(
-        user_id=user_id,
-        persona_id=persona_id,
-        memory_type=memory_type,
-        include_archived=include_archived,
-        include_deleted=False,
-    )
-    memories = [_row_to_response(r, character_id) for r in rows]
-    return CharacterMemoryListResponse(memories=memories, total=total_count)
 
 
 @router.post(
@@ -200,8 +228,8 @@ async def create_character_memory(
             "content": body.content,
             "salience": body.salience,
         })
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create character memory") from exc
 
     return _fetch_memory_by_id(db, user_id, persona_id, entry_id, character_id)
 
@@ -231,8 +259,19 @@ async def extract_character_memories_endpoint(
     conversation = db.get_conversation_by_id(body.chat_id)
     if not conversation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
-    if str(conversation.get("user_id")) != user_id:
+    stored_client_id = conversation.get("client_id")
+    request_user_id = current_user.id
+    if not _ids_match(stored_client_id, request_user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your chat session")
+    conversation_character_id = conversation.get("character_id")
+    requested_character_id = card.get("id") or character_id
+    if conversation_character_id in (None, "") or not _ids_match(
+        conversation_character_id, requested_character_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chat session must belong to the requested character",
+        )
 
     user_name = conversation.get("user_name", "User")
     persona_id = get_or_create_character_persona_profile(db, character_id, char_name, user_id)
@@ -288,8 +327,8 @@ async def extract_character_memories_endpoint(
                 created_at="",
                 last_modified="",
             ))
-        except Exception as exc:
-            logger.warning("Failed to persist extracted memory: {}", exc)
+        except Exception:
+            logger.warning("Failed to persist extracted memory")
 
     return CharacterMemoryExtractResponse(
         extracted=len(created),
@@ -336,8 +375,8 @@ async def update_character_memory(
             persona_id=persona_id,
             update_data=update_data,
         )
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update character memory") from exc
 
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
@@ -367,8 +406,8 @@ async def delete_character_memory(
             persona_id=persona_id,
             update_data={"deleted": True},
         )
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete character memory") from exc
 
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
@@ -390,12 +429,18 @@ async def archive_character_memory(
     persona_id = _persona_id_for_character(character_id)
     user_id = str(current_user.id)
 
-    ok = db.set_persona_memory_archived(
-        entry_id=memory_id,
-        user_id=user_id,
-        persona_id=persona_id,
-        archived=body.archived,
-    )
+    try:
+        ok = db.set_persona_memory_archived(
+            entry_id=memory_id,
+            user_id=user_id,
+            persona_id=persona_id,
+            archived=body.archived,
+        )
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to update character memory archive state",
+        ) from exc
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
 

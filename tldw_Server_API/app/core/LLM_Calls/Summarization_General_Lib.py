@@ -27,6 +27,10 @@ from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_ups
 # Import Local
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_name,
+    custom_openai_provider_number,
+)
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -100,6 +104,9 @@ def _resolve_default_system_prompt() -> str:
 
 def _adapter_provider_name(api_name: str) -> str:
     normalized = normalize_provider(api_name)
+    custom_number = custom_openai_provider_number(normalized)
+    if custom_number is not None:
+        return custom_openai_provider_name(custom_number)
     return _ADAPTER_PROVIDER_ALIASES.get(normalized, normalized)
 
 

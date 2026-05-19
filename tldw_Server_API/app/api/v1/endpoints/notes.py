@@ -29,8 +29,9 @@ from fastapi import (
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, rbac_rate_limit
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Dependency to get user-specific ChaChaNotes_DB instance
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
@@ -90,8 +91,6 @@ from tldw_Server_API.app.api.v1.schemas.notes_moodboards import (
     MoodboardResponse,
     MoodboardUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings as core_settings
 
 #
@@ -1123,7 +1122,7 @@ async def notes_health() -> dict[str, Any]:
             health["status"] = "degraded"
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         health["status"] = "unhealthy"
-        health["error"] = str(e)
+        health["error"] = "Notes health check failed"
         if base_dir:
             storage_info["base_dir"] = str(base_dir)
 
@@ -1304,6 +1303,12 @@ async def list_notes(
             "limit": limit,
             "offset": offset,
             "total": total,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "notes list")
@@ -1359,6 +1364,12 @@ async def list_deleted_notes(
             "limit": limit,
             "offset": offset,
             "total": total,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "deleted notes list")
@@ -1483,6 +1494,12 @@ async def export_notes(
             "total": total,
             "limit": limit,
             "offset": offset,
+            "pagination": build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes_data),
+            ),
             "exported_at": __import__("datetime").datetime.utcnow().isoformat()
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
@@ -1492,6 +1509,12 @@ async def export_notes(
 @router.get(
     "/export.csv",
     response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Notes CSV export download.",
+            "content": {"text/csv; charset=utf-8": {}},
+        },
+    },
     summary="Export notes as CSV",
     tags=["notes"]
 )
@@ -1593,6 +1616,12 @@ async def export_notes_post(
 @router.post(
     "/export.csv",
     response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Selected notes CSV export download.",
+            "content": {"text/csv; charset=utf-8": {}},
+        },
+    },
     summary="Export selected notes as CSV",
     tags=["notes"]
 )
@@ -1887,18 +1916,30 @@ async def list_keyword_collections_endpoint(
             )
 
         collections_data = db.list_keyword_collections(limit=limit, offset=offset)
+        total = None
+        try:
+            total = db.count_keyword_collections()
+        except _NOTES_NONCRITICAL_EXCEPTIONS as count_exc:
+            logger.warning("Counting keyword collections failed: {}", count_exc)
         if include_keywords:
             collections_data = [
                 _attach_collection_keywords_inline(db, dict(row))
                 for row in collections_data
             ]
+        response_total = total if total is not None else offset + len(collections_data)
 
         return {
             "collections": collections_data,
             "count": len(collections_data),
             "limit": limit,
             "offset": offset,
-            "total": None,
+            "total": response_total,
+            "pagination": build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(collections_data),
+            ),
         }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "collection")
@@ -2003,7 +2044,23 @@ async def list_collection_keyword_links_endpoint(
             }
             for row in rows
         ]
-        return {"links": links}
+        total = int(db.count_collection_keyword_links())
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(links),
+        )
+        return {
+            "links": links,
+            "count": len(links),
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "pagination": pagination,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+        }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "collection")
 
@@ -2299,6 +2356,8 @@ async def list_conversation_keyword_links_endpoint(
                             "keyword_id": int(kw_id),
                         }
                     )
+            total = len(links)
+            links = links[offset: offset + limit]
         else:
             cursor = db.execute_query(
                 "SELECT conversation_id, keyword_id FROM conversation_keywords ORDER BY conversation_id ASC, keyword_id ASC LIMIT ? OFFSET ?",
@@ -2312,7 +2371,23 @@ async def list_conversation_keyword_links_endpoint(
                 }
                 for row in rows
             ]
-        return {"links": links}
+            total = int(db.count_conversation_keyword_links())
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(links),
+        )
+        return {
+            "links": links,
+            "count": len(links),
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "pagination": pagination,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+        }
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "conversation-keyword link")
 
@@ -2519,6 +2594,11 @@ async def list_moodboards_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))},
             )
         rows = await _run_db_call(db.list_moodboards, limit=limit, offset=offset, include_deleted=include_deleted)
+        total = None
+        try:
+            total = await _run_db_call(db.count_moodboards, include_deleted=include_deleted)
+        except _NOTES_NONCRITICAL_EXCEPTIONS as count_exc:
+            logger.warning("Counting moodboards failed: {}", count_exc)
         payload = [_normalize_moodboard_payload(row) for row in rows]
         return MoodboardListResponse(
             items=payload,
@@ -2526,6 +2606,13 @@ async def list_moodboards_endpoint(
             count=len(payload),
             limit=limit,
             offset=offset,
+            total=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(payload),
+            ),
         )
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
@@ -2768,6 +2855,12 @@ async def list_moodboard_notes_endpoint(
             limit=limit,
             offset=offset,
             total=total,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(notes),
+            ),
         )
     except HTTPException:
         raise
@@ -3089,6 +3182,12 @@ async def list_note_attachments(
 @router.get(
     "/{note_id}/attachments/{file_name}",
     response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Raw note attachment file.",
+            "content": {"application/octet-stream": {}},
+        },
+    },
     summary="Download an attachment for a note",
     tags=["notes"],
 )
@@ -4276,7 +4375,23 @@ async def get_notes_for_keyword_endpoint(
                                 detail=f"Keyword with ID '{keyword_id}' not found.")
 
         notes_list = db.get_notes_for_keyword(keyword_id=keyword_id, limit=limit, offset=offset)
-        return NotesForKeywordResponse(keyword_id=keyword_id, notes=notes_list)
+        note_counts = db.get_note_counts_for_keywords([keyword_id])
+        total = int(note_counts.get(int(keyword_id), len(notes_list)))
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(notes_list),
+        )
+        return NotesForKeywordResponse(
+            keyword_id=keyword_id,
+            notes=notes_list,
+            count=len(notes_list),
+            limit=limit,
+            offset=offset,
+            total=total,
+            pagination=pagination,
+        )
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:

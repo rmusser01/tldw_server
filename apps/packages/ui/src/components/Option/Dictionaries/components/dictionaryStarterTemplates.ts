@@ -2,6 +2,7 @@ export type DictionaryStarterTemplateId =
   | "medical_abbreviations"
   | "chat_speak_translator"
   | "custom_terminology"
+  | "character_speech_patterns"
 
 type DictionaryStarterEntry = {
   pattern: string
@@ -113,6 +114,37 @@ export const DICTIONARY_STARTER_TEMPLATES: DictionaryStarterTemplate[] = [
       },
     ],
   },
+  {
+    id: "character_speech_patterns",
+    label: "Character Speech Patterns",
+    description: "Add accent, dialect, or speech quirks for roleplay characters.",
+    entries: [
+      {
+        pattern: "you",
+        replacement: "ye",
+        type: "literal",
+        group: "dialect",
+        enabled: true,
+        case_sensitive: false,
+      },
+      {
+        pattern: "the",
+        replacement: "th'",
+        type: "literal",
+        group: "dialect",
+        enabled: true,
+        case_sensitive: false,
+      },
+      {
+        pattern: "going to",
+        replacement: "gonna",
+        type: "literal",
+        group: "slang",
+        enabled: true,
+        case_sensitive: false,
+      },
+    ],
+  },
 ]
 
 export function getDictionaryStarterTemplate(
@@ -124,4 +156,3 @@ export function getDictionaryStarterTemplate(
     null
   )
 }
-

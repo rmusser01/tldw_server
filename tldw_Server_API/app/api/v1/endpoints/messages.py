@@ -10,8 +10,8 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
@@ -26,7 +26,6 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_override_credentials,
     validate_provider_override,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_and_model,
@@ -613,6 +612,15 @@ async def _handle_count_tokens(
     "/messages",
     summary="Anthropic-compatible Messages API",
     dependencies=[Depends(check_rate_limit)],
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Anthropic-compatible messages JSON response or SSE stream.",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        },
+    },
 )
 async def create_messages(
     request: Request,
@@ -635,6 +643,15 @@ async def create_messages(
     "/v1/messages",
     summary="Anthropic-compatible Messages API",
     dependencies=[Depends(check_rate_limit)],
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Anthropic-compatible messages JSON response or SSE stream.",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        },
+    },
 )
 async def create_messages_public(
     request: Request,

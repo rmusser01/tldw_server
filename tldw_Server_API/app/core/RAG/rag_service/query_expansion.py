@@ -556,8 +556,8 @@ async def multi_strategy_expansion(query: str, strategies: Optional[list[str]] =
             ac = await expand_acronyms(query)
             if isinstance(ac, str) and ac.strip() and ac != query:
                 first_variation = ac.replace(query, "").strip()
-        except Exception as acronym_error:
-            logger.debug("Acronym expansion failed; continuing to next strategy", exc_info=acronym_error)
+        except Exception:
+            logger.debug("Acronym expansion failed; continuing to next strategy")
     if not first_variation and "synonym" in strategies:
         try:
             # Load corpus-level synonyms if provided
@@ -574,8 +574,8 @@ async def multi_strategy_expansion(query: str, strategies: Optional[list[str]] =
                 syns = await expand_synonyms(query)
             if syns:
                 first_variation = syns[0]
-        except Exception as synonym_error:
-            logger.debug("Synonym expansion failed; continuing to next strategy", exc_info=synonym_error)
+        except Exception:
+            logger.debug("Synonym expansion failed; continuing to next strategy")
     if not first_variation and "domain" in strategies:
         try:
             if corpus:
@@ -591,8 +591,8 @@ async def multi_strategy_expansion(query: str, strategies: Optional[list[str]] =
                 dom = await domain_specific_expansion(query)
             if dom:
                 first_variation = dom[0]
-        except Exception as domain_error:
-            logger.debug("Domain expansion failed; continuing", exc_info=domain_error)
+        except Exception:
+            logger.debug("Domain expansion failed; continuing")
 
     return f"{query} {first_variation}".strip() if first_variation else query
 

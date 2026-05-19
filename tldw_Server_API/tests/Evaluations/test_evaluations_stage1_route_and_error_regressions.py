@@ -186,3 +186,208 @@ def test_history_preserves_http_403_for_non_admin_cross_user_request(monkeypatch
 
     assert response.status_code == 403
     assert "Admin privileges required" in response.json()["detail"]
+
+
+def test_history_includes_canonical_offset_pagination(monkeypatch):
+    app = _build_eval_only_app(monkeypatch)
+
+    class _DummyService:
+        async def get_evaluation_history(self, **_kwargs):
+            return [
+                {
+                    "id": "eval_1",
+                    "created_at": "2026-01-01T00:00:00",
+                    "evaluation_type": "g_eval",
+                }
+            ]
+
+        async def count_evaluations(self, **_kwargs):
+            return 3
+
+    monkeypatch.setattr(
+        eval_unified,
+        "get_unified_evaluation_service_for_user",
+        lambda _user_id: _DummyService(),
+    )
+    app.dependency_overrides[eval_unified.get_auth_principal] = lambda: SimpleNamespace(
+        is_admin=False, roles=[], permissions=[]
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/history",
+            json={"limit": 1, "offset": 1},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total_count"] == 3
+    assert body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 1,
+        "total": 3,
+        "has_more": True,
+        "next_offset": 2,
+    }
+    assert body["has_more"] is True
+    assert body["next_offset"] == 2
+
+
+def test_propositions_uses_stable_user_id_instead_of_auth_context_token(monkeypatch):
+    app = _build_eval_only_app(monkeypatch)
+
+    async def _verify_api_key_override():
+        return "super-secret-api-key"
+
+    app.dependency_overrides[eval_unified.verify_api_key] = _verify_api_key_override
+
+    captured = {}
+
+    class _AllowLimiter:
+        async def check_rate_limit(self, *_args, **_kwargs):
+            return True, {}
+
+    class _DummyService:
+        async def evaluate_propositions(self, *, extracted, reference, method, threshold, user_id):
+            captured["user_id"] = user_id
+            return {
+                "evaluation_id": "eval_prop_1",
+                "results": {
+                    "metrics": {"precision": 1.0, "recall": 1.0, "f1": 1.0},
+                    "counts": {"matched": 1, "total_extracted": 1, "total_reference": 1},
+                    "details": {},
+                },
+                "evaluation_time": 0.01,
+            }
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr(
+        eval_unified,
+        "get_unified_evaluation_service_for_user",
+        lambda _user_id: _DummyService(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/propositions",
+            json={
+                "extracted": ["Claim A"],
+                "reference": ["Claim A"],
+                "method": "semantic",
+                "threshold": 0.7,
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["user_id"] == "1"
+
+
+def test_ocr_uses_stable_user_id_instead_of_auth_context_token(monkeypatch):
+    app = _build_eval_only_app(monkeypatch)
+
+    async def _verify_api_key_override():
+        return "super-secret-api-key"
+
+    app.dependency_overrides[eval_unified.verify_api_key] = _verify_api_key_override
+
+    captured = {}
+
+    class _AllowLimiter:
+        async def check_rate_limit(self, *_args, **_kwargs):
+            return True, {}
+
+    class _DummyService:
+        async def evaluate_ocr(self, *, items, ocr_options=None, metrics=None, thresholds=None, user_id):
+            captured["user_id"] = user_id
+            return {
+                "evaluation_id": "eval_ocr_1",
+                "results": {"summary": {}},
+                "evaluation_time": 0.01,
+            }
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr(
+        eval_unified,
+        "get_unified_evaluation_service_for_user",
+        lambda _user_id: _DummyService(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/ocr",
+            json={
+                "items": [
+                    {
+                        "id": "doc-1",
+                        "extracted_text": "hello world",
+                        "ground_truth_text": "hello world",
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["user_id"] == "1"
+
+
+def test_batch_geval_uses_stable_and_webhook_user_identity(monkeypatch):
+    app = _build_eval_only_app(monkeypatch)
+
+    async def _verify_api_key_override():
+        return "super-secret-api-key"
+
+    app.dependency_overrides[eval_unified.verify_api_key] = _verify_api_key_override
+
+    captured = {}
+
+    class _AllowLimiter:
+        async def check_rate_limit(self, *_args, **_kwargs):
+            return True, {}
+
+    class _DummyService:
+        async def evaluate_geval(
+            self,
+            *,
+            source_text,
+            summary,
+            metrics,
+            api_name,
+            api_key,
+            user_id,
+            webhook_user_id=None,
+        ):
+            captured["user_id"] = user_id
+            captured["webhook_user_id"] = webhook_user_id
+            return {
+                "evaluation_id": "eval_batch_1",
+                "results": {"metrics": {"coherence": 0.9}},
+            }
+
+    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr(
+        eval_unified,
+        "get_unified_evaluation_service_for_user",
+        lambda _user_id: _DummyService(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/batch",
+            json={
+                "evaluation_type": "geval",
+                "parallel_workers": 1,
+                "items": [
+                    {
+                        "source_text": "source",
+                        "summary": "summary",
+                        "metrics": ["coherence"],
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["user_id"] == "1"
+    assert captured["webhook_user_id"] == "user_1"

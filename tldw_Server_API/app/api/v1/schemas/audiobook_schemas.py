@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 SourceInputType = Literal["epub", "pdf", "txt", "md", "srt", "vtt", "ass"]
 AudioFormat = Literal["wav", "mp3", "flac", "opus", "m4b"]
 SubtitleFormat = Literal["srt", "vtt", "ass"]
@@ -17,6 +19,14 @@ AudiobookJobStatus = Literal["queued", "processing", "completed", "failed", "can
 AudiobookArtifactType = Literal["audio", "subtitle", "package", "alignment"]
 AudiobookArtifactScope = Literal["chapter", "merged"]
 AlignmentEngine = Literal["kokoro"]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class SourceRef(BaseModel):
@@ -401,6 +411,16 @@ class AudiobookProjectListResponse(BaseModel):
     """List response for audiobook projects."""
 
     projects: list[AudiobookProjectInfo] = Field(..., description="Project list")
+    total: int = Field(..., description="Total number of projects")
+    limit: int = Field(..., description="Applied page limit")
+    offset: int = Field(..., description="Applied page offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> AudiobookProjectListResponse:
+        return _default_offset_pagination_aliases(self)
 
     model_config = {
         "json_schema_extra": {
@@ -416,7 +436,18 @@ class AudiobookProjectListResponse(BaseModel):
                         "created_at": "2025-01-21T10:00:00+00:00",
                         "updated_at": "2025-01-21T10:05:00+00:00",
                     }
-                ]
+                ],
+                "total": 1,
+                "limit": 100,
+                "offset": 0,
+                "pagination": {
+                    "mode": "offset",
+                    "total": 1,
+                    "limit": 100,
+                    "offset": 0,
+                    "has_more": False,
+                    "next_offset": None,
+                },
             }
         }
     }
@@ -478,6 +509,15 @@ class AudiobookChapterListResponse(BaseModel):
 
     project_id: str = Field(..., description="Project identifier")
     chapters: list[AudiobookChapterInfo] = Field(..., description="Chapter list")
+    limit: int = Field(..., description="Applied page limit")
+    offset: int = Field(..., description="Applied page offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> AudiobookChapterListResponse:
+        return _default_offset_pagination_aliases(self)
 
     model_config = {
         "json_schema_extra": {
@@ -495,6 +535,16 @@ class AudiobookChapterListResponse(BaseModel):
                         "metadata": {"chapter_id": "ch_001", "item_index": 0},
                     }
                 ],
+                "limit": 200,
+                "offset": 0,
+                "pagination": {
+                    "mode": "offset",
+                    "total": None,
+                    "limit": 200,
+                    "offset": 0,
+                    "has_more": False,
+                    "next_offset": None,
+                },
             }
         }
     }
@@ -516,6 +566,15 @@ class AudiobookArtifactsResponse(BaseModel):
 
     project_id: str = Field(..., description="Project identifier")
     artifacts: list[ArtifactInfo] = Field(..., description="Artifact list")
+    limit: int = Field(..., description="Applied page limit")
+    offset: int = Field(..., description="Applied page offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> AudiobookArtifactsResponse:
+        return _default_offset_pagination_aliases(self)
 
     model_config = {
         "json_schema_extra": {
@@ -547,6 +606,16 @@ class AudiobookArtifactsResponse(BaseModel):
                         "download_url": "/api/v1/outputs/790/download",
                     },
                 ],
+                "limit": 200,
+                "offset": 0,
+                "pagination": {
+                    "mode": "offset",
+                    "total": None,
+                    "limit": 200,
+                    "offset": 0,
+                    "has_more": False,
+                    "next_offset": None,
+                },
             }
         }
     }
@@ -597,6 +666,16 @@ class VoiceProfileListResponse(BaseModel):
     """List response for voice profiles."""
 
     profiles: list[VoiceProfileResponse] = Field(..., description="Voice profiles")
+    total: int = Field(..., description="Total voice profiles matching the query")
+    limit: int = Field(..., description="Applied page size")
+    offset: int = Field(..., description="Applied offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> VoiceProfileListResponse:
+        return _default_offset_pagination_aliases(self)
 
 
 class VoiceProfileDeleteResponse(BaseModel):

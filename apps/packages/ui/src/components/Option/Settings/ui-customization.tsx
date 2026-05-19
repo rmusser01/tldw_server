@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { cn } from "@/libs/utils"
 import { useSetting } from "@/hooks/useSetting"
 import {
+  PERSONA_BUDDY_SHELL_ENABLED_SETTING,
   SIDEBAR_SHORTCUT_MAX_COUNT,
   DEFAULT_SIDEBAR_SHORTCUT_SELECTION,
   SIDEBAR_SHORTCUT_SELECTION_SETTING,
@@ -86,7 +87,7 @@ const SidebarShortcutSelector = ({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
+    <div className="panel-card p-4 space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold text-text">{title}</h3>
@@ -196,7 +197,7 @@ const HeaderShortcutSelector = ({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
+    <div className="panel-card p-4 space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold text-text">{title}</h3>
@@ -268,6 +269,9 @@ const HeaderShortcutSelector = ({
 
 export const UiCustomizationSettings = () => {
   const { t } = useTranslation(["settings", "common"])
+  const [personaBuddyShellEnabled, setPersonaBuddyShellEnabled] = useSetting(
+    PERSONA_BUDDY_SHELL_ENABLED_SETTING
+  )
   const [shortcutSelection, setShortcutSelection] = useSetting(
     SIDEBAR_SHORTCUT_SELECTION_SETTING
   )
@@ -300,6 +304,29 @@ export const UiCustomizationSettings = () => {
       </div>
 
       <div className="space-y-4">
+        <div className="panel-card p-4">
+          <Checkbox
+            checked={personaBuddyShellEnabled}
+            onChange={(event) =>
+              void setPersonaBuddyShellEnabled(event.target.checked)
+            }
+            className="w-full"
+          >
+            <div className="space-y-1">
+              <div className="text-sm font-semibold text-text">
+                {t("uiCustomization.personaBuddyShell.label", {
+                  defaultValue: "Enable persona buddy shell"
+                })}
+              </div>
+              <div className="text-xs text-text-muted">
+                {t("uiCustomization.personaBuddyShell.description", {
+                  defaultValue:
+                    "Show the floating buddy shell on supported persona-aware surfaces."
+                })}
+              </div>
+            </div>
+          </Checkbox>
+        </div>
         <SidebarShortcutSelector
           title={t("uiCustomization.shortcuts.title", {
             defaultValue: "Sidebar shortcuts"

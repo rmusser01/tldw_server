@@ -48,7 +48,7 @@ function EvidenceRailContent({
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="ml-auto rounded-md p-1 text-text-muted hover:bg-hover hover:text-text transition-colors"
+          className="ml-auto flex items-center justify-center min-w-8 min-h-8 h-8 w-8 rounded-md text-text-muted hover:bg-hover hover:text-text transition-colors"
           aria-label="Close evidence panel"
         >
           <X className="h-4 w-4" />
@@ -89,7 +89,12 @@ function EvidenceRailContent({
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {tab === "sources" ? (
           resultsCount > 0 ? (
-            <SourceList layout="rail" />
+            <>
+              <p className="mb-2 text-xs text-text-muted">
+                Use each source card to copy citations, copy excerpts, or open supported sources.
+              </p>
+              <SourceList layout="rail" />
+            </>
           ) : (
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-text-muted">
               No sources yet. Run a query to inspect retrieval evidence.
@@ -150,6 +155,7 @@ export function EvidenceRail({
         id="knowledge-evidence-panel"
         className={cn(
           "hidden w-[400px] shrink-0 border-l border-border bg-surface/40 lg:block xl:w-[420px]",
+          "motion-safe:transition-all motion-safe:duration-300 motion-safe:animate-in motion-safe:slide-in-from-right motion-reduce:animate-none motion-reduce:transition-none",
           className
         )}
         aria-label="Evidence panel"
@@ -188,7 +194,7 @@ export function EvidenceRail({
             onClick={() => onOpenChange(false)}
             aria-label="Close evidence panel"
           />
-          <aside className="absolute right-0 top-0 h-full w-[88vw] max-w-md border-l border-border bg-surface shadow-xl">
+          <aside className="absolute right-0 top-0 h-full w-[88vw] max-w-md border-l border-border bg-surface shadow-xl motion-safe:transition-all motion-safe:duration-300 motion-safe:animate-in motion-safe:slide-in-from-right motion-reduce:animate-none motion-reduce:transition-none">
             <EvidenceRailContent
               tab={tab}
               onOpenChange={onOpenChange}

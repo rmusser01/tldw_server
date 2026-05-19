@@ -7,6 +7,9 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.utils.pagination import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     MaintenanceRotationRunItem,
     MaintenanceRotationRunListResponse,
@@ -172,6 +175,12 @@ class AdminMaintenanceRotationService:
             total=total,
             limit=limit,
             offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(rows),
+            ),
         )
         return response.model_dump(mode="json")
 

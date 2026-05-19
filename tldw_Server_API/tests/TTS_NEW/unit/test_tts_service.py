@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import asyncio
 
+from tldw_Server_API.app.core.TTS import tts_service_v2 as tts_service_v2_module
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
@@ -64,6 +65,49 @@ class TestServiceInitialization:
 
         # Should handle multiple shutdowns gracefully
         await tts_service.shutdown()
+
+    @pytest.mark.unit
+    async def test_service_shutdown_uses_public_supervisor_shutdown_and_still_closes_factory(self):
+        service = TTSServiceV2()
+
+        factory = MagicMock()
+        factory.close = AsyncMock()
+        service.factory = factory
+        service._factory = None
+
+        class _FailingSupervisor:
+            def __init__(self) -> None:
+                self.mark_closing_calls = 0
+                self.shutdown = AsyncMock(side_effect=RuntimeError("sidecar stop failed"))
+
+            def mark_closing(self) -> None:
+                self.mark_closing_calls += 1
+
+        supervisor = _FailingSupervisor()
+        service._omnivoice_supervisor = supervisor
+
+        await service.shutdown()
+
+        assert supervisor.mark_closing_calls == 1
+        supervisor.shutdown.assert_awaited_once()
+        factory.close.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_close_tts_service_v2_invokes_instance_shutdown(monkeypatch):
+    service = MagicMock()
+    service.shutdown = AsyncMock()
+
+    close_factory = AsyncMock()
+    monkeypatch.setattr(tts_service_v2_module, "_service_instance", service, raising=True)
+    monkeypatch.setattr(tts_service_v2_module, "close_tts_factory", close_factory, raising=True)
+
+    await tts_service_v2_module.close_tts_service_v2()
+
+    service.shutdown.assert_awaited_once()
+    close_factory.assert_awaited_once()
+    assert tts_service_v2_module._service_instance is None
 
 # ========================================================================
 # Text Generation Tests
@@ -562,6 +606,47 @@ class TestMetricsCollection:
             if call.args and call.args[0] == "tts_fallback_outcomes_total"
         ]
         assert fallback_outcome_calls
+
+
+@pytest.mark.unit
+async def test_convert_response_if_needed_handles_non_omnivoice_wav_response(monkeypatch):
+    from tldw_Server_API.app.core.TTS import tts_service_v2 as tts_service_module
+
+    service = TTSServiceV2()
+    response = TTSResponse(
+        audio_data=b"wav-bytes",
+        format=AudioFormat.WAV,
+        sample_rate=24000,
+        channels=2,
+        provider="openai",
+    )
+    request = TTSRequest(
+        text="hello world",
+        format=AudioFormat.MP3,
+        stream=False,
+    )
+    to_thread_calls: list[str] = []
+
+    async def _fake_to_thread(func, *args, **kwargs):
+        to_thread_calls.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    async def _fake_convert_format(input_path, output_path, target_format, sample_rate=None, channels=None):
+        output_path.write_bytes(b"converted-audio")
+        return True
+
+    monkeypatch.setattr(tts_service_module.asyncio, "to_thread", _fake_to_thread, raising=True)
+    monkeypatch.setattr(tts_service_module.AudioConverter, "convert_format", _fake_convert_format, raising=True)
+
+    converted = await service._convert_response_if_needed(
+        response,
+        request,
+        provider_key="openai",
+    )
+
+    assert converted.audio_data == b"converted-audio"
+    assert converted.format == AudioFormat.MP3
+    assert to_thread_calls  # nosec B101
 
 
 @pytest.mark.unit

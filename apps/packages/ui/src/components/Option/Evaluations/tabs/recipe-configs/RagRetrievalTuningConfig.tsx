@@ -1,5 +1,5 @@
 import React from "react"
-import { Alert, Button, Card, Checkbox, Input, Typography } from "antd"
+import { Alert, Button, Card, Checkbox, Input, InputNumber, Typography } from "antd"
 import type { DatasetSample } from "@/services/evaluations"
 import { useTranslation } from "react-i18next"
 import { useGenerateSyntheticEvalDrafts } from "../../hooks/useSyntheticEval"
@@ -1465,11 +1465,12 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
                     </div>
                     <div>
                       <Text strong>{`Top K ${index + 1}`}</Text>
-                      <Input
+                      <InputNumber
                         aria-label={`Top K ${index + 1}`}
-                        className="mt-2"
-                        value={String(retrievalConfig.top_k)}
-                        onChange={(event) =>
+                        className="mt-2 w-full"
+                        value={Number(retrievalConfig.top_k)}
+                        onChange={(value) => {
+                          if (typeof value !== "number") return
                           applyRunConfig((current) => ({
                             ...current,
                             candidates: (Array.isArray(current.candidates) ? current.candidates : []).map(
@@ -1480,22 +1481,23 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
                                       retrieval_config: {
                                         ...DEFAULT_RETRIEVAL_CONFIG,
                                         ...(item.retrieval_config || {}),
-                                        top_k: parseInteger(event.target.value, DEFAULT_RETRIEVAL_CONFIG.top_k)
+                                        top_k: value
                                       }
                                     }
                                   : item
                             )
                           }))
-                        }
+                        }}
                       />
                     </div>
                     <div>
                       <Text strong>{`Hybrid alpha ${index + 1}`}</Text>
-                      <Input
+                      <InputNumber
                         aria-label={`Hybrid alpha ${index + 1}`}
-                        className="mt-2"
-                        value={String(retrievalConfig.hybrid_alpha)}
-                        onChange={(event) =>
+                        className="mt-2 w-full"
+                        value={Number(retrievalConfig.hybrid_alpha)}
+                        onChange={(value) => {
+                          if (typeof value !== "number") return
                           applyRunConfig((current) => ({
                             ...current,
                             candidates: (Array.isArray(current.candidates) ? current.candidates : []).map(
@@ -1506,16 +1508,13 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
                                       retrieval_config: {
                                         ...DEFAULT_RETRIEVAL_CONFIG,
                                         ...(item.retrieval_config || {}),
-                                        hybrid_alpha: parseNumeric(
-                                          event.target.value,
-                                          DEFAULT_RETRIEVAL_CONFIG.hybrid_alpha
-                                        )
+                                        hybrid_alpha: value
                                       }
                                     }
                                   : item
                             )
                           }))
-                        }
+                        }}
                       />
                     </div>
                     <div>
@@ -1627,41 +1626,40 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
             </div>
             <div>
               <Text strong>Top K</Text>
-              <Input
+              <InputNumber
                 aria-label="Top K"
-                className="mt-2"
-                value={String(normalizedRunConfig.retrieval_config.top_k)}
-                onChange={(event) =>
+                className="mt-2 w-full"
+                value={Number(normalizedRunConfig.retrieval_config.top_k)}
+                onChange={(value) => {
+                  if (typeof value !== "number") return
                   applyRunConfig((current) => ({
                     ...current,
                     retrieval_config: {
                       ...DEFAULT_RETRIEVAL_CONFIG,
                       ...(current.retrieval_config || {}),
-                      top_k: parseInteger(event.target.value, DEFAULT_RETRIEVAL_CONFIG.top_k)
+                      top_k: value
                     }
                   }))
-                }
+                }}
               />
             </div>
             <div>
               <Text strong>Hybrid alpha</Text>
-              <Input
+              <InputNumber
                 aria-label="Hybrid alpha"
-                className="mt-2"
-                value={String(normalizedRunConfig.retrieval_config.hybrid_alpha)}
-                onChange={(event) =>
+                className="mt-2 w-full"
+                value={Number(normalizedRunConfig.retrieval_config.hybrid_alpha)}
+                onChange={(value) => {
+                  if (typeof value !== "number") return
                   applyRunConfig((current) => ({
                     ...current,
                     retrieval_config: {
                       ...DEFAULT_RETRIEVAL_CONFIG,
                       ...(current.retrieval_config || {}),
-                      hybrid_alpha: parseNumeric(
-                        event.target.value,
-                        DEFAULT_RETRIEVAL_CONFIG.hybrid_alpha
-                      )
+                      hybrid_alpha: value
                     }
                   }))
-                }
+                }}
               />
             </div>
             <div>
@@ -1718,86 +1716,78 @@ export const RagRetrievalTuningConfig: React.FC<Props> = ({
         <div className="grid gap-3 md:grid-cols-2">
           <div>
             <Text strong>Review sample fraction</Text>
-            <Input
+            <InputNumber
               aria-label="Review sample fraction"
-              className="mt-2"
-              value={String(weakBudget.review_sample_fraction)}
-              onChange={(event) =>
+              className="mt-2 w-full"
+              value={Number(weakBudget.review_sample_fraction)}
+              onChange={(value) => {
+                if (typeof value !== "number") return
                 applyRunConfig((current) => ({
                   ...current,
                   weak_supervision_budget: {
                     ...DEFAULT_WEAK_SUPERVISION_BUDGET,
                     ...(current.weak_supervision_budget || {}),
-                    review_sample_fraction: parseNumeric(
-                      event.target.value,
-                      DEFAULT_WEAK_SUPERVISION_BUDGET.review_sample_fraction
-                    )
+                    review_sample_fraction: value
                   }
                 }))
-              }
+              }}
             />
           </div>
           <div>
             <Text strong>Max review samples</Text>
-            <Input
+            <InputNumber
               aria-label="Max review samples"
-              className="mt-2"
-              value={String(weakBudget.max_review_samples)}
-              onChange={(event) =>
+              className="mt-2 w-full"
+              value={Number(weakBudget.max_review_samples)}
+              onChange={(value) => {
+                if (typeof value !== "number") return
                 applyRunConfig((current) => ({
                   ...current,
                   weak_supervision_budget: {
                     ...DEFAULT_WEAK_SUPERVISION_BUDGET,
                     ...(current.weak_supervision_budget || {}),
-                    max_review_samples: parseInteger(
-                      event.target.value,
-                      DEFAULT_WEAK_SUPERVISION_BUDGET.max_review_samples
-                    )
+                    max_review_samples: value
                   }
                 }))
-              }
+              }}
             />
           </div>
           <div>
             <Text strong>Min review samples</Text>
-            <Input
+            <InputNumber
               aria-label="Min review samples"
-              className="mt-2"
-              value={String(weakBudget.min_review_samples)}
-              onChange={(event) =>
+              className="mt-2 w-full"
+              value={Number(weakBudget.min_review_samples)}
+              onChange={(value) => {
+                if (typeof value !== "number") return
                 applyRunConfig((current) => ({
                   ...current,
                   weak_supervision_budget: {
                     ...DEFAULT_WEAK_SUPERVISION_BUDGET,
                     ...(current.weak_supervision_budget || {}),
-                    min_review_samples: parseInteger(
-                      event.target.value,
-                      DEFAULT_WEAK_SUPERVISION_BUDGET.min_review_samples
-                    )
+                    min_review_samples: value
                   }
                 }))
-              }
+              }}
             />
           </div>
           <div>
             <Text strong>Synthetic query limit</Text>
-            <Input
+            <InputNumber
               aria-label="Synthetic query limit"
-              className="mt-2"
-              value={String(weakBudget.synthetic_query_limit)}
-              onChange={(event) =>
+              className="mt-2 w-full"
+              value={Number(weakBudget.synthetic_query_limit)}
+              onChange={(value) => {
+                if (typeof value !== "number") return
                 applyRunConfig((current) => ({
                   ...current,
                   weak_supervision_budget: {
                     ...DEFAULT_WEAK_SUPERVISION_BUDGET,
                     ...(current.weak_supervision_budget || {}),
-                    synthetic_query_limit: parseInteger(
-                      event.target.value,
-                      DEFAULT_WEAK_SUPERVISION_BUDGET.synthetic_query_limit
-                    )
+                    synthetic_query_limit: value
                   }
                 }))
-              }
+              }}
             />
           </div>
         </div>

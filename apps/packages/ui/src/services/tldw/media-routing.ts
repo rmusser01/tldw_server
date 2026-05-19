@@ -133,6 +133,15 @@ const UPLOAD_MEDIA_TYPES = new Set<UploadMediaType>([
   "document"
 ])
 
+/** Raw (pre-normalization) types whose original file should be preserved for Document Workspace. */
+const WORKSPACE_FILE_TYPES = new Set(["pdf", "ebook", "epub", "document"])
+
+/** Returns true if this raw media type's original file should be stored on the server. */
+export const shouldKeepOriginalFile = (type: string): boolean => {
+  const t = String(type || "").trim().toLowerCase()
+  return WORKSPACE_FILE_TYPES.has(t)
+}
+
 export const inferIngestTypeFromUrl = (url: string): IngestEntryType => {
   try {
     // eslint-disable-next-line no-new

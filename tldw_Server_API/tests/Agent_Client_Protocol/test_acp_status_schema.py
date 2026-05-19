@@ -147,6 +147,26 @@ class _StubSessionStore:
             return [], 0
         return [self.record], 1
 
+    async def list_runs(
+        self,
+        *,
+        user_id: int | None = None,
+        status: str | None = None,
+        agent_type: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        if user_id is not None and user_id != self.record.user_id:
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
+        return {
+            "items": [self.record.to_info_dict()],
+            "total": 2,
+            "limit": limit,
+            "offset": offset,
+        }
+
     async def get_session(self, session_id: str):
         if session_id != self.record.session_id:
             return None
@@ -187,6 +207,13 @@ def test_acp_list_sessions_status_schema_includes_tenancy(client_user_only, stub
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["total"] == 1
+    assert payload["pagination"]["total"] == 1
+    assert payload["pagination"]["limit"] == 100
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["has_more"] is False
+    assert payload["pagination"]["next_offset"] is None
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     session = payload["sessions"][0]
     assert session["status"] == "active"
     assert session["has_websocket"] is True
@@ -273,8 +300,38 @@ def test_acp_session_events_query_schema(client_user_only, stub_acp_store):
     assert payload["session_id"] == "session-123"
     assert payload["total"] == 2
     assert len(payload["events"]) == 2
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     assert payload["events"][0]["event_type"] == "message"
     assert payload["events"][0]["role"] == "user"
+
+
+def test_acp_list_runs_query_schema_includes_pagination(client_user_only, stub_acp_store):
+    resp = client_user_only.get("/api/v1/acp/runs?limit=1&offset=0")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 2
+    assert payload["limit"] == 1
+    assert payload["offset"] == 0
+    assert len(payload["items"]) == 1
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 1
 
 
 def test_acp_session_artifacts_query_schema(client_user_only, stub_acp_store):

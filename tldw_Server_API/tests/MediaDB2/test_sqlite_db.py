@@ -473,6 +473,70 @@ class TestDatabaseCRUDAndSync:
         payload = json.loads(log_entry['payload'])
         assert payload['title'] == title + " Updated Via URL"  # From first update
 
+    def test_identical_content_overwrite_updates_latest_version_analysis_and_safe_metadata(self, db_instance):
+
+        title = "Identical Content Metadata Update"
+        content_v1 = "Initial content for metadata update."
+        content_v2 = "Updated content that should become canonical."
+        analysis_v2 = "Fresh summary for identical-content overwrite."
+        safe_metadata_v2 = {
+            "title": title,
+            "video_lite": {
+                "summary": analysis_v2,
+                "summary_status": "ready",
+            },
+        }
+
+        media_id, media_uuid, _ = db_instance.add_media_with_keywords(
+            title=title,
+            media_type="video",
+            content=content_v1,
+            keywords=["video-lite"],
+        )
+        cursor = db_instance.execute_query("SELECT content_hash, version FROM Media WHERE id = ?", (media_id,))
+        original_row = cursor.fetchone()
+        generated_url = f"local://video/{original_row['content_hash']}"
+
+        db_instance.add_media_with_keywords(
+            title=title,
+            media_type="video",
+            content=content_v2,
+            keywords=["video-lite"],
+            overwrite=True,
+            url=generated_url,
+        )
+        media_version_after_content_update = get_entity_version(db_instance, "Media", media_uuid)
+
+        media_id_upd, media_uuid_upd, message = db_instance.add_media_with_keywords(
+            title=title,
+            media_type="video",
+            content=content_v2,
+            keywords=["video-lite"],
+            overwrite=True,
+            url=None,
+            analysis_content=analysis_v2,
+            safe_metadata=json.dumps(safe_metadata_v2),
+        )
+
+        assert media_id_upd == media_id
+        assert media_uuid_upd == media_uuid
+        assert message == f"Media '{title}' is already up-to-date."
+        assert get_entity_version(db_instance, "Media", media_uuid) == media_version_after_content_update
+
+        version_row = db_instance.execute_query(
+            """
+            SELECT version_number, version, analysis_content, safe_metadata
+            FROM DocumentVersions
+            WHERE media_id = ?
+            ORDER BY version_number DESC
+            LIMIT 1
+            """,
+            (media_id,),
+        ).fetchone()
+        assert version_row["version_number"] == 2
+        assert version_row["analysis_content"] == analysis_v2
+        assert json.loads(version_row["safe_metadata"]) == safe_metadata_v2
+
     def test_soft_delete_media_cascade(self, db_instance):
 
         # 1. Setup complex item

@@ -3364,5 +3364,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "引用背景顏色"
+  },
+  "navigation_connect": {
+    "message": "連線"
+  },
+  "navigation_aiModels": {
+    "message": "AI 與模型"
+  },
+  "navigation_experience": {
+    "message": "體驗"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "知識與工作區"
+  },
+  "navigation_safetyAdmin": {
+    "message": "安全與管理"
+  },
+  "providerKeys_navTitle": {
+    "message": "供應商金鑰"
+  },
+  "navigation_dataManagement": {
+    "message": "資料管理"
+  },
+  "dataManagement_navTitle": {
+    "message": "資料管理"
   }
 }

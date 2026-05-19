@@ -2,6 +2,7 @@
 
 import type { Invoice, OrgUsageSummary, PlanTier, Subscription } from '@/types';
 import { formatDate } from '@/lib/format';
+import { logger } from '@/lib/logger';
 
 /**
  * Returns true when the SaaS billing surface is enabled.
@@ -16,6 +17,10 @@ export const EMPTY_BILLING_CELL_PLACEHOLDER = '—';
 const BILLING_DATE_LOCALE = 'en-CA';
 
 type WarnFn = (message?: unknown, ...optionalParams: unknown[]) => void;
+
+const defaultWarn: WarnFn = (message, ...rest) => {
+  logger.warn(String(message ?? ''), { component: 'billing', detail: rest.length ? rest.map(String).join(' ') : undefined });
+};
 
 export type OrganizationPlanMap = Record<number, { tier: PlanTier; status: string }>;
 
@@ -40,7 +45,7 @@ export function formatBillingDate(value?: string | null): string {
 
 export function normalizeInvoices(
   invoices: unknown,
-  warn: WarnFn = console.warn
+  warn: WarnFn = defaultWarn
 ): Invoice[] {
   if (Array.isArray(invoices)) {
     return invoices as Invoice[];
@@ -72,7 +77,7 @@ export function buildOrganizationPlanMap(
 
 export async function fetchOrganizationPlanMap(
   loadSubscriptions: () => Promise<unknown>,
-  warn: WarnFn = console.warn
+  warn: WarnFn = defaultWarn
 ): Promise<OrganizationPlanMap> {
   try {
     return buildOrganizationPlanMap(await loadSubscriptions());
@@ -114,7 +119,7 @@ export function buildDashboardBillingStats(
 
 export async function fetchDashboardBillingStats(
   loadSubscriptions: () => Promise<unknown>,
-  warn: WarnFn = console.warn
+  warn: WarnFn = defaultWarn
 ): Promise<DashboardBillingStats | null> {
   try {
     return buildDashboardBillingStats(await loadSubscriptions());
@@ -128,7 +133,7 @@ export function resolveOrganizationBillingSnapshot(
   subscriptionResult: PromiseSettledResult<unknown>,
   usageResult: PromiseSettledResult<unknown>,
   invoiceResult: PromiseSettledResult<unknown>,
-  warn: WarnFn = console.warn
+  warn: WarnFn = defaultWarn
 ): OrganizationBillingSnapshot {
   const subscription =
     subscriptionResult.status === 'fulfilled'

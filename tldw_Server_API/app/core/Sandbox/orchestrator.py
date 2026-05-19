@@ -22,6 +22,7 @@ from .models import RunPhase, RunSpec, RunStatus, RuntimeType, Session, SessionS
 from .policy import SandboxPolicy, SandboxPolicyConfig
 from .store import IdempotencyConflict as StoreIdemConflict
 from .store import get_store
+from .utils import coerce_optional_nonempty_string
 
 _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -94,9 +95,11 @@ class SandboxOrchestrator:
         self.policy = policy or SandboxPolicy(cfg)
         self._lock = threading.RLock()
         self._sessions: dict[str, Session] = {}
-        # Store backend for runs/idempotency/usage
+        # Store backend for runs/idempotency/usage and durable run queue
         self._store = get_store()
-        # in-memory run queue of (run_id, enqueue_timestamp)
+        # In-memory run queue caches (L1 over durable store queue).
+        # These provide fast access for non-critical operations like wait
+        # time estimation and fallback counting when the store is unavailable.
         self._queue: list[tuple[str, float]] = []
         self._enqueue_index: dict[str, float] = {}
         self._queue_meta: dict[str, dict[str, str | None]] = {}
@@ -659,6 +662,11 @@ class SandboxOrchestrator:
             self._store.put_run(user_id, status)
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"store.put_run failed: {e}")
+        # Persist to durable queue for cross-restart recovery
+        try:
+            self._store.enqueue_run(rid, owner_key, priority=0)
+        except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS as e:
+            logger.debug(f"store.enqueue_run failed: {e}")
         self._store_idem("runs", user_id, idem_key, body, rid, {
             "id": rid,
             "phase": status.phase.value,
@@ -696,6 +704,10 @@ class SandboxOrchestrator:
                     self._queue_meta.pop(rid, None)
         if not expired:
             return
+        # Remove expired entries from durable queue
+        for rid in expired:
+            with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                self._store.remove_from_queue(rid)
         from datetime import datetime
         for rid in expired:
             try:
@@ -746,7 +758,7 @@ class SandboxOrchestrator:
             self._store.update_run(status)
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"store.update_run failed: {e}")
-        # Cleanup enqueue index when leaving queued phase
+        # Cleanup enqueue index and durable queue when leaving queued phase
         try:
             if status.phase != RunPhase.queued:
                 with self._lock:
@@ -754,6 +766,8 @@ class SandboxOrchestrator:
                     self._queue_meta.pop(run_id, None)
                     if self._queue:
                         self._queue = [(rid, ts) for (rid, ts) in self._queue if rid != run_id]
+                with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                    self._store.remove_from_queue(run_id)
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
             pass
 
@@ -1395,6 +1409,39 @@ class SandboxOrchestrator:
                 exc,
             )
             return []
+
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
+    ) -> None:
+        self._store.put_vz_session_control(
+            session_id=str(session_id),
+            runtime=str(runtime),
+            vm_id=str(vm_id),
+            template_id=(str(template_id) if template_id is not None else None),
+            workspace_mount=(str(workspace_mount) if workspace_mount is not None else None),
+            agent_ready=bool(agent_ready),
+            helper_instance_id=coerce_optional_nonempty_string(helper_instance_id),
+            helper_started_at=coerce_optional_nonempty_string(helper_started_at),
+        )
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        return self._store.get_vz_session_control(str(session_id))
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        return bool(self._store.delete_vz_session_control(str(session_id)))
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        rows = self._store.list_vz_session_controls()
+        return [dict(row) for row in rows if isinstance(row, dict)]
 
     # -----------------
     # Admin listing helpers

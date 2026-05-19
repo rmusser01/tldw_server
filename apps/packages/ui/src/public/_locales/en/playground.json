@@ -524,6 +524,99 @@
   "composer_contextKnowledgeClose": {
     "message": "Close Search & Context"
   },
+  "composer_context_character": {
+    "message": "Character"
+  },
+  "composer_context_persona": {
+    "message": "Persona"
+  },
+  "composer_context_assistant": {
+    "message": "Assistant"
+  },
+  "composer_context_systemPrompt": {
+    "message": "System prompt"
+  },
+  "composer_context_behavior": {
+    "message": "Behavior"
+  },
+  "composer_context_customSystemPrompt": {
+    "message": "Custom"
+  },
+  "composer_context_modifiedBehaviorTemplate": {
+    "message": "{{title}} modified"
+  },
+  "composer_context_scene": {
+    "message": "Scene"
+  },
+  "composer_context_sceneActive": {
+    "message": "Active"
+  },
+  "composer_context_generationStyle": {
+    "message": "Generation style"
+  },
+  "composer_context_context": {
+    "message": "Context"
+  },
+  "composer_context_rolePlayPinnedExternal": {
+    "message": "{{count}} pinned + external"
+  },
+  "composer_context_rolePlayPinnedCount": {
+    "message": "{{count}} pinned"
+  },
+  "composer_context_rolePlayExternal": {
+    "message": "External"
+  },
+  "composer_modeCharacter": {
+    "message": "Character / Scene"
+  },
+  "composer_modeCharacterNotice": {
+    "message": "Character / scene settings opened."
+  },
+  "composer_modeCharacterActive": {
+    "message": "Active: {{name}}"
+  },
+  "composer_rolePlaySetup": {
+    "message": "Role-play setup"
+  },
+  "composer_rolePlayPreview": {
+    "message": "Role-play preview"
+  },
+  "composer_rolePlayLayers": {
+    "message": "Role-play layers"
+  },
+  "composer_chooseBehaviorTemplate": {
+    "message": "Choose behavior template"
+  },
+  "composer_clearIdentity": {
+    "message": "Clear identity"
+  },
+  "composer_clearBehavior": {
+    "message": "Clear behavior"
+  },
+  "composer_resetGeneration": {
+    "message": "Reset generation"
+  },
+  "composer_sceneEnabled": {
+    "message": "Scene enabled"
+  },
+  "composer_sceneNotes": {
+    "message": "Scene notes"
+  },
+  "composer_sceneNotesPlaceholder": {
+    "message": "Describe the current scene context."
+  },
+  "composer_sceneActive": {
+    "message": "Scene active"
+  },
+  "composer_sceneInactive": {
+    "message": "No scene draft"
+  },
+  "composer_clearScene": {
+    "message": "Clear scene"
+  },
+  "composer_resetScene": {
+    "message": "Reset scene"
+  },
   "composer_knowledgeSearch": {
     "message": "Search & Context"
   },
@@ -810,7 +903,7 @@
     "message": "Select at least one model for Compare mode."
   },
   "actor_title": {
-    "message": "Scene Director (Actor)"
+    "message": "Optional scene context"
   },
   "actor_help": {
     "message": "Configure per-chat scene context: roles, mood, world, goals, and notes."
@@ -1653,7 +1746,10 @@
     "message": "Multi-model compare"
   },
   "presets_title": {
-    "message": "Parameter Presets"
+    "message": "Generation style"
+  },
+  "presets_generationStyle": {
+    "message": "Generation style"
   },
   "presets_creative_label": {
     "message": "Creative"
@@ -1746,25 +1842,25 @@
     "message": "Responses will be formatted as valid JSON"
   },
   "templates_title": {
-    "message": "System Prompt Templates"
+    "message": "System prompts"
   },
   "templates_button": {
-    "message": "Templates"
+    "message": "System prompts"
   },
   "templates_search": {
-    "message": "Search templates..."
+    "message": "Search system prompts..."
   },
   "templates_all": {
     "message": "All"
   },
   "templates_noResults": {
-    "message": "No templates found"
+    "message": "No system prompts found"
   },
   "templates_copy": {
-    "message": "Copy to clipboard"
+    "message": "Copy prompt"
   },
   "templates_use": {
-    "message": "Use template"
+    "message": "Use prompt"
   },
   "templates_category_general": {
     "message": "General"
@@ -1952,6 +2048,33 @@
   "workspace_addModel": {
     "message": "Add model"
   },
+  "workspace_keyboardShortcuts": {
+    "message": "Keyboard Shortcuts"
+  },
+  "workspace_shortcutSearch": {
+    "message": "Search workspace"
+  },
+  "workspace_shortcutFocusSources": {
+    "message": "Focus sources pane"
+  },
+  "workspace_shortcutFocusChat": {
+    "message": "Focus chat pane"
+  },
+  "workspace_shortcutFocusStudio": {
+    "message": "Focus studio pane"
+  },
+  "workspace_shortcutNewNote": {
+    "message": "New note"
+  },
+  "workspace_shortcutNewWorkspace": {
+    "message": "New workspace"
+  },
+  "workspace_shortcutUndo": {
+    "message": "Undo"
+  },
+  "workspace_shortcutShowShortcuts": {
+    "message": "Show shortcuts"
+  },
   "workspace_clearChat": {
     "message": "Clear chat"
   },
@@ -1960,6 +2083,9 @@
   },
   "workspace_messagePlaceholderCompare": {
     "message": "Send to {{count}} models..."
+  },
+  "studio_loadingOutputViewer": {
+    "message": "Loading output viewer..."
   },
   "debug_title": {
     "message": "Debug Panel"
@@ -2302,5 +2428,548 @@
   },
   "composer_compareNoticesExpand": {
     "message": "{{count}} more notes"
+  },
+  "cockpit_chatStatus": {
+    "message": "Chat status"
+  },
+  "cockpit_layoutControls": {
+    "message": "Chat layout controls"
+  },
+  "cockpit_focusChat": {
+    "message": "Focus chat"
+  },
+  "cockpit_chatCockpit": {
+    "message": "Chat cockpit"
+  },
+  "cockpit_railVisibility": {
+    "message": "Rail visibility"
+  },
+  "cockpit_showPanels": {
+    "message": "Show cockpit panels"
+  },
+  "cockpit_enterFocus": {
+    "message": "Enter focus chat"
+  },
+  "cockpit_hideContextRail": {
+    "message": "Hide context rail"
+  },
+  "cockpit_showContextRail": {
+    "message": "Show context rail"
+  },
+  "cockpit_hideRuntimeRail": {
+    "message": "Hide runtime rail"
+  },
+  "cockpit_showRuntimeRail": {
+    "message": "Show runtime rail"
+  },
+  "cockpit_context": {
+    "message": "Context"
+  },
+  "cockpit_runtime": {
+    "message": "Runtime"
+  },
+  "cockpit_focus": {
+    "message": "Focus"
+  },
+  "cockpit_cockpit": {
+    "message": "Cockpit"
+  },
+  "cockpit_contextLandmark": {
+    "message": "Chat cockpit context"
+  },
+  "cockpit_runtimeLandmark": {
+    "message": "Chat cockpit runtime"
+  },
+  "cockpit_conversationContext": {
+    "message": "Conversation context"
+  },
+  "cockpit_contextActive": {
+    "message": "Context active"
+  },
+  "cockpit_noExtraContext": {
+    "message": "No extra context"
+  },
+  "cockpit_clear": {
+    "message": "Clear"
+  },
+  "cockpit_contextResearchCountOne": {
+    "message": "1 research attachment"
+  },
+  "cockpit_contextResearchCountMany": {
+    "message": "{{count}} research attachments"
+  },
+  "cockpit_clearResearchContext": {
+    "message": "Clear research context"
+  },
+  "cockpit_contextFilesCountOne": {
+    "message": "1 file"
+  },
+  "cockpit_contextFilesCountMany": {
+    "message": "{{count}} files"
+  },
+  "cockpit_clearFiles": {
+    "message": "Clear files"
+  },
+  "cockpit_contextKnowledgeCountOne": {
+    "message": "1 knowledge item"
+  },
+  "cockpit_contextKnowledgeCountMany": {
+    "message": "{{count}} knowledge items"
+  },
+  "cockpit_clearKnowledge": {
+    "message": "Clear knowledge"
+  },
+  "cockpit_contextMediaCountOne": {
+    "message": "1 media scope"
+  },
+  "cockpit_contextMediaCountMany": {
+    "message": "{{count}} media scopes"
+  },
+  "cockpit_clearMediaScopes": {
+    "message": "Clear media scopes"
+  },
+  "cockpit_webSearch": {
+    "message": "Web search"
+  },
+  "cockpit_webSearchOn": {
+    "message": "Web search on"
+  },
+  "cockpit_webSearchOff": {
+    "message": "Web search off"
+  },
+  "cockpit_openSearchContext": {
+    "message": "Open Search & Context"
+  },
+  "cockpit_searchContext": {
+    "message": "Search & Context"
+  },
+  "cockpit_promptContext": {
+    "message": "Prompt context"
+  },
+  "cockpit_prompts": {
+    "message": "Prompts"
+  },
+  "cockpit_customPrompt": {
+    "message": "Custom prompt"
+  },
+  "cockpit_inlineSystemPromptActive": {
+    "message": "Inline system prompt active"
+  },
+  "cockpit_loadingPromptDetails": {
+    "message": "Loading prompt details..."
+  },
+  "cockpit_noPromptContext": {
+    "message": "No system prompt will be added."
+  },
+  "cockpit_noPromptSelected": {
+    "message": "No prompt selected"
+  },
+  "cockpit_promptDetailsUnavailable": {
+    "message": "Prompt details unavailable"
+  },
+  "cockpit_quickPrompt": {
+    "message": "Quick prompt"
+  },
+  "cockpit_selectPrompt": {
+    "message": "Select prompt"
+  },
+  "cockpit_systemPrompt": {
+    "message": "System prompt"
+  },
+  "cockpit_clearPrompt": {
+    "message": "Clear prompt"
+  },
+  "cockpit_conversationSession": {
+    "message": "Conversation session"
+  },
+  "cockpit_session": {
+    "message": "Session"
+  },
+  "cockpit_historyLinked": {
+    "message": "History linked"
+  },
+  "cockpit_noSavedHistory": {
+    "message": "No saved history yet"
+  },
+  "cockpit_saveConversation": {
+    "message": "Save conversation"
+  },
+  "cockpit_useTemporaryChat": {
+    "message": "Use temporary chat"
+  },
+  "cockpit_sessionTemporary": {
+    "message": "Temporary chat"
+  },
+  "cockpit_sessionServer": {
+    "message": "Server chat"
+  },
+  "cockpit_sessionLocal": {
+    "message": "Local chat"
+  },
+  "cockpit_temporary": {
+    "message": "Temporary"
+  },
+  "cockpit_saved": {
+    "message": "Saved"
+  },
+  "cockpit_runtimeState": {
+    "message": "Runtime state"
+  },
+  "cockpit_streaming": {
+    "message": "Streaming"
+  },
+  "cockpit_degraded": {
+    "message": "Degraded"
+  },
+  "cockpit_degradedServerHealth": {
+    "message": "Server health is degraded"
+  },
+  "cockpit_error": {
+    "message": "Error"
+  },
+  "cockpit_ready": {
+    "message": "Ready"
+  },
+  "cockpit_provider": {
+    "message": "Provider"
+  },
+  "cockpit_noProviderSelected": {
+    "message": "No provider selected"
+  },
+  "cockpit_model": {
+    "message": "Model"
+  },
+  "cockpit_noModelSelected": {
+    "message": "No model selected"
+  },
+  "cockpit_route": {
+    "message": "Route {{route}}"
+  },
+  "cockpit_runControls": {
+    "message": "Run controls"
+  },
+  "cockpit_stopGeneration": {
+    "message": "Stop generation"
+  },
+  "cockpit_stopUnavailableIdle": {
+    "message": "No turn is running."
+  },
+  "cockpit_regenerateLastResponse": {
+    "message": "Regenerate last response"
+  },
+  "cockpit_regenerateUnavailableStreaming": {
+    "message": "Wait for the current turn to finish before regenerating."
+  },
+  "cockpit_regenerateUnavailableNoAssistant": {
+    "message": "Regenerate becomes available after an assistant response."
+  },
+  "cockpit_degradedChatAvailable": {
+    "message": "Chat remains available."
+  },
+  "cockpit_reviewModelChatSettings": {
+    "message": "Review Model & Chat settings"
+  },
+  "cockpit_reviewSettings": {
+    "message": "Review settings"
+  },
+  "cockpit_modelAndCharacter": {
+    "message": "Model and character"
+  },
+  "cockpit_modelCharacter": {
+    "message": "Model & character"
+  },
+  "cockpit_openModelSettings": {
+    "message": "Open model settings"
+  },
+  "cockpit_modelSettings": {
+    "message": "Model settings"
+  },
+  "cockpit_openCharacterSettings": {
+    "message": "Open character settings"
+  },
+  "cockpit_character": {
+    "message": "Character"
+  },
+  "cockpit_noCharacterSelected": {
+    "message": "No character selected"
+  },
+  "cockpit_conversationVolume": {
+    "message": "Conversation volume"
+  },
+  "cockpit_timeline": {
+    "message": "Timeline"
+  },
+  "cockpit_searchOpen": {
+    "message": "Search open"
+  },
+  "cockpit_searchClosed": {
+    "message": "Search closed"
+  },
+  "cockpit_messageCount_one": {
+    "message": "{{count}} message"
+  },
+  "cockpit_messageCount": {
+    "message": "{{count}} messages"
+  },
+  "audioSourcePicker_defaultMic": {
+    "message": "Default microphone"
+  },
+  "audioSourcePicker_selectLabel": {
+    "message": "Audio input source"
+  },
+  "audioSourcePicker_sourceFallbackActive": {
+    "message": "Source fallback active"
+  },
+  "audioSourcePicker_unavailable": {
+    "message": "Unavailable"
+  },
+  "voiceChat_unavailableReasons_notConnected": {
+    "message": "Connect to tldw before using voice conversation."
+  },
+  "voiceChat_unavailableReasons_transportMissing": {
+    "message": "This server does not advertise voice conversation streaming."
+  },
+  "voiceChat_unavailableReasons_authMissing": {
+    "message": "Configure tldw credentials before using voice conversation."
+  },
+  "voiceChat_unavailableReasons_audioUnhealthy": {
+    "message": "Audio health is not ready for voice conversation."
+  },
+  "voiceChat_unavailableReasons_ttsConfigMissing": {
+    "message": "Voice conversation needs a server TTS model and voice."
+  },
+  "voiceChat_unavailableReasons_ttsProviderUnsupported": {
+    "message": "Voice conversation does not support this TTS provider."
+  },
+  "voiceChat_unavailableReasons_modelMissing": {
+    "message": "Select a chat model for voice conversation."
+  },
+  "voiceChat_unavailableReasons_disconnected": {
+    "message": "Voice chat disconnected."
+  },
+  "voiceChat_unavailableReasons_ttsError": {
+    "message": "Voice chat hit a TTS error."
+  },
+  "voiceChat_unavailableReasons_error": {
+    "message": "Voice chat hit an error."
+  },
+  "stt_serverRequirement": {
+    "message": "Transcription requires a configured STT engine on your tldw server."
+  },
+  "stt_audioSetupGuide": {
+    "message": "Audio Setup Guide"
+  },
+  "stt_firstUseHint": {
+    "message": "Press the record button or upload an audio file to get started with transcription."
+  },
+  "stt_noModelsTitle": {
+    "message": "No transcription models available"
+  },
+  "stt_noModelsBody": {
+    "message": "Configure STT models in your server settings. Check the Audio Setup Guide for instructions."
+  },
+  "stt_spaceKeyHint": {
+    "message": "Press <kbd>Space</kbd> to toggle recording"
+  },
+  "tts_combinedWorkflowHint": {
+    "message": "For combined TTS + STT workflows, try the <speechLink>Speech Playground</speechLink>."
+  },
+  "tts_audioSetupGuide": {
+    "message": "Audio Setup Guide"
+  },
+  "tts_ffmpegWarningTitle": {
+    "message": "ffmpeg not detected"
+  },
+  "tts_ffmpegWarningBody": {
+    "message": "Some audio processing features require ffmpeg. Install it for full functionality."
+  },
+  "tts_noProviderTitle": {
+    "message": "No TTS provider detected on your server"
+  },
+  "tts_noProviderDescription": {
+    "message": "Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
+  },
+  "tts_progressSegments": {
+    "message": "{{completed}}/{{total}} segments"
+  },
+  "cockpit_noContextDetail": {
+    "message": "Nothing extra will be added to the next reply."
+  },
+  "cockpit_contextSummary": {
+    "message": "Context summary"
+  },
+  "cockpit_contextSources": {
+    "message": "Context sources"
+  },
+  "cockpit_activeSourceCountOne": {
+    "message": "1 active source"
+  },
+  "cockpit_activeSourceCountMany": {
+    "message": "{{count}} active sources"
+  },
+  "cockpit_armed": {
+    "message": "Armed"
+  },
+  "cockpit_idle": {
+    "message": "Idle"
+  },
+  "cockpit_active": {
+    "message": "Active"
+  },
+  "cockpit_available": {
+    "message": "Available"
+  },
+  "cockpit_disabled": {
+    "message": "Disabled"
+  },
+  "cockpit_removeSource": {
+    "message": "Remove {{title}}"
+  },
+  "cockpit_openSource": {
+    "message": "Open {{title}}"
+  },
+  "cockpit_web": {
+    "message": "Web"
+  },
+  "cockpit_webSearchDetail": {
+    "message": "Enabled for the next reply."
+  },
+  "cockpit_disableWebSearch": {
+    "message": "Disable web search"
+  },
+  "cockpit_research": {
+    "message": "Research"
+  },
+  "cockpit_researchContext": {
+    "message": "Research context"
+  },
+  "cockpit_researchRun": {
+    "message": "Run {{runId}}"
+  },
+  "cockpit_file": {
+    "message": "File"
+  },
+  "cockpit_fileFallback": {
+    "message": "File {{index}}"
+  },
+  "cockpit_knowledge": {
+    "message": "Knowledge"
+  },
+  "cockpit_knowledgeFallback": {
+    "message": "Knowledge {{index}}"
+  },
+  "cockpit_media": {
+    "message": "Media"
+  },
+  "cockpit_mediaScopeLabel": {
+    "message": "Media scope {{id}}"
+  },
+  "cockpit_nextReply": {
+    "message": "Used on next reply"
+  },
+  "cockpit_contextEmptyWorkbench": {
+    "message": "Add web search, files, knowledge, media, or research context before sending."
+  },
+  "cockpit_turnRunning": {
+    "message": "Turn running"
+  },
+  "cockpit_turnIdle": {
+    "message": "Turn idle"
+  },
+  "cockpit_providerRoute": {
+    "message": "Provider route"
+  },
+  "cockpit_stop": {
+    "message": "Stop"
+  },
+  "cockpit_scopedSettings": {
+    "message": "Scoped settings"
+  },
+  "cockpit_settingsDefault": {
+    "message": "Default settings for this provider:model."
+  },
+  "cockpit_settingInherited": {
+    "message": "Inherited"
+  },
+  "cockpit_settingOverride": {
+    "message": "Override"
+  },
+  "cockpit_temperature": {
+    "message": "Temperature"
+  },
+  "cockpit_topP": {
+    "message": "Top P"
+  },
+  "cockpit_topK": {
+    "message": "Top K"
+  },
+  "cockpit_contextWindow": {
+    "message": "Context"
+  },
+  "cockpit_maxTokens": {
+    "message": "Max tokens"
+  },
+  "cockpit_reasoning": {
+    "message": "Reasoning"
+  },
+  "cockpit_toolAvailability": {
+    "message": "Tool availability"
+  },
+  "cockpit_tools": {
+    "message": "Tools"
+  },
+  "cockpit_mcpTools": {
+    "message": "MCP tools"
+  },
+  "cockpit_openMcpTools": {
+    "message": "Open MCP tools"
+  },
+  "cockpit_openTools": {
+    "message": "Open tools"
+  },
+  "cockpit_toolsComposerManaged": {
+    "message": "Use composer MCP controls to inspect availability."
+  },
+  "cockpit_mobilePanelTabs": {
+    "message": "Mobile cockpit panels"
+  },
+  "cockpit_collapseRailSection": {
+    "message": "Collapse {{title}}"
+  },
+  "cockpit_expandRailSection": {
+    "message": "Expand {{title}}"
+  },
+  "cockpit_searchAndSources": {
+    "message": "Search & sources"
+  },
+  "cockpit_searchSourcesDetail": {
+    "message": "Manage web, files, knowledge, media, and research context."
+  },
+  "cockpit_promptManagement": {
+    "message": "Prompt management"
+  },
+  "cockpit_prompt": {
+    "message": "Prompt"
+  },
+  "cockpit_reviewModelSettings": {
+    "message": "Review model settings"
+  },
+  "cockpit_modelRoute": {
+    "message": "Model route"
+  },
+  "cockpit_noAssistantDetail": {
+    "message": "No persona or character will shape replies."
+  },
+  "cockpit_providerModelSettings": {
+    "message": "Provider:model settings"
+  },
+  "cockpit_chatToolAccess": {
+    "message": "Chat tool access"
+  },
+  "cockpit_configureMcpTools": {
+    "message": "Configure MCP tools"
+  },
+  "cockpit_empty": {
+    "message": "Empty"
   }
 }

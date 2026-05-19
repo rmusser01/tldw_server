@@ -75,3 +75,54 @@ export const buildServerLogHint = (
   if (!correlationId) return fallbackHint
   return `Check server logs with correlation ID: ${correlationId}.`
 }
+
+/**
+ * Map common backend error patterns to user-friendly messages.
+ * Returns null if no known pattern is matched.
+ */
+// TODO(i18n): extract user-facing strings to i18n resources
+export const humanizeBackendError = (error: unknown): string | null => {
+  const raw = normalizeRawError(error)
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+
+  if (
+    lower.includes("chunkererror") ||
+    lower.includes("chunker error") ||
+    lower.includes("chunking failed")
+  ) {
+    return "This file couldn't be processed. Try a different format."
+  }
+  if (
+    lower.includes("timeouterror") ||
+    lower.includes("timed out") ||
+    lower.includes("request timeout") ||
+    lower.includes("gateway timeout")
+  ) {
+    return "Processing took too long. Try a smaller file."
+  }
+  if (
+    lower.includes("connectionerror") ||
+    lower.includes("connection refused") ||
+    lower.includes("econnrefused") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("network error")
+  ) {
+    return "Lost connection to the server."
+  }
+  if (
+    lower.includes("413") ||
+    lower.includes("payload too large") ||
+    lower.includes("request entity too large")
+  ) {
+    return "File is too large for the server to accept."
+  }
+  if (
+    lower.includes("unsupported") &&
+    (lower.includes("format") || lower.includes("type"))
+  ) {
+    return "This file format is not supported."
+  }
+
+  return null
+}

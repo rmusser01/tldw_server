@@ -36,6 +36,46 @@ const extractIngestJobIds = (payload: unknown): number[] => {
     .filter((value) => Number.isFinite(value) && value > 0)
 }
 
+const dismissAssistantSetupBlockingModal = async (
+  page: Page,
+  timeoutMs = 5_000
+): Promise<void> => {
+  const setupHeading = page.getByText(/build your assistant/i).first()
+  const overlay = page.getByTestId("assistant-setup-overlay").first()
+  const overlayVisible =
+    (await overlay.isVisible({ timeout: 1_000 }).catch(() => false)) ||
+    (await setupHeading.isVisible({ timeout: 1_000 }).catch(() => false))
+  if (!overlayVisible) return
+
+  const skipControls = [
+    page.getByRole("button", { name: /skip for now/i }).first(),
+    page.getByText(/^skip for now$/i).first(),
+  ]
+
+  for (const control of skipControls) {
+    if (!(await control.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      continue
+    }
+    await control.click()
+    await expect
+      .poll(
+        async () =>
+          !(await overlay.isVisible().catch(() => false)) &&
+          !(await setupHeading.isVisible().catch(() => false)),
+        {
+          timeout: timeoutMs,
+          message: "Timed out dismissing the assistant setup modal",
+        }
+    )
+      .toBe(true)
+    return
+  }
+
+  throw new Error(
+    "Assistant setup modal is visible, but no dismiss control matching 'Skip for now' was found."
+  )
+}
+
 const waitForQuickIngestDialog = async (page: Page): Promise<Locator> => {
   const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
   await expect(dialog).toBeVisible({ timeout: 30_000 })
@@ -43,7 +83,11 @@ const waitForQuickIngestDialog = async (page: Page): Promise<Locator> => {
 }
 
 const findQuickIngestUrlInput = (dialog: Locator): Locator =>
-  dialog.locator("textarea").first()
+  dialog
+    .getByLabel(/url input area|paste urls input/i)
+    .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
+    .or(dialog.locator("textarea"))
+    .first()
 
 const findQuickIngestFileInput = (dialog: Locator): Locator =>
   dialog.locator('[data-testid="qi-file-input"], input[type="file"]').first()
@@ -120,11 +164,11 @@ const waitForQuickIngestQueueAdvance = async (
           .getByRole("button", { name: /configure \d+ items/i })
           .isVisible()
           .catch(() => false)
-        const runVisible = await dialog
-          .getByTestId("quick-ingest-run")
+        const startProcessingVisible = await dialog
+          .getByRole("button", { name: /start processing/i })
           .isVisible()
           .catch(() => false)
-        return useDefaultsVisible || configureVisible || runVisible
+        return useDefaultsVisible || configureVisible || startProcessingVisible
       },
       {
         timeout: Math.min(timeoutMs, 20_000),
@@ -149,18 +193,44 @@ const waitForQuickIngestCompletionUi = async (
   timeoutMs: number
 ): Promise<void> => {
   const resultsStep = dialog.getByTestId("wizard-results-step")
-  const completionSummary = dialog.getByTestId("quick-ingest-complete")
   const completedRegion = dialog.getByRole("region", { name: /completed items/i }).first()
+  const errorRegion = dialog.getByRole("region", { name: /error items/i }).first()
 
   await expect
     .poll(
       async () => {
         const resultsVisible = await resultsStep.isVisible().catch(() => false)
-        const summaryVisible = await completionSummary.isVisible().catch(() => false)
         const regionVisible = await completedRegion.isVisible().catch(() => false)
-        return resultsVisible || summaryVisible || regionVisible
+        const errorVisible = await errorRegion.isVisible().catch(() => false)
+        return resultsVisible || regionVisible || errorVisible
       },
       { timeout: timeoutMs, message: "Timed out waiting for quick ingest completion UI" }
+    )
+    .toBe(true)
+}
+
+const waitForQuickIngestConfigureUi = async (
+  dialog: Locator,
+  timeoutMs: number
+): Promise<void> => {
+  const ingestionOptionsHeading = dialog.getByText(/ingestion options/i).first()
+  const nextButton = dialog.getByRole("button", { name: /^next$/i }).first()
+  const backButton = dialog.getByRole("button", { name: /^back$/i }).first()
+
+  await expect
+    .poll(
+      async () => {
+        const headingVisible = await ingestionOptionsHeading.isVisible().catch(() => false)
+        if (headingVisible) return true
+
+        const nextVisible = await nextButton.isVisible().catch(() => false)
+        const backVisible = await backButton.isVisible().catch(() => false)
+        return nextVisible && backVisible
+      },
+      {
+        timeout: timeoutMs,
+        message: "Timed out waiting for the quick ingest configure step",
+      }
     )
     .toBe(true)
 }
@@ -169,6 +239,8 @@ type QuickIngestCompletionExpectation = {
   mediaId?: string
   sourceUrl?: string
   fileName?: string
+  title?: string
+  terminalState?: "completed" | "skipped" | "failed" | "either"
 }
 
 type QuickIngestProcessingTarget = "processing" | "completed"
@@ -247,6 +319,32 @@ const startQuickIngestProcessing = async (
   await startProcessingBtn.click()
 }
 
+const startQueuedQuickIngestFromCurrentStep = async (
+  dialog: Locator,
+  timeoutMs: number
+): Promise<void> => {
+  const useDefaultsBtn = dialog.getByRole("button", { name: /use defaults/i }).first()
+  if (await useDefaultsBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await useDefaultsBtn.click()
+    return
+  }
+
+  const configureBtn = dialog
+    .getByRole("button", { name: /configure \d+ items/i })
+    .first()
+  if (await configureBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await configureBtn.click()
+    await waitForQuickIngestConfigureUi(dialog, timeoutMs)
+    await advanceQuickIngestToReviewStep(dialog, timeoutMs)
+    await startQuickIngestProcessing(dialog, timeoutMs)
+    return
+  }
+
+  const startProcessingBtn = dialog.getByRole("button", { name: /start processing/i }).first()
+  await expect(startProcessingBtn).toBeVisible({ timeout: timeoutMs })
+  await startProcessingBtn.click()
+}
+
 /**
  * Open the quick ingest dialog from any page surface that exposes the trigger.
  */
@@ -255,11 +353,13 @@ export async function openQuickIngestDialog(
   timeoutMs = 30_000
 ): Promise<Locator> {
   const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
+  await dismissAssistantSetupBlockingModal(page)
   if (await dialog.isVisible({ timeout: Math.min(timeoutMs, 5_000) }).catch(() => false)) {
     return dialog
   }
 
   await waitForConnection(page, Math.min(timeoutMs, 20_000))
+  await dismissAssistantSetupBlockingModal(page)
   if (await dialog.isVisible({ timeout: Math.min(timeoutMs, 5_000) }).catch(() => false)) {
     return dialog
   }
@@ -268,6 +368,7 @@ export async function openQuickIngestDialog(
   if (!(await quickIngestBtn.isVisible({ timeout: 1_000 }).catch(() => false))) {
     await page.goto("/media", { waitUntil: "domcontentloaded" })
     await waitForConnection(page)
+    await dismissAssistantSetupBlockingModal(page)
     if (await dialog.isVisible({ timeout: 3_000 }).catch(() => false)) {
       return dialog
     }
@@ -356,6 +457,26 @@ export async function queueUrlAndStartProcessing(
 }
 
 /**
+ * Start processing from an already queued quick-ingest dialog without re-adding inputs.
+ */
+export async function startQueuedQuickIngestProcessing(
+  dialog: Locator,
+  options: QueueUrlAndStartProcessingOptions = {}
+): Promise<Locator> {
+  const timeoutMs = options.timeoutMs ?? 120_000
+
+  await startQueuedQuickIngestFromCurrentStep(dialog, timeoutMs)
+
+  if (options.waitForState === "processing") {
+    await waitForQuickIngestProcessingUi(dialog, timeoutMs)
+    return dialog
+  }
+
+  await waitForQuickIngestCompletionUi(dialog, timeoutMs)
+  return dialog
+}
+
+/**
  * Assert the quick ingest results view has reached a completed state.
  */
 export async function assertQuickIngestCompletedResults(
@@ -367,14 +488,57 @@ export async function assertQuickIngestCompletedResults(
   await expect(dialog.getByTestId("wizard-results-step")).toBeVisible({
     timeout: timeoutMs,
   })
-  await expect(dialog.getByRole("region", { name: /completed items/i }).first()).toBeVisible({
-    timeout: timeoutMs,
-  })
-  await expect(dialog.getByText(/Total:\s*\d+\s+succeeded,\s*\d+\s+failed/i)).toBeVisible({
+  const completedRegion = dialog.getByRole("region", { name: /completed items/i }).first()
+  const skippedRegion = dialog.getByRole("region", { name: /skipped items/i }).first()
+  const errorRegion = dialog.getByRole("region", { name: /error items/i }).first()
+  const terminalState = expectation.terminalState ?? "completed"
+  let sawSkippedRegion = false
+
+  if (terminalState === "completed") {
+    await expect(completedRegion).toBeVisible({
+      timeout: timeoutMs,
+    })
+  } else if (terminalState === "skipped") {
+    await expect(skippedRegion).toBeVisible({
+      timeout: timeoutMs,
+    })
+    sawSkippedRegion = true
+  } else if (terminalState === "failed") {
+    await expect(errorRegion).toBeVisible({
+      timeout: timeoutMs,
+    })
+  } else {
+    await expect
+      .poll(
+        async () =>
+          (await completedRegion.isVisible().catch(() => false)) ||
+          (await skippedRegion.isVisible().catch(() => false)) ||
+          (await errorRegion.isVisible().catch(() => false)),
+        {
+          timeout: timeoutMs,
+          message: "Timed out waiting for quick ingest terminal results to show completed, skipped, or failed items",
+        }
+      )
+      .toBe(true)
+    sawSkippedRegion = await skippedRegion.isVisible().catch(() => false)
+  }
+
+  await expect(
+    dialog.getByText(/Total:\s*\d+\s+succeeded(?:,\s*\d+\s+skipped)?,\s*\d+\s+failed/i)
+  ).toBeVisible({
     timeout: timeoutMs,
   })
 
+  if (sawSkippedRegion) {
+    await expect(
+      dialog.getByText(/already exists|overwrite/i).first()
+    ).toBeVisible({
+      timeout: timeoutMs,
+    })
+  }
+
   const candidateTexts = [
+    expectation.title,
     expectation.fileName,
     expectation.mediaId,
     expectation.sourceUrl,
@@ -450,9 +614,7 @@ export async function advanceQuickIngestToConfigureStep(
     .getByRole("button", { name: /configure \d+ items/i })
     .first()
   await configureBtn.click()
-  await expect(dialog.getByLabel(/transcription model/i).first()).toBeVisible({
-    timeout: timeoutMs,
-  })
+  await waitForQuickIngestConfigureUi(dialog, timeoutMs)
 }
 
 /**
@@ -582,15 +744,10 @@ export async function ingestAndWaitForReady(
         })
       }
 
-      const runBtn = quickIngestDialog.getByTestId("quick-ingest-run").first()
-      if (await runBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await runBtn.click()
-      } else {
-        const startProcessingBtn = quickIngestDialog
-          .getByRole("button", { name: /start processing|run quick ingest/i })
-          .first()
-        await startProcessingBtn.click()
-      }
+      const startProcessingBtn = quickIngestDialog
+        .getByRole("button", { name: /start processing/i })
+        .first()
+      await startProcessingBtn.click()
     }
   } else {
     await queueFileForQuickIngest(quickIngestDialog, input.file, timeoutMs)
@@ -606,9 +763,7 @@ export async function ingestAndWaitForReady(
         .first()
       if (await configureBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
         await configureBtn.click()
-        await expect(quickIngestDialog.getByLabel(/transcription model/i).first()).toBeVisible({
-          timeout: timeoutMs,
-        })
+        await waitForQuickIngestConfigureUi(quickIngestDialog, timeoutMs)
       }
 
       const nextBtn = quickIngestDialog.getByRole("button", { name: /^next$/i }).first()

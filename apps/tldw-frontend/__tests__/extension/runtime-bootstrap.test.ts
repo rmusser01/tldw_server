@@ -129,6 +129,26 @@ describe("runtime-bootstrap chrome shim", () => {
     ).toBe("true")
   })
 
+  it("backfills MCP Hub into persisted web header shortcuts", async () => {
+    localStorage.setItem(
+      HEADER_SHORTCUT_SELECTION_SETTING.key,
+      JSON.stringify(["chat", "media"])
+    )
+
+    await import("@web/extension/shims/runtime-bootstrap")
+
+    const nextRaw = localStorage.getItem(HEADER_SHORTCUT_SELECTION_SETTING.key)
+    expect(nextRaw).toBeTruthy()
+    const nextSelection = JSON.parse(String(nextRaw))
+    expect(Array.isArray(nextSelection)).toBe(true)
+    expect(nextSelection).toContain("chat")
+    expect(nextSelection).toContain("media")
+    expect(nextSelection).toContain("mcp-hub")
+    expect(
+      localStorage.getItem("tldw:web-defaults:header-shortcuts-mcp-hub:v1")
+    ).toBe("true")
+  })
+
   it("canonicalizes quickstart webui bootstrap to the current page origin", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     delete process.env.NEXT_PUBLIC_API_URL

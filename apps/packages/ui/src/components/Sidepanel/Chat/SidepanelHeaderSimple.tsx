@@ -2,7 +2,7 @@ import logoImage from "@/assets/icon.png"
 import { useMessage } from "@/hooks/useMessage"
 import { Link } from "react-router-dom"
 import { Tooltip } from "antd"
-import { Bot, CogIcon, ExternalLink, Menu, Pencil, Volume2 } from "lucide-react"
+import { Bot, CogIcon, ExternalLink, LayoutDashboard, Menu, Pencil, Volume2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import React from "react"
 import { StatusDot } from "./StatusDot"
@@ -118,6 +118,17 @@ export const SidepanelHeaderSimple = ({
     }
     openFallback()
   }, [notification, t])
+
+  const openDashboard = React.useCallback(() => {
+    const url = browser.runtime.getURL("/options.html#/flashcards")
+    if (browser.tabs?.create) {
+      browser.tabs.create({ url }).catch(() => {
+        window.open(url, "_blank")
+      })
+      return
+    }
+    window.open(url, "_blank")
+  }, [])
 
   return (
     <div
@@ -243,6 +254,18 @@ export const SidepanelHeaderSimple = ({
             </Link>
           </Tooltip>
         ) : null}
+        <Tooltip title={t("sidepanel:header.openDashboard", "Open dashboard")}>
+          <button
+            type="button"
+            onClick={openDashboard}
+            aria-label={t("sidepanel:header.openDashboard", "Open dashboard")}
+            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            title={t("sidepanel:header.openDashboard", "Open dashboard")}
+            data-testid="chat-open-dashboard"
+          >
+            <LayoutDashboard className="size-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
         <Tooltip title={t("sidepanel:header.openFullScreen", "Open Full-Screen")}>
           <button
             type="button"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
@@ -35,6 +35,7 @@ import { UserSecurityCard } from './components/UserSecurityCard';
 import { UserMembershipDialogs } from './components/UserMembershipDialogs';
 import { useUserSecurity } from './hooks/use-user-security';
 import Link from 'next/link';
+import { logger } from '@/lib/logger';
 
 type UserRateLimits = {
   requests_per_minute?: number | null;
@@ -274,6 +275,17 @@ export default function UserDetailPage() {
   const [showAddOverride, setShowAddOverride] = useState(false);
   const [newOverridePermissionId, setNewOverridePermissionId] = useState('');
   const [newOverrideGrant, setNewOverrideGrant] = useState(true);
+  const [permSearchQuery, setPermSearchQuery] = useState('');
+  const [permSourceFilter, setPermSourceFilter] = useState<'all' | EffectivePermissionSource>('all');
+
+  const filteredPerms = useMemo(() =>
+    effectivePermissions.filter((perm) => {
+      const matchesSearch = !permSearchQuery || perm.name.toLowerCase().includes(permSearchQuery.toLowerCase());
+      const matchesSource = permSourceFilter === 'all' || perm.source === permSourceFilter;
+      return matchesSearch && matchesSource;
+    }),
+    [effectivePermissions, permSearchQuery, permSourceFilter],
+  );
 
   const applyRateLimits = useCallback((limits?: UserRateLimits | null) => {
     if (!limits) {
@@ -329,7 +341,7 @@ export default function UserDetailPage() {
           setIsAuthorized(false);
           setError('You are not authorized to edit this user.');
         } else {
-          console.error('Failed to verify user scope:', scopeErr);
+          logger.error('Failed to verify user scope', { component: 'UserDetailPage', error: scopeErr instanceof Error ? scopeErr.message : String(scopeErr) });
         }
       }
     } catch (err: unknown) {
@@ -341,7 +353,7 @@ export default function UserDetailPage() {
       }
       const message =
         err instanceof Error ? err.message : typeof err === 'string' ? err : 'Failed to load user';
-      console.error('Failed to load user:', message);
+      logger.error('Failed to load user', { component: 'UserDetailPage', error: message });
       setError(message);
     } finally {
       setLoading(false);
@@ -373,7 +385,7 @@ export default function UserDetailPage() {
         }));
       setOrgMemberships(normalized);
     } catch (err: unknown) {
-      console.error('Failed to load user organizations:', err);
+      logger.error('Failed to load user organizations', { component: 'UserDetailPage', error: err instanceof Error ? err.message : String(err) });
       setOrgMemberships([]);
       setOrgMembershipsError('Failed to load user organizations.');
     } finally {
@@ -404,7 +416,7 @@ export default function UserDetailPage() {
         }));
       setTeamMemberships(normalized);
     } catch (err: unknown) {
-      console.error('Failed to load user teams:', err);
+      logger.error('Failed to load user teams', { component: 'UserDetailPage', error: err instanceof Error ? err.message : String(err) });
       setTeamMemberships([]);
       setTeamMembershipsError('Failed to load user teams.');
     } finally {
@@ -463,7 +475,7 @@ export default function UserDetailPage() {
         applyRateLimits(normalizedRateLimits);
       }
     } catch (err: unknown) {
-      console.error('Failed to load permissions:', err);
+      logger.error('Failed to load permissions', { component: 'UserDetailPage', error: err instanceof Error ? err.message : String(err) });
     } finally {
       setPermissionsLoading(false);
     }
@@ -542,13 +554,9 @@ export default function UserDetailPage() {
         setError('You are not authorized to update this user.');
         return;
       }
-      if (err instanceof Error) {
-        console.error('Failed to update user:', err);
-        setError(err.message);
-      } else {
-        console.error('Failed to update user:', err);
-        setError(String(err));
-      }
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('Failed to update user', { component: 'UserDetailPage', error: message });
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -619,13 +627,13 @@ export default function UserDetailPage() {
         const updated = await api.getUserRateLimits(userId);
         normalizedRateLimits = normalizeRateLimits(updated);
       } catch (err: unknown) {
-        console.error('Failed to reload rate limits after update:', err);
+        logger.error('Failed to reload rate limits after update', { component: 'UserDetailPage', error: err instanceof Error ? err.message : String(err) });
         normalizedRateLimits = data;
       }
       applyRateLimits(normalizedRateLimits);
       toastSuccess('Rate limits updated', 'User rate limits have been saved.');
     } catch (err: unknown) {
-      console.error('Failed to update rate limits:', err);
+      logger.error('Failed to update rate limits', { component: 'UserDetailPage', error: err instanceof Error ? err.message : String(err) });
       const message = err instanceof Error ? err.message : 'Failed to update rate limits';
       showError('Save failed', message);
     } finally {
@@ -1018,38 +1026,52 @@ export default function UserDetailPage() {
                       <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                         View effective permissions ({effectivePermissions.length})
                       </summary>
-                      <div className="mt-2 mb-2">
-                        <input
-                          type="text"
-                          aria-label="Filter permissions"
-                          placeholder="Filter permissions..."
-                          value={permFilter}
-                          onChange={(e) => setPermFilter(e.target.value)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs"
-                        />
-                      </div>
-                      <div className="max-h-48 overflow-y-auto space-y-1">
-                        {effectivePermissions.filter(p => !permFilter || p.name.toLowerCase().includes(permFilter.toLowerCase())).map((perm, index) => (
-                          <div
-                            key={perm.id || `perm-${index}`}
-                            className="flex items-center justify-between p-2 rounded bg-muted/30"
+                      <div className="mt-2 space-y-2">
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Search permissions..."
+                            value={permSearchQuery}
+                            onChange={(e) => setPermSearchQuery(e.target.value)}
+                            className="h-8 text-xs"
+                          />
+                          <Select
+                            value={permSourceFilter}
+                            onChange={(e) => setPermSourceFilter(e.target.value as 'all' | EffectivePermissionSource)}
+                            className="h-8 text-xs w-40"
                           >
-                            <code className="font-mono text-xs">{perm.name}</code>
-                            {perm.source === 'override' ? (
-                              <Badge variant="secondary" className="text-xs">
-                                Direct override
-                              </Badge>
-                            ) : perm.source === 'role' ? (
-                              <Badge variant="outline" className="text-xs">
-                                Role: {perm.sourceLabel || user.role || 'role'}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs">
-                                Inherited
-                              </Badge>
-                            )}
-                          </div>
-                        ))}
+                            <option value="all">All sources</option>
+                            <option value="role">Role-derived</option>
+                            <option value="override">Direct overrides</option>
+                            <option value="inherited">Inherited only</option>
+                          </Select>
+                        </div>
+                        <div className="max-h-48 overflow-y-auto space-y-1">
+                          {filteredPerms.length === 0 ? (
+                            <div className="text-xs text-muted-foreground py-2 text-center">
+                              No permissions match your filter.
+                            </div>
+                          ) : filteredPerms.map((perm, index) => (
+                            <div
+                              key={perm.id || `perm-${index}`}
+                              className="flex items-center justify-between p-2 rounded bg-muted/30"
+                            >
+                              <code className="font-mono text-xs">{perm.name}</code>
+                              {perm.source === 'override' ? (
+                                <Badge variant="secondary" className="text-xs">
+                                  Direct override
+                                </Badge>
+                              ) : perm.source === 'role' ? (
+                                <Badge variant="outline" className="text-xs">
+                                  Role: {perm.sourceLabel || user.role || 'role'}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-xs">
+                                  Inherited
+                                </Badge>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </details>
                   )}

@@ -4,6 +4,7 @@ STREAMS_UNIFIED flag. This validates that the endpoint emits SSE lines and a
 single terminal [DONE] when a (stubbed) provider stream is used.
 """
 
+from contextlib import asynccontextmanager
 import os
 import shutil
 import tempfile
@@ -13,6 +14,16 @@ import httpx
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+
+@asynccontextmanager
+async def _lifespan_async_client(app):
+    # ASGITransport does not drive lifespan, so explicitly re-enter startup for
+    # the shared singleton app after prior TestClient-based tests have drained it.
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            yield client
 
 
 def _fake_provider_stream() -> Iterator[str]:
@@ -52,10 +63,9 @@ async def test_character_chat_streaming_unified_sse(monkeypatch):
         def _stub_chat_api_call(*args, **kwargs):  # returns a generator (sync iterator)
             return _fake_provider_stream()
 
-        mod.perform_chat_api_call = _stub_chat_api_call
+        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             # Bootstrap: get default character + create chat
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200
@@ -122,10 +132,9 @@ async def test_character_chat_streaming_unified_sse_slow_async_heartbeat(monkeyp
         async def _stub_chat_api_call(*args, **kwargs):
             return _fake_async_provider_stream_slow()
 
-        mod.perform_chat_api_call = _stub_chat_api_call  # type: ignore
+        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             # Bootstrap: default character + chat
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200
@@ -202,10 +211,9 @@ async def test_character_chat_streaming_unified_sse_provider_duplicate_done(monk
 
             return _fake_provider_stream_with_duplicate_done_sync()
 
-        mod.perform_chat_api_call = _stub_chat_api_call  # type: ignore
+        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             # Bootstrap defaults
             r = await client.get("/api/v1/characters/", headers=headers)
             character_id = r.json()[0]["id"]
@@ -266,12 +274,11 @@ async def test_character_chat_streaming_unified_sse_chunk_limit(monkeypatch):
         def _stub_chat_api_call(*args, **kwargs):
             return _fake_provider_stream_many_chunks()
 
-        mod.perform_chat_api_call = _stub_chat_api_call  # type: ignore
+        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
         monkeypatch.setattr(mod, "MAX_STREAMING_CHUNKS", 2)
         monkeypatch.setattr(mod, "MAX_STREAMING_BYTES", 10_000)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200
             character_id = r.json()[0]["id"]
@@ -323,12 +330,11 @@ async def test_character_chat_streaming_unified_sse_byte_limit(monkeypatch):
         def _stub_chat_api_call(*args, **kwargs):
             return _fake_provider_stream_large_chunk()
 
-        mod.perform_chat_api_call = _stub_chat_api_call  # type: ignore
+        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
         monkeypatch.setattr(mod, "MAX_STREAMING_CHUNKS", 100)
         monkeypatch.setattr(mod, "MAX_STREAMING_BYTES", 50)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200
             character_id = r.json()[0]["id"]
@@ -386,10 +392,9 @@ async def test_character_chat_streaming_unified_sse_provider_error_emits_done(mo
         def _stub_chat_api_call(*args, **kwargs):
             return _fake_provider_stream_raises_bad_request()
 
-        mod.perform_chat_api_call = _stub_chat_api_call  # type: ignore
+        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
 
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200
             character_id = r.json()[0]["id"]

@@ -111,6 +111,20 @@ def get_explicit_scope_ids(context: Any | None, rule_type: str) -> set[str] | No
     return set(_coerce_values_to_list(explicit_ids.get(normalized_rule_type)))
 
 
+def assert_identifier_in_scope(
+    context: Any | None,
+    rule_type: str,
+    identifier: Any,
+    *,
+    label: str,
+) -> None:
+    scoped_ids = get_explicit_scope_ids(context, rule_type)
+    if scoped_ids is None:
+        return
+    if str(identifier or "") not in scoped_ids:
+        raise PermissionError(f"{label} access denied by persona scope")
+
+
 def merge_requested_ids_with_scope(
     requested_ids: Any,
     *,

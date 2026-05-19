@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { Building2, ChevronDown, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +14,8 @@ import {
 import { api } from '@/lib/api-client';
 import { Organization } from '@/types';
 import { usePermissions } from '@/components/PermissionGuard';
+import { getScopedItem, setScopedItem, removeScopedItem } from '@/lib/scoped-storage';
+import { logger } from '@/lib/logger';
 
 interface OrgContextType {
   organizations: Organization[];
@@ -53,17 +56,14 @@ export function OrgContextProvider({ children }: OrgContextProviderProps) {
 
   const handleSetSelectedOrg = useCallback((org: Organization | null) => {
     setSelectedOrg(org);
-    if (typeof window === 'undefined') {
-      return;
-    }
     try {
       if (org) {
-        localStorage.setItem(ORG_SELECTION_STORAGE_KEY, String(org.id));
+        setScopedItem(ORG_SELECTION_STORAGE_KEY, String(org.id));
       } else {
-        localStorage.removeItem(ORG_SELECTION_STORAGE_KEY);
+        removeScopedItem(ORG_SELECTION_STORAGE_KEY);
       }
     } catch (error) {
-      console.warn('Failed to persist org selection:', error);
+      logger.warn('Failed to persist org selection', { component: 'OrgContextProvider', error: error instanceof Error ? error.message : String(error) });
     }
   }, []);
 
@@ -74,7 +74,7 @@ export function OrgContextProvider({ children }: OrgContextProviderProps) {
       const orgList = Array.isArray(orgs) ? orgs : [];
       setOrganizations(orgList);
     } catch (error) {
-      console.error('Failed to load organizations:', error);
+      logger.error('Failed to load organizations', { component: 'OrgContextProvider', error: error instanceof Error ? error.message : String(error) });
       setOrganizations([]);
     } finally {
       setLoading(false);
@@ -86,18 +86,16 @@ export function OrgContextProvider({ children }: OrgContextProviderProps) {
       return;
     }
     let storedId: number | null = null;
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem(ORG_SELECTION_STORAGE_KEY);
-        if (stored) {
-          const parsed = Number.parseInt(stored, 10);
-          if (!Number.isNaN(parsed)) {
-            storedId = parsed;
-          }
+    try {
+      const stored = getScopedItem(ORG_SELECTION_STORAGE_KEY);
+      if (stored) {
+        const parsed = Number.parseInt(stored, 10);
+        if (!Number.isNaN(parsed)) {
+          storedId = parsed;
         }
-      } catch (error) {
-        console.warn('Failed to load persisted org selection:', error);
       }
+    } catch (error) {
+      logger.warn('Failed to load persisted org selection', { component: 'OrgContextProvider', error: error instanceof Error ? error.message : String(error) });
     }
 
     if (storedId !== null) {
@@ -106,12 +104,10 @@ export function OrgContextProvider({ children }: OrgContextProviderProps) {
         handleSetSelectedOrg(storedOrg);
         return;
       }
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.removeItem(ORG_SELECTION_STORAGE_KEY);
-        } catch (error) {
-          console.warn('Failed to clear invalid org selection:', error);
-        }
+      try {
+        removeScopedItem(ORG_SELECTION_STORAGE_KEY);
+      } catch (error) {
+        logger.warn('Failed to clear invalid org selection', { component: 'OrgContextProvider', error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -158,20 +154,30 @@ export function OrgContextSwitcher({ className = '' }: OrgContextSwitcherProps) 
   const { organizations, selectedOrg, setSelectedOrg, loading } = useOrgContext();
   const { isSuperAdmin } = usePermissions();
 
-  // Org-scoped users see a read-only badge showing their org name
+  // Org-scoped (non-super-admin) users see a read-only badge showing their org
   if (!isSuperAdmin()) {
-    if (selectedOrg) {
+    if (loading) {
       return (
         <div className={`flex min-w-0 items-center gap-2 px-3 py-2 ${className}`}>
           <Building2 className="h-4 w-4 text-muted-foreground" />
-          <span className="max-w-[120px] truncate text-sm font-medium" title={selectedOrg.name}>
-            {selectedOrg.name}
-          </span>
+          <span className="text-sm text-muted-foreground">Loading...</span>
         </div>
       );
     }
-    return null;
+    if (!selectedOrg) {
+      return null;
+    }
+    return (
+      <div className={`flex min-w-0 items-center gap-2 px-3 py-2 ${className}`} data-testid="org-badge">
+        <Building2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+        <Badge variant="secondary" className="cursor-default hover:bg-secondary truncate max-w-[140px]" title={selectedOrg.name}>
+          {selectedOrg.name}
+        </Badge>
+      </div>
+    );
   }
+
+  // Super admins see all orgs and can choose to scope to one
   if (loading) {
     return (
       <div className={`flex items-center gap-2 px-3 py-2 ${className}`}>
@@ -239,6 +245,25 @@ export function useOrgFilteredData<T extends { org_id?: number }>(data: T[]): T[
   }
 
   return data.filter((item) => item.org_id === selectedOrg.id);
+}
+
+// Banner component showing the active org context near page headers
+export function OrgContextBanner() {
+  const { selectedOrg } = useOrgContext();
+
+  if (!selectedOrg) {
+    return null;
+  }
+
+  return (
+    <div
+      data-testid="org-context-banner"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground"
+    >
+      <Building2 className="h-3 w-3" aria-hidden="true" />
+      <span>Viewing: <span className="font-medium text-foreground">{selectedOrg.name}</span></span>
+    </div>
+  );
 }
 
 export default OrgContextSwitcher;

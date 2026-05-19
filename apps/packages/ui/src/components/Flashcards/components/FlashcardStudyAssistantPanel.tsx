@@ -2,6 +2,7 @@ import React from "react"
 import { Alert, Button, Card, Empty, Input, Space, Tag, Typography } from "antd"
 import { Lightbulb, MessageSquareText, Sparkles, Volume2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Link as RouterLink, useInRouterContext } from "react-router-dom"
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition"
 import { useTTS } from "@/hooks/useTTS"
 import type {
@@ -12,6 +13,50 @@ import type {
 } from "@/services/flashcards"
 import { MarkdownWithBoundary } from "./MarkdownWithBoundary"
 import { VoiceTranscriptComposer } from "./VoiceTranscriptComposer"
+
+type AssistantErrorKind = "network" | "server" | "no_llm"
+
+function extractHttpStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== "object") return undefined
+  const e = err as Record<string, unknown>
+  // Top-level: err.status, err.statusCode
+  if (typeof e.status === "number") return e.status
+  if (typeof e.statusCode === "number") return e.statusCode
+  // Nested: err.response.status, err.response.statusCode
+  const resp = e.response
+  if (resp && typeof resp === "object") {
+    const r = resp as Record<string, unknown>
+    if (typeof r.status === "number") return r.status
+    if (typeof r.statusCode === "number") return r.statusCode
+  }
+  // Data envelope: err.data.status, err.data.statusCode
+  const data = e.data
+  if (data && typeof data === "object") {
+    const d = data as Record<string, unknown>
+    if (typeof d.status === "number") return d.status
+    if (typeof d.statusCode === "number") return d.statusCode
+  }
+  // Deep nested: err.response.data.status, err.response.data.statusCode
+  if (resp && typeof resp === "object") {
+    const rData = (resp as Record<string, unknown>).data
+    if (rData && typeof rData === "object") {
+      const rd = rData as Record<string, unknown>
+      if (typeof rd.status === "number") return rd.status
+      if (typeof rd.statusCode === "number") return rd.statusCode
+    }
+  }
+  return undefined
+}
+
+function classifyAssistantError(err: unknown): AssistantErrorKind {
+  const isNetwork =
+    err instanceof TypeError ||
+    (err instanceof Error && /network|fetch|timeout/i.test(err.message))
+  if (isNetwork) return "network"
+  const httpStatus = extractHttpStatus(err)
+  if (typeof httpStatus === "number" && httpStatus >= 400) return "server"
+  return "no_llm"
+}
 
 const { Text, Title } = Typography
 
@@ -28,8 +73,10 @@ interface FlashcardStudyAssistantPanelProps {
   threadVersion?: number | null
   messages: StudyAssistantMessage[]
   availableActions?: StudyAssistantAction[] | null
+  assistantContext?: unknown
   isLoading?: boolean
   isError?: boolean
+  queryError?: unknown
   isResponding?: boolean
   onReloadContext?: () => Promise<unknown>
   onRespond: (request: StudyAssistantRespondRequest) => Promise<unknown>
@@ -78,19 +125,121 @@ const ACTION_LABELS: Record<StudyAssistantAction, string> = {
   freeform: "Ask assistant"
 }
 
+type RemediationCitationLike = {
+  citation_text?: string | null
+  quote?: string | null
+  label?: string | null
+  source_type?: string
+  source_id?: string
+  locator?: string | null
+  ordinal?: unknown
+}
+
+type RemediationDeepDiveTargetLike = {
+  source_type?: string
+  source_id?: string
+  citation_ordinal?: unknown
+  route_kind?: string | null
+  route?: string | null
+  available?: boolean
+  fallback_reason?: string | null
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const toCleanString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+const toSafeHref = (value: unknown): string | null => {
+  if (typeof value !== "string") return null
+  const href = value.trim()
+  if (!href) return null
+  if (href.startsWith("/")) return href
+
+  try {
+    const parsed = new URL(href)
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null
+  } catch {
+    return null
+  }
+}
+
+const normalizeCitation = (value: unknown): RemediationCitationLike | null => {
+  if (!isRecord(value)) return null
+  const sourceType = toCleanString(value.source_type)
+  const sourceId = toCleanString(value.source_id)
+  if (!sourceType || !sourceId) return null
+  return {
+    citation_text: toCleanString(value.citation_text),
+    quote: toCleanString(value.quote),
+    label: toCleanString(value.label),
+    source_type: sourceType,
+    source_id: sourceId,
+    locator: toCleanString(value.locator),
+    ordinal: value.ordinal
+  }
+}
+
+const normalizeCitationList = (value: unknown): RemediationCitationLike[] => {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeCitation).filter((entry): entry is RemediationCitationLike => entry != null)
+}
+
+const normalizeDeepDiveTarget = (value: unknown): RemediationDeepDiveTargetLike | null => {
+  if (!isRecord(value)) return null
+  const sourceType = toCleanString(value.source_type)
+  const sourceId = toCleanString(value.source_id)
+  if (!sourceType || !sourceId) return null
+  return {
+    source_type: sourceType,
+    source_id: sourceId,
+    citation_ordinal: value.citation_ordinal,
+    route_kind: toCleanString(value.route_kind),
+    route: toSafeHref(value.route),
+    available: typeof value.available === "boolean" ? value.available : true,
+    fallback_reason: toCleanString(value.fallback_reason)
+  }
+}
+
 export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanelProps> = ({
   cardUuid,
   threadVersion = null,
   messages,
   availableActions,
+  assistantContext = null,
   isLoading = false,
   isError = false,
+  queryError,
   isResponding = false,
   onReloadContext,
   onRespond,
   autoSubmitRequest = null
 }) => {
   const { t } = useTranslation(["option", "common"])
+  const inRouterContext = useInRouterContext()
+
+  const classifiedQueryError = React.useMemo(() => {
+    if (!isError || !queryError) return null
+    const kind = classifyAssistantError(queryError)
+    if (kind === "network") {
+      return t("option:flashcards.studyAssistantNetworkError", {
+        defaultValue: "Could not reach the server. Check your connection and try again."
+      })
+    }
+    if (kind === "server") {
+      return t("option:flashcards.studyAssistantServerError", {
+        defaultValue: "The server returned an error. Please try again or check server logs."
+      })
+    }
+    return t("option:flashcards.studyAssistantNoLlm", {
+      defaultValue: "Study assistant requires an LLM provider. Configure one in Settings \u2192 LLM Providers."
+    })
+  }, [isError, queryError, t])
+
   const { speak, isSpeaking } = useTTS()
   const {
     supported,
@@ -121,10 +270,49 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
   }, [reloadedContext, threadVersion])
 
   const displayedMessages = activeContextOverride?.messages ?? messages
+  const activeAssistantContext = React.useMemo(
+    () => activeContextOverride ?? extractStudyAssistantContext(assistantContext),
+    [activeContextOverride, assistantContext]
+  )
   const resolvedActions = React.useMemo(() => {
     const sourceActions = activeContextOverride?.available_actions ?? availableActions
     return Array.from(new Set((sourceActions && sourceActions.length ? sourceActions : DEFAULT_ACTIONS)))
   }, [activeContextOverride?.available_actions, availableActions])
+  const latestAssistantMessage = React.useMemo(
+    () => [...displayedMessages].reverse().find((message) => message.role === "assistant") ?? null,
+    [displayedMessages]
+  )
+  const remediationContext = React.useMemo(() => {
+    const assistantRoot = isRecord(activeAssistantContext) ? activeAssistantContext : null
+    const assistantPayload = isRecord(latestAssistantMessage?.structured_payload)
+      ? latestAssistantMessage.structured_payload
+      : null
+    const rootCitations = normalizeCitationList(assistantRoot?.citations)
+    const payloadCitations = normalizeCitationList(assistantPayload?.citations)
+    const citations = rootCitations.length > 0 ? rootCitations : payloadCitations
+    const primaryCitation =
+      normalizeCitation(assistantRoot?.primary_citation) ??
+      normalizeCitation(assistantPayload?.primary_citation) ??
+      citations[0] ??
+      null
+    const deepDiveTarget =
+      normalizeDeepDiveTarget(assistantRoot?.deep_dive_target) ??
+      normalizeDeepDiveTarget(assistantPayload?.deep_dive_target)
+    const supportingQuote =
+      toCleanString(primaryCitation?.citation_text) ??
+      toCleanString(primaryCitation?.quote) ??
+      toCleanString(assistantPayload?.supporting_quote) ??
+      toCleanString(assistantPayload?.supporting_quote_text) ??
+      toCleanString(citations[0]?.citation_text) ??
+      toCleanString(citations[0]?.quote) ??
+      null
+    return {
+      citations,
+      primaryCitation,
+      deepDiveTarget,
+      supportingQuote
+    }
+  }, [activeAssistantContext, latestAssistantMessage?.structured_payload])
 
   React.useEffect(() => {
     setAssistantError(null)
@@ -159,11 +347,23 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
         setReloadedContext(latestContext)
       }
       return true
-    } catch {
+    } catch (err) {
+      const kind = classifyAssistantError(err)
       setAssistantError(
-        t("option:flashcards.studyAssistantUnavailable", {
-          defaultValue: "Study assistant unavailable"
-        })
+        kind === "network"
+          ? t("option:flashcards.studyAssistantNetworkError", {
+              defaultValue:
+                "Could not reach the server. Check your connection and try again."
+            })
+          : kind === "server"
+            ? t("option:flashcards.studyAssistantServerError", {
+                defaultValue:
+                  "The server returned an error. Please try again or check server logs."
+              })
+            : t("option:flashcards.studyAssistantNoLlm", {
+                defaultValue:
+                  "Study assistant requires an LLM provider. Configure one in Settings \u2192 LLM Providers."
+              })
       )
       return false
     } finally {
@@ -187,10 +387,22 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
           }
           return "conflict"
         }
+        const kind = classifyAssistantError(error)
         setAssistantError(
-          t("option:flashcards.studyAssistantUnavailable", {
-            defaultValue: "Study assistant unavailable"
-          })
+          kind === "network"
+            ? t("option:flashcards.studyAssistantNetworkError", {
+                defaultValue:
+                  "Could not reach the server. Check your connection and try again."
+              })
+            : kind === "server"
+              ? t("option:flashcards.studyAssistantServerError", {
+                  defaultValue:
+                    "The server returned an error. Please try again or check server logs."
+                })
+              : t("option:flashcards.studyAssistantNoLlm", {
+                  defaultValue:
+                    "Study assistant requires an LLM provider. Configure one in Settings \u2192 LLM Providers."
+                })
         )
         return "error"
       }
@@ -293,6 +505,12 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
       defaultValue: "Retry my message"
     })
   }, [conflictRequest, t])
+  const remediationLabel = t("option:flashcards.studyAssistantRemediation", {
+    defaultValue: "Remediation"
+  })
+  const deepDiveLabel = t("option:flashcards.studyAssistantDeepDive", {
+    defaultValue: "Deep dive to source"
+  })
 
   return (
     <Card
@@ -316,6 +534,7 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
             type="warning"
             title={
               assistantError ??
+              classifiedQueryError ??
               t("option:flashcards.studyAssistantUnavailable", {
                 defaultValue: "Study assistant unavailable"
               })
@@ -436,6 +655,45 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
             </Space>
           </div>
         ) : null}
+        {(remediationContext.supportingQuote || remediationContext.deepDiveTarget) && (
+          <div
+            className="rounded border border-border bg-surface p-3"
+            data-testid="flashcards-study-assistant-remediation"
+          >
+            <Space orientation="vertical" size={8} className="w-full">
+              <Text strong>{remediationLabel}</Text>
+              {remediationContext.supportingQuote && (
+                <div className="rounded border border-border/70 bg-background p-3">
+                  <Text type="secondary" className="mb-1 block text-xs uppercase tracking-wide">
+                    {t("option:flashcards.studyAssistantSupportingQuote", {
+                      defaultValue: "Supporting quote"
+                    })}
+                  </Text>
+                  <Text className="block text-sm text-text">
+                    “{remediationContext.supportingQuote}”
+                  </Text>
+                </div>
+              )}
+              {remediationContext.deepDiveTarget?.route ? (
+                remediationContext.deepDiveTarget.route.startsWith("/") && inRouterContext ? (
+                  <RouterLink
+                    to={remediationContext.deepDiveTarget.route}
+                    className="text-sm text-primary hover:text-primary/80"
+                  >
+                    {deepDiveLabel}
+                  </RouterLink>
+                ) : (
+                  <Typography.Link
+                    href={remediationContext.deepDiveTarget.route}
+                    className="text-sm"
+                  >
+                    {deepDiveLabel}
+                  </Typography.Link>
+                )
+              ) : null}
+            </Space>
+          </div>
+        )}
         <div>
           <Title level={5} className="!mb-2">
             {t("option:flashcards.studyAssistantHistory", {

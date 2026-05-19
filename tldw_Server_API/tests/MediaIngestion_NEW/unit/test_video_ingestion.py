@@ -234,6 +234,90 @@ def test_confabulation_allows_keyless_provider(mock_single, mock_geval, _mock_re
 
 
 @pytest.mark.unit
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.process_single_video")
+def test_process_videos_sanitizes_item_processing_failure(mock_single, tmp_path):
+    mock_single.side_effect = RuntimeError("video parser exploded at /private/cache/video.mp4")
+
+    result = process_videos(
+        inputs=["https://example.com/video.mp4"],
+        start_time=None,
+        end_time=None,
+        diarize=False,
+        vad_use=False,
+        transcription_model="whisper-small",
+        transcription_language="en",
+        perform_analysis=False,
+        custom_prompt=None,
+        system_prompt=None,
+        perform_chunking=False,
+        chunk_method=None,
+        max_chunk_size=1000,
+        chunk_overlap=0,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        chunk_language=None,
+        summarize_recursively=False,
+        api_name=None,
+        use_cookies=False,
+        cookies=None,
+        timestamp_option=False,
+        perform_confabulation_check=False,
+        temp_dir=str(tmp_path),
+        keep_original=False,
+        perform_diarization=False,
+    )
+
+    item = result["results"][0]
+    assert result["errors"] == ["Video processing failed"]
+    assert item["status"] == "Error"
+    assert item["error"] == "Video processing failed"
+    assert "video parser exploded" not in result["errors"][0]
+    assert "/private/cache/video.mp4" not in result["errors"][0]
+
+
+@pytest.mark.unit
+def test_process_single_video_sanitizes_unexpected_processing_failure(monkeypatch, tmp_path):
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"\x00" * 2048)
+
+    def _fail_transcription(**_kwargs):
+        raise RuntimeError("video transcription exploded at /private/cache/clip.wav")
+
+    monkeypatch.setattr(video_lib, "perform_transcription", _fail_transcription)
+
+    result = process_single_video(
+        video_input=str(video_path),
+        start_seconds=0,
+        end_seconds=None,
+        diarize=False,
+        vad_use=False,
+        transcription_model="base",
+        transcription_language="en",
+        perform_analysis=False,
+        custom_prompt=None,
+        system_prompt=None,
+        perform_chunking=False,
+        chunk_method=None,
+        max_chunk_size=1000,
+        chunk_overlap=0,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        chunk_language=None,
+        summarize_recursively=False,
+        api_name=None,
+        use_cookies=False,
+        cookies=None,
+        timestamp_option=False,
+        temp_dir=str(tmp_path),
+    )
+
+    assert result["status"] == "Error"
+    assert result["error"] == "Video processing failed"
+    assert "video transcription exploded" not in str(result)
+    assert "/private/cache/clip.wav" not in str(result)
+
+
+@pytest.mark.unit
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.parse_and_expand_urls")
 @patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.process_single_video")
 def test_process_videos_expands_playlist_inputs(mock_single, mock_expand, tmp_path):
@@ -337,6 +421,24 @@ def test_resolve_eval_api_key_normalizes_environment_lookup(monkeypatch):
 
     assert _resolve_eval_api_key("llama.cpp") == "env-llama"
     assert _resolve_eval_api_key("custom-openai-api-2") == "env-custom2"
+
+
+@pytest.mark.unit
+def test_resolve_eval_api_key_supports_numbered_custom_openai(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.loaded_config_data",
+        {"custom_openai_api_37": {"api_key": "cfg-custom37"}},
+        raising=False,
+    )
+    assert _resolve_eval_api_key("custom-openai-api-37") == "cfg-custom37"
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.loaded_config_data",
+        {},
+        raising=False,
+    )
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_37", "env-custom37")
+    assert _resolve_eval_api_key("custom-openai-api-37") == "env-custom37"
 
 
 @pytest.mark.unit

@@ -1,6 +1,6 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { Modal, Button, Checkbox, Tag, Progress } from "antd"
+import { Button, Checkbox, Tag, Progress } from "antd"
 import {
   Shield,
   CheckCircle,
@@ -27,7 +27,20 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
 
   const [batchApprove, setBatchApprove] = useState(false)
   const [showPolicyDetails, setShowPolicyDetails] = useState(false)
+  const [now, setNow] = useState(Date.now())
   const currentPermission = pendingPermissions[0]
+  const currentRequestId = currentPermission?.request_id ?? null
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    setBatchApprove(false)
+    setShowPolicyDetails(false)
+    setNow(Date.now())
+  }, [currentRequestId])
 
   if (!currentPermission) {
     return null
@@ -63,10 +76,11 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
     }
   }
 
-  // Calculate time remaining
-  const timeElapsed = Date.now() - currentPermission.requestedAt.getTime()
-  const timeRemaining = Math.max(0, currentPermission.timeout_seconds * 1000 - timeElapsed)
-  const progressPercent = (timeRemaining / (currentPermission.timeout_seconds * 1000)) * 100
+  const timeElapsed = now - currentPermission.requestedAt.getTime()
+  const totalMs = currentPermission.timeout_seconds * 1000
+  // Guard against zero/negative timeouts to avoid Infinity/NaN in progress bar
+  const timeRemaining = totalMs <= 0 ? 0 : Math.max(0, totalMs - timeElapsed)
+  const progressPercent = totalMs <= 0 ? 0 : (timeRemaining / totalMs) * 100
   const hasPolicyMetadata = Boolean(
     currentPermission.approval_requirement
     || currentPermission.governance_reason
@@ -76,14 +90,11 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   )
 
   return (
-    <Modal
-      open={true}
-      closable={false}
-      maskClosable={false}
-      footer={null}
-      width={500}
-      centered
-      className="acp-permission-modal"
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("playground:acp.permissionRequired", "Permission Required")}
+      className="absolute bottom-4 right-4 z-50 w-[420px] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-surface shadow-2xl p-5"
     >
       <div className="space-y-4">
         {/* Header */}
@@ -193,7 +204,7 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
               {currentPermission.policy_snapshot_fingerprint && (
                 <div>
                   <span className="font-medium text-text">
-                    {t("playground:acp.snapshotFingerprint", "Snapshot")}:{" "}
+                    {t("playground:acp.snapshotFingerprint", "Policy version")}:{" "}
                   </span>
                   <span className="font-mono">
                     {currentPermission.policy_snapshot_fingerprint.slice(0, 12)}
@@ -202,10 +213,29 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
               )}
             </div>
             {showPolicyDetails && currentPermission.provenance_summary && (
-              <div className="mt-3 rounded bg-surface2 p-2">
-                <pre className="overflow-auto text-xs text-text">
-                  {JSON.stringify(currentPermission.provenance_summary, null, 2)}
-                </pre>
+              <div className="mt-3 rounded bg-surface2 p-2 space-y-1">
+                {typeof currentPermission.provenance_summary === "object" ? (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                    {Object.entries(currentPermission.provenance_summary as Record<string, unknown>)
+                      .filter(([, v]) => v !== null && v !== undefined && v !== "")
+                      .map(([key, value]) => (
+                        <React.Fragment key={key}>
+                          <dt className="font-medium text-text capitalize">
+                            {key.replace(/_/g, " ")}
+                          </dt>
+                          <dd className="text-text-muted font-mono truncate">
+                            {typeof value === "string" && value.length > 40
+                              ? `${value.slice(0, 40)}...`
+                              : String(value)}
+                          </dd>
+                        </React.Fragment>
+                      ))}
+                  </dl>
+                ) : (
+                  <pre className="overflow-auto text-xs text-text">
+                    {JSON.stringify(currentPermission.provenance_summary, null, 2)}
+                  </pre>
+                )}
               </div>
             )}
           </div>
@@ -241,11 +271,12 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
             onChange={(e) => setBatchApprove(e.target.checked)}
           >
             <span className="text-sm text-text">
-              {t(
-                "playground:acp.batchApprove",
-                "Auto-approve all future '{{tier}}' tier requests in this session",
-                { tier: currentPermission.tier }
-              )}
+              {currentPermission.tier === "batch"
+                ? t("playground:acp.batchApproveWrite",
+                    "Automatically approve similar file-write operations for the rest of this session")
+                : t("playground:acp.batchApproveGeneral",
+                    "Automatically approve similar operations for the rest of this session")
+              }
             </span>
           </Checkbox>
         )}
@@ -270,6 +301,6 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
           </Button>
         </div>
       </div>
-    </Modal>
+    </div>
   )
 }

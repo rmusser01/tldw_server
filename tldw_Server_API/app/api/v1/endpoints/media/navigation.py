@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import html as html_lib
 import hashlib
+import html as html_lib
 import json
 import re
 from collections import defaultdict
@@ -11,8 +11,8 @@ from typing import Any, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media.document_outline import (
     MAX_OUTLINE_FILE_SIZE,
@@ -32,12 +32,13 @@ from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
     MediaNavigationTarget,
 )
 from tldw_Server_API.app.api.v1.utils.cache import cache_response, get_cached_response
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,
     get_media_transcripts,
+    lookup_section_by_heading,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Storage import get_storage_backend
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
 
@@ -177,7 +178,7 @@ def _clean_navigation_title(value: Any) -> str:
     if not text:
         return ""
     text = html_lib.unescape(text)
-    text = text.replace("\u00A0", " ")
+    text = text.replace("\u00a0", " ")
     text = _HTML_TAG_RE.sub(" ", text)
     text = text.replace("`", "").replace("~", "")
     text = re.sub(r"(?<!\w)\*\*(.+?)\*\*(?!\w)", r"\1", text)
@@ -186,10 +187,7 @@ def _clean_navigation_title(value: Any) -> str:
     def _strip_italic_wrap(match: re.Match[str]) -> str:
         inner = str(match.group(1) or "")
         lowered = inner.lower()
-        if (
-            re.fullmatch(r"[a-z]{2,3}", lowered)
-            and lowered not in _ITALIC_STOPWORDS
-        ):
+        if re.fullmatch(r"[a-z]{2,3}", lowered) and lowered not in _ITALIC_STOPWORDS:
             return f"{lowered[0]}_{lowered[1:]}"
         return inner
 
@@ -241,9 +239,7 @@ def _is_noisy_navigation_title(title: str) -> bool:
     if letters > 0 and (letters / max(1, len(compact))) < 0.12 and digits > letters:
         return True
     words = [part for part in cleaned.split(" ") if part]
-    if len(words) > 16 and not _HEADING_STYLE_TITLE_RE.match(cleaned):
-        return True
-    return False
+    return bool(len(words) > 16 and not _HEADING_STYLE_TITLE_RE.match(cleaned))
 
 
 def _infer_generated_toc_level(title: str) -> int:
@@ -278,9 +274,7 @@ def _is_plausible_generated_toc_title(title: str) -> bool:
     ):
         return False
 
-    if re.search(r"[=<>±∑∫]", cleaned):
-        return False
-    return True
+    return not re.search(r"[=<>±∑∫]", cleaned)
 
 
 def _sanitize_navigation_path_parts(path_parts: list[str]) -> list[str]:
@@ -302,17 +296,11 @@ def _is_sparse_pdf_outline(nodes: list[dict[str, Any]]) -> bool:
     max_level = max((_to_int(node.get("level")) or 1 for node in nodes), default=1)
     root_count = sum(1 for node in nodes if node.get("parent_id") is None)
     unique_pages = len(
-        {
-            _to_int(node.get("target_start"))
-            for node in nodes
-            if _to_int(node.get("target_start")) is not None
-        }
+        {_to_int(node.get("target_start")) for node in nodes if _to_int(node.get("target_start")) is not None}
     )
     if node_count <= 2 and max_level <= 1:
         return True
-    if node_count <= 3 and root_count == node_count and unique_pages <= 2:
-        return True
-    return False
+    return bool(node_count <= 3 and root_count == node_count and unique_pages <= 2)
 
 
 def _parse_chunk_metadata(value: Any) -> dict[str, Any]:
@@ -393,8 +381,8 @@ def _materialize_navigation_nodes(raw_nodes: list[dict[str, Any]]) -> list[Media
     for raw in raw_nodes:
         try:
             nodes.append(MediaNavigationNode.model_validate(raw))
-        except (TypeError, ValueError) as exc:
-            logger.debug("Skipping invalid navigation node payload: {}", exc)
+        except (TypeError, ValueError):
+            logger.debug("Skipping invalid navigation node payload")
     return nodes
 
 
@@ -498,8 +486,8 @@ async def _extract_pdf_outline_nodes(
 
     try:
         file_record = db.get_media_file(media_id, "original")
-    except Exception as exc:
-        logger.warning("Navigation source pdf_outline failed to fetch file record: {}", exc)
+    except Exception:
+        logger.warning("Navigation source pdf_outline failed to fetch file record")
         return []
 
     if not file_record:
@@ -519,23 +507,19 @@ async def _extract_pdf_outline_nodes(
         try:
             file_size = await storage.get_size(storage_path)
             if file_size > MAX_OUTLINE_FILE_SIZE:
-                logger.debug(
-                    "Navigation source pdf_outline skipped for media_id={} due to file size {}",
-                    media_id,
-                    file_size,
-                )
+                logger.debug("Navigation source pdf_outline skipped due to file size")
                 return []
         except FileNotFoundError:
             return []
         pdf_file = await storage.retrieve(storage_path)
-    except StorageError as exc:
-        logger.warning("Navigation source pdf_outline storage access failed: {}", exc)
+    except StorageError:
+        logger.warning("Navigation source pdf_outline storage access failed")
         return []
 
     try:
         entries, _total_pages = _extract_pdf_outline(pdf_file)
-    except Exception as exc:
-        logger.warning("Navigation source pdf_outline extraction failed: {}", exc)
+    except Exception:
+        logger.warning("Navigation source pdf_outline extraction failed")
         return []
 
     if not entries:
@@ -594,8 +578,8 @@ def _extract_document_structure_nodes(
     """
     try:
         rows = db.execute_query(query, (media_id, bool_false)).fetchall() or []
-    except Exception as exc:
-        logger.warning("Navigation source document_structure_index query failed: {}", exc)
+    except Exception:
+        logger.warning("Navigation source document_structure_index query failed")
         return []
 
     if not rows:
@@ -792,18 +776,8 @@ def _coerce_transcript_payload(raw_payload: Any) -> tuple[str, list[dict[str, An
         return raw_payload, []
 
     if isinstance(raw_payload, dict):
-        text_val = (
-            raw_payload.get("text")
-            or raw_payload.get("transcription")
-            or raw_payload.get("transcript")
-            or ""
-        )
-        segments_any = (
-            raw_payload.get("segments")
-            or raw_payload.get("Segments")
-            or raw_payload.get("entries")
-            or []
-        )
+        text_val = raw_payload.get("text") or raw_payload.get("transcription") or raw_payload.get("transcript") or ""
+        segments_any = raw_payload.get("segments") or raw_payload.get("Segments") or raw_payload.get("entries") or []
         segments = _normalize_transcript_segments(segments_any)
         text = str(text_val or "")
         if not text and segments:
@@ -844,8 +818,8 @@ def _extract_transcript_segment_nodes(
 
     try:
         transcripts = get_media_transcripts(db, media_id)
-    except Exception as exc:
-        logger.warning("Navigation source transcript_segment query failed: {}", exc)
+    except Exception:
+        logger.warning("Navigation source transcript_segment query failed")
         return []
     if not transcripts:
         return []
@@ -907,8 +881,8 @@ def _extract_chunk_metadata_nodes(
     """
     try:
         rows = db.execute_query(query, (media_id, bool_false)).fetchall() or []
-    except Exception as exc:
-        logger.warning("Navigation source chunk_metadata query failed: {}", exc)
+    except Exception:
+        logger.warning("Navigation source chunk_metadata query failed")
         return []
 
     if not rows:
@@ -927,7 +901,7 @@ def _extract_chunk_metadata_nodes(
         metadata = _parse_chunk_metadata(row_dict.get("metadata"))
         path_parts = _sanitize_navigation_path_parts(
             _normalize_section_path(
-            metadata.get("section_path") or metadata.get("ancestry_titles"),
+                metadata.get("section_path") or metadata.get("ancestry_titles"),
             )
         )
         if not path_parts:
@@ -1235,10 +1209,7 @@ async def _select_source_nodes(
             nodes = await _extract_pdf_outline_nodes(media_id, db, media)
             if nodes and _is_sparse_pdf_outline(nodes):
                 sparse_pdf_candidate = nodes
-                logger.debug(
-                    "Navigation source pdf_outline produced sparse structure for media_id={}; trying fallback sources",
-                    media_id,
-                )
+                logger.debug("Navigation source pdf_outline produced sparse structure; trying fallback sources")
                 continue
         elif source == "generated_toc":
             nodes = _extract_generated_toc_nodes(media_id, db, media)
@@ -1256,7 +1227,7 @@ async def _select_source_nodes(
         generated_nodes = _extract_generated_fallback_nodes(media_id, db, media)
         if generated_nodes:
             return generated_nodes, source_order_used
-        logger.debug("Generated fallback requested but produced no nodes for media_id={}", media_id)
+        logger.debug("Generated fallback requested but produced no nodes")
     if sparse_pdf_candidate:
         return sparse_pdf_candidate, source_order_used
     return [], source_order_used
@@ -1277,8 +1248,8 @@ def _get_media_text(media_id: int, media: dict[str, Any], db: MediaNavigationDb)
             version_number=None,
             include_content=True,
         )
-    except Exception as exc:
-        logger.debug("Failed to fetch latest document version for media {}: {}", media_id, exc)
+    except Exception:
+        logger.debug("Failed to fetch latest document version")
         latest_doc = None
 
     if latest_doc:
@@ -1290,8 +1261,8 @@ def _get_media_text(media_id: int, media: dict[str, Any], db: MediaNavigationDb)
     if media_type in {"audio", "video"}:
         try:
             transcript = get_latest_transcription(db, media_id)
-        except Exception as exc:
-            logger.debug("Failed to fetch latest transcript for media {}: {}", media_id, exc)
+        except Exception:
+            logger.debug("Failed to fetch latest transcript")
             transcript = None
         if isinstance(transcript, str) and transcript:
             return transcript
@@ -1372,11 +1343,11 @@ def _derive_content_span(
             heading = anchor
     try:
         if heading:
-            lookup = db.lookup_section_by_heading(media_id, heading)
+            lookup = lookup_section_by_heading(db, media_id, heading)
         else:
             lookup = None
-    except Exception as exc:
-        logger.debug("Section heading lookup failed for media {}: {}", media_id, exc)
+    except (DatabaseError, TypeError):
+        logger.debug("Section heading lookup failed")
         lookup = None
 
     if lookup:
@@ -1527,7 +1498,7 @@ async def get_media_navigation(
     try:
         media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
     except Exception as exc:
-        logger.error("Database error fetching media for navigation media_id={}: {}", media_id, exc)
+        logger.error("Database error fetching media for navigation")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error while fetching media item",
@@ -1546,7 +1517,7 @@ async def get_media_navigation(
         try:
             return MediaNavigationResponse.model_validate(payload)
         except (TypeError, ValueError):
-            logger.debug("Ignoring invalid cached navigation payload for media_id={}", media_id)
+            logger.debug("Ignoring invalid cached navigation payload")
 
     raw_nodes, source_order_used = await _select_source_nodes(
         media_id=media_id,
@@ -1613,7 +1584,7 @@ async def get_media_navigation_content(
     try:
         media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
     except Exception as exc:
-        logger.error("Database error fetching media for navigation content media_id={}: {}", media_id, exc)
+        logger.error("Database error fetching media for navigation content")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error while fetching media item",
@@ -1665,7 +1636,7 @@ async def get_media_navigation_content(
         try:
             return MediaNavigationContentResponse.model_validate(payload)
         except (TypeError, ValueError):
-            logger.debug("Ignoring invalid cached navigation content payload for media_id={}, node_id={}", media_id, node_id)
+            logger.debug("Ignoring invalid cached navigation content payload")
 
     full_text = _get_media_text(media_id=media_id, media=media, db=db)
     span = _derive_content_span(
@@ -1692,11 +1663,7 @@ async def get_media_navigation_content(
 
     alternate_content = None
     if params.include_alternates:
-        alt_map = {
-            fmt: variants[fmt]
-            for fmt in intrinsic_formats
-            if fmt != resolved_format and fmt in variants
-        }
+        alt_map = {fmt: variants[fmt] for fmt in intrinsic_formats if fmt != resolved_format and fmt in variants}
         alternate_content = alt_map or None
 
     response = MediaNavigationContentResponse(

@@ -20,6 +20,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     CLAIMS_ADMIN,
@@ -1875,10 +1876,11 @@ def list_all_claims(
     limit: int,
     offset: int,
     include_deleted: bool,
+    envelope: bool,
     user_id: int | None,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     with _resolve_media_db(
         db=db,
         current_user=current_user,
@@ -1886,6 +1888,8 @@ def list_all_claims(
         admin_required=True,
         owner_filter=True,
     ) as (target_db, owner_filter):
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
         claims = target_db.list_claims(
             media_id=media_id,
             owner_user_id=owner_filter,
@@ -1893,11 +1897,27 @@ def list_all_claims(
             reviewer_id=reviewer_id,
             review_group=review_group,
             claim_cluster_id=claim_cluster_id,
-            limit=limit,
-            offset=offset,
+            limit=normalized_limit + 1 if envelope else limit,
+            offset=normalized_offset if envelope else offset,
             include_deleted=include_deleted,
         )
-        return [_normalize_claim_row(dict(row)) for row in claims]
+        normalized = [_normalize_claim_row(dict(row)) for row in claims]
+        if not envelope:
+            return normalized
+        items = normalized[:normalized_limit]
+        pagination = build_offset_pagination_meta(
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total=None,
+            count=len(items),
+            has_more=len(normalized) > normalized_limit,
+        )
+        return {
+            "items": items,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+            "pagination": pagination,
+        }
 
 
 def search_claims(
@@ -1917,29 +1937,37 @@ def search_claims(
         admin_required=True,
         owner_filter=True,
     ) as (target_db, owner_filter):
-        fetch_limit = max(1, int(limit) + int(offset))
-        rows = target_db.search_claims(
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        rows, total = target_db.search_claims(
             query,
-            limit=fetch_limit,
+            limit=normalized_limit,
+            offset=normalized_offset,
             owner_user_id=owner_filter,
+            include_total=True,
         )
         normalized = [_normalize_search_row(dict(r)) for r in rows]
-        total = len(normalized)
-        sliced = normalized[offset: offset + limit]
+        pagination = build_offset_pagination_meta(
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total=total,
+            count=len(normalized),
+        )
         if not group_by_cluster:
             return {
                 "query": query,
                 "group_by_cluster": False,
                 "total": total,
-                "results": sliced,
+                "results": normalized,
                 "clusters": None,
                 "orphaned": None,
+                "pagination": pagination,
             }
 
         clusters: list[dict[str, Any]] = []
         orphaned: list[dict[str, Any]] = []
         cluster_ids: list[int] = []
-        for row in sliced:
+        for row in normalized:
             cluster_id = row.get("claim_cluster_id")
             if cluster_id is None:
                 orphaned.append(row)
@@ -1952,7 +1980,7 @@ def search_claims(
             if c.get("id") is not None
         }
         cluster_hits: dict[int, dict[str, Any]] = {}
-        for row in sliced:
+        for row in normalized:
             cluster_id = row.get("claim_cluster_id")
             if cluster_id is None:
                 continue
@@ -1980,6 +2008,7 @@ def search_claims(
             "results": [],
             "clusters": clusters,
             "orphaned": orphaned,
+            "pagination": pagination,
         }
 
 
@@ -2009,18 +2038,36 @@ def list_claim_notifications(
         target_user = str(user_id) if user_id is not None else str(current_user.id)
         if not _principal_has_platform_admin_claims(principal) and target_user_id is not None and str(target_user_id) != str(principal.user_id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-        rows = target_db.list_claim_notifications(
-            user_id=target_user,
-            kind=kind,
-            target_user_id=str(target_user_id) if target_user_id is not None else None,
-            target_review_group=str(target_review_group) if target_review_group else None,
-            resource_type=str(resource_type) if resource_type else None,
-            resource_id=str(resource_id) if resource_id else None,
-            delivered=delivered,
-            limit=limit,
-            offset=offset,
-        )
-        filtered = _filter_notifications_for_principal(principal, rows)
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        filtered: list[dict[str, Any]] = []
+        skipped_visible = 0
+        db_offset = 0
+        batch_size = min(1000, max(50, normalized_limit * 2, normalized_limit + 1))
+        while len(filtered) < normalized_limit:
+            rows = target_db.list_claim_notifications(
+                user_id=target_user,
+                kind=kind,
+                target_user_id=str(target_user_id) if target_user_id is not None else None,
+                target_review_group=str(target_review_group) if target_review_group else None,
+                resource_type=str(resource_type) if resource_type else None,
+                resource_id=str(resource_id) if resource_id else None,
+                delivered=delivered,
+                limit=batch_size,
+                offset=db_offset,
+            )
+            if not rows:
+                break
+            for row in _filter_notifications_for_principal(principal, rows):
+                if skipped_visible < normalized_offset:
+                    skipped_visible += 1
+                    continue
+                filtered.append(row)
+                if len(filtered) >= normalized_limit:
+                    break
+            db_offset += len(rows)
+            if len(rows) < batch_size:
+                break
         return [_normalize_notification_row(row) for row in filtered]
 
 
@@ -2075,22 +2122,41 @@ def claim_notifications_digest(
         owner_filter=False,
     ) as (target_db, _owner_filter):
         target_user = str(user_id) if user_id is not None else str(current_user.id)
-        rows = target_db.list_claim_notifications(
-            user_id=target_user,
-            kind=kind,
-            target_user_id=str(target_user_id) if target_user_id is not None else None,
-            target_review_group=str(target_review_group) if target_review_group else None,
-            resource_type=str(resource_type) if resource_type else None,
-            resource_id=str(resource_id) if resource_id else None,
-            delivered=delivered,
-            limit=limit,
-            offset=offset,
-        )
-        filtered = _filter_notifications_for_principal(principal, rows)
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        filtered: list[dict[str, Any]] = []
+        skipped_visible = 0
+        db_offset = 0
+        batch_size = min(1000, max(50, normalized_limit * 2, normalized_limit + 1))
+        while len(filtered) <= normalized_limit:
+            rows = target_db.list_claim_notifications(
+                user_id=target_user,
+                kind=kind,
+                target_user_id=str(target_user_id) if target_user_id is not None else None,
+                target_review_group=str(target_review_group) if target_review_group else None,
+                resource_type=str(resource_type) if resource_type else None,
+                resource_id=str(resource_id) if resource_id else None,
+                delivered=delivered,
+                limit=batch_size,
+                offset=db_offset,
+            )
+            if not rows:
+                break
+            for row in _filter_notifications_for_principal(principal, rows):
+                if skipped_visible < normalized_offset:
+                    skipped_visible += 1
+                    continue
+                filtered.append(row)
+                if len(filtered) > normalized_limit:
+                    break
+            db_offset += len(rows)
+            if len(rows) < batch_size:
+                break
+        has_more = len(filtered) > normalized_limit
         counts_by_kind: dict[str, int] = {}
         counts_by_target_user: dict[str, int] = {}
         counts_by_review_group: dict[str, int] = {}
-        normalized = [_normalize_notification_row(row) for row in filtered]
+        normalized = [_normalize_notification_row(row) for row in filtered[:normalized_limit]]
         for row in normalized:
             kind_val = str(row.get("kind") or "unknown")
             counts_by_kind[kind_val] = counts_by_kind.get(kind_val, 0) + 1
@@ -2110,6 +2176,13 @@ def claim_notifications_digest(
             "counts_by_kind": counts_by_kind,
             "counts_by_target_user": counts_by_target_user,
             "counts_by_review_group": counts_by_review_group,
+            "pagination": build_offset_pagination_meta(
+                limit=normalized_limit,
+                offset=normalized_offset,
+                total=None,
+                count=len(normalized),
+                has_more=has_more,
+            ),
         }
         if include_items:
             payload["notifications"] = normalized
@@ -2220,7 +2293,7 @@ def update_claims_settings(
         try:
             setup_manager.update_config({"Claims": updates})
         except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail="Failed to update claims settings") from exc
 
     return _claims_settings_snapshot()
 
@@ -2590,7 +2663,7 @@ def claims_rebuild_status(*, rebuild_service: Any = None) -> dict[str, Any]:
     except HTTPException:
         raise
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to get claims rebuild status") from exc
 
 
 def claims_rebuild_health(principal: AuthPrincipal, *, summary: bool = False) -> dict[str, Any]:
@@ -2636,11 +2709,12 @@ def get_review_queue(
     limit: int,
     offset: int,
     include_deleted: bool,
+    envelope: bool,
     user_id: int | None,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     _ensure_claims_review(principal)
     with _resolve_media_db(
         db=db,
@@ -2660,6 +2734,8 @@ def get_review_queue(
             if reviewer_id is None and review_group is None:
                 reviewer_id = int(principal.user_id or 0)
 
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
         rows = target_db.list_review_queue(
             status=status_filter,
             reviewer_id=reviewer_id,
@@ -2667,12 +2743,29 @@ def get_review_queue(
             media_id=media_id,
             extractor=extractor,
             owner_user_id=owner_filter,
-            limit=limit,
-            offset=offset,
+            limit=normalized_limit + 1 if envelope else limit,
+            offset=normalized_offset if envelope else offset,
             include_deleted=include_deleted,
         )
-        record_claims_review_metrics(queue_size=len(rows))
-        return [_normalize_claim_row(dict(r)) for r in rows]
+        normalized = [_normalize_claim_row(dict(r)) for r in rows]
+        if not envelope:
+            record_claims_review_metrics(queue_size=len(normalized))
+            return normalized
+        items = normalized[:normalized_limit]
+        record_claims_review_metrics(queue_size=len(items))
+        pagination = build_offset_pagination_meta(
+            limit=normalized_limit,
+            offset=normalized_offset,
+            total=None,
+            count=len(items),
+            has_more=len(normalized) > normalized_limit,
+        )
+        return {
+            "items": items,
+            "has_more": pagination.has_more,
+            "next_offset": pagination.next_offset,
+            "pagination": pagination,
+        }
 
 
 async def review_claim(
@@ -3287,8 +3380,26 @@ def list_claims_review_metrics(
             limit=limit,
             offset=offset,
         )
+        total = target_db.count_claims_review_extractor_metrics_daily(
+            user_id=target_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            extractor=extractor,
+            extractor_version=extractor_version,
+        )
     normalized = [_normalize_review_extractor_metrics_row(row) for row in rows]
-    return {"items": normalized, "total": len(normalized)}
+    return {
+        "items": normalized,
+        "total": int(total),
+        "limit": int(limit),
+        "offset": int(offset),
+        "pagination": build_offset_pagination_meta(
+            total=int(total),
+            limit=int(limit),
+            offset=int(offset),
+            count=len(normalized),
+        ),
+    }
 
 
 def export_claims_analytics(
@@ -3474,6 +3585,12 @@ def list_claims_analytics_exports(
         "total": int(total),
         "limit": int(limit),
         "offset": int(offset),
+        "pagination": build_offset_pagination_meta(
+            total=int(total),
+            limit=int(limit),
+            offset=int(offset),
+            count=len(exports),
+        ),
     }
 
 
@@ -3515,25 +3632,28 @@ def list_claim_clusters(
     keyword: str | None,
     min_size: int | None,
     watchlisted: bool | None,
+    envelope: bool,
     user_id: int | None,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     _ensure_claims_review(principal)
     target_user_id = str(current_user.id)
     if user_id is not None:
         if not _principal_has_platform_admin_claims(principal):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
         target_user_id = str(int(user_id))
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
     clusters = db.list_claim_clusters(
         target_user_id,
-        limit=limit,
-        offset=offset,
+        limit=normalized_limit + 1 if envelope else limit,
+        offset=normalized_offset if envelope else offset,
         updated_since=updated_since,
         keyword=keyword,
         min_size=min_size,
-        watchlisted=None,
+        watchlisted=watchlisted,
     )
     counts = _load_watchlist_cluster_counts(target_user_id, [int(c.get("id")) for c in clusters if c.get("id")])
     if counts:
@@ -3543,11 +3663,22 @@ def list_claim_clusters(
             except _CLAIMS_NONCRITICAL_EXCEPTIONS:
                 continue
             cluster["watchlist_count"] = int(counts.get(cluster_id, 0))
-    if watchlisted is not None:
-        clusters = [
-            c for c in clusters if (int(c.get("watchlist_count") or 0) > 0) == bool(watchlisted)
-        ]
-    return clusters
+    if not envelope:
+        return clusters
+    items = clusters[:normalized_limit]
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(items),
+        has_more=len(clusters) > normalized_limit,
+    )
+    return {
+        "items": items,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
+    }
 
 
 def rebuild_claim_clusters(
@@ -3773,18 +3904,41 @@ def list_claim_cluster_members(
     cluster_id: int,
     limit: int,
     offset: int,
+    envelope: bool,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
-) -> list[dict[str, Any]]:
+) -> Any:
     _ensure_claims_review(principal)
     cluster = db.get_claim_cluster(int(cluster_id))
     if not cluster:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster not found")
     if not _principal_has_platform_admin_claims(principal) and str(cluster.get("user_id")) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
-    rows = db.list_claim_cluster_members(int(cluster_id), limit=limit, offset=offset)
-    return [_normalize_claim_row(dict(r)) for r in rows]
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
+    rows = db.list_claim_cluster_members(
+        int(cluster_id),
+        limit=normalized_limit + 1 if envelope else limit,
+        offset=normalized_offset if envelope else offset,
+    )
+    normalized = [_normalize_claim_row(dict(r)) for r in rows]
+    if not envelope:
+        return normalized
+    items = normalized[:normalized_limit]
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(items),
+        has_more=len(normalized) > normalized_limit,
+    )
+    return {
+        "items": items,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
+    }
 
 
 def evaluate_watchlist_cluster_notifications(
@@ -3811,6 +3965,7 @@ def claim_cluster_timeline(
     cluster_id: int,
     limit: int,
     offset: int,
+    envelope: bool,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
@@ -3821,14 +3976,36 @@ def claim_cluster_timeline(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cluster not found")
     if not _principal_has_platform_admin_claims(principal) and str(cluster.get("user_id")) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
     rows = db.execute_query(
         "SELECT DATE(cluster_joined_at) AS day, COUNT(*) AS count "
         "FROM claim_cluster_membership WHERE cluster_id = ? "
         "GROUP BY day ORDER BY day ASC LIMIT ? OFFSET ?",
-        (int(cluster_id), int(limit), int(offset)),
+        (
+            int(cluster_id),
+            normalized_limit + 1 if envelope else int(limit),
+            normalized_offset if envelope else int(offset),
+        ),
     ).fetchall()
     timeline = [{"day": r[0], "count": int(r[1])} for r in rows if r]
-    return {"cluster_id": int(cluster_id), "timeline": timeline}
+    if not envelope:
+        return {"cluster_id": int(cluster_id), "timeline": timeline}
+    items = timeline[:normalized_limit]
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(items),
+        has_more=len(timeline) > normalized_limit,
+    )
+    return {
+        "cluster_id": int(cluster_id),
+        "timeline": items,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
+    }
 
 
 def claim_cluster_evidence(
@@ -3836,6 +4013,7 @@ def claim_cluster_evidence(
     cluster_id: int,
     limit: int,
     offset: int,
+    envelope: bool,
     principal: AuthPrincipal,
     current_user: User,
     db: MediaDatabase,
@@ -3847,9 +4025,16 @@ def claim_cluster_evidence(
     if not _principal_has_platform_admin_claims(principal) and str(cluster.get("user_id")) != str(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
 
-    members = db.list_claim_cluster_members(int(cluster_id), limit=limit, offset=offset)
+    normalized_limit = max(1, int(limit))
+    normalized_offset = max(0, int(offset))
+    members = db.list_claim_cluster_members(
+        int(cluster_id),
+        limit=normalized_limit + 1 if envelope else limit,
+        offset=normalized_offset if envelope else offset,
+    )
+    visible_members = members[:normalized_limit] if envelope else members
     buckets = {"supported": [], "refuted": [], "nei": []}
-    for row in members:
+    for row in visible_members:
         status_val = str(row.get("review_status") or "pending").lower()
         if status_val == "approved":
             buckets["supported"].append(_normalize_claim_row(dict(row)))
@@ -3859,10 +4044,26 @@ def claim_cluster_evidence(
             buckets["nei"].append(_normalize_claim_row(dict(row)))
 
     counts = {k: len(v) for k, v in buckets.items()}
+    if not envelope:
+        return {
+            "cluster_id": int(cluster_id),
+            "counts": counts,
+            "evidence": buckets,
+        }
+    pagination = build_offset_pagination_meta(
+        limit=normalized_limit,
+        offset=normalized_offset,
+        total=None,
+        count=len(visible_members),
+        has_more=len(members) > normalized_limit,
+    )
     return {
         "cluster_id": int(cluster_id),
         "counts": counts,
         "evidence": buckets,
+        "has_more": pagination.has_more,
+        "next_offset": pagination.next_offset,
+        "pagination": pagination,
     }
 
 
@@ -3897,9 +4098,13 @@ def list_claims_by_media(
             total = int(row[0]) if row else 0
         except _CLAIMS_NONCRITICAL_EXCEPTIONS:
             total = offset + len(claims)
-        next_off: int | None = None
-        if offset + len(claims) < total:
-            next_off = offset + len(claims)
+        pagination = build_offset_pagination_meta(
+            limit=int(limit),
+            offset=int(offset),
+            total=int(total),
+            count=len(claims),
+        )
+        next_off = pagination.next_offset
         next_link: str | None = None
         if next_off is not None:
             if request and absolute_links:
@@ -3916,6 +4121,7 @@ def list_claims_by_media(
         return {
             "items": claims,
             "next_offset": next_off,
+            "pagination": pagination,
             "total": total,
             "total_pages": total_pages,
             "next_link": next_link,

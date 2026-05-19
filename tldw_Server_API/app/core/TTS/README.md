@@ -61,7 +61,7 @@ Provider support snapshot (indicative): OpenAI (cloud), ElevenLabs (cloud, cloni
 - Error Handling:
   - Rich exception taxonomy in `tts_exceptions.py` with retry classification; circuit breaker integration; optional streaming of errors as audio.
 - Security:
-  - Endpoints use `require_token_scope` and per-route rate limits; inputs validated and sanitized; uploads validated for type/size/path.
+  - Endpoints use `TokenScopeGuard` and per-route rate limits; inputs validated and sanitized; uploads validated for type/size/path.
 - Metrics:
   - Registered counters/histograms (e.g., `tts_requests_total`, `tts_request_duration_seconds`, `tts_fallback_attempts`, text length/audio size metrics) via Metrics registry.
 

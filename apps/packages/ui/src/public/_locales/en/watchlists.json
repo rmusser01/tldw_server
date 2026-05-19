@@ -17,6 +17,174 @@
   "comingSoon": {
     "message": "Coming soon..."
   },
+  "tabs_alerts": {
+    "message": "Alerts"
+  },
+  "tabs_alertsTooltip": {
+    "message": "Content matches from your Watchlist alert rules"
+  },
+  "quickActions_alerts": {
+    "message": "Review alerts"
+  },
+  "orientation_alerts_title": {
+    "message": "Alerts: review matched content"
+  },
+  "orientation_alerts_description": {
+    "message": "Create content alert rules and triage item matches here. Run failures stay in Activity as health issues."
+  },
+  "help_tabs_alerts": {
+    "message": "Alert guidance"
+  },
+  "alerts_healthBoundary": {
+    "message": "Run failures and source problems are health issues, not content alerts."
+  },
+  "alerts_boundaryDescription": {
+    "message": "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint."
+  },
+  "alerts_rulesTitle": {
+    "message": "Content alert rules"
+  },
+  "alerts_rulesDescription": {
+    "message": "Create a rule to be notified when new Watchlist items match a descriptor, keyword, classification, entity, or source constraint."
+  },
+  "alerts_inboxTitle": {
+    "message": "Alert inbox"
+  },
+  "alerts_inboxDescription": {
+    "message": "Review why a new item matched, then mark it read or dismiss it from the active queue."
+  },
+  "alerts_createRule": {
+    "message": "Create rule"
+  },
+  "alerts_saveRule": {
+    "message": "Save rule"
+  },
+  "alerts_emptyRules": {
+    "message": "No content alert rules yet."
+  },
+  "alerts_emptyInbox": {
+    "message": "No content alerts match these filters."
+  },
+  "alerts_validation_required": {
+    "message": "Name and pattern are required"
+  },
+  "alerts_updateRuleSuccess": {
+    "message": "Content alert rule updated."
+  },
+  "alerts_updateRuleError": {
+    "message": "Failed to update content alert rule."
+  },
+  "alerts_deleteConfirmTitle": {
+    "message": "Delete content alert rule?"
+  },
+  "alerts_deleteConfirmContent": {
+    "message": "This removes the rule and keeps existing alert history."
+  },
+  "alerts_deleteSuccess": {
+    "message": "Content alert rule deleted."
+  },
+  "alerts_deleteError": {
+    "message": "Failed to delete content alert rule."
+  },
+  "alerts_updateAlertSuccess": {
+    "message": "Alert updated."
+  },
+  "alerts_updateAlertError": {
+    "message": "Failed to update alert."
+  },
+  "alerts_totalItems": {
+    "message": "{{total}} alerts"
+  },
+  "alerts_filters_search": {
+    "message": "Search alerts"
+  },
+  "alerts_ids_job": {
+    "message": "Monitor #{{id}}"
+  },
+  "overview_alertHealth_title": {
+    "message": "Alerts and health"
+  },
+  "overview_alertHealth_contentTitle": {
+    "message": "Content alerts"
+  },
+  "overview_alertHealth_unreadAlerts": {
+    "message": "Unread content alerts"
+  },
+  "overview_alertHealth_noUnreadAlerts": {
+    "message": "No unread content alerts"
+  },
+  "overview_alertHealth_contentDescription": {
+    "message": "New updates matching your Watchlist alert rules."
+  },
+  "overview_alertHealth_reviewAlerts": {
+    "message": "Review alerts"
+  },
+  "overview_alertHealth_createRule": {
+    "message": "Create content alert rule"
+  },
+  "overview_alertHealth_healthTitle": {
+    "message": "Health issues"
+  },
+  "overview_alertHealth_healthIssues": {
+    "message": "Health issues"
+  },
+  "overview_alertHealth_noHealthIssues": {
+    "message": "No health issues"
+  },
+  "overview_alertHealth_healthDescription": {
+    "message": "Run failures and source problems are health issues, not content alerts."
+  },
+  "overview_alertHealth_openActivity": {
+    "message": "Open Activity"
+  },
+  "setupWizard_title": {
+    "message": "Create Watchlist"
+  },
+  "setupWizard_presets_cti_osint_label": {
+    "message": "CTI / OSINT"
+  },
+  "setupWizard_presets_cti_osint_description": {
+    "message": "Track vulnerabilities, malware, actors, advisories, and source changes."
+  },
+  "setupWizard_presets_news_label": {
+    "message": "News"
+  },
+  "setupWizard_presets_news_description": {
+    "message": "Track developing events, people, organizations, and source diversity."
+  },
+  "setupWizard_presets_general_label": {
+    "message": "General"
+  },
+  "setupWizard_presets_general_description": {
+    "message": "Track a topic and collect updates for review."
+  },
+  "setupWizard_presets_blank_label": {
+    "message": "Blank"
+  },
+  "setupWizard_presets_blank_description": {
+    "message": "Start with an empty Watchlist and configure details yourself."
+  },
+  "setupWizard_startModes_sources_label": {
+    "message": "Start from sources"
+  },
+  "setupWizard_startModes_sources_description": {
+    "message": "Create a Watchlist with initial feeds and an optional monitor."
+  },
+  "setupWizard_startModes_topic_label": {
+    "message": "Start from topic"
+  },
+  "setupWizard_startModes_topic_description": {
+    "message": "Create the Watchlist objective first, then add feeds before collection starts."
+  },
+  "setupWizard_startModes_report_goal_label": {
+    "message": "Start from report goal"
+  },
+  "setupWizard_startModes_report_goal_description": {
+    "message": "Define the briefing goal first, then connect sources and templates."
+  },
+  "setupWizard_boundaries_alerts": {
+    "message": "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
+  },
   "tabs_overview": {
     "message": "Overview"
   },
@@ -30,7 +198,7 @@
     "message": "Activity"
   },
   "tabs_items": {
-    "message": "Articles"
+    "message": "Updates"
   },
   "tabs_outputs": {
     "message": "Reports"
@@ -107,6 +275,12 @@
   "sources_disabled": {
     "message": "Feed disabled"
   },
+  "sources_toggleActiveAria": {
+    "message": "Toggle active for {{name}}"
+  },
+  "sources_selectSourceAria": {
+    "message": "Select {{name}}"
+  },
   "sources_deleteConfirm": {
     "message": "Delete this feed?"
   },
@@ -166,6 +340,21 @@
   },
   "sources_seenInfo": {
     "message": "Source Health & Dedup Stats"
+  },
+  "sources_checkNowForSourceAria": {
+    "message": "Check now for {{name}}"
+  },
+  "sources_seenInfoForSourceAria": {
+    "message": "Source Health & Dedup Stats for {{name}}"
+  },
+  "sources_editSourceAria": {
+    "message": "Edit {{name}}"
+  },
+  "sources_deleteSourceAria": {
+    "message": "Delete {{name}}"
+  },
+  "sources_groupCount": {
+    "message": "{{count}} {{label}}"
   },
   "sources_columns_name": {
     "message": "Name"
@@ -320,6 +509,9 @@
   "jobs_disabled": {
     "message": "Monitor disabled"
   },
+  "jobs_toggleActiveAria": {
+    "message": "Toggle active for {{name}}"
+  },
   "jobs_runTriggered": {
     "message": "Run triggered"
   },
@@ -343,6 +535,21 @@
   },
   "jobs_compactSummary": {
     "message": "{{scope}} • {{filters}} filters"
+  },
+  "jobs_audioEnabledChip": {
+    "message": "Audio on"
+  },
+  "jobs_previewForMonitorAria": {
+    "message": "Preview {{name}}"
+  },
+  "jobs_editMonitorAria": {
+    "message": "Edit {{name}}"
+  },
+  "jobs_deleteMonitorAria": {
+    "message": "Delete {{name}}"
+  },
+  "jobs_noFilters": {
+    "message": "No filters"
   },
   "jobs_never": {
     "message": "Never"
@@ -764,6 +971,12 @@
   "runs_columns_itemsProcessed": {
     "message": "Processed"
   },
+  "runs_columns_itemsFiltered": {
+    "message": "Filtered"
+  },
+  "runs_columns_itemsErrored": {
+    "message": "Errors"
+  },
   "runs_columns_actions": {
     "message": "Actions"
   },
@@ -806,11 +1019,29 @@
   "runs_detail_items": {
     "message": "Scraped Items"
   },
+  "runs_detail_itemsTableAria": {
+    "message": "Run items table"
+  },
+  "runs_detail_itemsTotal": {
+    "message": "{{total}} items"
+  },
   "runs_detail_noLogs": {
     "message": "No logs available"
   },
   "runs_detail_noItems": {
     "message": "No items found"
+  },
+  "runs_detail_toggleReviewedAria": {
+    "message": "Toggle reviewed for {{title}}"
+  },
+  "runs_detail_reviewed": {
+    "message": "Reviewed"
+  },
+  "runs_detail_needsReview": {
+    "message": "Needs review"
+  },
+  "runs_detail_openSource": {
+    "message": "Open source"
   },
   "runs_detail_errorMessage": {
     "message": "Error Message"
@@ -855,7 +1086,7 @@
     "message": "Error"
   },
   "items_description": {
-    "message": "Browse scraped feed items and open the selected source content."
+    "message": "Review collected updates, alert matches, and briefing candidates from this Watchlist."
   },
   "items_smartFeeds": {
     "message": "Smart Feeds"
@@ -879,7 +1110,7 @@
     "message": "Failed to load sources"
   },
   "items_fetchError": {
-    "message": "Failed to load feed items"
+    "message": "Failed to load updates"
   },
   "items_sourceSearchPlaceholder": {
     "message": "Search feeds..."
@@ -894,7 +1125,7 @@
     "message": "No feeds found"
   },
   "items_searchPlaceholder": {
-    "message": "Search feed items..."
+    "message": "Search updates..."
   },
   "items_filters_all": {
     "message": "All"
@@ -906,7 +1137,7 @@
     "message": "Filtered"
   },
   "items_empty": {
-    "message": "No feed items found"
+    "message": "No updates found"
   },
   "items_unknownSource": {
     "message": "Unknown source"
@@ -969,28 +1200,28 @@
     "message": "Mark page as reviewed"
   },
   "items_batch_markAllFiltered": {
-    "message": "Mark all filtered as reviewed"
+    "message": "Mark all filtered updates"
   },
   "items_batch_noSelected": {
     "message": "Select one or more items to review."
   },
   "items_batch_noPage": {
-    "message": "All items on this page are already reviewed."
+    "message": "All updates on this page are already reviewed."
   },
   "items_batch_noFiltered": {
-    "message": "No matching unread items to review."
+    "message": "No matching unread updates to review."
   },
   "items_batch_confirmSelectedTitle": {
-    "message": "Mark selected items as reviewed?"
+    "message": "Mark selected updates as reviewed?"
   },
   "items_batch_confirmPageTitle": {
-    "message": "Mark this page as reviewed?"
+    "message": "Mark this page of updates as reviewed?"
   },
   "items_batch_confirmAllFilteredTitle": {
-    "message": "Mark all filtered items as reviewed?"
+    "message": "Mark all filtered updates as reviewed?"
   },
   "items_batch_confirmDescription": {
-    "message": "This will mark {{count}} item{{plural}} as reviewed."
+    "message": "This will mark {{count}} update{{plural}} as reviewed."
   },
   "items_batch_completed": {
     "message": "Marked {{count}} item{{plural}} as reviewed."
@@ -999,7 +1230,7 @@
     "message": "Marked {{success}} item{{successPlural}} as reviewed; {{failed}} failed."
   },
   "items_batch_failed": {
-    "message": "Failed to mark items as reviewed."
+    "message": "Failed to mark updates as reviewed."
   },
   "items_savedViews_label": {
     "message": "Saved views"
@@ -1056,22 +1287,61 @@
     "message": "Keyboard shortcuts (?)"
   },
   "items_shortcuts_nextPrevious": {
-    "message": "Move to next or previous article in the list."
+    "message": "Move to next or previous update in the list."
   },
   "items_shortcuts_toggleReviewed": {
-    "message": "Toggle reviewed state for the selected article."
+    "message": "Toggle reviewed state for the selected update."
   },
   "items_shortcuts_openOriginal": {
-    "message": "Open the selected article in a new tab."
+    "message": "Open the selected update in a new tab."
   },
   "items_shortcuts_refresh": {
-    "message": "Refresh feeds, article list, and smart counts."
+    "message": "Refresh feeds, updates, and smart counts."
   },
   "items_shortcuts_newFlow": {
     "message": "Start a new feed flow by opening Add Source."
   },
   "items_shortcuts_help": {
     "message": "Open this shortcuts help panel."
+  },
+  "reports_builder_title": {
+    "message": "Create report"
+  },
+  "reports_builder_createReport": {
+    "message": "Create report"
+  },
+  "reports_builder_runRequired": {
+    "message": "Select a run to generate a report."
+  },
+  "reports_builder_proceedWithWarnings": {
+    "message": "Proceed with warnings"
+  },
+  "reports_builder_generate": {
+    "message": "Generate defensible report"
+  },
+  "reports_builder_loadingQueue": {
+    "message": "Loading queued updates"
+  },
+  "reports_builder_emptyQueue": {
+    "message": "No queued updates found for this run."
+  },
+  "reports_builder_readiness": {
+    "message": "Report readiness"
+  },
+  "reports_evidence_title": {
+    "message": "Evidence snapshot"
+  },
+  "reports_evidence_tableAria": {
+    "message": "Evidence table"
+  },
+  "reports_evidence_legacyTitle": {
+    "message": "Live provenance only"
+  },
+  "reports_evidence_legacyDescription": {
+    "message": "This older report was created before evidence snapshots were available."
+  },
+  "reports_evidence_errorTitle": {
+    "message": "Evidence snapshot unavailable"
   },
   "outputs_title": {
     "message": "Reports"
@@ -1571,6 +1841,9 @@
   "outputs_columns_delivery": {
     "message": "Delivery"
   },
+  "outputs_columns_readiness": {
+    "message": "Readiness"
+  },
   "outputs_columns_expires": {
     "message": "Expires"
   },
@@ -1636,6 +1909,24 @@
   },
   "templates_empty": {
     "message": "No templates yet"
+  },
+  "templates_tableAria": {
+    "message": "Templates table"
+  },
+  "templates_noDescription": {
+    "message": "No description"
+  },
+  "templates_versionLabel": {
+    "message": "Version"
+  },
+  "templates_latestVersion": {
+    "message": "Latest"
+  },
+  "templates_historyLabel": {
+    "message": "History"
+  },
+  "templates_versionCount": {
+    "message": "{{count}} version{{plural}}"
   },
   "templates_createTitle": {
     "message": "Create Template"
@@ -1736,6 +2027,12 @@
   "overview_fetchError": {
     "message": "Failed to load overview"
   },
+  "overview_noWatchlist_title": {
+    "message": "Create a Watchlist first"
+  },
+  "overview_noWatchlist_description": {
+    "message": "Use the Watchlist setup action above to create the project container before adding sources, monitors, or reports."
+  },
   "overview_openSources": {
     "message": "Open"
   },
@@ -1761,28 +2058,28 @@
     "message": "Some sources or recent runs show failures. Open failed runs to investigate."
   },
   "overview_onboarding_title": {
-    "message": "Quick setup"
+    "message": "Add initial collection"
   },
   "overview_onboarding_pipeline": {
-    "message": "Add Feed -> Configure Monitor -> Check Activity -> Review Articles -> View Reports"
+    "message": "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports"
   },
   "overview_onboarding_steps_addFeed_title": {
-    "message": "Add your first feed"
+    "message": "Add feeds to this Watchlist"
   },
   "overview_onboarding_steps_addFeed_description": {
-    "message": "Start by adding an RSS/site feed in Feeds."
+    "message": "Add RSS/site feeds inside the selected Watchlist."
   },
   "overview_onboarding_steps_createMonitor_title": {
-    "message": "Create your first monitor"
+    "message": "Create a monitor"
   },
   "overview_onboarding_steps_createMonitor_description": {
-    "message": "Pick feeds, then set a schedule with presets."
+    "message": "Pick Watchlist feeds, then set a schedule with presets."
   },
   "overview_onboarding_steps_reviewResults_title": {
     "message": "Review results"
   },
   "overview_onboarding_steps_reviewResults_description": {
-    "message": "Open Activity for run health, Articles for captured content, and Reports for generated briefings."
+    "message": "Open Activity for run health, Updates for captured content, and Reports for generated briefings."
   },
   "overview_onboarding_cta_addFeed": {
     "message": "Add first feed"
@@ -1791,13 +2088,13 @@
     "message": "Create first monitor"
   },
   "overview_onboarding_cta_reviewArticles": {
-    "message": "Open Articles"
+    "message": "Open Updates"
   },
   "overview_onboarding_cta_guidedSetup": {
-    "message": "Guided setup"
+    "message": "Add initial collection"
   },
   "overview_onboarding_quickSetup_title": {
-    "message": "Guided quick setup"
+    "message": "Add initial collection"
   },
   "overview_onboarding_quickSetup_steps_feed": {
     "message": "Feed"
@@ -1875,28 +2172,28 @@
     "message": "Run test now"
   },
   "overview_onboarding_quickSetup_reviewDescription": {
-    "message": "Preview sample candidates and expected briefing, then create your feed and monitor."
+    "message": "Preview sample candidates and expected briefing, then add feeds and monitor to this Watchlist."
   },
   "overview_onboarding_quickSetup_actions_finish": {
-    "message": "Create setup"
+    "message": "Create collection"
   },
   "overview_onboarding_quickSetup_created": {
-    "message": "Quick setup complete. Feed and monitor created."
+    "message": "Initial collection added. Feeds and monitor are ready."
   },
   "overview_onboarding_quickSetup_createdAndRunning": {
-    "message": "Quick setup complete. Your first run has started."
+    "message": "Initial collection added. Your first run has started."
   },
   "overview_onboarding_quickSetup_error": {
-    "message": "Failed to complete quick setup."
+    "message": "Failed to add initial collection."
   },
   "overview_setupComplete_title": {
     "message": "Setup complete"
   },
   "overview_setupComplete_nextRunDescription": {
-    "message": "Your next monitor run is {{time}}. New content will appear in Articles and Activity."
+    "message": "Your next monitor run is {{time}}. New content will appear in Updates and Activity."
   },
   "overview_setupComplete_runNowDescription": {
-    "message": "Run a monitor from Monitors to generate your first Articles and Activity entries."
+    "message": "Run a monitor from Monitors to generate your first Updates and Activity entries."
   },
   "overview_setupComplete_openActivity": {
     "message": "Open Activity"
@@ -1929,7 +2226,7 @@
     "message": "No upcoming schedules"
   },
   "overview_cards_items_title": {
-    "message": "Articles"
+    "message": "Updates"
   },
   "overview_cards_items_unread": {
     "message": "Unread"
@@ -1986,13 +2283,13 @@
     "message": "Guided tour complete"
   },
   "guide_completedDescription": {
-    "message": "Next: monitor Activity for run health, review Articles for captured content, and open Reports for generated briefings."
+    "message": "Next: monitor Activity for run health, review Updates for captured content, and open Reports for generated briefings."
   },
   "guide_openActivity": {
     "message": "Open Activity"
   },
   "guide_openArticles": {
-    "message": "Open Articles"
+    "message": "Open Updates"
   },
   "guide_steps_sources_title": {
     "message": "1. Add feeds"
@@ -2013,10 +2310,10 @@
     "message": "Activity shows run status, logs, and failures for each monitor."
   },
   "guide_steps_items_title": {
-    "message": "4. Review articles"
+    "message": "4. Review updates"
   },
   "guide_steps_items_description": {
-    "message": "Articles are captured content from successful runs, ready for triage."
+    "message": "Updates are captured content from successful runs, ready for triage."
   },
   "guide_steps_outputs_title": {
     "message": "5. Deliver reports"
@@ -2124,7 +2421,7 @@
     "message": "Activity guidance"
   },
   "help_tabs_items": {
-    "message": "Article review"
+    "message": "Updates review"
   },
   "help_tabs_outputs": {
     "message": "Reports guidance"
@@ -2280,10 +2577,61 @@
     "message": "Check activity"
   },
   "quickActions_items": {
-    "message": "Review articles"
+    "message": "Review updates"
   },
   "quickActions_outputs": {
     "message": "View reports"
+  },
+  "mobileNav_title": {
+    "message": "Manage Watchlist"
+  },
+  "mobileNav_fallbackLabel": {
+    "message": "Manage Watchlist"
+  },
+  "mobileNav_navigationLabel": {
+    "message": "Watchlist management destinations"
+  },
+  "mobileNav_overviewGroup": {
+    "message": "Overview"
+  },
+  "mobileNav_collectGroup": {
+    "message": "Collect"
+  },
+  "mobileNav_reviewGroup": {
+    "message": "Review"
+  },
+  "mobileNav_reportsGroup": {
+    "message": "Reports"
+  },
+  "mobileNav_settingsGroup": {
+    "message": "Settings"
+  },
+  "mobileNav_overviewDescription": {
+    "message": "Intent, health, and next actions"
+  },
+  "mobileNav_sourcesDescription": {
+    "message": "Sources, groups, tags, and imports"
+  },
+  "mobileNav_jobsDescription": {
+    "message": "Schedules, scope, filters, and run now"
+  },
+  "mobileNav_alertsDescription": {
+    "message": "Content matches and alert rules"
+  },
+  "mobileNav_itemsDescription": {
+    "message": "Triage, saved views, and report queue"
+  },
+  "mobileNav_runsDescription": {
+    "message": "Run history, health, and details"
+  },
+  "mobileNav_outputsDescription": {
+    "message": "Generated reports, evidence, and downloads"
+  },
+  "mobileNav_templatesDescription": {
+    "message": "Report template authoring and preview"
+  },
+  "mobileNav_settingsDescription": {
+    "message": "Lifecycle, defaults, and subscriptions"
   },
   "orientation_label": {
     "message": "Current view guide"
@@ -2298,7 +2646,7 @@
     "message": "Open Activity"
   },
   "orientation_actions_openItems": {
-    "message": "Open Articles"
+    "message": "Open Updates"
   },
   "orientation_actions_openOutputs": {
     "message": "Open Reports"
@@ -2316,7 +2664,7 @@
     "message": "Overview summarizes watchlist health, setup progress, and attention signals."
   },
   "orientation_tabs_overview_next": {
-    "message": "Next: open Feeds to add sources, then create Monitors."
+    "message": "Next: open Feeds to add feeds, then create Monitors."
   },
   "orientation_tabs_sources_what": {
     "message": "Feeds are your input sources for monitor runs."
@@ -2337,10 +2685,10 @@
     "message": "Next: open Reports to verify generated briefing outputs."
   },
   "orientation_tabs_items_what": {
-    "message": "Articles are captured content for daily triage and briefing input."
+    "message": "Updates are captured content for daily triage and briefing input."
   },
   "orientation_tabs_items_next": {
-    "message": "Next: adjust Monitors when article quality or volume needs tuning."
+    "message": "Next: adjust Monitors when update quality or volume needs tuning."
   },
   "orientation_tabs_outputs_what": {
     "message": "Reports contains generated briefings, including delivery outcomes."
@@ -2379,13 +2727,13 @@
     "message": "Monitors need schedule fixes ({{count}})"
   },
   "overview_onboarding_quickSetup_help_feed": {
-    "message": "Tip: paste a feed URL now. You can adjust feed settings later."
+    "message": "Add one or more feed URLs to this Watchlist. You can adjust feed settings later."
   },
   "overview_onboarding_quickSetup_help_monitor": {
-    "message": "No cron needed: choose a preset schedule for now."
+    "message": "Choose how this Watchlist monitor runs; presets avoid cron setup first."
   },
   "overview_onboarding_quickSetup_help_review": {
-    "message": "You can change any of these settings later from Feeds and Monitors."
+    "message": "Review the scoped feeds and monitor before adding them to this Watchlist."
   },
   "overview_onboarding_quickSetup_fields_setupGoal": {
     "message": "Setup goal"
@@ -2424,10 +2772,10 @@
     "message": "{{ingestable}} ingestable, {{filtered}} filtered from {{total}} sample items."
   },
   "overview_onboarding_quickSetup_candidatePreview_empty": {
-    "message": "No sample candidates returned yet. You can still create setup and validate with a test run."
+    "message": "No sample candidates returned yet. You can still add the collection and validate with a test run."
   },
   "overview_onboarding_quickSetup_candidatePreview_error": {
-    "message": "Could not load feed sample preview right now. You can still create setup and use a test run to verify results."
+    "message": "Could not load feed sample preview right now. You can still add the collection and use a test run to verify results."
   },
   "overview_onboarding_quickSetup_templatePreview_title": {
     "message": "Briefing preview (template: {{template}})"
@@ -2442,7 +2790,7 @@
     "message": "Text + audio briefing"
   },
   "overview_onboarding_quickSetup_outcome_triage": {
-    "message": "Article triage only"
+    "message": "Update triage only"
   },
   "overview_onboarding_quickSetup_destinationHint_runNow": {
     "message": "Starts one test run immediately and opens Activity details."
@@ -2454,16 +2802,16 @@
     "message": "Opens Monitors after setup so you can run checks when ready."
   },
   "overview_onboarding_quickSetup_actions_finishWithTest": {
-    "message": "Create setup + run test"
+    "message": "Create collection + run test"
   },
   "overview_onboarding_quickSetup_actions_retryPreview": {
     "message": "Retry preview"
   },
   "overview_onboarding_quickSetup_createdBriefing": {
-    "message": "Quick setup complete. Feed and monitor created for briefing reports."
+    "message": "Initial collection added. Feeds and monitor are ready for briefing reports."
   },
   "overview_onboarding_quickSetup_testRunPending": {
-    "message": "Quick setup complete. Test run started. Open Activity for progress and Reports for generated briefings."
+    "message": "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings."
   },
   "teachPoints_label": {
     "message": "First-time tip"
@@ -2901,16 +3249,19 @@
     "message": "selected item{{plural}}"
   },
   "items_batch_scope_page": {
-    "message": "items on this page"
+    "message": "updates on this page"
   },
   "items_batch_scope_allFiltered": {
-    "message": "all filtered items"
+    "message": "all filtered updates"
   },
   "items_batch_confirmDescriptionScoped": {
-    "message": "Scope: {{scope}}. This will mark {{count}} item{{plural}} as reviewed."
+    "message": "Scope: {{scope}}. This will mark {{count}} update{{plural}} as reviewed."
   },
   "items_batch_completedScoped": {
     "message": "Marked {{count}} {{scope}} as reviewed."
+  },
+  "items_batch_incompleteScoped": {
+    "message": "Marked {{success}} {{scope}} as reviewed; more matching updates may remain."
   },
   "items_batch_partialScoped": {
     "message": "Marked {{success}} {{scope}} as reviewed; {{failed}} failed."
@@ -2930,6 +3281,9 @@
   "items_batch_progress_completed": {
     "message": "Completed {{success}} of {{total}}. {{failed}} failed."
   },
+  "items_batch_progress_incomplete": {
+    "message": "Batch review partial: {{succeeded}} succeeded; more matching updates may remain."
+  },
   "items_batch_progress_retryFailed": {
     "message": "Retry failed"
   },
@@ -2946,7 +3300,7 @@
     "message": "Needs review"
   },
   "items_shortcuts_hintStrip": {
-    "message": "Shortcuts: j/k navigate, space toggles reviewed, o opens original, ? shows help."
+    "message": "Shortcuts: j/k navigate, space toggles reviewed, o opens original update, ? shows help."
   },
   "items_shortcuts_openPanel": {
     "message": "View all"
@@ -2961,7 +3315,7 @@
     "message": "Selected {{title}} from {{source}} ({{state}})."
   },
   "items_live_selectionCleared": {
-    "message": "No article selected."
+    "message": "No update selected."
   },
   "outputs_filterByRun": {
     "message": "Filter by run ID"
@@ -2980,6 +3334,12 @@
   },
   "outputs_tableAria": {
     "message": "Reports table"
+  },
+  "outputs_expired": {
+    "message": "Expired"
+  },
+  "outputs_never": {
+    "message": "Never"
   },
   "outputs_live_loadError": {
     "message": "Reports refresh failed."
@@ -3094,5 +3454,38 @@
   },
   "settings_clusters_toggleAria": {
     "message": "Toggle subscription for {{cluster}}"
+  },
+  "items_alertMatches": {
+    "message": "Alert matches"
+  },
+  "items_batch_collectingAllFiltered": {
+    "message": "Preparing unread updates that match current filters..."
+  },
+  "items_savedViews_loadError": {
+    "message": "Failed to load saved views."
+  },
+  "items_savedViews_createError": {
+    "message": "Failed to create saved view."
+  },
+  "items_savedViews_updateError": {
+    "message": "Failed to update saved view."
+  },
+  "items_savedViews_importLocal": {
+    "message": "Import local views"
+  },
+  "items_savedViews_imported": {
+    "message": "Imported {{count}} saved view{{plural}}."
+  },
+  "items_savedViews_importPartialError": {
+    "message": "{{count}} saved view{{plural}} could not be imported and can be retried."
+  },
+  "items_savedViews_importError": {
+    "message": "Failed to import saved views."
+  },
+  "items_alertSummary_total": {
+    "message": "{{count}} {{label}}"
+  },
+  "items_alertSummary_openAlerts": {
+    "message": "Open Alerts"
   }
 }

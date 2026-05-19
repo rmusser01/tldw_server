@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     OpenAISpeechRequest,
@@ -15,7 +15,6 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     VoiceEncodeResponse,
 )
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
@@ -43,7 +42,7 @@ VOICE_COUNTER_TYPE = "voice_call"
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_UPLOAD,
@@ -97,19 +96,19 @@ async def upload_voice(
             status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice upload is not available in this build"
         ) from None
     except VoiceQuotaExceededError as e:
-        logger.warning(f"Voice quota exceeded: {e}", exc_info=True)
+        logger.warning("Voice quota exceeded")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_http_error_detail("Voice quota exceeded", request_id, exc=e),
         ) from e
     except VoiceProcessingError as e:
-        logger.warning(f"Voice processing failed: {e}", exc_info=True)
+        logger.warning("Voice processing failed")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_http_error_detail("Voice processing failed", request_id, exc=e),
         ) from e
     except Exception as e:
-        logger.error(f"Voice upload error: {e}")
+        logger.error("Voice upload error")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload voice sample") from e
 
 
@@ -119,7 +118,7 @@ async def upload_voice(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_ENCODE,
@@ -151,13 +150,13 @@ async def encode_voice_reference(
         )
         return VoiceEncodeResponse(**result.model_dump())
     except VoiceProcessingError as e:
-        logger.warning(f"Voice encoding failed: {e}", exc_info=True)
+        logger.warning("Voice encoding failed")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
     except Exception as e:
-        logger.error(f"Voice encode error: {e}")
+        logger.error("Voice encode error")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to encode voice reference") from e
 
 
@@ -167,7 +166,7 @@ async def encode_voice_reference(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_LIST,
@@ -191,7 +190,7 @@ async def list_voices(request: Request, current_user: User = Depends(get_request
     except ImportError:
         return {"voices": [], "count": 0}
     except Exception as e:
-        logger.error(f"Error listing voices: {e}")
+        logger.error("Error listing voices")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list voices") from e
 
 
@@ -201,7 +200,7 @@ async def list_voices(request: Request, current_user: User = Depends(get_request
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_GET,
@@ -232,7 +231,7 @@ async def get_voice_details(
     except ImportError:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice management not available") from None
     except Exception as e:
-        logger.error(f"Error getting voice details: {e}")
+        logger.error("Error getting voice details")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get voice details") from e
 
 
@@ -242,7 +241,7 @@ async def get_voice_details(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_DELETE,
@@ -275,17 +274,24 @@ async def delete_voice(
     except ImportError:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice management not available") from None
     except Exception as e:
-        logger.error(f"Error deleting voice: {e}")
+        logger.error("Error deleting voice")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete voice") from e
 
 
 @router.post(
     "/voices/{voice_id}/preview",
     summary="Generate voice preview",
+    response_class=StreamingResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "MP3 audio stream for a custom voice preview",
+            "content": {"audio/mpeg": {}},
+        },
+    },
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_PREVIEW,
@@ -344,7 +350,7 @@ async def preview_voice(
     except ImportError:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Custom voice preview not available") from None
     except Exception as e:
-        logger.error(f"Voice preview error: {e}")
+        logger.error("Voice preview error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate voice preview"
         ) from e

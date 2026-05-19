@@ -65,6 +65,38 @@ async def test_authnz_rate_limits_repo_lockout_postgres(test_db_pool):
 
 
 @pytest.mark.asyncio
+async def test_authnz_rate_limits_repo_lockout_scoped_by_attempt_type_postgres(test_db_pool):
+    """Lockout visibility should remain scoped to the matching attempt type."""
+    pool = test_db_pool
+
+    settings = Settings(
+        AUTH_MODE="multi_user",
+        JWT_SECRET_KEY="x" * 64,
+        MAX_LOGIN_ATTEMPTS=3,
+        LOCKOUT_DURATION_MINUTES=5,
+    )
+
+    limiter = RateLimiter(db_pool=pool, settings=settings)
+    await limiter.initialize()
+
+    identifier = "pg-lockout-scope-user"
+    for _ in range(settings.MAX_LOGIN_ATTEMPTS):
+        await limiter.record_failed_attempt(
+            identifier=identifier,
+            attempt_type="login",
+        )
+
+    login_locked, _ = await limiter.check_lockout(identifier, attempt_type="login")
+    reset_locked, _ = await limiter.check_lockout(
+        identifier,
+        attempt_type="password_reset",
+    )
+
+    assert login_locked is True
+    assert reset_locked is False
+
+
+@pytest.mark.asyncio
 async def test_authnz_rate_limits_repo_rate_window_postgres(test_db_pool):
     """AuthnzRateLimitsRepo rate_limits window helpers should behave consistently on Postgres."""
     pool = test_db_pool

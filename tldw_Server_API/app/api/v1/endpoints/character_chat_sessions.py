@@ -67,6 +67,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     GreetingSelectResponse,
     LorebookDiagnosticExportResponse,
     MessageResponse,
+    PromptPreviewResponse,
     PresetCreate,
     PresetDetail,
     PresetListResponse,
@@ -76,7 +77,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     get_override_model_priority,
@@ -85,7 +89,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -98,6 +102,10 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
     get_character_rate_limiter,
 )
+from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+    apply_world_book_prompt_context,
+    build_world_book_prompt_context,
+)
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
@@ -108,6 +116,8 @@ from tldw_Server_API.app.core.Character_Chat.constants import (
     THROTTLE_CACHE_MAX_KEYS,
     THROTTLE_STALE_SECONDS,
 )
+
+MAX_STREAM_PERSIST_USAGE_BYTES = 4_096
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
     resolve_character_generation_settings,
@@ -123,6 +133,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
+    PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
 )
 
@@ -133,6 +144,11 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
     resolve_provider_and_model,
+)
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
+    evaluate_prompt_cost_guardrails,
+    load_prompt_cost_guardrail_config,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -533,6 +549,253 @@ def _validate_and_truncate_tool_calls(tool_calls: Any) -> Optional[list]:
         return None
 
     return tool_calls
+
+
+def _build_stream_persist_fingerprint(
+    chat_id: str,
+    assistant_content: str,
+    user_message_id: str | None,
+    speaker_character_id: int | None,
+    ranking: int | None,
+) -> str:
+    """Build a deterministic fingerprint for streamed persist retries."""
+    payload = {
+        "chat_id": chat_id,
+        "assistant_content": assistant_content.strip(),
+        "user_message_id": user_message_id,
+        "speaker_character_id": speaker_character_id,
+        "ranking": ranking,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _load_existing_stream_persist_message_by_id(
+    db: CharactersRAGDB,
+    chat_id: str,
+    assistant_message_id: str,
+    *,
+    assistant_content: str,
+    parent_message_id: str | None,
+    speaker_name: str,
+) -> tuple[str, dict[str, Any]] | None:
+    """Return an existing persisted assistant message by stable message id."""
+    message = db.get_message_by_id(assistant_message_id)
+    if not message:
+        return None
+    if str(message.get("conversation_id") or "").strip() != str(chat_id).strip():
+        raise ConflictError("assistant_message_id already exists in another conversation")
+    if message.get("deleted"):
+        raise ConflictError("assistant_message_id references a deleted message")
+    existing_sender = str(message.get("sender") or "").strip()
+    if existing_sender and existing_sender != speaker_name:
+        raise ConflictError("assistant_message_id already exists for a different speaker")
+    if str(message.get("content") or "") != assistant_content:
+        raise ConflictError("assistant_message_id already exists for different content")
+    existing_parent_message_id = str(message.get("parent_message_id") or "").strip() or None
+    expected_parent_message_id = str(parent_message_id or "").strip() or None
+    if existing_parent_message_id != expected_parent_message_id:
+        raise ConflictError("assistant_message_id already exists for a different parent message")
+    metadata = db.get_message_metadata(assistant_message_id) or {}
+    extra = metadata.get("extra") or {}
+    return assistant_message_id, extra
+
+
+def _find_existing_stream_persist_message(
+    db: CharactersRAGDB,
+    chat_id: str,
+    fingerprint: str,
+) -> tuple[str, dict[str, Any]] | None:
+    """Find a previously persisted assistant turn for the same streamed payload."""
+    candidate_messages = [
+        message
+        for message in (
+            db.get_messages_for_conversation(
+                chat_id,
+                limit=100,
+                offset=0,
+                order_by_timestamp="DESC",
+            )
+            or []
+        )
+        if not message.get("deleted") and message.get("sender") != "user"
+    ]
+    if not candidate_messages:
+        return None
+
+    message_ids = [str(message["id"]) for message in candidate_messages]
+    load_metadata_map = getattr(db, "get_message_metadata_map", None)
+    metadata_by_message_id = (
+        load_metadata_map(message_ids)
+        if callable(load_metadata_map)
+        else {}
+    ) or {}
+
+    for message in candidate_messages:
+        message_id = str(message["id"])
+        metadata = metadata_by_message_id.get(message_id)
+        if metadata is None:
+            metadata = db.get_message_metadata(message_id) or {}
+        extra = metadata.get("extra") or {}
+        if extra.get("stream_persist_fingerprint") == fingerprint:
+            return message_id, extra
+    return None
+
+
+def _build_persist_validation_degraded_detail(assistant_message_id: str) -> dict[str, Any]:
+    """Build the structured 503 detail used when persistence succeeds but validation degrades."""
+    return {
+        "code": "persist_validation_degraded",
+        "saved": True,
+        "assistant_message_id": assistant_message_id,
+    }
+
+
+def _build_stream_persist_metadata_extra(
+    *,
+    speaker_character_id: int | None,
+    speaker_character_name: str,
+    turn_taking_mode: str,
+    validation_degraded: bool,
+    persist_fingerprint: str | None,
+    mood_label: str | None,
+    mood_confidence: float | None,
+    mood_topic: str | None,
+    usage: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata_extra: dict[str, Any] = {
+        "speaker_character_id": speaker_character_id,
+        "speaker_character_name": speaker_character_name,
+        "turn_taking_mode": turn_taking_mode,
+        "persist_validation_degraded": validation_degraded,
+    }
+    if persist_fingerprint:
+        metadata_extra["stream_persist_fingerprint"] = persist_fingerprint
+    if isinstance(mood_label, str):
+        trimmed_label = mood_label.strip()
+        if trimmed_label:
+            metadata_extra["mood_label"] = trimmed_label
+    if mood_confidence is not None:
+        metadata_extra["mood_confidence"] = float(mood_confidence)
+    if isinstance(mood_topic, str):
+        trimmed_topic = mood_topic.strip()
+        if trimmed_topic:
+            metadata_extra["mood_topic"] = trimmed_topic
+    if usage is not None:
+        metadata_extra["usage"] = usage
+    return metadata_extra
+
+
+def _validate_stream_persist_usage(usage: Any) -> dict[str, int] | None:
+    """Validate and normalize persisted usage metadata."""
+    if usage is None:
+        return None
+    if not isinstance(usage, Mapping):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid usage. Expected object",
+        )
+
+    normalized: dict[str, int] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+    ):
+        value = usage.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid usage.{key}. Expected non-negative integer",
+            )
+        normalized[key] = value
+
+    encoded = json.dumps(normalized, sort_keys=True).encode("utf-8")
+    if len(encoded) > MAX_STREAM_PERSIST_USAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"usage exceeds {MAX_STREAM_PERSIST_USAGE_BYTES} bytes",
+        )
+    return normalized or None
+
+
+def _try_store_stream_persist_metadata(
+    db: CharactersRAGDB,
+    *,
+    assistant_message_id: str,
+    tool_calls: Any,
+    metadata_extra: dict[str, Any],
+) -> None:
+    try:
+        validated_tool_calls = _validate_and_truncate_tool_calls(tool_calls)
+        stored = db.add_message_metadata(
+            assistant_message_id,
+            tool_calls=validated_tool_calls,
+            extra=metadata_extra,
+        )
+        if not stored:
+            logger.debug(
+                "Non-fatal: failed to persist metadata for message {}",
+                assistant_message_id,
+            )
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Non-fatal: failed to persist metadata for message {}: {}",
+            assistant_message_id,
+            exc,
+        )
+
+
+def _update_chat_rating_after_stream_persist(
+    db: CharactersRAGDB,
+    *,
+    chat_id: str,
+    chat_rating: int | float | None,
+) -> None:
+    if chat_rating is None:
+        return
+    try:
+        conv_for_update = db.get_conversation_by_id(chat_id)
+        if conv_for_update:
+            db.update_conversation(
+                chat_id,
+                {"rating": chat_rating},
+                conv_for_update.get('version', 1),
+            )
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Failed to update chat rating for chat_id={} rating={} error={}",
+            chat_id,
+            chat_rating,
+            exc,
+            exc_info=True,
+        )
+
+
+def _apply_stream_persist_side_effects(
+    db: CharactersRAGDB,
+    *,
+    chat_id: str,
+    assistant_message_id: str,
+    tool_calls: Any,
+    metadata_extra: dict[str, Any],
+    chat_rating: int | float | None,
+) -> None:
+    _try_store_stream_persist_metadata(
+        db,
+        assistant_message_id=assistant_message_id,
+        tool_calls=tool_calls,
+        metadata_extra=metadata_extra,
+    )
+    _update_chat_rating_after_stream_persist(
+        db,
+        chat_id=chat_id,
+        chat_rating=chat_rating,
+    )
+
 
 # Legacy local SSE helpers removed — unified streams handle normalization
 
@@ -3287,14 +3550,14 @@ async def create_chat_session(
 
 # Template tokens available in custom presets
 _PRESET_TEMPLATE_TOKENS = [
-    PresetTokenInfo(token="{{char}}", description="Character name"),
-    PresetTokenInfo(token="{{user}}", description="User/player name"),
-    PresetTokenInfo(token="{{description}}", description="Character description field"),
-    PresetTokenInfo(token="{{personality}}", description="Character personality field"),
-    PresetTokenInfo(token="{{scenario}}", description="Character scenario field"),
-    PresetTokenInfo(token="{{system_prompt}}", description="Character system prompt field"),
-    PresetTokenInfo(token="{{message_example}}", description="Character example messages"),
-    PresetTokenInfo(token="{{post_history}}", description="Post-history instructions"),
+    PresetTokenInfo(token="{{char}}", description="Character name"),  # nosec B106
+    PresetTokenInfo(token="{{user}}", description="User/player name"),  # nosec B106
+    PresetTokenInfo(token="{{description}}", description="Character description field"),  # nosec B106
+    PresetTokenInfo(token="{{personality}}", description="Character personality field"),  # nosec B106
+    PresetTokenInfo(token="{{scenario}}", description="Character scenario field"),  # nosec B106
+    PresetTokenInfo(token="{{system_prompt}}", description="Character system prompt field"),  # nosec B106
+    PresetTokenInfo(token="{{message_example}}", description="Character example messages"),  # nosec B106
+    PresetTokenInfo(token="{{post_history}}", description="Post-history instructions"),  # nosec B106
 ]
 
 # Built-in preset metadata (non-deletable)
@@ -3902,6 +4165,10 @@ _TOKEN_BUDGET_PRESET = 180
 _TOKEN_BUDGET_STEERING = 120
 _TOKEN_BUDGET_LOREBOOK = 420
 _TOKEN_BUDGET_WORLD_BOOK = 240
+_PERSONA_PREVIEW_MAX_ID_CHARS = 128
+_PERSONA_PREVIEW_MAX_TEXT_CHARS = 160
+_PERSONA_PREVIEW_MAX_ITEMS = 20
+_PERSONA_PREVIEW_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 # Priority order for truncation (highest priority first)
 _TRUNCATION_PRIORITY = [
@@ -3926,6 +4193,66 @@ _CONTRADICTORY_DIRECTIVE_PAIRS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _normalize_persona_preview_id(value: Any, *, default: str = "none") -> str:
+    """Return a bounded identifier for persona prompt-preview diagnostics."""
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return default
+    if (
+        len(raw_value) <= _PERSONA_PREVIEW_MAX_ID_CHARS
+        and _PERSONA_PREVIEW_SAFE_ID_RE.fullmatch(raw_value)
+    ):
+        return raw_value
+    digest = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+    return f"hash:{digest}"
+
+
+def _truncate_persona_preview_text(value: Any) -> str:
+    """Return a compact text preview for prompt-preview diagnostics."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= _PERSONA_PREVIEW_MAX_TEXT_CHARS:
+        return text
+    return f"{text[:_PERSONA_PREVIEW_MAX_TEXT_CHARS].rstrip()}..."
+
+
+def _selected_persona_preview_reason(exemplar: dict[str, Any]) -> str:
+    """Return a bounded reason for a selected persona exemplar."""
+    bucket = _normalize_persona_preview_id(
+        exemplar.get("selection_bucket") or exemplar.get("kind"),
+        default="selected",
+    )
+    if bucket == "selected":
+        return bucket
+    return _normalize_persona_preview_id(f"{bucket}_selected")
+
+
+def _build_persona_preview_assembly(
+    *,
+    conversation: dict[str, Any],
+    exemplars: list[dict[str, Any]],
+    requested_scenario_tags: list[str] | None = None,
+    requested_tone: str | None = None,
+    current_turn_text: str | None = None,
+    conflicting_capability_tags: list[str] | None = None,
+) -> PersonaExemplarPromptAssembly | None:
+    """Build shared persona exemplar preview assembly for persona-backed chats."""
+    if conversation.get("assistant_kind") != "persona":
+        return None
+
+    persona_id = str(conversation.get("assistant_id") or "").strip()
+    if not persona_id:
+        return None
+
+    return assemble_persona_exemplar_prompt(
+        persona_id=persona_id,
+        exemplars=exemplars,
+        requested_scenario_tags=requested_scenario_tags,
+        requested_tone=requested_tone,
+        current_turn_text=current_turn_text,
+        conflicting_capability_tags=conflicting_capability_tags,
+    )
+
+
 def _build_persona_preview_sections(
     *,
     conversation: dict[str, Any],
@@ -3936,22 +4263,86 @@ def _build_persona_preview_sections(
     conflicting_capability_tags: list[str] | None = None,
 ) -> list[tuple[str, str, int]]:
     """Build persona exemplar preview sections using the shared assembly helper."""
-    if conversation.get("assistant_kind") != "persona":
-        return []
-
-    persona_id = str(conversation.get("assistant_id") or "").strip()
-    if not persona_id:
-        return []
-
-    assembly = assemble_persona_exemplar_prompt(
-        persona_id=persona_id,
+    assembly = _build_persona_preview_assembly(
+        conversation=conversation,
         exemplars=exemplars,
         requested_scenario_tags=requested_scenario_tags,
         requested_tone=requested_tone,
         current_turn_text=current_turn_text,
         conflicting_capability_tags=conflicting_capability_tags,
     )
+    if assembly is None:
+        return []
     return assembly.sections
+
+
+def _build_persona_preview_context(
+    *,
+    conversation: dict[str, Any],
+    assembly: PersonaExemplarPromptAssembly | None,
+    current_turn_source: str,
+    current_turn_text: str | None,
+) -> dict[str, Any]:
+    """Build a bounded effective-context preview for persona-backed prompt assembly."""
+    if conversation.get("assistant_kind") != "persona":
+        return {"active": False, "reason": "not_persona_chat"}
+
+    persona_id = str(conversation.get("assistant_id") or "").strip()
+    if not persona_id:
+        return {"active": False, "reason": "missing_persona_id"}
+
+    selected_exemplar_ids: list[str] = []
+    selected_exemplars: list[dict[str, str]] = []
+    rejected_exemplars: list[dict[str, str]] = []
+    section_names: list[str] = []
+    if assembly is not None:
+        section_names = [
+            _normalize_persona_preview_id(name)
+            for name, _, _ in assembly.sections[:_PERSONA_PREVIEW_MAX_ITEMS]
+        ]
+        selected_exemplar_ids = [
+            _normalize_persona_preview_id(item.get("id"))
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        selected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _selected_persona_preview_reason(item),
+            }
+            for item in assembly.selected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+        rejected_exemplars = [
+            {
+                "id": _normalize_persona_preview_id(item.get("id")),
+                "reason": _normalize_persona_preview_id(item.get("reason"), default="unspecified"),
+            }
+            for item in assembly.rejected_exemplars[:_PERSONA_PREVIEW_MAX_ITEMS]
+            if item.get("id")
+        ]
+
+    applied = bool(section_names)
+    return {
+        "active": True,
+        "assistant_kind": "persona",
+        "assistant_id": _normalize_persona_preview_id(persona_id),
+        "persona_memory_mode": _normalize_persona_preview_id(
+            conversation.get("persona_memory_mode"),
+            default="read_only",
+        ),
+        "applied": applied,
+        "reason": "selected" if applied else "no_exemplars_selected",
+        "section_names": section_names,
+        "selected_exemplar_ids": selected_exemplar_ids,
+        "selected_exemplars": selected_exemplars,
+        "rejected_exemplars": rejected_exemplars,
+        "current_turn": {
+            "source": _normalize_persona_preview_id(current_turn_source),
+            "has_text": bool(str(current_turn_text or "").strip()),
+            "preview": _truncate_persona_preview_text(current_turn_text),
+        },
+    }
 
 
 def _estimate_tokens(text: str) -> int:
@@ -4011,6 +4402,8 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
 
 @router.post(
     "/{chat_id}/prompt-preview",
+    response_model=PromptPreviewResponse,
+    response_model_exclude_unset=True,
     summary="Preview assembled prompt with token budget breakdown",
     tags=["Chat Sessions"],
 )
@@ -4175,63 +4568,61 @@ async def prompt_assembly_preview(
 
         lorebook_text = ""
         lorebook_diagnostics: list[dict[str, Any]] = []
+        lorebook_cost_diagnostics: dict[str, Any] = {}
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     turn_context.get("active_character_id")
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    lorebook_diagnostics = wb_result.get("diagnostics") or []
-                    if wb_context and wb_context.strip():
-                        lorebook_text = f"World info:\n{wb_context.strip()}"
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            role = str(msg.get("role", "")).strip().lower()
-                            if role == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(
-                            insert_pos,
-                            {"role": "system", "content": lorebook_text},
-                        )
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            lorebook_text = world_book_context.text
+            lorebook_diagnostics = list(world_book_context.legacy_diagnostics)
+            lorebook_cost_diagnostics = dict(world_book_context.diagnostics) if lorebook_text else {}
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass
 
         persona_preview_sections: list[tuple[str, str, int]] = []
+        persona_preview_context: dict[str, Any] | None = None
         if conversation.get("assistant_kind") == "persona" and conversation.get("assistant_id"):
-            persona_preview_sections = _build_persona_preview_sections(
+            stripped_append_user_message = str(body.append_user_message or "").strip()
+            persona_current_turn_text = stripped_append_user_message or next(
+                (
+                    str(message.get("content") or "").strip()
+                    for message in reversed(formatted)
+                    if str(message.get("role") or "").strip().lower() == "user"
+                    and str(message.get("content") or "").strip()
+                ),
+                "",
+            )
+            persona_current_turn_source = (
+                "append_user_message"
+                if stripped_append_user_message
+                else ("history" if persona_current_turn_text else "none")
+            )
+            persona_exemplars = db.list_persona_exemplars(
+                user_id=str(current_user.id),
+                persona_id=str(conversation.get("assistant_id")),
+                include_disabled=False,
+                include_deleted=False,
+                limit=50,
+                offset=0,
+            )
+            persona_preview_assembly = _build_persona_preview_assembly(
                 conversation=conversation,
-                exemplars=db.list_persona_exemplars(
-                    user_id=str(current_user.id),
-                    persona_id=str(conversation.get("assistant_id")),
-                    include_disabled=False,
-                    include_deleted=False,
-                    limit=50,
-                    offset=0,
-                ),
-                current_turn_text=body.append_user_message or next(
-                    (
-                        str(message.get("content") or "").strip()
-                        for message in reversed(formatted)
-                        if str(message.get("role") or "").strip().lower() == "user"
-                        and str(message.get("content") or "").strip()
-                    ),
-                    "",
-                ),
+                exemplars=persona_exemplars,
+                current_turn_text=persona_current_turn_text,
+            )
+            if persona_preview_assembly is not None:
+                persona_preview_sections = persona_preview_assembly.sections
+            persona_preview_context = _build_persona_preview_context(
+                conversation=conversation,
+                assembly=persona_preview_assembly,
+                current_turn_source=persona_current_turn_source,
+                current_turn_text=persona_current_turn_text,
             )
 
         sections_raw: list[tuple[str, str, int]] = [
@@ -4262,6 +4653,8 @@ async def prompt_assembly_preview(
             }
             if name == "lorebook" and lorebook_diagnostics:
                 section_payload["diagnostics"] = lorebook_diagnostics
+            if name == "lorebook" and lorebook_cost_diagnostics:
+                section_payload["cost_diagnostics"] = lorebook_cost_diagnostics
             sections.append(section_payload)
 
         message_tokens = sum(_estimate_tokens(str(m.get("content", ""))) for m in messages)
@@ -4293,7 +4686,7 @@ async def prompt_assembly_preview(
         conflicts = _extract_scalar_conflicts(conflict_source_sections)
         conflicts.extend(_extract_directive_conflicts(conflict_text))
 
-        return {
+        response_payload = {
             "chat_id": chat_id,
             "character_id": turn_context.get("active_character_id") or conversation.get("character_id"),
             "character_name": char_name,
@@ -4308,6 +4701,9 @@ async def prompt_assembly_preview(
             "conflicts": conflicts or None,
             "examples": _PREVIEW_CONFLICT_EXAMPLES,
         }
+        if persona_preview_context is not None:
+            response_payload["persona_context"] = persona_preview_context
+        return response_payload
 
     except HTTPException:
         raise
@@ -4328,6 +4724,12 @@ async def prompt_assembly_preview(
         "Streaming: when stream=true, response is sent as SSE and assistant content is NOT persisted,"
         " even if save_to_db=true. Use non-streaming to persist, or persist manually after streaming."
     ),
+    responses={
+        200: {
+            "description": "Character chat completion response or SSE stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
     tags=["Chat Sessions"],
 )
 async def character_chat_completion(
@@ -4514,38 +4916,31 @@ async def character_chat_completion(
             )
 
         # Inject world book context and capture diagnostics for this turn.
+        pre_world_book_formatted_for_guardrails = [dict(message) for message in formatted]
         turn_lorebook_diagnostics: Optional[list[dict[str, Any]]] = None
+        turn_lorebook_cost_diagnostics: Optional[dict[str, Any]] = None
+        turn_lorebook_text_for_guardrails: Optional[str] = None
         try:
-            from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
-            wb_manager = WorldBookService(db)
-            recent_text = " ".join(
-                str(m.get("content", "")) for m in formatted if m.get("role") in ("user", "assistant")
-            )[-2000:]
-            if recent_text.strip():
-                world_book_character_id = (
+            world_book_context = build_world_book_prompt_context(
+                formatted,
+                db=db,
+                character_id=(
                     active_character_id
                     or conversation.get("character_id")
-                )
-                wb_result = wb_manager.process_context(
-                    text=recent_text,
-                    character_id=world_book_character_id,
-                    include_diagnostics=True,
-                )
-                if isinstance(wb_result, dict):
-                    wb_context = wb_result.get("processed_context", "")
-                    turn_lorebook_diagnostics = wb_result.get("diagnostics") or None
-                    if wb_context and wb_context.strip():
-                        # Insert world book context as a system message after existing system messages.
-                        insert_pos = 0
-                        for idx, msg in enumerate(formatted):
-                            if str(msg.get("role", "")).strip().lower() == "system":
-                                insert_pos = idx + 1
-                            else:
-                                break
-                        formatted.insert(insert_pos, {
-                            "role": "system",
-                            "content": f"World info:\n{wb_context.strip()}",
-                        })
+                ),
+            )
+            formatted = apply_world_book_prompt_context(formatted, world_book_context)
+            turn_lorebook_text_for_guardrails = world_book_context.text or None
+            turn_lorebook_diagnostics = (
+                list(world_book_context.legacy_diagnostics)
+                if world_book_context.legacy_diagnostics
+                else None
+            )
+            turn_lorebook_cost_diagnostics = (
+                dict(world_book_context.diagnostics)
+                if world_book_context.text
+                else None
+            )
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             pass  # world book injection is best-effort
 
@@ -4700,6 +5095,65 @@ async def character_chat_completion(
         legacy_allow_local = parse_boolean(os.getenv("ALLOW_LOCAL_LLM_CALLS"))
         offline_sim = provider == "local-llm" and not (enable_local_llm or disable_offline_sim or legacy_allow_local)
         streams_unified = str(os.getenv("STREAMS_UNIFIED", "0")).strip().lower() in {"1", "true", "on", "yes"}
+        turn_prompt_guardrail_diagnostics: Optional[dict[str, Any]] = None
+        prompt_guardrails_enabled = False
+        try:
+            prompt_guardrail_config = load_prompt_cost_guardrail_config()
+            prompt_guardrails_enabled = prompt_guardrail_config.enabled
+            if prompt_guardrail_config.enabled:
+                prompt_guardrail_envelope = build_prompt_cost_envelope(
+                    (
+                        pre_world_book_formatted_for_guardrails
+                        if turn_lorebook_text_for_guardrails
+                        else formatted
+                    ),
+                    world_book_text=turn_lorebook_text_for_guardrails,
+                )
+                prompt_guardrail_decision = evaluate_prompt_cost_guardrails(
+                    prompt_guardrail_envelope,
+                    request_options={"max_tokens": body.max_tokens, "streaming": bool(body.stream)},
+                    config=prompt_guardrail_config,
+                )
+                if prompt_guardrail_decision.action != "allow":
+                    turn_prompt_guardrail_diagnostics = prompt_guardrail_decision.to_response_metadata()
+                    log_metadata = {
+                        "provider": provider,
+                        "model": model,
+                        "streaming": bool(body.stream),
+                        "decision": turn_prompt_guardrail_diagnostics,
+                    }
+                    if prompt_guardrail_decision.action == "block":
+                        logger.warning(
+                            "Character chat prompt cost guardrail blocked request: {}",
+                            log_metadata,
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail={
+                                "type": "prompt_cost_guardrail_block",
+                                "message": "Prompt cost guardrail blocked request before provider dispatch.",
+                                "prompt_guardrails": turn_prompt_guardrail_diagnostics,
+                            },
+                        )
+                    logger.warning(
+                        "Character chat prompt cost guardrail warnings: {}",
+                        log_metadata,
+                    )
+        except HTTPException:
+            raise
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "Character chat prompt cost guardrail evaluation failed due to {}",
+                type(exc).__name__,
+            )
+            if prompt_guardrails_enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "type": "prompt_cost_guardrail_error",
+                        "message": "Prompt cost guardrail evaluation failed before provider dispatch.",
+                    },
+                ) from exc
         llm_resp = None
         if not offline_sim:
             # Enforce per-minute completion rate only for real provider calls
@@ -4717,6 +5171,8 @@ async def character_chat_completion(
                     max_tokens=body.max_tokens,
                     tools=body.tools,
                     tool_choice=body.tool_choice,
+                    billing_prompt_cache_intent=body.billing_prompt_cache_intent,
+                    inference_prefix_cache_intent=body.inference_prefix_cache_intent,
                     streaming=bool(body.stream),
                     user_identifier=str(current_user.id),
                     app_config=byok_resolution.app_config,
@@ -4733,9 +5189,11 @@ async def character_chat_completion(
                     ) from e
             except ChatAPIError as e:
                 logger.error("Chat provider call failed [{}]: {}", e.__class__.__name__, e)
+                provider_status_code = int(getattr(e, "status_code", status.HTTP_502_BAD_GATEWAY))
+                public_detail = "Chat provider error" if provider_status_code >= 500 else str(e)
                 raise HTTPException(
-                    status_code=int(getattr(e, "status_code", status.HTTP_502_BAD_GATEWAY)),
-                    detail=str(e),
+                    status_code=provider_status_code,
+                    detail=public_detail,
                 ) from e
             except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Chat provider call failed: {e}")
@@ -5131,6 +5589,10 @@ async def character_chat_completion(
                 metadata_extra["mood_topic"] = resolved_mood_topic
             if turn_lorebook_diagnostics:
                 metadata_extra["lorebook_diagnostics"] = turn_lorebook_diagnostics
+            if turn_lorebook_cost_diagnostics:
+                metadata_extra["lorebook_cost_diagnostics"] = turn_lorebook_cost_diagnostics
+            if turn_prompt_guardrail_diagnostics:
+                metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
             validated_tool_calls = (
                 _validate_and_truncate_tool_calls(assistant_tool_calls)
                 if assistant_tool_calls
@@ -5178,18 +5640,17 @@ async def character_chat_completion(
     except HTTPException:
         raise
     except InputError as e:
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
         logger.warning(f"Input error in character chat completion for {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
+        raise map_db_error_to_http(
+            e,
+            payload_too_large_substrings=("exceeds maximum",),
+        ) from e
     except ConflictError as e:
         logger.warning(f"Conflict in character chat completion for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error in character chat completion for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to complete character chat") from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error in character chat completion for {chat_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during character chat completion") from e
@@ -5345,7 +5806,13 @@ async def list_chat_sessions(
             chats=chats,
             total=total_count,
             limit=limit,
-            offset=offset
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(chats),
+            ),
         )
 
     except HTTPException:
@@ -5420,10 +5887,10 @@ async def update_chat_session(
     except ConflictError as e:
         # Optimistic locking or state conflicts
         logger.warning(f"Conflict updating chat session {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error updating chat session {chat_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to update chat session") from e
     except HTTPException:
         raise
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -5686,10 +6153,10 @@ async def delete_chat_session(
 
     except ConflictError as e:
         logger.warning(f"Conflict deleting chat session {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error deleting chat session {chat_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to delete chat session") from e
     except HTTPException:
         raise
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -5740,10 +6207,10 @@ async def restore_chat_session(
 
     except ConflictError as e:
         logger.warning(f"Conflict restoring chat session {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error restoring chat session {chat_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to restore chat session") from e
     except HTTPException:
         raise
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -5952,8 +6419,16 @@ async def export_chat_history(
                     export_data["message_metadata_extra"] = message_metadata_extra
 
             # Add pagination info to JSON export
+            if total_messages is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Unable to compute canonical pagination metadata for export",
+                )
             export_data["pagination"] = {
+                "mode": "page",
                 "page": page,
+                "per_page": page_size,
+                "total": total_messages,
                 "page_size": page_size,
                 "total_pages": total_pages,
                 "total_messages": total_messages,
@@ -6093,16 +6568,20 @@ async def persist_streamed_assistant_message(
             char_card = db.get_character_card_by_id(conversation.get("character_id")) or {}
             resolved_speaker_name = str(char_card.get("name") or "Assistant").strip() or "Assistant"
         resolved_turn_mode = str(turn_context.get("turn_taking_mode") or "single").strip() or "single"
-
-        # Enforce message cap (+1 assistant)
-        try:
-            current_count = db.count_messages_for_conversation(chat_id)
-            limiter = get_character_rate_limiter()
-            await limiter.check_message_limit(chat_id, current_count + 1)
-        except HTTPException:
-            raise
-        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Non-fatal: message cap check skipped in persist endpoint")
+        requested_assistant_message_id = (
+            body.assistant_message_id.strip()
+            if isinstance(body.assistant_message_id, str)
+            else ""
+        ) or None
+        persist_fingerprint = None
+        if not requested_assistant_message_id and getattr(body, "user_message_id", None):
+            persist_fingerprint = _build_stream_persist_fingerprint(
+                chat_id,
+                body.assistant_content,
+                body.user_message_id,
+                resolved_speaker_id,
+                body.ranking if getattr(body, "ranking", None) is not None else None,
+            )
 
         # Validate optional parent message belongs to this conversation
         if getattr(body, "user_message_id", None):
@@ -6118,86 +6597,152 @@ async def persist_streamed_assistant_message(
                     detail="Parent message must belong to the same conversation"
                 )
 
-        # Persist assistant response via Character_Chat guardrails
-        assistant_msg_id = post_message_to_conversation(
-            db=db,
-            conversation_id=chat_id,
-            character_name=resolved_speaker_name,
-            message_content=body.assistant_content,
-            is_user_message=False,
-            parent_message_id=body.user_message_id,
-            ranking=body.ranking if getattr(body, "ranking", None) is not None else None,
+        existing_persist = None
+        if requested_assistant_message_id:
+            existing_persist = _load_existing_stream_persist_message_by_id(
+                db,
+                chat_id,
+                requested_assistant_message_id,
+                assistant_content=body.assistant_content,
+                parent_message_id=body.user_message_id,
+                speaker_name=resolved_speaker_name,
+            )
+        elif persist_fingerprint is not None:
+            existing_persist = _find_existing_stream_persist_message(db, chat_id, persist_fingerprint)
+        if existing_persist is not None:
+            existing_id, existing_extra = existing_persist
+            _apply_stream_persist_side_effects(
+                db,
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                tool_calls=getattr(body, "tool_calls", None),
+                metadata_extra=_build_stream_persist_metadata_extra(
+                    speaker_character_id=resolved_speaker_id,
+                    speaker_character_name=resolved_speaker_name,
+                    turn_taking_mode=resolved_turn_mode,
+                    validation_degraded=existing_extra.get("persist_validation_degraded") is True,
+                    persist_fingerprint=persist_fingerprint,
+                    mood_label=body.mood_label,
+                    mood_confidence=body.mood_confidence,
+                    mood_topic=body.mood_topic,
+                    usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
+                ),
+                chat_rating=getattr(body, "chat_rating", None),
+            )
+            if existing_extra.get("persist_validation_degraded"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_build_persist_validation_degraded_detail(existing_id),
+                )
+            return CharacterChatStreamPersistResponse(
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                saved=True,
+            )
+
+        # Enforce message cap (+1 assistant)
+        validation_degraded: Exception | None = None
+        try:
+            current_count = db.count_messages_for_conversation(chat_id)
+            limiter = get_character_rate_limiter()
+            await limiter.check_message_limit(chat_id, current_count + 1)
+        except HTTPException:
+            raise
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            validation_degraded = exc
+            logger.debug("Non-fatal: message cap check degraded in persist endpoint: {}", exc)
+
+        metadata_extra = _build_stream_persist_metadata_extra(
+            speaker_character_id=resolved_speaker_id,
+            speaker_character_name=resolved_speaker_name,
+            turn_taking_mode=resolved_turn_mode,
+            validation_degraded=validation_degraded is not None,
+            persist_fingerprint=persist_fingerprint,
+            mood_label=body.mood_label,
+            mood_confidence=body.mood_confidence,
+            mood_topic=body.mood_topic,
+            usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
         )
+
+        # Persist assistant response via Character_Chat guardrails
+        try:
+            assistant_msg_id = post_message_to_conversation(
+                db=db,
+                conversation_id=chat_id,
+                character_name=resolved_speaker_name,
+                message_content=body.assistant_content,
+                is_user_message=False,
+                message_id=requested_assistant_message_id,
+                parent_message_id=body.user_message_id,
+                ranking=body.ranking if getattr(body, "ranking", None) is not None else None,
+            )
+        except ConflictError:
+            if not requested_assistant_message_id:
+                raise
+            existing_persist = _load_existing_stream_persist_message_by_id(
+                db,
+                chat_id,
+                requested_assistant_message_id,
+                assistant_content=body.assistant_content,
+                parent_message_id=body.user_message_id,
+                speaker_name=resolved_speaker_name,
+            )
+            if existing_persist is None:
+                raise
+            existing_id, existing_extra = existing_persist
+            _apply_stream_persist_side_effects(
+                db,
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                tool_calls=getattr(body, "tool_calls", None),
+                metadata_extra=metadata_extra,
+                chat_rating=getattr(body, "chat_rating", None),
+            )
+            if existing_extra.get("persist_validation_degraded"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=_build_persist_validation_degraded_detail(existing_id),
+                )
+            return CharacterChatStreamPersistResponse(
+                chat_id=chat_id,
+                assistant_message_id=existing_id,
+                saved=True,
+            )
         if not assistant_msg_id:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to persist assistant message"
             )
-        # Persist metadata: tool_calls and usage
-        try:
-            metadata_extra: dict[str, Any] = {
-                "speaker_character_id": resolved_speaker_id,
-                "speaker_character_name": resolved_speaker_name,
-                "turn_taking_mode": resolved_turn_mode,
-            }
-            if isinstance(body.mood_label, str):
-                mood_label = body.mood_label.strip()
-                if mood_label:
-                    metadata_extra["mood_label"] = mood_label
-            if body.mood_confidence is not None:
-                metadata_extra["mood_confidence"] = float(body.mood_confidence)
-            if isinstance(body.mood_topic, str):
-                mood_topic = body.mood_topic.strip()
-                if mood_topic:
-                    metadata_extra["mood_topic"] = mood_topic
-            if getattr(body, 'usage', None) is not None:
-                metadata_extra["usage"] = body.usage
-            validated_tool_calls = _validate_and_truncate_tool_calls(getattr(body, 'tool_calls', None))
-            db.add_message_metadata(
-                assistant_msg_id,
-                tool_calls=validated_tool_calls,
-                extra=metadata_extra,
-            )
-        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                f"Non-fatal: failed to persist metadata for message {assistant_msg_id}: {exc}"
-            )
+        _apply_stream_persist_side_effects(
+            db,
+            chat_id=chat_id,
+            assistant_message_id=assistant_msg_id,
+            tool_calls=getattr(body, "tool_calls", None),
+            metadata_extra=metadata_extra,
+            chat_rating=getattr(body, "chat_rating", None),
+        )
 
-        # Optionally update chat rating
-        if getattr(body, 'chat_rating', None) is not None:
-            try:
-                conv_for_update = db.get_conversation_by_id(chat_id)
-                if conv_for_update:
-                    db.update_conversation(
-                        chat_id,
-                        {"rating": body.chat_rating},
-                        conv_for_update.get('version', 1),
-                    )
-            except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(
-                    "Failed to update chat rating for chat_id={} rating={} error={}",
-                    chat_id,
-                    getattr(body, "chat_rating", None),
-                    e,
-                    exc_info=True,
-                )
+        if validation_degraded is not None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_build_persist_validation_degraded_detail(assistant_msg_id),
+            )
 
         return CharacterChatStreamPersistResponse(chat_id=chat_id, assistant_message_id=assistant_msg_id, saved=True)
     except HTTPException:
         raise
     except InputError as e:
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
         logger.warning(f"Input error persisting streamed assistant message for {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
+        raise map_db_error_to_http(
+            e,
+            payload_too_large_substrings=("exceeds maximum",),
+        ) from e
     except ConflictError as e:
         logger.warning(f"Conflict persisting streamed assistant message for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except CharactersRAGDBError as e:
         logger.error(f"DB error persisting streamed assistant message for {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e, default_detail="Failed to persist assistant message") from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error persisting streamed assistant message for {chat_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to persist assistant message") from e
@@ -6459,6 +7004,12 @@ async def export_lorebook_diagnostics(
         turns=page_items,
         page=page,
         size=size,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=size,
+            total=total,
+            total_pages=(total + size - 1) // size,
+        ),
     )
 
 

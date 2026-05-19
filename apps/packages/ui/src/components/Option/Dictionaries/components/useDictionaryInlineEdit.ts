@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   type InlineEditableEntryField,
@@ -44,9 +45,14 @@ export function useDictionaryInlineEdit({
   queryClient,
   validateRegexWithServer,
 }: UseDictionaryInlineEditParams): UseDictionaryInlineEditResult {
+  const { t } = useTranslation(["option"])
   const [inlineEdit, setInlineEdit] = React.useState<InlineEditState | null>(null)
   const [inlineEditError, setInlineEditError] = React.useState<string | null>(null)
   const [inlineEditSaving, setInlineEditSaving] = React.useState(false)
+  const localize = React.useCallback(
+    (key: string, fallback: string) => t(key, fallback),
+    [t]
+  )
 
   const startInlineEdit = React.useCallback(
     (entry: any, field: InlineEditableEntryField) => {
@@ -77,10 +83,18 @@ export function useDictionaryInlineEdit({
 
     const nextValue = inlineEdit.value
     const trimmedValue = nextValue.trim()
-    const fieldLabel = inlineEdit.field === "pattern" ? "Pattern" : "Replacement"
+    const fieldLabel =
+      inlineEdit.field === "pattern"
+        ? t("option:dictionaries.patternLabel", "Pattern")
+        : t("option:dictionaries.replacementLabel", "Replacement")
 
     if (!trimmedValue) {
-      setInlineEditError(`${fieldLabel} is required.`)
+      setInlineEditError(
+        t("option:dictionaries.inlineEditRequired", {
+          defaultValue: "{{fieldLabel}} is required.",
+          fieldLabel
+        })
+      )
       return
     }
 
@@ -92,12 +106,17 @@ export function useDictionaryInlineEdit({
 
     const currentEntry = allEntriesById.get(inlineEdit.entryId)
     if (!currentEntry) {
-      setInlineEditError("Entry no longer exists. Refresh and retry.")
+      setInlineEditError(
+        t(
+          "option:dictionaries.inlineEditMissingEntry",
+          "Entry no longer exists. Refresh and retry."
+        )
+      )
       return
     }
 
     if (inlineEdit.field === "pattern" && currentEntry?.type === "regex") {
-      const clientRegexError = validateRegexPattern(nextValue)
+      const clientRegexError = validateRegexPattern(nextValue, localize)
       if (clientRegexError) {
         setInlineEditError(clientRegexError)
         return
@@ -123,9 +142,20 @@ export function useDictionaryInlineEdit({
       await queryClient.invalidateQueries({ queryKey: allEntriesQueryKey })
       setInlineEdit(null)
       setInlineEditError(null)
-      notification.success({ message: `${fieldLabel} updated` })
+      notification.success({
+        message: t("option:dictionaries.inlineEditUpdated", {
+          defaultValue: "{{fieldLabel}} updated",
+          fieldLabel
+        })
+      })
     } catch (error: any) {
-      setInlineEditError(error?.message || "Unable to save inline edit.")
+      setInlineEditError(
+        error?.message ||
+          t(
+            "option:dictionaries.inlineEditSaveFailed",
+            "Unable to save inline edit."
+          )
+      )
     } finally {
       setInlineEditSaving(false)
     }
@@ -137,6 +167,8 @@ export function useDictionaryInlineEdit({
     inlineEditSaving,
     notification,
     queryClient,
+    t,
+    localize,
     validateRegexWithServer,
   ])
 

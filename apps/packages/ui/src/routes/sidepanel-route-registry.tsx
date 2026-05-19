@@ -10,7 +10,9 @@ const SidepanelCompanion = lazy(() => import("./sidepanel-companion"))
 const SidepanelCompanionConversation = lazy(
   () => import("./sidepanel-companion-conversation")
 )
+const SidepanelClipper = lazy(() => import("./sidepanel-clipper"))
 const SidepanelPersona = lazy(() => import("./sidepanel-persona"))
+const SidepanelFlashcards = lazy(() => import("./sidepanel-flashcards"))
 const SidepanelErrorBoundaryTest = lazy(
   () => import("./sidepanel-error-boundary-test")
 )
@@ -43,8 +45,20 @@ export const sidepanelRoutes: RouteDefinition[] = [
   },
   {
     kind: "sidepanel",
+    path: "/clipper",
+    element: <SidepanelClipper />,
+    targets: ALL_TARGETS
+  },
+  {
+    kind: "sidepanel",
     path: "/persona",
     element: <SidepanelPersona />,
+    targets: ALL_TARGETS
+  },
+  {
+    kind: "sidepanel",
+    path: "/flashcards",
+    element: <SidepanelFlashcards />,
     targets: ALL_TARGETS
   },
   { kind: "sidepanel", path: "/settings", element: <SidepanelSettings /> },

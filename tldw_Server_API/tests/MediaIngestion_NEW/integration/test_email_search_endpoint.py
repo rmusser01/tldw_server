@@ -25,6 +25,22 @@ class _FakeEmailDB:
         type(self).last_search_kwargs = dict(_kwargs)
         if query and "(" in str(query):
             raise InputError("Parentheses are not supported in email query v1.")
+        if query == "multi":
+            rows = [
+                {
+                    "email_message_id": 1,
+                    "media_id": 10,
+                    "media_title": "Budget Q1",
+                    "subject": "Budget Q1",
+                },
+                {
+                    "email_message_id": 2,
+                    "media_id": 11,
+                    "media_title": "Budget Q2",
+                    "subject": "Budget Q2",
+                },
+            ]
+            return rows[offset : offset + limit], 2
         rows = [
             {
                 "email_message_id": 1,
@@ -129,6 +145,17 @@ def test_email_search_endpoint_returns_paginated_payload(email_search_client):
     assert "items" in body and isinstance(body["items"], list)
     assert "pagination" in body and isinstance(body["pagination"], dict)
     assert body["pagination"]["total"] == 1
+
+
+def test_email_search_endpoint_includes_canonical_offset_pagination(email_search_client) -> None:
+    response = email_search_client.get("/api/v1/email/search", params={"q": "multi", "limit": 1})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["pagination"]["mode"] == "offset"
+    assert body["pagination"]["has_more"] is True
+    assert body["pagination"]["next_offset"] == 1
+    assert body["has_more"] is True
+    assert body["next_offset"] == 1
 
 
 def test_email_search_endpoint_returns_400_on_parse_error(email_search_client):

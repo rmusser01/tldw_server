@@ -80,6 +80,40 @@ async def test_llm_adapter_with_template_rendering(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_adapter_template_fallback_log_sanitizes_backend_error(monkeypatch):
+    """Test template fallback logs hide raw backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+    import tldw_Server_API.app.core.Chat.prompt_template_manager as prompt_template_manager
+    from tldw_Server_API.app.core.Workflows.adapters.llm import llm
+
+    async def fake_call(**kwargs):
+        return {"choices": [{"message": {"content": "Fallback response"}}]}
+
+    def broken_template(_value, _context):
+        raise RuntimeError("template backend exploded at /private/templates.db")
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_call)
+    monkeypatch.setattr(prompt_template_manager, "apply_template_to_string", broken_template)
+
+    messages = []
+    sink_id = llm.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        result = await run_llm_adapter(
+            {"provider": "openai", "model": "gpt-4", "prompt": "Greet {{ inputs.name }}"},
+            {"inputs": {"name": "Alice"}, "user_id": "1"},
+        )
+    finally:
+        llm.logger.remove(sink_id)
+
+    assert result["text"] == "Fallback response"
+    joined = "\n".join(messages)
+    assert "LLM adapter: template rendering failed" in joined
+    assert "templates.db" not in joined
+
+
+@pytest.mark.asyncio
 async def test_llm_adapter_with_messages(monkeypatch):
     """Test LLM adapter with messages array instead of prompt."""
     monkeypatch.delenv("TEST_MODE", raising=False)
@@ -246,6 +280,42 @@ async def test_llm_adapter_streaming(monkeypatch):
     assert result["text"] == "Hello World"
 
 
+@pytest.mark.asyncio
+async def test_llm_adapter_streaming_sanitizes_event_dispatch_errors(monkeypatch):
+    """Test streaming event dispatch logs hide raw exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+    from tldw_Server_API.app.core.Workflows.adapters.llm import llm
+
+    async def make_stream():
+        yield b'data: {"choices": [{"delta": {"content": "Hello"}}]}'
+        yield b"data: [DONE]"
+
+    async def fake_stream_caller(**kwargs):
+        return make_stream()
+
+    def broken_append_event(_name, _payload):
+        raise RuntimeError("event bus exploded at /private/stream-events")
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_stream_caller)
+
+    messages = []
+    sink_id = llm.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        result = await run_llm_adapter(
+            {"provider": "openai", "model": "gpt-4", "prompt": "Test", "stream": True},
+            {"user_id": "1", "append_event": broken_append_event},
+        )
+    finally:
+        llm.logger.remove(sink_id)
+
+    assert result == {"text": "Hello", "streamed": True}
+    joined = "\n".join(messages)
+    assert "LLM stream event dispatch failed" in joined
+    assert "stream-events" not in joined
+
+
 # =============================================================================
 # run_llm_with_tools_adapter Tests
 # =============================================================================
@@ -350,6 +420,57 @@ async def test_llm_with_tools_adapter_tool_execution(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_with_tools_adapter_sanitizes_tool_execution_errors(monkeypatch):
+    """Test tool execution failures hide raw backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import sys
+    import tldw_Server_API.app.core.Chat.chat_service as chat_service
+
+    call_count = 0
+
+    async def fake_call(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "function": {"name": "lookup_secret", "arguments": "{}"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"content": "Handled sanitized tool error"}}]}
+
+    class FakeMCPManager:
+        async def execute_tool(self, name, args, context=None):
+            raise RuntimeError("tool backend exploded at /private/tool-cache")
+
+    class FakeManagerModule:
+        @staticmethod
+        def get_mcp_manager():
+            return FakeMCPManager()
+
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.MCP_unified.manager", FakeManagerModule)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_call)
+
+    config = {"prompt": "Use a tool", "tools": [], "auto_execute": True}
+    result = await run_llm_with_tools_adapter(config, {"user_id": "1"})
+
+    assert result["text"] == "Handled sanitized tool error"
+    assert result["tool_results"] == [{"tool": "lookup_secret", "error": "tool_execution_error"}]
+    assert "tool-cache" not in str(result)
+
+
+@pytest.mark.asyncio
 async def test_llm_with_tools_adapter_cancellation(monkeypatch):
     """Test LLM with tools adapter respects cancellation."""
     config = {"prompt": "Test", "tools": []}
@@ -411,7 +532,7 @@ async def test_llm_with_tools_adapter_error_handling(monkeypatch):
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 
     async def fake_call(**kwargs):
-        raise Exception("API error")
+        raise RuntimeError("LLM tools backend exploded at /private/llm-cache")
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_call)
 
@@ -419,8 +540,8 @@ async def test_llm_with_tools_adapter_error_handling(monkeypatch):
     context = {"user_id": "1"}
 
     result = await run_llm_with_tools_adapter(config, context)
-    assert "error" in result
-    assert "API error" in result["error"]
+    assert result == {"error": "llm_with_tools_error", "text": "", "tool_results": []}
+    assert "llm-cache" not in str(result)
 
 
 # =============================================================================
@@ -474,7 +595,7 @@ async def test_llm_compare_adapter_with_failures(monkeypatch):
         nonlocal call_count
         call_count += 1
         if call_count == 2:
-            raise Exception("Provider error")
+            raise RuntimeError("Provider exploded at /private/llm-cache")
         return {"choices": [{"message": {"content": "Success"}}]}
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_call)
@@ -491,6 +612,8 @@ async def test_llm_compare_adapter_with_failures(monkeypatch):
     result = await run_llm_compare_adapter(config, context)
     assert result["comparison"]["successful"] == 1
     assert result["comparison"]["failed"] == 1
+    assert result["responses"][1]["error"] == "llm_provider_error"
+    assert "llm-cache" not in str(result)
 
 
 @pytest.mark.asyncio
@@ -649,7 +772,7 @@ async def test_llm_critique_adapter_error_handling(monkeypatch):
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
 
     async def fake_call(**kwargs):
-        raise Exception("Critique failed")
+        raise RuntimeError("Critique backend exploded at /private/llm-cache")
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_call)
 
@@ -657,8 +780,8 @@ async def test_llm_critique_adapter_error_handling(monkeypatch):
     context = {"user_id": "1"}
 
     result = await run_llm_critique_adapter(config, context)
-    assert "error" in result
-    assert "Critique failed" in result["error"]
+    assert result == {"error": "llm_critique_error", "critique": "", "revised": ""}
+    assert "llm-cache" not in str(result)
 
 
 # =============================================================================
@@ -724,6 +847,43 @@ async def test_moderation_adapter_redact_custom_patterns(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_moderation_adapter_sanitizes_invalid_custom_pattern_logs(monkeypatch):
+    """Test invalid custom redaction regex logs hide raw pattern/parser details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service
+    from tldw_Server_API.app.core.Workflows.adapters.llm import moderation as moderation_module
+
+    class _Policy:
+        redact_replacement = "[REDACTED]"
+
+    class _Service:
+        def get_effective_policy(self, _user_id):
+            return _Policy()
+
+        def redact_text_with_count(self, text, _policy):
+            return text, 0
+
+    monkeypatch.setattr(moderation_service, "get_moderation_service", lambda: _Service())
+
+    messages: list[str] = []
+    sink_id = moderation_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        result = await run_moderation_adapter(
+            {"action": "redact", "text": "Contact private-token", "patterns": ["private-token("]},
+            {"user_id": "1"},
+        )
+    finally:
+        moderation_module.logger.remove(sink_id)
+
+    assert result["text"] == "Contact private-token"
+    joined = "\n".join(messages)
+    assert "Invalid custom redaction pattern skipped" in joined
+    assert "private-token" not in joined
+    assert "missing ), unterminated subpattern" not in joined
+
+
+@pytest.mark.asyncio
 async def test_moderation_adapter_missing_text():
     """Test moderation adapter returns error for missing text."""
     config = {"action": "check"}
@@ -765,6 +925,24 @@ async def test_moderation_adapter_unknown_action(monkeypatch):
 
     result = await run_moderation_adapter(config, context)
     assert "unknown_action" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_moderation_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test moderation backend failures hide raw exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+
+    import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service
+
+    def fake_get_service():
+        raise RuntimeError("moderation backend exploded at /private/policy.db")
+
+    monkeypatch.setattr(moderation_service, "get_moderation_service", fake_get_service)
+
+    result = await run_moderation_adapter({"action": "check", "text": "safe text"}, {"user_id": "1"})
+
+    assert result == {"error": "moderation_error"}
+    assert "policy.db" not in str(result)
 
 
 # =============================================================================

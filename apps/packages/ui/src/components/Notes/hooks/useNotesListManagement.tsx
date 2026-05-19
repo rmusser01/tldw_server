@@ -30,6 +30,7 @@ import {
   normalizeNotebookCollectionsResponse,
   buildNotebookDefaultName,
   NOTE_SEARCH_DEBOUNCE_MS,
+  promptModal,
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 
@@ -370,7 +371,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         if (!Number.isFinite(id)) return null
         return {
           id: Math.floor(id),
-          name: String(item?.name || "").trim() || `Moodboard ${id}`,
+          name: String(item?.name || "").trim() || `Collection ${id}`,
           description: item?.description ?? null,
           smart_rule: item?.smart_rule ?? null,
           version:
@@ -415,7 +416,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   }, [moodboards, selectedMoodboardId])
 
   const createMoodboard = React.useCallback(async () => {
-    const name = String(window.prompt("Moodboard name") || "").trim()
+    const name = await promptModal({
+      title: 'Create collection',
+      placeholder: 'Collection name',
+      okText: 'Create',
+    })
     if (!name) return
     try {
       const created = await bgRequest<any>({
@@ -430,18 +435,23 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       }
       setListViewMode("moodboard")
       setPage(1)
-      message.success(`Created moodboard "${name}"`)
+      message.success(`Created collection "${name}"`)
     } catch {
-      message.error("Could not create moodboard")
+      message.error("Could not create collection")
     }
   }, [message, refetchMoodboards])
 
   const renameMoodboard = React.useCallback(async () => {
     if (!selectedMoodboard) {
-      message.warning("Select a moodboard first")
+      message.warning("Select a collection first")
       return
     }
-    const nextName = String(window.prompt("Rename moodboard", selectedMoodboard.name) || "").trim()
+    const nextName = await promptModal({
+      title: 'Rename collection',
+      defaultValue: selectedMoodboard.name,
+      placeholder: 'Collection name',
+      okText: 'Rename',
+    })
     if (!nextName || nextName === selectedMoodboard.name) return
     const expectedVersion = selectedMoodboard.version ?? 1
     try {
@@ -452,19 +462,19 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         body: { name: nextName }
       })
       await refetchMoodboards()
-      message.success(`Renamed moodboard to "${nextName}"`)
+      message.success(`Renamed collection to "${nextName}"`)
     } catch {
-      message.error("Could not rename moodboard")
+      message.error("Could not rename collection")
     }
   }, [message, refetchMoodboards, selectedMoodboard])
 
   const deleteMoodboard = React.useCallback(async () => {
     if (!selectedMoodboard) {
-      message.warning("Select a moodboard first")
+      message.warning("Select a collection first")
       return
     }
     const ok = await confirmDanger({
-      title: "Delete moodboard?",
+      title: "Delete collection?",
       content: `Delete "${selectedMoodboard.name}"?`,
       okText: "Delete",
       cancelText: "Cancel"
@@ -479,9 +489,9 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       })
       await refetchMoodboards()
       setPage(1)
-      message.success("Moodboard deleted")
+      message.success("Collection deleted")
     } catch {
-      message.error("Could not delete moodboard")
+      message.error("Could not delete collection")
     }
   }, [confirmDanger, message, refetchMoodboards, selectedMoodboard])
 
@@ -588,18 +598,24 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const createNotebookFromCurrentKeywords = React.useCallback(async () => {
     const normalizedKeywords = normalizeNotebookKeywords(keywordTokens)
     if (normalizedKeywords.length === 0) {
-      message.info('Select at least one keyword before saving a notebook.')
+      message.info('Select at least one tag before saving a filter.')
       return
     }
     if (typeof window === 'undefined') return
 
     const defaultName = buildNotebookDefaultName(normalizedKeywords)
-    const rawName = window.prompt('Smart collection name', defaultName)
+    const rawName = await promptModal({
+      title: 'Save filter',
+      label: 'Save the current tag filters as a reusable preset.',
+      defaultValue: defaultName,
+      placeholder: 'Filter name',
+      okText: 'Save',
+    })
     if (rawName == null) return
 
     const notebookName = normalizeNotebookName(rawName)
     if (!notebookName) {
-      message.warning('Smart collection name cannot be empty.')
+      message.warning('Saved filter name cannot be empty.')
       return
     }
 
@@ -637,7 +653,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
     setKeywordTokens([])
     setPage(1)
-    message.success(`Saved smart collection "${notebookName}"`)
+    message.success(`Saved filter "${notebookName}"`)
 
     if (isOnline && selectedNotebookAfterSave) {
       try {
@@ -659,7 +675,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           setSelectedNotebookId(persisted.id)
         }
       } catch {
-        message.warning('Saved locally, but failed to sync notebook to server.')
+        message.warning('Saved locally, but failed to sync saved filter to server.')
       }
     }
   }, [isOnline, keywordTokens, message, notebookOptions, setKeywordTokens, upsertNotebookOnServer])
@@ -673,8 +689,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       return
     }
     const ok = await confirmDanger({
-      title: 'Remove notebook?',
-      content: `Remove "${notebookToRemove.name}" from notebook filters? This does not delete any notes.`,
+      title: 'Remove saved filter?',
+      content: `Remove "${notebookToRemove.name}" from saved filters? This does not delete any notes.`,
       okText: 'Remove',
       cancelText: 'Cancel'
     })
@@ -684,12 +700,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     )
     setSelectedNotebookId(null)
     setPage(1)
-    message.success(`Removed notebook "${notebookToRemove.name}"`)
+    message.success(`Removed saved filter "${notebookToRemove.name}"`)
     if (isOnline) {
       try {
         await deleteNotebookOnServer(notebookToRemove.id)
       } catch {
-        message.warning('Removed locally, but failed to remove notebook on server.')
+        message.warning('Removed locally, but failed to remove saved filter on server.')
       }
     }
   }, [confirmDanger, deleteNotebookOnServer, isOnline, message, notebookOptions, selectedNotebookId])

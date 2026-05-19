@@ -18,13 +18,17 @@ import { TableSkeleton } from '@/components/ui/skeleton';
 import { Form, FormInput } from '@/components/ui/form';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useConfirm } from '@/components/ui/confirm-dialog';
-import { ExportMenu } from '@/components/ui/export-menu';
-import { exportData, type ExportFormat } from '@/lib/export';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { usePrivilegedActionDialog } from '@/components/ui/privileged-action-dialog';
 import { Plus, Users, Building2, Search, Pencil, Trash2 } from 'lucide-react';
 import { Team, Organization } from '@/types';
 import { api } from '@/lib/api-client';
+import { ExportMenu } from '@/components/ui/export-menu';
+import { exportTeams, ExportFormat } from '@/lib/export';
 import Link from 'next/link';
 import { useUrlPagination, useUrlState } from '@/lib/use-url-state';
+import { logger } from '@/lib/logger';
 
 const teamSchema = z.object({
   name: z.string().min(1, 'Team name is required'),
@@ -56,7 +60,10 @@ function TeamsPageContent() {
   const [editError, setEditError] = useState('');
   const [updatingTeam, setUpdatingTeam] = useState(false);
   const [deletingTeamId, setDeletingTeamId] = useState<number | null>(null);
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const confirm = useConfirm();
+  const promptPrivilegedAction = usePrivilegedActionDialog();
   const { warning, success, error: showError } = useToast();
   const isAllOrganizations = selectedOrgId === ALL_ORGANIZATIONS_SENTINEL;
   const scopedOrganizationId = isAllOrganizations ? undefined : selectedOrgId;
@@ -75,7 +82,7 @@ function TeamsPageContent() {
       const orgs = Array.isArray(data) ? data : [];
       setOrganizations(orgs);
     } catch (error) {
-      console.error('Failed to load organizations:', error);
+      logger.error('Failed to load organizations', { component: 'TeamsPage', error: error instanceof Error ? error.message : String(error) });
       setOrganizations([]);
     }
   }, []);
@@ -83,15 +90,35 @@ function TeamsPageContent() {
   const loadTeams = useCallback(async (orgId: string) => {
     try {
       setLoading(true);
-      const data = await api.getTeams(orgId);
-      setTeams(Array.isArray(data) ? data : []);
+      if (orgId === '__all__') {
+        // Load teams from all organizations
+        const results = await Promise.allSettled(
+          organizations.map((org) => api.getTeams(String(org.id)))
+        );
+        const allTeams: Team[] = [];
+        const failedOrgs: string[] = [];
+        results.forEach((result, idx) => {
+          if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            allTeams.push(...result.value);
+          } else if (result.status === 'rejected') {
+            failedOrgs.push(String(organizations[idx]?.name ?? organizations[idx]?.id ?? idx));
+          }
+        });
+        setTeams(allTeams);
+        if (failedOrgs.length > 0) {
+          warning(`Failed to load teams for: ${failedOrgs.join(', ')}`);
+        }
+      } else {
+        const data = await api.getTeams(orgId);
+        setTeams(Array.isArray(data) ? data : []);
+      }
     } catch (error) {
-      console.error('Failed to load teams:', error);
+      logger.error('Failed to load teams', { component: 'TeamsPage', error: error instanceof Error ? error.message : String(error) });
       setTeams([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [organizations]);
 
   useEffect(() => {
     loadOrganizations();
@@ -143,7 +170,7 @@ function TeamsPageContent() {
       await loadTeams(scopedOrganizationId);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Please try again.';
-      console.error('Failed to create team:', error);
+      logger.error('Failed to create team', { component: 'TeamsPage', error: error instanceof Error ? error.message : String(error) });
       showError('Failed to create team', message);
     } finally {
       setCreatingTeam(false);
@@ -256,6 +283,88 @@ function TeamsPageContent() {
     }
   };
 
+  // Clear selection when team list changes
+  useEffect(() => {
+    setSelectedTeamIds((prev) => {
+      if (prev.size === 0) return prev;
+      const available = new Set(teams.map((t) => t.id));
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (available.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [teams]);
+
+  const handleToggleSelectTeam = (teamId: number, checked: boolean) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(teamId);
+      } else {
+        next.delete(teamId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisibleTeams = (checked: boolean, visibleTeams: Team[]) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        visibleTeams.forEach((t) => next.add(t.id));
+      } else {
+        visibleTeams.forEach((t) => next.delete(t.id));
+      }
+      return next;
+    });
+  };
+
+  const handleClearTeamSelection = () => {
+    setSelectedTeamIds(new Set());
+  };
+
+  const handleBulkDeleteTeams = async () => {
+    if (!selectedOrgId || selectedOrgId === '__all__') return;
+    const ids = Array.from(selectedTeamIds);
+    if (ids.length === 0) return;
+    const approval = await promptPrivilegedAction({
+      title: 'Delete selected teams',
+      message: `Delete ${ids.length} team${ids.length !== 1 ? 's' : ''}? This cannot be undone.`,
+      confirmText: 'Delete',
+      requirePassword: false,
+    });
+    if (!approval) return;
+
+    try {
+      setBulkDeleting(true);
+      const results = await Promise.allSettled(
+        ids.map((id) => api.deleteTeam(selectedOrgId, String(id)))
+      );
+      const failures = results.filter((r) => r.status === 'rejected').length;
+      if (failures > 0) {
+        showError(
+          'Bulk delete incomplete',
+          `${ids.length - failures} deleted, ${failures} failed.`
+        );
+      } else {
+        success(
+          'Teams deleted',
+          `${ids.length} team${ids.length !== 1 ? 's' : ''} removed.`
+        );
+      }
+      handleClearTeamSelection();
+      await loadTeams(selectedOrgId);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to delete teams';
+      showError('Bulk delete failed', message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const selectedTeamCount = selectedTeamIds.size;
+
   const filteredTeams = teams.filter((team) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -269,6 +378,8 @@ function TeamsPageContent() {
   const totalPages = Math.ceil(totalItems / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const paginatedTeams = filteredTeams.slice(startIndex, startIndex + pageSize);
+  const allVisibleTeamsSelected = paginatedTeams.length > 0
+    && paginatedTeams.every((t) => selectedTeamIds.has(t.id));
 
   return (
     <PermissionGuard variant="route" requireAuth role="admin">
@@ -279,20 +390,14 @@ function TeamsPageContent() {
                 <h1 className="text-3xl font-bold">Teams</h1>
                 <p className="text-muted-foreground">Manage teams within organizations</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap gap-2">
                 <ExportMenu
-                  onExport={(format: ExportFormat) => {
-                    exportData({
-                      data: teams as unknown as Record<string, unknown>[],
-                      filename: 'teams',
-                      format,
-                    });
-                  }}
-                  disabled={teams.length === 0}
+                  onExport={(format: ExportFormat) => exportTeams(filteredTeams, format)}
+                  disabled={filteredTeams.length === 0}
                 />
                 <Button
                   onClick={() => setShowCreateForm(!showCreateForm)}
-                  disabled={!scopedOrganizationId}
+                  disabled={!selectedOrgId || selectedOrgId === '__all__'}
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   New Team
@@ -424,7 +529,7 @@ function TeamsPageContent() {
                   />
                 ) : loading ? (
                   <div className="py-4">
-                    <TableSkeleton rows={4} columns={5} />
+                    <TableSkeleton rows={4} columns={6} />
                   </div>
                 ) : filteredTeams.length === 0 ? (
                   <EmptyState
@@ -453,9 +558,47 @@ function TeamsPageContent() {
                   />
                 ) : (
                   <>
+                    {selectedTeamCount > 0 && (
+                      <div className="mb-4 flex flex-col gap-3 rounded-md border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{selectedTeamCount} selected</Badge>
+                          <span className="text-sm text-muted-foreground">
+                            Bulk actions apply to selected teams.
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleBulkDeleteTeams}
+                            loading={bulkDeleting}
+                            loadingText="Deleting..."
+                            disabled={bulkDeleting}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                            Delete
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClearTeamSelection}
+                            disabled={bulkDeleting}
+                          >
+                            Clear selection
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox
+                              checked={allVisibleTeamsSelected}
+                              onCheckedChange={(checked) => handleToggleSelectAllVisibleTeams(checked, paginatedTeams)}
+                              aria-label="Select all visible teams"
+                            />
+                          </TableHead>
                           <TableHead>ID</TableHead>
                           <TableHead>Name</TableHead>
                           <TableHead>Description</TableHead>
@@ -466,6 +609,13 @@ function TeamsPageContent() {
                       <TableBody>
                         {paginatedTeams.map((team) => (
                           <TableRow key={team.id}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedTeamIds.has(team.id)}
+                                onCheckedChange={(checked) => handleToggleSelectTeam(team.id, checked)}
+                                aria-label={`Select team ${team.name}`}
+                              />
+                            </TableCell>
                             <TableCell className="font-mono text-sm">{team.id}</TableCell>
                             <TableCell className="font-medium">{team.name}</TableCell>
                             <TableCell className="text-muted-foreground">

@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     get_user_media_db_path,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.Evaluations.embeddings_abtest_jobs import (
     ABTEST_JOBS_CLEANUP_TYPE,
     ABTEST_JOBS_DOMAIN,
@@ -74,15 +75,13 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(default)
 
 
-def _normalize_user_id(value: Any) -> tuple[str, int]:
+def _normalize_user_id(value: Any) -> str:
     if value is None or str(value).strip() == "":
-        uid = DatabasePaths.get_single_user_id()
-        return str(uid), int(uid)
-    try:
-        uid_int = int(value)
-    except (TypeError, ValueError):
-        uid_int = int(DatabasePaths.get_single_user_id())
-    return str(value), uid_int
+        return str(DatabasePaths.get_single_user_id())
+    return canonical_evaluations_user_scope(
+        value,
+        fallback=DatabasePaths.get_single_user_id(),
+    )
 
 
 def _normalize_payload(raw: Any) -> dict[str, Any]:
@@ -169,7 +168,7 @@ async def handle_abtest_job(job: dict[str, Any]) -> dict[str, Any]:
 
     job_id = job.get("uuid") or job.get("id")
     owner = job.get("owner_user_id") or payload.get("user_id")
-    user_id_str, user_id_int = _normalize_user_id(owner)
+    user_id_str = _normalize_user_id(owner)
     job_logger = logger.bind(
         test_id=str(test_id),
         job_id=str(job_id) if job_id is not None else None,
@@ -177,7 +176,7 @@ async def handle_abtest_job(job: dict[str, Any]) -> dict[str, Any]:
     )
     job_logger.info(f"Embeddings A/B job starting ({job_type})")
 
-    svc = get_unified_evaluation_service_for_user(user_id_int)
+    svc = get_unified_evaluation_service_for_user(user_id_str)
     if job_type == ABTEST_JOBS_CLEANUP_TYPE:
         cleanup_abtest_resources(
             svc.db,

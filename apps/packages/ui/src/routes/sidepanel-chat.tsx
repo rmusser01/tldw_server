@@ -10,6 +10,7 @@ import {
   saveHistory,
   saveMessage
 } from "@/db/dexie/helpers"
+import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
@@ -57,6 +58,16 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { restoreQueuedRequests } from "@/utils/chat-request-queue"
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import {
+  clearPendingWebClipAnalyzeRequest,
+  readPendingWebClipAnalyzeRequest
+} from "@/services/web-clipper/enrichment"
+import {
+  collectWebClipAnalyzeMessageIds,
+  hasSubmittedWebClipAnalyzeMessage,
+  WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
+} from "@/services/web-clipper/analyze-handoff"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
 import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
 import {
@@ -545,6 +556,7 @@ const SidepanelChat = () => {
   const [noteDraftTitle, setNoteDraftTitle] = React.useState("")
   const [noteSuggestedTitle, setNoteSuggestedTitle] = React.useState("")
   const [noteSourceUrl, setNoteSourceUrl] = React.useState<string | undefined>()
+  const [noteSourceMessageId, setNoteSourceMessageId] = React.useState<string | null>(null)
   const [noteSaving, setNoteSaving] = React.useState(false)
   const [noteError, setNoteError] = React.useState<string | null>(null)
   const [ingestCard, setIngestCard] = React.useState<IngestCardState | null>(null)
@@ -591,6 +603,7 @@ const SidepanelChat = () => {
     setNoteDraftTitle("")
     setNoteSuggestedTitle("")
     setNoteSourceUrl(undefined)
+    setNoteSourceMessageId(null)
     setNoteSaving(false)
     setNoteError(null)
   }, [])
@@ -652,6 +665,34 @@ const SidepanelChat = () => {
     serverChatId,
     t
   ])
+
+  const handleCreateStudyPackFromSelection = React.useCallback(() => {
+    const title = (noteDraftTitle || noteSuggestedTitle).trim()
+    const messageId = noteSourceMessageId?.trim() || ""
+    if (!title || !messageId) {
+      setNoteError(
+        t(
+          "sidepanel:notes.studyPackUnavailable",
+          "This selection does not have a supported message source for study packs yet."
+        )
+      )
+      return
+    }
+
+    openOptionsHashRoute(
+      buildStudyPackRoute({
+        title,
+        sourceItems: [
+          {
+            sourceType: "message",
+            sourceId: messageId,
+            sourceTitle: title
+          }
+        ]
+      })
+    )
+    resetNoteModal()
+  }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, openOptionsHashRoute, resetNoteModal, t])
 
   const handleNoteSave = React.useCallback(async () => {
     const content = noteDraftContent.trim()
@@ -850,6 +891,12 @@ const SidepanelChat = () => {
   })
   const bgMsg = useBackgroundMessage()
   const lastBgMsgRef = React.useRef<typeof bgMsg | null>(null)
+  const pendingWebClipAnalyzeRef = React.useRef<string | null>(null)
+  const messagesRef = React.useRef(messages)
+
+  React.useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   const restoreSidepanelState = async () => {
     // Wait until we've attempted to resolve tab id so we don't
@@ -1826,6 +1873,54 @@ const SidepanelChat = () => {
   }, [userMessageCount])
 
   React.useEffect(() => {
+    if (streaming || !selectedModel) return
+
+    const pendingAnalyze = readPendingWebClipAnalyzeRequest()
+    if (!pendingAnalyze) return
+    if (pendingWebClipAnalyzeRef.current === pendingAnalyze.id) return
+
+    const baselineMessageIds = collectWebClipAnalyzeMessageIds(messagesRef.current)
+    pendingWebClipAnalyzeRef.current = pendingAnalyze.id
+
+    void (async () => {
+      try {
+        await onSubmit({
+          message: pendingAnalyze.message,
+          messageType: WEB_CLIPPER_ANALYZE_MESSAGE_TYPE,
+          image: pendingAnalyze.image || "",
+          requestOverrides: pendingAnalyze.requestOverrides
+        })
+
+        if (
+          hasSubmittedWebClipAnalyzeMessage(
+            messagesRef.current,
+            baselineMessageIds
+          )
+        ) {
+          clearPendingWebClipAnalyzeRequest(pendingAnalyze.id)
+        } else {
+          pendingWebClipAnalyzeRef.current = null
+        }
+      } catch (error) {
+        pendingWebClipAnalyzeRef.current = null
+        notification.error({
+          message: t(
+            "sidepanel:notification.webClipAnalyzeFailedTitle",
+            "Clip handoff failed"
+          ),
+          description:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : t(
+                  "sidepanel:notification.webClipAnalyzeFailedBody",
+                  "The saved clip could not be sent to chat."
+                )
+        })
+      }
+    })()
+  }, [notification, onSubmit, selectedModel, streaming, t])
+
+  React.useEffect(() => {
     if (!bgMsg) return
     if (lastBgMsgRef.current === bgMsg) return
 
@@ -1847,10 +1942,15 @@ const SidepanelChat = () => {
         bgMsg.payload?.pageTitle as string | undefined,
         sourceUrl
       )
+      const rawMessageId =
+        typeof bgMsg.payload?.messageId === "string" || typeof bgMsg.payload?.messageId === "number"
+          ? String(bgMsg.payload.messageId)
+          : null
       setNoteDraftContent(selected)
       setNoteSuggestedTitle(suggestedTitle)
       setNoteDraftTitle(suggestedTitle)
       setNoteSourceUrl(sourceUrl)
+      setNoteSourceMessageId(rawMessageId)
       setNoteSaving(false)
       setNoteError(null)
         setNoteModalOpen(true)
@@ -2098,7 +2198,10 @@ const SidepanelChat = () => {
       case "running":
         return t("sidepanel:ingest.running", "Processing")
       case "completed":
-        return t("sidepanel:ingest.completed", "Ready")
+        return t(
+          "sidepanel:ingest.completed",
+          getDesignSystemState("ready")?.label ?? ""
+        )
       case "failed":
         return t("sidepanel:ingest.failed", "Failed")
       case "cancelled":
@@ -2453,12 +2556,17 @@ const SidepanelChat = () => {
             onCancel={resetNoteModal}
             onSave={handleNoteSave}
             onGenerateFlashcards={handleGenerateFlashcardsFromSelection}
+            onCreateStudyPack={noteSourceMessageId ? handleCreateStudyPackFromSelection : undefined}
             modalTitle={t("sidepanel:notes.saveToNotesTitle", "Save to Notes")}
             saveText={t("common:save", "Save")}
             cancelText={t("common:cancel", "Cancel")}
             generateFlashcardsText={t(
               "sidepanel:notes.generateFlashcards",
               "Generate flashcards"
+            )}
+            createStudyPackText={t(
+              "sidepanel:notes.createStudyPack",
+              "Create study pack"
             )}
             titleLabel={t("sidepanel:notes.titleLabel", "Title")}
             contentLabel={t("sidepanel:notes.contentLabel", "Content")}

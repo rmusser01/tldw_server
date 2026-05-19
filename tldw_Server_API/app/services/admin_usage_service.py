@@ -5,6 +5,8 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta, build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     LLMTopSpenderRow,
     LLMTopSpendersResponse,
@@ -41,6 +43,16 @@ _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+
+
+def _usage_page_pagination(*, total: int, page: int, limit: int) -> PagePaginationMeta:
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=limit,
+        total=total,
+        total_pages=total_pages,
+    )
 
 
 def _is_db_pool_object(db: Any) -> bool:
@@ -457,35 +469,67 @@ async def fetch_llm_usage(
             conditions.append(f"om.org_id IN ({placeholders})")
             params.extend(org_ids)
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    cache_columns = (
+        "COALESCE(cached_input_tokens,0) AS cached_input_tokens, "
+        "COALESCE(cache_write_input_tokens,0) AS cache_write_input_tokens, "
+        "COALESCE(cache_read_input_tokens,0) AS cache_read_input_tokens, "
+        "billable_input_tokens, estimate_source"
+    )
 
     if pg:
         total = await db.fetchval(f"SELECT COUNT(*) FROM llm_usage_log{join_clause}{where_clause}", *params)  # nosec B608
-        data_sql = (
-            f"SELECT id, ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms, prompt_tokens, completion_tokens, total_tokens, total_cost_usd, currency, estimated, request_id FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"  # nosec B608
-        )
-        rows = await db.fetch(data_sql, *params, limit, offset)
+        try:
+            data_sql = (
+                f"SELECT id, ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms, prompt_tokens, completion_tokens, total_tokens, total_cost_usd, {cache_columns}, currency, estimated, request_id FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"  # nosec B608
+            )
+            rows = await db.fetch(data_sql, *params, limit, offset)
+        except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(f"llm_usage: falling back without cache accounting columns (pg): {exc}")
+            data_sql = (
+                f"SELECT id, ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms, prompt_tokens, completion_tokens, total_tokens, total_cost_usd, currency, estimated, request_id FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}"  # nosec B608
+            )
+            rows = await db.fetch(data_sql, *params, limit, offset)
         return [dict(r) for r in rows], int(total or 0)
 
     # SQLite
     cur = await db.execute(f"SELECT COUNT(*) FROM llm_usage_log{join_clause}{where_clause}", params)  # nosec B608
     total_row = await cur.fetchone()
     total = int(total_row[0] if total_row else 0)
-    data_sql = (
-        f"SELECT id, ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms, prompt_tokens, completion_tokens, total_tokens, total_cost_usd, currency, estimated, request_id FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ? OFFSET ?"  # nosec B608
-    )
-    cur = await db.execute(data_sql, params + [limit, offset])
-    rows = await cur.fetchall()
+    has_cache_columns = True
+    try:
+        data_sql = (
+            f"SELECT id, ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms, prompt_tokens, completion_tokens, total_tokens, total_cost_usd, {cache_columns}, currency, estimated, request_id FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ? OFFSET ?"  # nosec B608
+        )
+        cur = await db.execute(data_sql, params + [limit, offset])
+        rows = await cur.fetchall()
+    except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(f"llm_usage: falling back without cache accounting columns (sqlite): {exc}")
+        has_cache_columns = False
+        data_sql = (
+            f"SELECT id, ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms, prompt_tokens, completion_tokens, total_tokens, total_cost_usd, currency, estimated, request_id FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ? OFFSET ?"  # nosec B608
+        )
+        cur = await db.execute(data_sql, params + [limit, offset])
+        rows = await cur.fetchall()
     out = []
     for row in rows:
         if hasattr(row, 'keys'):
             d = dict(row)
         else:
-            d = {
-                "id": row[0], "ts": row[1], "user_id": row[2], "key_id": row[3], "endpoint": row[4], "operation": row[5],
-                "provider": row[6], "model": row[7], "status": row[8], "latency_ms": row[9], "prompt_tokens": row[10],
-                "completion_tokens": row[11], "total_tokens": row[12], "total_cost_usd": row[13], "currency": row[14],
-                "estimated": bool(row[15]), "request_id": row[16],
-            }
+            if has_cache_columns:
+                d = {
+                    "id": row[0], "ts": row[1], "user_id": row[2], "key_id": row[3], "endpoint": row[4], "operation": row[5],
+                    "provider": row[6], "model": row[7], "status": row[8], "latency_ms": row[9], "prompt_tokens": row[10],
+                    "completion_tokens": row[11], "total_tokens": row[12], "total_cost_usd": row[13], "cached_input_tokens": row[14],
+                    "cache_write_input_tokens": row[15], "cache_read_input_tokens": row[16], "billable_input_tokens": row[17],
+                    "estimate_source": row[18], "currency": row[19], "estimated": bool(row[20]), "request_id": row[21],
+                }
+            else:
+                d = {
+                    "id": row[0], "ts": row[1], "user_id": row[2], "key_id": row[3], "endpoint": row[4], "operation": row[5],
+                    "provider": row[6], "model": row[7], "status": row[8], "latency_ms": row[9], "prompt_tokens": row[10],
+                    "completion_tokens": row[11], "total_tokens": row[12], "total_cost_usd": row[13], "currency": row[14],
+                    "estimated": bool(row[15]), "request_id": row[16],
+                }
         out.append(d)
     return out, total
 
@@ -556,17 +600,80 @@ async def fetch_llm_usage_summary(
     key_select_parts = [f"{expr} as group_value{'' if idx == 0 else f'_{idx + 1}'}" for idx, expr in enumerate(key_exprs)]
     key_group_by = ", ".join(key_exprs)
     key_order_by = ", ".join(key_exprs)
+    pg_cache_summary = (
+        "SUM(COALESCE(cached_input_tokens,0)) AS cached_input_tokens, "
+        "SUM(COALESCE(cache_write_input_tokens,0)) AS cache_write_input_tokens, "
+        "SUM(COALESCE(cache_read_input_tokens,0)) AS cache_read_input_tokens, "
+        "SUM(COALESCE(billable_input_tokens, prompt_tokens, 0)) AS billable_input_tokens, "
+        "SUM(CASE WHEN estimate_source = 'provider_usage' THEN 1 ELSE 0 END) AS provider_usage_count, "
+        "SUM(CASE WHEN estimate_source = 'stream_estimate' THEN 1 ELSE 0 END) AS stream_estimate_count, "
+        "SUM(CASE WHEN estimate_source = 'disconnect_estimate' THEN 1 ELSE 0 END) AS disconnect_estimate_count, "
+        "SUM(CASE WHEN estimate_source = 'missing_usage' THEN 1 ELSE 0 END) AS missing_usage_count, "
+        "SUM(CASE WHEN estimate_source = 'local_diagnostic' THEN 1 ELSE 0 END) AS local_diagnostic_count, "
+        "SUM(CASE WHEN estimated THEN 1 ELSE 0 END) AS estimated_usage_count, "
+    )
+    pg_cache_summary_fallback = (
+        "0 AS cached_input_tokens, "
+        "0 AS cache_write_input_tokens, "
+        "0 AS cache_read_input_tokens, "
+        "SUM(COALESCE(prompt_tokens,0)) AS billable_input_tokens, "
+        "0 AS provider_usage_count, "
+        "0 AS stream_estimate_count, "
+        "0 AS disconnect_estimate_count, "
+        "0 AS missing_usage_count, "
+        "0 AS local_diagnostic_count, "
+        "SUM(CASE WHEN estimated THEN 1 ELSE 0 END) AS estimated_usage_count, "
+    )
+    sqlite_cache_summary = (
+        "SUM(IFNULL(cached_input_tokens,0)) as cached_input_tokens, "
+        "SUM(IFNULL(cache_write_input_tokens,0)) as cache_write_input_tokens, "
+        "SUM(IFNULL(cache_read_input_tokens,0)) as cache_read_input_tokens, "
+        "SUM(IFNULL(billable_input_tokens, IFNULL(prompt_tokens,0))) as billable_input_tokens, "
+        "SUM(CASE WHEN estimate_source = 'provider_usage' THEN 1 ELSE 0 END) as provider_usage_count, "
+        "SUM(CASE WHEN estimate_source = 'stream_estimate' THEN 1 ELSE 0 END) as stream_estimate_count, "
+        "SUM(CASE WHEN estimate_source = 'disconnect_estimate' THEN 1 ELSE 0 END) as disconnect_estimate_count, "
+        "SUM(CASE WHEN estimate_source = 'missing_usage' THEN 1 ELSE 0 END) as missing_usage_count, "
+        "SUM(CASE WHEN estimate_source = 'local_diagnostic' THEN 1 ELSE 0 END) as local_diagnostic_count, "
+        "SUM(CASE WHEN estimated THEN 1 ELSE 0 END) as estimated_usage_count, "
+    )
 
     if pg:
-        sql = (
-            f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
-            "COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors, "
-            "SUM(COALESCE(prompt_tokens,0)) AS input_tokens, SUM(COALESCE(completion_tokens,0)) AS output_tokens, "
-            "SUM(COALESCE(total_tokens,0)) AS total_tokens, SUM(COALESCE(total_cost_usd,0)) AS total_cost_usd, AVG(latency_ms)::float AS latency_avg_ms "
-            f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
-        )
-        rows = await db.fetch(sql, *params)
+        try:
+            sql = (
+                f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
+                "COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors, "
+                "SUM(COALESCE(prompt_tokens,0)) AS input_tokens, SUM(COALESCE(completion_tokens,0)) AS output_tokens, "
+                "SUM(COALESCE(total_tokens,0)) AS total_tokens, SUM(COALESCE(total_cost_usd,0)) AS total_cost_usd, "
+                f"{pg_cache_summary}"
+                "AVG(latency_ms)::float AS latency_avg_ms "
+                f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
+            )
+            rows = await db.fetch(sql, *params)
+        except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(f"llm_usage_summary: falling back with default cache accounting columns (pg): {exc}")
+            sql = (
+                f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
+                "COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors, "
+                "SUM(COALESCE(prompt_tokens,0)) AS input_tokens, SUM(COALESCE(completion_tokens,0)) AS output_tokens, "
+                "SUM(COALESCE(total_tokens,0)) AS total_tokens, SUM(COALESCE(total_cost_usd,0)) AS total_cost_usd, "
+                f"{pg_cache_summary_fallback}"
+                "AVG(latency_ms)::float AS latency_avg_ms "
+                f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
+            )
+            rows = await db.fetch(sql, *params)
         out: list[dict[str, Any]] = []
+        cache_summary_defaults = {
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "billable_input_tokens": 0,
+            "provider_usage_count": 0,
+            "stream_estimate_count": 0,
+            "disconnect_estimate_count": 0,
+            "missing_usage_count": 0,
+            "local_diagnostic_count": 0,
+            "estimated_usage_count": 0,
+        }
         for r in rows:
             d = dict(r)
             try:
@@ -581,18 +688,36 @@ async def fetch_llm_usage_summary(
                     d["group_value_secondary"] = str(d.get(secondary_key))
             else:
                 d["group_value_secondary"] = None
+            for key, default_value in cache_summary_defaults.items():
+                d.setdefault(key, default_value)
             out.append(d)
         return out
     # SQLite
-    sql = (
-        f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
-        "COUNT(*) as requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) as errors, "
-        "SUM(IFNULL(prompt_tokens,0)) as input_tokens, SUM(IFNULL(completion_tokens,0)) as output_tokens, "
-        "SUM(IFNULL(total_tokens,0)) as total_tokens, SUM(IFNULL(total_cost_usd,0)) as total_cost_usd, AVG(latency_ms) as latency_avg_ms "
-        f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
-    )
-    cur = await db.execute(sql, params)
-    rows = await cur.fetchall()
+    has_cache_columns = True
+    try:
+        sql = (
+            f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
+            "COUNT(*) as requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) as errors, "
+            "SUM(IFNULL(prompt_tokens,0)) as input_tokens, SUM(IFNULL(completion_tokens,0)) as output_tokens, "
+            "SUM(IFNULL(total_tokens,0)) as total_tokens, SUM(IFNULL(total_cost_usd,0)) as total_cost_usd, "
+            f"{sqlite_cache_summary}"
+            "AVG(latency_ms) as latency_avg_ms "
+            f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
+        )
+        cur = await db.execute(sql, params)
+        rows = await cur.fetchall()
+    except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(f"llm_usage_summary: falling back without cache accounting columns (sqlite): {exc}")
+        has_cache_columns = False
+        sql = (
+            f"SELECT {', '.join(key_select_parts)}, "  # nosec B608
+            "COUNT(*) as requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) as errors, "
+            "SUM(IFNULL(prompt_tokens,0)) as input_tokens, SUM(IFNULL(completion_tokens,0)) as output_tokens, "
+            "SUM(IFNULL(total_tokens,0)) as total_tokens, SUM(IFNULL(total_cost_usd,0)) as total_cost_usd, AVG(latency_ms) as latency_avg_ms "
+            f"FROM llm_usage_log{join_clause}{where_clause} GROUP BY {key_group_by} ORDER BY requests DESC, {key_order_by}"
+        )
+        cur = await db.execute(sql, params)
+        rows = await cur.fetchall()
     out_rows: list[dict[str, Any]] = []
     for r in rows:
         gv = r[0]
@@ -617,7 +742,21 @@ async def fetch_llm_usage_summary(
             'output_tokens': int(r[metric_index_offset + 3] or 0),
             'total_tokens': int(r[metric_index_offset + 4] or 0),
             'total_cost_usd': float(r[metric_index_offset + 5] or 0.0),
-            'latency_avg_ms': (float(r[metric_index_offset + 6]) if r[metric_index_offset + 6] is not None else None),
+            'cached_input_tokens': int(r[metric_index_offset + 6] or 0) if has_cache_columns else 0,
+            'cache_write_input_tokens': int(r[metric_index_offset + 7] or 0) if has_cache_columns else 0,
+            'cache_read_input_tokens': int(r[metric_index_offset + 8] or 0) if has_cache_columns else 0,
+            'billable_input_tokens': int(r[metric_index_offset + 9] or 0) if has_cache_columns else 0,
+            'provider_usage_count': int(r[metric_index_offset + 10] or 0) if has_cache_columns else 0,
+            'stream_estimate_count': int(r[metric_index_offset + 11] or 0) if has_cache_columns else 0,
+            'disconnect_estimate_count': int(r[metric_index_offset + 12] or 0) if has_cache_columns else 0,
+            'missing_usage_count': int(r[metric_index_offset + 13] or 0) if has_cache_columns else 0,
+            'local_diagnostic_count': int(r[metric_index_offset + 14] or 0) if has_cache_columns else 0,
+            'estimated_usage_count': int(r[metric_index_offset + 15] or 0) if has_cache_columns else 0,
+            'latency_avg_ms': (
+                float(r[metric_index_offset + (16 if has_cache_columns else 6)])
+                if r[metric_index_offset + (16 if has_cache_columns else 6)] is not None
+                else None
+            ),
         })
     return out_rows
 
@@ -706,7 +845,14 @@ async def get_usage_daily(
             limit=limit,
         )
         items = [UsageDailyRow(**r) for r in rows]
-        return UsageDailyResponse(items=items, total=int(total or 0), page=page, limit=limit)
+        normalized_total = int(total or 0)
+        return UsageDailyResponse(
+            items=items,
+            total=normalized_total,
+            page=page,
+            limit=limit,
+            pagination=_usage_page_pagination(total=normalized_total, page=page, limit=limit),
+        )
     except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS:
         logger.exception("Failed to query usage_daily")
         raise HTTPException(status_code=500, detail="Failed to load usage daily data") from None
@@ -863,7 +1009,19 @@ async def get_llm_usage(
             org_ids=org_ids,
         )
         items = [LLMUsageLogRow(**r) for r in rows]
-        return LLMUsageLogResponse(items=items, total=int(total or 0), page=page, limit=limit)
+        total_count = int(total or 0)
+        return LLMUsageLogResponse(
+            items=items,
+            total=total_count,
+            page=page,
+            limit=limit,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=(page - 1) * limit,
+                count=len(items),
+            ),
+        )
     except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS:
         logger.exception("Failed to query llm_usage_log")
         raise HTTPException(status_code=500, detail="Failed to load LLM usage data") from None
@@ -971,43 +1129,87 @@ async def export_llm_usage_csv(
                 params.extend(org_ids)
         where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
+        cache_csv_columns_pg = (
+            "COALESCE(cached_input_tokens,0) AS cached_input_tokens, "
+            "COALESCE(cache_write_input_tokens,0) AS cache_write_input_tokens, "
+            "COALESCE(cache_read_input_tokens,0) AS cache_read_input_tokens, "
+            "billable_input_tokens, estimate_source"
+        )
+        cache_csv_columns_sqlite = (
+            "IFNULL(cached_input_tokens,0), IFNULL(cache_write_input_tokens,0), "
+            "IFNULL(cache_read_input_tokens,0), billable_input_tokens, estimate_source"
+        )
+
+        has_cache_columns = True
         if is_pg:
             limit_placeholder = f"${len(params) + 1}"
-            sql = (
-                f"SELECT id, ts, COALESCE(user_id,0) as user_id, COALESCE(key_id,0) as key_id, endpoint, operation, provider, model, status, latency_ms, "  # nosec B608
-                f"COALESCE(prompt_tokens,0), COALESCE(completion_tokens,0), COALESCE(total_tokens,0), COALESCE(total_cost_usd,0), currency, estimated, request_id "
-                f"FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT {limit_placeholder}"
-            )
-            rows = await db.fetch(sql, *params, limit)
+            try:
+                sql = (
+                    f"SELECT id, ts, COALESCE(user_id,0) AS user_id, COALESCE(key_id,0) AS key_id, endpoint, operation, provider, model, status, latency_ms, "  # nosec B608
+                    "COALESCE(prompt_tokens,0) AS prompt_tokens, COALESCE(completion_tokens,0) AS completion_tokens, "
+                    "COALESCE(total_tokens,0) AS total_tokens, COALESCE(total_cost_usd,0) AS total_cost_usd, "
+                    f"{cache_csv_columns_pg}, currency, estimated, request_id "
+                    f"FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT {limit_placeholder}"
+                )
+                rows = await db.fetch(sql, *params, limit)
+            except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"llm_usage_csv: falling back without cache accounting columns (pg): {exc}")
+                has_cache_columns = False
+                sql = (
+                    f"SELECT id, ts, COALESCE(user_id,0) AS user_id, COALESCE(key_id,0) AS key_id, endpoint, operation, provider, model, status, latency_ms, "  # nosec B608
+                    "COALESCE(prompt_tokens,0) AS prompt_tokens, COALESCE(completion_tokens,0) AS completion_tokens, "
+                    "COALESCE(total_tokens,0) AS total_tokens, COALESCE(total_cost_usd,0) AS total_cost_usd, currency, estimated, request_id "
+                    f"FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT {limit_placeholder}"
+                )
+                rows = await db.fetch(sql, *params, limit)
             data = [(
                 r["id"], r["ts"], r["user_id"], r["key_id"], r["endpoint"], r["operation"], r["provider"], r["model"], r["status"], r["latency_ms"],
-                r["prompt_tokens"], r["completion_tokens"], r["total_tokens"], r["total_cost_usd"], r["currency"], r["estimated"], r["request_id"]
+                r["prompt_tokens"], r["completion_tokens"], r["total_tokens"], r["total_cost_usd"],
+                r["cached_input_tokens"] if has_cache_columns else 0,
+                r["cache_write_input_tokens"] if has_cache_columns else 0,
+                r["cache_read_input_tokens"] if has_cache_columns else 0,
+                r["billable_input_tokens"] if has_cache_columns else None,
+                r["estimate_source"] if has_cache_columns else None,
+                r["currency"], r["estimated"], r["request_id"]
             ) for r in rows]
         else:
-            sql = (
-                f"SELECT id, ts, IFNULL(user_id,0), IFNULL(key_id,0), endpoint, operation, provider, model, status, latency_ms, "  # nosec B608
-                f"IFNULL(prompt_tokens,0), IFNULL(completion_tokens,0), IFNULL(total_tokens,0), IFNULL(total_cost_usd,0), currency, estimated, request_id "
-                f"FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ?"
-            )
-            cur = await db.execute(sql, params + [limit])
-            data = await cur.fetchall()
+            try:
+                sql = (
+                    f"SELECT id, ts, IFNULL(user_id,0), IFNULL(key_id,0), endpoint, operation, provider, model, status, latency_ms, "  # nosec B608
+                    "IFNULL(prompt_tokens,0), IFNULL(completion_tokens,0), IFNULL(total_tokens,0), IFNULL(total_cost_usd,0), "
+                    f"{cache_csv_columns_sqlite}, currency, estimated, request_id "
+                    f"FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ?"
+                )
+                cur = await db.execute(sql, params + [limit])
+                data = await cur.fetchall()
+            except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"llm_usage_csv: falling back without cache accounting columns (sqlite): {exc}")
+                has_cache_columns = False
+                sql = (
+                    f"SELECT id, ts, IFNULL(user_id,0), IFNULL(key_id,0), endpoint, operation, provider, model, status, latency_ms, "  # nosec B608
+                    "IFNULL(prompt_tokens,0), IFNULL(completion_tokens,0), IFNULL(total_tokens,0), IFNULL(total_cost_usd,0), currency, estimated, request_id "
+                    f"FROM llm_usage_log{join_clause}{where_clause} ORDER BY ts DESC LIMIT ?"
+                )
+                cur = await db.execute(sql, params + [limit])
+                rows = await cur.fetchall()
+                data = [
+                    (
+                        row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9],
+                        row[10], row[11], row[12], row[13], 0, 0, 0, None, None, row[14], row[15], row[16],
+                    )
+                    for row in rows
+                ]
 
         header = [
             "id","ts","user_id","key_id","endpoint","operation","provider","model","status","latency_ms",
-            "prompt_tokens","completion_tokens","total_tokens","total_cost_usd","currency","estimated","request_id"
+            "prompt_tokens","completion_tokens","total_tokens","total_cost_usd",
+            "cached_input_tokens","cache_write_input_tokens","cache_read_input_tokens","billable_input_tokens","estimate_source",
+            "currency","estimated","request_id"
         ]
         lines = [",".join(header)]
 
-        def _fmt(value):
-            if value is None:
-                return ""
-            s = str(value)
-            if "," in s or "\n" in s:
-                return '"' + s.replace('"', '""') + '"'
-            return s
-
         for row in data:
-            lines.append(",".join(_fmt(c) for c in row))
+            lines.append(",".join(_fmt_csv_value(c) for c in row))
         return "\n".join(lines) + "\n"
     except _ADMIN_USAGE_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(f"Failed to export llm usage CSV: {exc}")

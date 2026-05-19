@@ -1,22 +1,39 @@
+import json
 from pathlib import Path
 
-from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, MigrationError
 
 
-def test_load_migrations_includes_sql_baseline(tmp_path):
-
-    project_root = Path(__file__).resolve().parents[2]
-    migrations_dir = project_root / "app" / "core" / "DB_Management" / "migrations"
-
-    db_path = tmp_path / "dummy.db"
+def test_load_migrations_raises_on_duplicate_versions(tmp_path: Path):
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    db_path = tmp_path / "app.db"
     db_path.touch()
 
+    (migrations_dir / "001_first.json").write_text(
+        json.dumps({"version": 1, "name": "first", "up_sql": "SELECT 1"})
+    )
+    (migrations_dir / "001_second.json").write_text(
+        json.dumps({"version": 1, "name": "second", "up_sql": "SELECT 2"})
+    )
+
     migrator = DatabaseMigrator(str(db_path), str(migrations_dir))
-    migrations = migrator.load_migrations()
 
-    versions = [migration.version for migration in migrations]
+    with pytest.raises(MigrationError, match="Duplicate migration version 1"):
+        migrator.load_migrations()
 
-    assert versions == sorted(versions)
-    assert 1 in versions  # SQL baseline migration
-    assert 5 in versions  # Last SQL migration
-    assert versions.count(3) == 1  # duplicate SQL file is ignored
+
+def test_load_migrations_raises_on_malformed_artifact(tmp_path: Path):
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    db_path = tmp_path / "app.db"
+    db_path.touch()
+
+    (migrations_dir / "001_first.json").write_text("{not valid json")
+
+    migrator = DatabaseMigrator(str(db_path), str(migrations_dir))
+
+    with pytest.raises(MigrationError, match="Invalid migration set: 001_first.json"):
+        migrator.load_migrations()

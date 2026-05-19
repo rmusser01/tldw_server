@@ -59,6 +59,8 @@ def _infer_tts_provider_from_model(model: Optional[str]) -> Optional[str]:
         return "neutts"
     if m.startswith("eleven"):
         return "elevenlabs"
+    if m.startswith("omnivoice") or m.startswith("omni-voice") or m.startswith("omni_voice"):
+        return "omnivoice"
     if m.startswith("index_tts") or m.startswith("indextts"):
         return "index_tts"
     if m.startswith("supertonic2") or m.startswith("supertonic-2") or m.startswith("tts-supertonic2"):
@@ -72,75 +74,79 @@ def _infer_tts_provider_from_model(model: Optional[str]) -> Optional[str]:
     return None
 
 
+def _tts_log_context(exc: Exception) -> Any:
+    return logger.bind(error_type=type(exc).__name__)
+
+
 def _raise_for_tts_error(exc: Exception, request_id: Optional[str]) -> None:
     if isinstance(exc, TTSInvalidVoiceReferenceError):
-        logger.warning(f"TTS voice reference error: {exc}", exc_info=True)
+        _tts_log_context(exc).warning("TTS voice reference error")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=_http_error_detail("TTS voice reference invalid", request_id, exc=exc),
         )
     if isinstance(exc, TTSValidationError):
-        logger.warning(f"TTS validation error: {exc}", exc_info=True)
+        _tts_log_context(exc).warning("TTS validation error")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_http_error_detail("TTS validation failed", request_id, exc=exc),
         )
     if isinstance(exc, TTSModelNotFoundError):
-        logger.error(f"TTS model not found: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS model not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=_http_error_detail("Requested TTS model not found", request_id, exc=exc),
         )
     if isinstance(exc, TTSProviderNotConfiguredError):
-        logger.error(f"TTS provider not configured: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS provider not configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_http_error_detail("TTS service unavailable", request_id, exc=exc),
         )
     if isinstance(exc, (TTSProviderInitializationError, TTSConfigurationError)):
-        logger.error(f"TTS provider initialization error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS provider initialization error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_http_error_detail("TTS service unavailable", request_id, exc=exc),
         )
     if isinstance(exc, TTSModelLoadError):
-        logger.error(f"TTS model load error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS model load error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_http_error_detail("TTS model unavailable", request_id, exc=exc),
         )
     if isinstance(exc, TTSResourceError):
-        logger.error(f"TTS resource error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS resource error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_http_error_detail("TTS service unavailable", request_id, exc=exc),
         )
     if isinstance(exc, TTSProviderUnavailableError):
-        logger.error(f"TTS provider unavailable: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS provider unavailable")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=_http_error_detail("TTS provider unavailable", request_id, exc=exc),
         )
     if isinstance(exc, TTSAuthenticationError):
-        logger.error(f"TTS authentication error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS authentication error")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=_http_error_detail("TTS provider authentication failed", request_id, exc=exc),
         )
     if isinstance(exc, TTSNetworkError):
-        logger.error(f"TTS network error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS network error")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=_http_error_detail("TTS provider request failed", request_id, exc=exc),
         )
     if isinstance(exc, TTSTimeoutError):
-        logger.error(f"TTS timeout error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS timeout error")
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=_http_error_detail("TTS provider timed out", request_id, exc=exc),
         )
     if isinstance(exc, TTSRateLimitError):
-        logger.warning(f"TTS rate limit exceeded: {exc}", exc_info=True)
+        _tts_log_context(exc).warning("TTS rate limit exceeded")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=_http_error_detail(
@@ -148,18 +154,18 @@ def _raise_for_tts_error(exc: Exception, request_id: Optional[str]) -> None:
             ),
         )
     if isinstance(exc, TTSQuotaExceededError):
-        logger.warning(f"TTS quota exceeded: {exc}", exc_info=True)
+        _tts_log_context(exc).warning("TTS quota exceeded")
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=_http_error_detail("TTS quota exceeded. Please review your plan or quota.", request_id, exc=exc),
         )
     if isinstance(exc, TTSError):
-        logger.error(f"TTS error: {exc}", exc_info=True)
+        _tts_log_context(exc).error("TTS error")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_http_error_detail("TTS generation failed", request_id, exc=exc),
         )
-    logger.error(f"Unexpected error during audio generation: {exc}", exc_info=True)
+    _tts_log_context(exc).error("Unexpected error during audio generation")
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=_http_error_detail("An unexpected error occurred during audio generation", request_id, exc=exc),
@@ -177,6 +183,16 @@ def _sanitize_speech_request(
         validator = TTSInputValidator({"strict_validation": tts_config.strict_validation})
 
         provider_hint = _infer_tts_provider_from_model(getattr(request_data, "model", None))
+        fields_set = getattr(request_data, "model_fields_set", None)
+        if fields_set is None:
+            fields_set = getattr(request_data, "__pydantic_fields_set__", None)
+        if fields_set is None:
+            fields_set = getattr(request_data, "__fields_set__", set())
+        voice_was_supplied = "voice" in set(fields_set or ())
+        if not voice_was_supplied and provider_hint == "omnivoice":
+            # OmniVoice must default to the provider-specific public API voice,
+            # regardless of any configured global default voice.
+            request_data.voice = "auto"
         sanitized_text = validator.sanitize_text(request_data.input, provider=provider_hint)
         if not sanitized_text or len(sanitized_text.strip()) == 0:
             raise TTSValidationError(
@@ -186,7 +202,7 @@ def _sanitize_speech_request(
         request_data.input = sanitized_text
         return provider_hint
     except TTSValidationError as exc:
-        logger.warning(f"TTS validation error: {exc}", exc_info=True)
+        _tts_log_context(exc).warning("TTS validation error")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_http_error_detail("TTS validation failed", request_id, exc=exc),

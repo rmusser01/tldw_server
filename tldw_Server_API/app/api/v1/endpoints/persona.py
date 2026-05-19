@@ -6,24 +6,31 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from collections import defaultdict, deque
 import contextlib
-from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 import uuid
+from collections import defaultdict, deque
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, WebSocket, WebSocketDisconnect, status
+import aiofiles
+import aiofiles.os
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, WebSocket, WebSocketDisconnect, status
 from loguru import logger
 from starlette.requests import Request as StarletteRequest
+from starlette.responses import FileResponse
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User, verify_jwt_and_fetch_user
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.persona import (
+    PersonaBuddyResponse,
     PersonaCommandDryRunRequest,
     PersonaCommandDryRunResponse,
     PersonaCommandPlannedActionResponse,
@@ -38,50 +45,77 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaExemplarCreate,
     PersonaExemplarDeleteResponse,
     PersonaExemplarImportRequest,
-    PersonaExemplarReviewRequest,
     PersonaExemplarResponse,
+    PersonaExemplarReviewRequest,
     PersonaExemplarUpdate,
     PersonaInfo,
+    PersonaLiveVoiceAnalyticsSummary,
+    PersonaLiveVoiceSessionSummary,
+    PersonaLiveVoiceSessionUpdateRequest,
     PersonaPolicyRulesReplaceRequest,
     PersonaPolicyRulesResponse,
-    PersonaBuddyResponse,
     PersonaProfileCreate,
     PersonaProfileResponse,
     PersonaProfileUpdate,
+    PersonaScopeRulesReplaceRequest,
+    PersonaScopeRulesResponse,
+    PersonaSessionDetail,
+    PersonaSessionRequest,
+    PersonaSessionResponse,
+    PersonaSessionSummary,
     PersonaSetupAnalyticsResponse,
     PersonaSetupAnalyticsRunSummary,
     PersonaSetupAnalyticsSummary,
     PersonaSetupEventCreate,
     PersonaSetupEventWriteResponse,
     PersonaSetupState,
-    PersonaVoiceDefaults,
     PersonaStateHistoryResponse,
-    PersonaStateRestoreRequest,
     PersonaStateResponse,
+    PersonaStateRestoreRequest,
     PersonaStateUpdateRequest,
-    PersonaSessionDetail,
-    PersonaSessionRequest,
-    PersonaSessionResponse,
-    PersonaSessionSummary,
-    PersonaLiveVoiceAnalyticsSummary,
-    PersonaLiveVoiceSessionSummary,
-    PersonaLiveVoiceSessionUpdateRequest,
-    PersonaScopeRulesReplaceRequest,
-    PersonaScopeRulesResponse,
     PersonaVoiceAnalyticsResponse,
     PersonaVoiceAnalyticsSummary,
     PersonaVoiceCommandAnalyticsItem,
+    PersonaVoiceDefaults,
     PersonaVoiceFallbackAnalytics,
+    PersonaVisualAssetResponse,
+    PersonaVisualCandidateListResponse,
+    PersonaVisualCandidateResponse,
+    PersonaVisualCandidateReviewRequest,
+    PersonaVisualDeactivateResponse,
+    PersonaVisualGenerationJobResponse,
+    PersonaVisualGenerationRequest,
+    PersonaVisualGenerationReadinessResponse,
+    PersonaVisualImportCommitRequest,
+    PersonaVisualImportCommitStartResponse,
+    PersonaVisualImportPreviewResponse,
+    PersonaVisualImportPreviewStartResponse,
+    PersonaVisualLibraryDeleteResponse,
+    PersonaVisualLibraryItemResponse,
+    PersonaVisualLibraryListResponse,
+    PersonaVisualLibrarySaveRequest,
+    PersonaVisualLibraryUpdateRequest,
+    PersonaVisualLibraryUseRequest,
+    PersonaVisualManifestUpdate,
+    PersonaVisualPackExportRequest,
+    PersonaVisualPackExportResponse,
+    PersonaVisualPackCreate,
+    PersonaVisualPackDuplicateRequest,
+    PersonaVisualPackResponse,
+    PersonaVisualPortabilityJobResponse,
+    PersonaVisualRendererCapabilitiesResponse,
+    PersonaVisualRendererCapabilityResponse,
+    PersonaVisualStarterPackCopyRequest,
+    PersonaVisualStarterPackDetailResponse,
+    PersonaVisualStarterPackListResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
+    VoiceActionType,
     VoiceCommandDefinition,
     VoiceCommandInfo,
     VoiceCommandListResponse,
     VoiceCommandToggleRequest,
-    VoiceActionType,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_jwt_and_fetch_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import (
     get_api_key_manager,
     has_scope,
@@ -91,21 +125,77 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTok
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.feature_flags import (
-    is_mcp_hub_policy_enforcement_enabled,
-    is_persona_enabled,
-)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+    PersonaVisualPortabilityRepository,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.feature_flags import (
+    is_mcp_hub_policy_enforcement_enabled,
+    is_persona_enabled,
+)
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Image_Generation.adapter_registry import (
+    get_registry as get_image_generation_registry,
+)
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
 from tldw_Server_API.app.core.Metrics import increment_counter
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Persona.buddy import (
+    build_persona_buddy_summary,
+    ensure_persona_buddy_for_profile,
+)
+from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
+    list_persona_visual_renderer_capabilities,
+)
+from tldw_Server_API.app.core.Persona.visual_jobs import (
+    create_generate_candidate_job,
+    create_visual_pack_export_job,
+    create_visual_pack_import_commit_job,
+    create_visual_pack_import_preview_job,
+    persona_visual_generation_queue,
+)
+from tldw_Server_API.app.core.Persona.visual_generation_recipes import (
+    PersonaVisualRecipeGenerationError,
+    build_persona_visual_recipe_generation_intent,
+    normalize_persona_visual_generation_request_id,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.archive import (
+    DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
+    import_preview_plan_from_stored_json,
+    is_import_preview_plan_committable,
+)
+from tldw_Server_API.app.core.Persona.visual_portability.constants import (
+    PERSONA_VISUAL_PACK_EXTENSION,
+)
+from tldw_Server_API.app.core.Persona.visuals import (
+    MAX_TRIGGER_DURATION_MS,
+    MIN_TRIGGER_DURATION_MS,
+    VISUAL_STATE_IDS,
+    custom_visual_state_id_error,
+)
+from tldw_Server_API.app.core.Persona.visual_service import (
+    MAX_VISUAL_UPLOAD_BYTES,
+    PersonaVisualService,
+    PersonaVisualServiceError,
+)
+from tldw_Server_API.app.core.Persona.visual_library_service import (
+    PersonaVisualLibraryService,
+    PersonaVisualLibraryServiceError,
+)
+from tldw_Server_API.app.core.Persona.visual_starter_catalog import (
+    PersonaVisualStarterCatalogError,
+    PersonaVisualStarterCatalogService,
+)
 from tldw_Server_API.app.core.Persona.connections import (
     PERSONA_CONNECTION_STATUS_FIELD,
     PersonaConnectionConfigError,
@@ -122,11 +212,33 @@ from tldw_Server_API.app.core.Persona.connections import (
     safe_template_context,
     validate_connection_request_target,
 )
+from tldw_Server_API.app.core.Persona.exemplar_ingestion import (
+    append_exemplar_review_note,
+    build_transcript_exemplar_candidates,
+)
+from tldw_Server_API.app.core.Persona.exemplar_runtime import (
+    append_persona_exemplar_sections,
+    resolve_persona_exemplar_runtime_context,
+)
+from tldw_Server_API.app.core.Persona.exemplar_turn_classifier import classify_persona_turn
 from tldw_Server_API.app.core.Persona.memory_integration import (
     persist_persona_turn,
     persist_tool_outcome,
     retrieve_top_memories,
 )
+from tldw_Server_API.app.core.Persona.policy_evaluator import (
+    default_allow_rules,
+    evaluate_canonical_policy,
+    normalize_policy_rules,
+)
+from tldw_Server_API.app.core.Persona.dialogue_tree_context import build_runtime_tree_context
+from tldw_Server_API.app.core.Persona.runtime_explorer import (
+    PersonaRuntimeExplorer,
+    RuntimeExplorationResult,
+    RuntimeExplorerConfig,
+    RuntimeScorer,
+)
+from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     normalize_persona_activity_surface,
     record_persona_session_started,
@@ -134,39 +246,28 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_persona_tool_executed,
 )
 from tldw_Server_API.app.core.Personalization.companion_context import load_companion_context
-from tldw_Server_API.app.core.Persona.exemplar_runtime import (
-    append_persona_exemplar_sections,
-    resolve_persona_exemplar_runtime_context,
-)
-from tldw_Server_API.app.core.Persona.exemplar_turn_classifier import classify_persona_turn
-from tldw_Server_API.app.core.Persona.exemplar_ingestion import (
-    append_exemplar_review_note,
-    build_transcript_exemplar_candidates,
-)
-from tldw_Server_API.app.core.Persona.policy_evaluator import (
-    default_allow_rules,
-    evaluate_canonical_policy,
-    normalize_policy_rules,
-)
-from tldw_Server_API.app.core.Persona.buddy import ensure_persona_buddy_for_profile
-from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
-from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Skills.context_integration import handle_skill_tool_call
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType as VoiceActionTypeInternal,
+)
+from tldw_Server_API.app.core.VoiceAssistant import (
     VoiceCommand,
     get_persona_live_voice_summary,
-    delete_voice_command as delete_voice_command_db,
     get_voice_analytics_summary_stats,
-    get_user_voice_commands,
-    get_voice_command as get_voice_command_db,
     get_voice_command_registry,
     get_voice_command_router,
     get_voice_resolution_stats,
     get_voice_top_commands,
     record_persona_live_voice_event,
     save_voice_command,
+)
+from tldw_Server_API.app.core.VoiceAssistant import (
+    delete_voice_command as delete_voice_command_db,
+)
+from tldw_Server_API.app.core.VoiceAssistant import (
+    get_voice_command as get_voice_command_db,
 )
 
 router = APIRouter()
@@ -191,6 +292,21 @@ _PERSONA_RUNTIME_MODES = {"session_scoped", "persistent_scoped"}
 _PERSONA_WS_REQUIRED_NOTICE_LEVELS = {"info", "warning", "error"}
 _PERSONA_WS_ALLOWED_STEP_TYPES = {"mcp_tool", "skill", "rag_query", "final_answer"}
 _PERSONA_LIVE_PROCESSING_NOTICE_DELAY_S = 2.0
+_PERSONA_WAKE_BEHAVIORS = {"one_shot", "continuous", "push_to_talk_after_wake"}
+_PERSONA_WAKE_DEACTIVATION_REASONS = {
+    "disarmed",
+    "stop_live_voice",
+    "persona_switch",
+    "tab_switch",
+    "route_leave",
+    "session_close",
+}
+_PERSONA_VISUAL_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
+_PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
+_PERSONA_VISUAL_IMPORT_PREVIEW_ARCHIVE_EXTENSIONS = {
+    PERSONA_VISUAL_PACK_EXTENSION,
+    ".zip",
+}
 _PERSONA_CONNECTION_MEMORY_TYPE = "persona_connection"
 _PERSONA_CONNECTION_ALLOWED_AUTH_TYPES = {"none", "bearer", "api_key", "basic", "custom_header"}
 _PERSONA_CONNECTION_TEST_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}
@@ -209,6 +325,10 @@ _PERSONA_STATE_FIELD_LABELS = {
     "identity_md": "identity",
     "heartbeat_md": "heartbeat",
 }
+_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY = "_runtime_explorer_selected"
+_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY = "_runtime_explorer_diagnostics"
+_PERSONA_RUNTIME_SAFE_DENIAL_TEXT = RuntimeExplorerConfig().safe_denial_text
+_PERSONA_RUNTIME_EXPLORER_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 
 
 def _bounded_label(value: Any, *, allowed: set[str], fallback: str) -> str:
@@ -249,70 +369,148 @@ def _metric_reason_bucket(reason_code: Any) -> str:
     return "other"
 
 
+def _runtime_explorer_safe_token(value: Any, *, fallback: str = "other") -> str:
+    """Return a bounded identifier token for trace-safe runtime diagnostics."""
+    token = str(value or "").strip()
+    if _PERSONA_RUNTIME_EXPLORER_TOKEN_RE.fullmatch(token):
+        return token
+    return fallback
+
+
+def _runtime_explorer_budget_int(budget: Any, field_name: str) -> int:
+    """Return a non-negative budget diagnostic integer with malformed fields as zero."""
+    raw_value = getattr(budget, field_name, 0) if budget is not None else 0
+    try:
+        return max(0, int(raw_value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _runtime_explorer_safe_denial_text(value: Any) -> str:
+    """Normalize runtime explorer safe-denial sentinels to user-facing text."""
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return text
+    return _PERSONA_RUNTIME_SAFE_DENIAL_TEXT
+
+
+def _runtime_explorer_diagnostics_payload(result: RuntimeExplorationResult) -> dict[str, Any]:
+    """Build the websocket-safe runtime explorer diagnostics envelope."""
+    diagnostics = dict(result.diagnostics or {})
+    reason_fallback = "selected_candidate" if result.selected_candidate else "none"
+    payload: dict[str, Any] = {
+        "fallback": _runtime_explorer_safe_token(
+            result.fallback.value if result.fallback else "none",
+            fallback="other",
+        ),
+        "reason": _runtime_explorer_safe_token(diagnostics.get("reason"), fallback=reason_fallback),
+        "provider_calls": _runtime_explorer_budget_int(result.budget, "provider_calls"),
+        "candidates_considered": _runtime_explorer_budget_int(result.budget, "candidates_considered"),
+        "hard_prunes": _runtime_explorer_budget_int(result.budget, "hard_prunes"),
+        "soft_prunes": _runtime_explorer_budget_int(result.budget, "soft_prunes"),
+        "elapsed_ms": _runtime_explorer_budget_int(result.budget, "elapsed_ms"),
+        "circuit_open": bool(result.circuit_open),
+        "safe_denial": bool(result.safe_denial),
+    }
+    if diagnostics.get("error_type"):
+        payload["error_type"] = _runtime_explorer_safe_token(diagnostics.get("error_type"), fallback="Exception")
+    return payload
+
+
+def _runtime_explorer_notice_reason_code(diagnostics: dict[str, Any]) -> str | None:
+    fallback = str(diagnostics.get("fallback") or "")
+    if fallback == "hard_safe_denial" or bool(diagnostics.get("safe_denial")):
+        return "RUNTIME_EXPLORER_SAFE_DENIAL"
+    if fallback == "circuit_open" or bool(diagnostics.get("circuit_open")):
+        return "RUNTIME_EXPLORER_CIRCUIT_OPEN"
+    if fallback == "soft_existing_behavior":
+        return "RUNTIME_EXPLORER_FALLBACK"
+    return None
+
+
+def _runtime_explorer_notice_message(diagnostics: dict[str, Any]) -> str:
+    reason_code = _runtime_explorer_notice_reason_code(diagnostics)
+    if reason_code == "RUNTIME_EXPLORER_SAFE_DENIAL":
+        return "Persona runtime explorer selected a safe denial."
+    if reason_code == "RUNTIME_EXPLORER_CIRCUIT_OPEN":
+        return "Persona runtime explorer is temporarily paused after repeated failures; using existing planning."
+    return "Persona runtime explorer fell back to existing planning."
+
+
 def _increment_persona_metric(metric_name: str, labels: dict[str, str]) -> None:
     safe_labels = {str(k): str(v) for k, v in labels.items()}
     with contextlib.suppress(Exception):
         increment_counter(metric_name, 1, labels=safe_labels)
 
 
-def _get_persona_max_tool_steps() -> int:
+_PERSONA_SETTING_READ_EXCEPTIONS = (AttributeError, ImportError, TypeError, ValueError)
+
+
+def _log_persona_setting_fallback(key: str, default: int | float, exc: Exception) -> None:
+    logger.debug(
+        "Falling back to default persona setting {}={} after config read failure: {}",
+        key,
+        default,
+        exc,
+    )
+
+
+def _persona_int_setting(key: str, default: int, min_val: int, max_val: int) -> int:
+    """Read an integer persona setting, then clamp it into the supported range."""
     try:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
-        value = int(_app_settings.get("PERSONA_MAX_TOOL_STEPS", 3))
-    except Exception:
-        value = 3
-    return max(1, min(value, 20))
+        value = int(_app_settings.get(key, default))
+    except _PERSONA_SETTING_READ_EXCEPTIONS as exc:
+        _log_persona_setting_fallback(key, default, exc)
+        value = default
+    return max(min_val, min(value, max_val))
+
+
+def _persona_float_setting(
+    key: str,
+    default: float,
+    min_val: float,
+    max_val: float,
+    *,
+    disable_on_zero: bool = False,
+) -> float:
+    """Read a float persona setting with fallback, optional zero-disable, and clamping."""
+    try:
+        from tldw_Server_API.app.core.config import settings as _app_settings
+
+        value = float(_app_settings.get(key, default))
+    except _PERSONA_SETTING_READ_EXCEPTIONS as exc:
+        _log_persona_setting_fallback(key, default, exc)
+        value = default
+    if disable_on_zero and value <= 0:
+        return 0.0
+    return max(min_val, min(value, max_val))
+
+
+def _get_persona_max_tool_steps() -> int:
+    return _persona_int_setting("PERSONA_MAX_TOOL_STEPS", 3, 1, 20)
 
 
 def _get_persona_memory_top_k() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_MEMORY_TOP_K", 3))
-    except Exception:
-        value = 3
-    return max(1, min(value, 10))
+    return _persona_int_setting("PERSONA_MEMORY_TOP_K", 3, 1, 10)
 
 
 def _get_persona_state_hint_max_chars() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_STATE_HINT_MAX_CHARS", 1024))
-    except Exception:
-        value = 1024
-    return max(128, min(value, 8192))
+    return _persona_int_setting("PERSONA_STATE_HINT_MAX_CHARS", 1024, 128, 8192)
 
 
 def _get_persona_state_hint_per_doc_max_chars() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_STATE_HINT_PER_DOC_MAX_CHARS", 384))
-    except Exception:
-        value = 384
-    return max(64, min(value, 2048))
+    return _persona_int_setting("PERSONA_STATE_HINT_PER_DOC_MAX_CHARS", 384, 64, 2048)
 
 
 def _get_persona_state_doc_max_chars() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_STATE_DOC_MAX_CHARS", 50_000))
-    except Exception:
-        value = 50_000
-    return max(256, min(value, 1_000_000))
+    return _persona_int_setting("PERSONA_STATE_DOC_MAX_CHARS", 50_000, 256, 1_000_000)
 
 
 def _get_persona_state_history_max_entries() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_STATE_HISTORY_MAX_ENTRIES", 200))
-    except Exception:
-        value = 200
-    return max(1, min(value, 2000))
+    return _persona_int_setting("PERSONA_STATE_HISTORY_MAX_ENTRIES", 200, 1, 2000)
 
 
 def _get_persona_allowed_audio_formats() -> set[str]:
@@ -320,87 +518,48 @@ def _get_persona_allowed_audio_formats() -> set[str]:
         from tldw_Server_API.app.core.config import settings as _app_settings
 
         raw = str(_app_settings.get("PERSONA_AUDIO_ALLOWED_FORMATS", "pcm16,wav,mp3,opus"))
-    except Exception:
+    except Exception:  # noqa: BLE001
         raw = "pcm16,wav,mp3,opus"
     parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
     return set(parts) if parts else {"pcm16"}
 
 
 def _get_persona_audio_chunk_max_bytes() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_AUDIO_CHUNK_MAX_BYTES", 1_048_576))
-    except Exception:
-        value = 1_048_576
-    return max(1024, min(value, 8_388_608))
+    return _persona_int_setting("PERSONA_AUDIO_CHUNK_MAX_BYTES", 1_048_576, 1024, 8_388_608)
 
 
 def _get_persona_audio_chunks_per_minute() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_AUDIO_CHUNKS_PER_MINUTE", 120))
-    except Exception:
-        value = 120
-    return max(1, min(value, 1200))
+    return _persona_int_setting("PERSONA_AUDIO_CHUNKS_PER_MINUTE", 120, 1, 1200)
 
 
 def _get_persona_tts_chunk_size_bytes() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_TTS_CHUNK_SIZE_BYTES", 8192))
-    except Exception:
-        value = 8192
-    return max(256, min(value, 65536))
+    return _persona_int_setting("PERSONA_TTS_CHUNK_SIZE_BYTES", 8192, 256, 65536)
 
 
 def _get_persona_tts_max_chunks() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_TTS_MAX_CHUNKS", 16))
-    except Exception:
-        value = 16
-    return max(1, min(value, 256))
+    return _persona_int_setting("PERSONA_TTS_MAX_CHUNKS", 16, 1, 256)
 
 
 def _get_persona_tts_max_total_bytes() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_TTS_MAX_TOTAL_BYTES", 131072))
-    except Exception:
-        value = 131072
-    return max(1024, min(value, 2_097_152))
+    return _persona_int_setting("PERSONA_TTS_MAX_TOTAL_BYTES", 131072, 1024, 2_097_152)
 
 
 def _get_persona_tts_max_in_flight_chunks() -> int:
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = int(_app_settings.get("PERSONA_TTS_MAX_IN_FLIGHT_CHUNKS", 4))
-    except Exception:
-        value = 4
-    return max(1, min(value, 32))
+    return _persona_int_setting("PERSONA_TTS_MAX_IN_FLIGHT_CHUNKS", 4, 1, 32)
 
 
 def _get_persona_ws_auth_revalidate_interval_s() -> float:
-    """
-    Periodic auth revalidation interval for long-lived persona WS sessions.
+    """Periodic auth revalidation interval for long-lived persona WS sessions.
 
     A value <= 0 disables the background watchdog.
     """
-    try:
-        from tldw_Server_API.app.core.config import settings as _app_settings
-
-        value = float(_app_settings.get("PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S", 15.0))
-    except Exception:
-        value = 15.0
-    if value <= 0:
-        return 0.0
-    return max(0.5, min(value, 300.0))
+    return _persona_float_setting(
+        "PERSONA_WS_AUTH_REVALIDATE_INTERVAL_S",
+        15.0,
+        0.5,
+        300.0,
+        disable_on_zero=True,
+    )
 
 
 def _get_persona_rbac_flags() -> tuple[bool, bool]:
@@ -414,6 +573,222 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
+
+
+def _get_persona_runtime_explorer_config() -> RuntimeExplorerConfig:
+    from tldw_Server_API.app.core.config import settings as _app_settings
+
+    return RuntimeExplorerConfig(
+        enabled=_coerce_bool(_app_settings.get("PERSONA_RUNTIME_EXPLORER_ENABLED", False), default=False),
+        max_depth=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_DEPTH", 1, 1, 10),
+        max_branching=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING", 2, 1, 10),
+        max_provider_calls=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS", 1, 0, 100),
+        timeout_ms=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS", 750, 100, 60_000),
+        max_tokens=_persona_int_setting("PERSONA_RUNTIME_EXPLORER_MAX_TOKENS", 256, 16, 4096),
+        llm_judges_enabled=_coerce_bool(
+            _app_settings.get("PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED", False),
+            default=False,
+        ),
+    )
+
+
+def _persona_runtime_scorers() -> list[RuntimeScorer] | None:
+    return None
+
+
+def _persona_runtime_candidate_generator(context: dict[str, Any]) -> list[dict[str, Any]]:
+    base_plan = _sanitize_persona_runtime_plan(context.get("base_plan"))
+    user_message = str(context.get("user_message") or "")
+    candidates = [
+        {
+            "action_type": "plan",
+            "text": user_message,
+            "plan": base_plan,
+            "metadata": {"source": "existing_persona_planner", "grounded": True},
+        }
+    ]
+    if _persona_runtime_requires_safe_refusal_branch(user_message):
+        candidates.append(
+            {
+                "action_type": "plan",
+                "text": _PERSONA_RUNTIME_SAFE_DENIAL_TEXT,
+                "plan": _runtime_safe_denial_plan(_PERSONA_RUNTIME_SAFE_DENIAL_TEXT),
+                "metadata": {"source": "deterministic_safe_refusal", "grounded": True},
+            }
+        )
+    return candidates
+
+
+def _persona_runtime_requires_safe_refusal_branch(user_message: str) -> bool:
+    lowered = str(user_message or "").casefold()
+    markers = (
+        "ignore previous",
+        "ignore prior",
+        "ignore earlier",
+        "override policy",
+        "bypass safety",
+        "bypass guardrail",
+        "reveal hidden prompt",
+        "reveal system prompt",
+        "dump system prompt",
+        "ignore persona",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+class PersonaRuntimeExplorerProvider:
+    """App-scoped cache for runtime explorer instances with matching dependencies."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cache_key: tuple[Any, ...] | None = None
+        self._explorer: PersonaRuntimeExplorer | None = None
+
+    def get(self, config: RuntimeExplorerConfig) -> PersonaRuntimeExplorer:
+        scorers = _persona_runtime_scorers()
+        cache_key = (
+            config,
+            id(_persona_runtime_candidate_generator),
+            tuple(id(scorer) for scorer in (scorers or [])),
+        )
+        with self._lock:
+            if self._explorer is None or self._cache_key != cache_key:
+                self._explorer = PersonaRuntimeExplorer(
+                    config=config,
+                    candidate_generator=_persona_runtime_candidate_generator,
+                    scorers=scorers,
+                )
+                self._cache_key = cache_key
+            return self._explorer
+
+
+def get_persona_runtime_explorer_provider(ws: WebSocket) -> PersonaRuntimeExplorerProvider:
+    provider = getattr(ws.app.state, "persona_runtime_explorer_provider", None)
+    if isinstance(provider, PersonaRuntimeExplorerProvider):
+        return provider
+    provider = PersonaRuntimeExplorerProvider()
+    ws.app.state.persona_runtime_explorer_provider = provider
+    return provider
+
+
+def _sanitize_persona_runtime_plan(raw_plan: Any) -> dict[str, Any]:
+    if not isinstance(raw_plan, dict):
+        return {"steps": []}
+    steps: list[dict[str, Any]] = []
+    for fallback_idx, raw_step in enumerate(raw_plan.get("steps") or []):
+        if not isinstance(raw_step, dict):
+            continue
+        try:
+            step_idx = int(raw_step.get("idx", fallback_idx))
+        except (TypeError, ValueError):
+            step_idx = fallback_idx
+        args = raw_step.get("args")
+        steps.append(
+            {
+                "idx": step_idx,
+                "step_type": str(raw_step.get("step_type") or ""),
+                "tool": str(raw_step.get("tool") or ""),
+                "args": dict(args) if isinstance(args, dict) else {},
+                "description": str(raw_step.get("description") or ""),
+                "why": str(raw_step.get("why") or ""),
+            }
+        )
+    return {"steps": steps}
+
+
+def _runtime_safe_denial_plan(message: str) -> dict[str, Any]:
+    return {
+        "steps": [
+            {
+                "idx": 0,
+                "step_type": "final_answer",
+                "tool": "summarize",
+                "args": {"text": str(message or "I cannot safely proceed with that request.")},
+                "description": "Decline unsafe runtime candidate",
+                "why": "Runtime exploration found a hard policy or safety violation.",
+            }
+        ]
+    }
+
+
+def _apply_persona_runtime_explorer_to_plan(
+    *,
+    base_plan: dict[str, Any],
+    user_message: str,
+    session_id: str,
+    persona_id: str,
+    runtime_mode: str,
+    memory_context: list[str],
+    persona_state_fields: list[str],
+    companion_usage: dict[str, Any],
+    persona_exemplar_selection: dict[str, Any],
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider | None = None,
+    include_diagnostics: bool = False,
+) -> dict[str, Any]:
+    config = _get_persona_runtime_explorer_config()
+    if not config.enabled:
+        return base_plan
+
+    sanitized_base_plan = _sanitize_persona_runtime_plan(base_plan)
+    context_counts = {
+        "memory_count": len(memory_context or []),
+        "persona_state_field_count": len(persona_state_fields or []),
+        "companion_card_count": int(companion_usage.get("applied_card_count", 0) or 0),
+        "companion_goal_count": int(companion_usage.get("applied_goal_count", 0) or 0),
+        "companion_activity_count": int(companion_usage.get("applied_activity_count", 0) or 0),
+        "persona_exemplar_selected_count": int(
+            persona_exemplar_selection.get("selected_count", 0) or 0
+        ),
+    }
+    provider_context = build_runtime_tree_context(
+        persona_id=str(persona_id or ""),
+        session_id=str(session_id or ""),
+        user_message=str(user_message or ""),
+        policy_snapshot={
+            "runtime_mode": str(runtime_mode or ""),
+            "base_plan": sanitized_base_plan,
+            "context_counts": context_counts,
+        },
+        max_text_length=max(1, int(config.max_tokens) * 4),
+    ).for_generator()
+    policy_snapshot = provider_context.get("policy_snapshot") or {}
+    runtime_context = {
+        "user_message": provider_context.get("user_message", ""),
+        "session_id": provider_context.get("session_id", ""),
+        "persona_id": provider_context.get("persona_id", ""),
+        "runtime_mode": policy_snapshot.get("runtime_mode", ""),
+        "base_plan": policy_snapshot.get("base_plan", {"steps": []}),
+        "context_counts": policy_snapshot.get("context_counts", context_counts),
+        "metadata": provider_context.get("metadata", {}),
+    }
+    provider = runtime_explorer_provider or PersonaRuntimeExplorerProvider()
+    result = provider.get(config).explore(runtime_context)
+    runtime_diagnostics = _runtime_explorer_diagnostics_payload(result) if include_diagnostics else None
+    if result.safe_denial:
+        safe_plan = _runtime_safe_denial_plan(_runtime_explorer_safe_denial_text(result.safe_denial))
+        if runtime_diagnostics:
+            safe_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
+        return safe_plan
+    if result.selected_candidate:
+        candidate_metadata = result.selected_candidate.get("metadata")
+        if isinstance(candidate_metadata, dict) and candidate_metadata.get("source") == "existing_persona_planner":
+            selected_base_plan = dict(base_plan)
+            selected_base_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            if runtime_diagnostics:
+                selected_base_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
+            return selected_base_plan
+        selected_plan = result.selected_candidate.get("plan")
+        sanitized_selected_plan = _sanitize_persona_runtime_plan(selected_plan)
+        if sanitized_selected_plan.get("steps"):
+            sanitized_selected_plan[_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY] = True
+            if runtime_diagnostics:
+                sanitized_selected_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
+            return sanitized_selected_plan
+    if runtime_diagnostics:
+        fallback_plan = dict(base_plan)
+        fallback_plan[_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY] = runtime_diagnostics
+        return fallback_plan
+    return base_plan
 
 
 def _get_persona_session_scopes(*, allow_export: bool, allow_delete: bool) -> set[str]:
@@ -1266,10 +1641,8 @@ def _memory_mode_allows_personalization_retrieval(runtime_mode: str, *, session_
     normalized = str(runtime_mode or "").strip().lower()
     if normalized == "persistent_scoped":
         return True
-    if normalized == "session_scoped" and session_exists:
-        return False
     # Backward compatibility for pre-session-scaffold clients that don't create persisted sessions first.
-    return True
+    return not (normalized == "session_scoped" and session_exists)
 
 
 def _require_current_user_id(current_user: User) -> str:
@@ -1446,7 +1819,11 @@ def _build_scope_snapshot(rules: list[dict[str, Any]]) -> tuple[dict[str, Any], 
     return snapshot, audit
 
 
-def _persona_profile_to_response(profile: dict[str, Any]) -> PersonaProfileResponse:
+def _persona_profile_to_response(
+    profile: dict[str, Any],
+    *,
+    buddy_row: dict[str, Any] | None = None,
+) -> PersonaProfileResponse:
     raw_voice_defaults = profile.get("voice_defaults")
     raw_setup = profile.get("setup")
     try:
@@ -1484,6 +1861,7 @@ def _persona_profile_to_response(profile: dict[str, Any]) -> PersonaProfileRespo
         created_at=str(profile.get("created_at") or _utc_now_iso()),
         last_modified=str(profile.get("last_modified") or _utc_now_iso()),
         version=int(profile.get("version") or 1),
+        buddy_summary=_persona_buddy_summary_from_profile(profile, buddy_row=buddy_row),
     )
 
 
@@ -1494,6 +1872,10 @@ def _persona_buddy_to_response(buddy: dict[str, Any]) -> PersonaBuddyResponse:
         created_at=str(buddy.get("created_at") or _utc_now_iso()),
         last_modified=str(buddy.get("last_modified") or buddy.get("created_at") or _utc_now_iso()),
     )
+
+
+class PersonaBuddyRollbackError(RuntimeError):
+    """Raised when profile rollback fails after persona buddy validation errors."""
 
 
 def _rollback_created_persona_profile_after_buddy_failure(
@@ -1516,17 +1898,19 @@ def _rollback_created_persona_profile_after_buddy_failure(
                 "Rolled back newly created persona profile {} after buddy sync failure.",
                 persona_hash,
             )
-        else:
-            logger.error(
-                "Failed to roll back newly created persona profile {} after buddy sync failure.",
-                persona_hash,
-            )
+            return
+        raise PersonaBuddyRollbackError(
+            "Persona buddy validation failed and rollback did not complete."
+        )
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         logger.error(
             "Error rolling back newly created persona profile {} after buddy sync failure: {}",
             persona_hash,
             exc,
         )
+        raise PersonaBuddyRollbackError(
+            "Persona buddy validation failed and rollback did not complete."
+        ) from exc
 
 
 def _rollback_updated_persona_profile_after_buddy_failure(
@@ -1540,7 +1924,7 @@ def _rollback_updated_persona_profile_after_buddy_failure(
 ) -> None:
     """Restore the previous visible profile state when buddy sync fails after update."""
     persona_hash = _redacted_id_for_logs(persona_id)
-    rollback_data = {field: previous_profile.get(field) for field in update_data.keys()}
+    rollback_data = {field: previous_profile.get(field) for field in update_data}
     if not rollback_data:
         return
     try:
@@ -1555,26 +1939,28 @@ def _rollback_updated_persona_profile_after_buddy_failure(
                 "Rolled back persona profile {} after buddy sync failure.",
                 persona_hash,
             )
-        else:
-            logger.error(
-                "Failed to roll back persona profile {} after buddy sync failure.",
-                persona_hash,
-            )
+            return
+        raise PersonaBuddyRollbackError(
+            "Persona buddy validation failed and rollback did not complete."
+        )
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         logger.error(
             "Error rolling back persona profile {} after buddy sync failure: {}",
             persona_hash,
             exc,
         )
+        raise PersonaBuddyRollbackError(
+            "Persona buddy validation failed and rollback did not complete."
+        ) from exc
 
 
 def _ensure_persona_buddy_after_profile_mutation(
     *,
     db: CharactersRAGDB,
     profile: dict[str, Any],
-) -> None:
+) -> dict[str, Any]:
     """Keep buddy state aligned after a committed profile mutation."""
-    _ = ensure_persona_buddy_for_profile(db, profile)
+    return ensure_persona_buddy_for_profile(db, profile)
 
 
 def _persona_exemplar_to_response(exemplar: dict[str, Any]) -> PersonaExemplarResponse:
@@ -1596,6 +1982,633 @@ def _persona_exemplar_to_response(exemplar: dict[str, Any]) -> PersonaExemplarRe
         last_modified=str(exemplar.get("last_modified") or exemplar.get("created_at") or _utc_now_iso()),
         deleted=bool(exemplar.get("deleted", False)),
         version=int(exemplar.get("version") or 1),
+    )
+
+
+def _persona_visual_asset_url(*, persona_id: str, pack_id: str, asset_id: str) -> str:
+    return f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/assets/{asset_id}/content"
+
+
+def _persona_visual_asset_to_response(asset: dict[str, Any]) -> PersonaVisualAssetResponse:
+    persona_id = str(asset.get("persona_id") or "")
+    pack_id = str(asset.get("pack_id") or "")
+    asset_id = str(asset.get("id") or "")
+    return PersonaVisualAssetResponse(
+        id=asset_id,
+        pack_id=pack_id,
+        persona_id=persona_id,
+        asset_role=str(asset.get("asset_role") or "frame"),
+        storage_key=str(asset.get("storage_key") or ""),
+        url=_persona_visual_asset_url(persona_id=persona_id, pack_id=pack_id, asset_id=asset_id),
+        original_filename=asset.get("original_filename"),
+        mime_type=str(asset.get("mime_type") or "application/octet-stream"),
+        byte_size=int(asset.get("byte_size") or 0),
+        checksum_sha256=str(asset.get("checksum_sha256") or ""),
+        width=asset.get("width"),
+        height=asset.get("height"),
+        duration_ms=asset.get("duration_ms"),
+        provenance=str(asset.get("provenance") or "uploaded"),
+        created_at=str(asset.get("created_at") or _utc_now_iso()),
+        last_modified=str(asset.get("last_modified") or asset.get("created_at") or _utc_now_iso()),
+        version=int(asset.get("version") or 1),
+    )
+
+
+def get_persona_visual_job_manager() -> JobManager:
+    db_url = (os.getenv("JOBS_DB_URL") or "").strip()
+    db_path = (os.getenv("JOBS_DB_PATH") or "").strip()
+    if db_url:
+        backend = "postgres" if db_url.startswith("postgres") else None
+        return JobManager(backend=backend, db_url=db_url)
+    if db_path:
+        return JobManager(db_path=Path(db_path))
+    return JobManager()
+
+
+def get_persona_visual_service(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualService:
+    return PersonaVisualService(db)
+
+
+def get_persona_visual_library_service(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualLibraryService:
+    return PersonaVisualLibraryService(db)
+
+
+def get_persona_visual_starter_catalog_service(
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualStarterCatalogService:
+    return PersonaVisualStarterCatalogService(db)
+
+
+def _build_persona_visual_generation_readiness(
+    *,
+    backend: str | None,
+) -> PersonaVisualGenerationReadinessResponse:
+    """Build the generation preflight response without enqueueing a job.
+
+    The checks mirror the worker's first failure points: optional worker flag,
+    queue name, backend resolution, and adapter instantiation.
+    """
+
+    requested_backend = str(backend or "").strip() or None
+    worker_enabled = env_flag_enabled("PERSONA_VISUAL_GENERATION_WORKER_ENABLED")
+    try:
+        registry = get_image_generation_registry()
+        enabled_backends = registry.list_backend_names(include_disabled=False)
+        default_backend = registry.resolve_backend(None)
+        resolved_backend = registry.resolve_backend(requested_backend) if requested_backend else default_backend
+        requested_backend_available = None
+        adapter_available = False
+        if resolved_backend:
+            adapter_available = registry.get_adapter(resolved_backend) is not None
+        if requested_backend is not None:
+            requested_backend_available = adapter_available
+
+        image_backend_available = adapter_available
+        reasons: list[str] = []
+        if not worker_enabled:
+            reasons.append("jobs_worker_disabled")
+        if requested_backend and resolved_backend is None:
+            reasons.append("requested_backend_unavailable")
+        elif resolved_backend and not adapter_available:
+            reasons.append("image_adapter_unavailable")
+        elif not requested_backend and not enabled_backends:
+            reasons.append("image_backend_unavailable")
+        elif not requested_backend and default_backend is None:
+            reasons.append("default_backend_unavailable")
+    except Exception:
+        logger.exception("Persona visual generation readiness dependency check failed")
+        enabled_backends = []
+        default_backend = None
+        requested_backend_available = False if requested_backend is not None else None
+        image_backend_available = False
+        reasons = []
+        if not worker_enabled:
+            reasons.append("jobs_worker_disabled")
+        reasons.append("dependency_check_failed")
+
+    return PersonaVisualGenerationReadinessResponse(
+        available=worker_enabled and image_backend_available,
+        worker_enabled=worker_enabled,
+        queue=persona_visual_generation_queue(),
+        image_backend_available=image_backend_available,
+        default_backend=default_backend,
+        requested_backend=requested_backend,
+        requested_backend_available=requested_backend_available,
+        enabled_backends=enabled_backends,
+        reasons=reasons,
+    )
+
+
+def _persona_visual_override_payload_from_tool_result(
+    *,
+    tool_name: str,
+    result: dict[str, Any],
+    persona_id: str,
+    session_id: str,
+) -> dict[str, Any] | None:
+    """Extract a bounded visual-state override from a successful MCP trigger result."""
+    if str(tool_name or "") != "persona_visuals.trigger_state":
+        return None
+    if not isinstance(result, dict) or result.get("ok") is False:
+        return None
+    payload = result.get("output")
+    if not isinstance(payload, dict):
+        payload = result.get("result")
+    if not isinstance(payload, dict) or payload.get("type") != "visual_state_override":
+        return None
+
+    state = _safe_persona_visual_override_state(
+        payload.get("state") or payload.get("visual_state")
+    )
+    if state is None:
+        return None
+
+    try:
+        duration_ms = int(payload.get("duration_ms", 1500))
+    except (TypeError, ValueError):
+        duration_ms = 1500
+    duration_ms = max(MIN_TRIGGER_DURATION_MS, min(MAX_TRIGGER_DURATION_MS, duration_ms))
+
+    resolved_persona_id = str(payload.get("persona_id") or persona_id or "").strip()
+    resolved_session_id = str(payload.get("session_id") or session_id or "").strip()
+    if not resolved_persona_id or not resolved_session_id:
+        return None
+
+    reason = _safe_persona_visual_override_reason(payload.get("reason"))
+    return {
+        "type": "visual_state_override",
+        "persona_id": resolved_persona_id,
+        "session_id": resolved_session_id,
+        "state": state,
+        "duration_ms": duration_ms,
+        "reason": reason,
+        "tool": "persona_visuals.trigger_state",
+    }
+
+
+def _safe_persona_visual_override_state(value: Any) -> str | None:
+    """Return a built-in or safe custom visual state ID for runtime payloads."""
+    state = str(value or "").strip()
+    if not state:
+        return None
+    if state in VISUAL_STATE_IDS:
+        return state
+    if custom_visual_state_id_error(state) is None:
+        return state
+    return None
+
+
+def _safe_persona_visual_override_reason(value: Any) -> str:
+    """Return a bounded, single-line reason for trace-safe runtime payloads."""
+    if value is not None and not isinstance(value, str):
+        return "persona_visuals.trigger_state"
+    reason = " ".join(str(value or "persona_visuals.trigger_state").split())
+    if not reason:
+        return "persona_visuals.trigger_state"
+    return reason[:200]
+
+
+def _persona_visual_pack_to_response(
+    pack: dict[str, Any],
+    *,
+    assets: list[dict[str, Any]] | None = None,
+) -> PersonaVisualPackResponse:
+    pack_assets = assets if assets is not None else list(pack.get("assets") or [])
+    return PersonaVisualPackResponse(
+        id=str(pack.get("id") or ""),
+        persona_id=str(pack.get("persona_id") or ""),
+        user_id=str(pack.get("user_id") or ""),
+        title=str(pack.get("title") or ""),
+        renderer_type=str(pack.get("renderer_type") or "sprite_frames"),
+        status=str(pack.get("status") or "draft"),
+        manifest_version=int(pack.get("manifest_version") or 1),
+        manifest=pack.get("manifest") if isinstance(pack.get("manifest"), dict) else {},
+        parent_pack_id=pack.get("parent_pack_id"),
+        revision_number=int(pack.get("revision_number") or 1),
+        provenance=str(pack.get("provenance") or "uploaded"),
+        active_at=pack.get("active_at"),
+        assets=[_persona_visual_asset_to_response(asset) for asset in pack_assets],
+        created_at=str(pack.get("created_at") or _utc_now_iso()),
+        last_modified=str(pack.get("last_modified") or pack.get("created_at") or _utc_now_iso()),
+        version=int(pack.get("version") or 1),
+    )
+
+
+def _persona_visual_library_item_to_response(item: dict[str, Any]) -> PersonaVisualLibraryItemResponse:
+    return PersonaVisualLibraryItemResponse(
+        id=str(item.get("id") or ""),
+        user_id=str(item.get("user_id") or ""),
+        source_persona_id=item.get("source_persona_id"),
+        source_pack_id=item.get("source_pack_id"),
+        title=str(item.get("title") or ""),
+        notes=item.get("notes"),
+        tags=[str(tag) for tag in list(item.get("tags") or [])],
+        source_persona_name=item.get("source_persona_name"),
+        source_pack_title=item.get("source_pack_title"),
+        source_pack_version=item.get("source_pack_version"),
+        source_current_version=item.get("source_current_version"),
+        source_available=bool(item.get("source_available")),
+        source_changed=bool(item.get("source_changed")),
+        created_at=str(item.get("created_at") or _utc_now_iso()),
+        last_modified=str(item.get("last_modified") or item.get("created_at") or _utc_now_iso()),
+        version=int(item.get("version") or 1),
+    )
+
+
+def _persona_visual_candidate_to_response(
+    candidate: dict[str, Any],
+    *,
+    generated_assets: list[dict[str, Any]] | None = None,
+) -> PersonaVisualCandidateResponse:
+    return PersonaVisualCandidateResponse(
+        id=str(candidate.get("id") or ""),
+        pack_id=str(candidate.get("pack_id") or ""),
+        persona_id=str(candidate.get("persona_id") or ""),
+        user_id=str(candidate.get("user_id") or ""),
+        job_id=candidate.get("job_id"),
+        status=str(candidate.get("status") or "review"),
+        proposed_manifest_patch=(
+            candidate.get("proposed_manifest_patch")
+            if isinstance(candidate.get("proposed_manifest_patch"), dict)
+            else {}
+        ),
+        generated_asset_ids=[str(item) for item in list(candidate.get("generated_asset_ids") or [])],
+        generated_assets=[
+            _persona_visual_asset_to_response(asset)
+            for asset in (generated_assets or [])
+        ],
+        generation_provenance=(
+            candidate.get("generation_provenance")
+            if isinstance(candidate.get("generation_provenance"), dict)
+            else {}
+        ),
+        prompt=candidate.get("prompt"),
+        failure_reason=candidate.get("failure_reason"),
+        created_at=str(candidate.get("created_at") or _utc_now_iso()),
+        last_modified=str(candidate.get("last_modified") or candidate.get("created_at") or _utc_now_iso()),
+        version=int(candidate.get("version") or 1),
+    )
+
+
+def _persona_visual_generation_job_request_id(
+    job: dict[str, Any],
+    *,
+    fallback_request_id: str | None,
+) -> str | None:
+    """Return the persisted request ID for a generated-candidate job response."""
+    for candidate in (
+        job.get("request_id"),
+        _persona_visual_generation_job_payload(job).get("request_id"),
+    ):
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    stable_job_id = str(job.get("id") or job.get("uuid") or "").strip()
+    return stable_job_id or (str(fallback_request_id or "").strip() or None)
+
+
+def _persona_visual_generation_job_payload(job: dict[str, Any]) -> dict[str, Any]:
+    payload = job.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str):
+        try:
+            parsed = json.loads(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _persona_visual_generated_assets_for_candidate(
+    *,
+    db: CharactersRAGDB,
+    candidate: dict[str, Any],
+    pack_id: str,
+    persona_id: str,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    generated_ids = {str(item) for item in list(candidate.get("generated_asset_ids") or [])}
+    if not generated_ids:
+        return []
+    assets = db.list_persona_visual_assets(
+        pack_id=pack_id,
+        persona_id=persona_id,
+        user_id=user_id,
+    )
+    return [asset for asset in assets if str(asset.get("id") or "") in generated_ids]
+
+
+def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTTPException:
+    status_code = status.HTTP_400_BAD_REQUEST
+    if exc.code in {"pack_not_found", "asset_not_found", "candidate_not_found", "target_persona_not_found"}:
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"forbidden"}:
+        status_code = status.HTTP_403_FORBIDDEN
+    elif exc.code in {"upload_too_large"}:
+        status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+    elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch"}:
+        status_code = status.HTTP_409_CONFLICT
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": str(exc), "details": exc.details},
+    )
+
+
+def _persona_visual_library_service_error_to_http(exc: PersonaVisualLibraryServiceError) -> HTTPException:
+    status_code = status.HTTP_400_BAD_REQUEST
+    if exc.code in {"library_item_not_found", "source_pack_not_found", "target_persona_not_found"}:
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"forbidden"}:
+        status_code = status.HTTP_403_FORBIDDEN
+    elif exc.code in {"source_pack_unavailable", "library_item_conflict"}:
+        status_code = status.HTTP_409_CONFLICT
+    elif exc.code in {"invalid_library_metadata"}:
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": str(exc), "details": exc.details},
+    )
+
+
+def _persona_visual_starter_catalog_error_to_http(exc: PersonaVisualStarterCatalogError) -> HTTPException:
+    status_code = status.HTTP_400_BAD_REQUEST
+    if exc.code in {"starter_pack_not_found", "target_persona_not_found"}:
+        status_code = status.HTTP_404_NOT_FOUND
+    elif exc.code in {"invalid_starter_fixture", "duplicate_starter_fixture"}:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    elif exc.code in {"invalid_starter_asset", "invalid_starter_manifest"}:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    elif exc.code in {"persona_id_required", "user_id_required"}:
+        status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": exc.code, "message": str(exc), "details": exc.details},
+    )
+
+
+def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Path:
+    parts = str(storage_key or "").split("/")
+    if len(parts) < 4 or parts[0] != "persona_visuals" or any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(status_code=404, detail="Persona visual asset not found")
+    base = DatabasePaths.get_user_persona_visuals_dir(user_id).resolve(strict=False)
+    target = base.joinpath(*parts[1:]).resolve(strict=False)
+    if not target.is_relative_to(base) or not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="Persona visual asset not found")
+    return target
+
+
+def _persona_visual_json_field(row: dict[str, Any], key: str, default: Any) -> Any:
+    value = row.get(key)
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except json.JSONDecodeError:
+        return default
+
+
+def _persona_visual_import_preview_commit_eligible(preview: dict[str, Any]) -> bool:
+    """Return whether stored preview metadata allows queuing import commit."""
+    status_value = str(preview.get("status") or "").strip()
+    if status_value == "blocked":
+        return False
+    if status_value != "completed":
+        return True
+    proposed_plan, proposed_plan_valid = import_preview_plan_from_stored_json(
+        preview.get("proposed_plan_json")
+    )
+    return proposed_plan_valid and is_import_preview_plan_committable(proposed_plan)
+
+
+def _persona_visual_replaceable_pack_ids(conflicts: Any) -> set[str]:
+    """Return target pack ids that preview conflicts allow replacing."""
+    if not isinstance(conflicts, list):
+        return set()
+    replaceable: set[str] = set()
+    for conflict in conflicts:
+        if not isinstance(conflict, dict):
+            continue
+        allowed_choices = conflict.get("allowed_choices")
+        if not isinstance(allowed_choices, list) or "replace_draft" not in allowed_choices:
+            continue
+        pack_id = str(conflict.get("pack_id") or "").strip()
+        if pack_id:
+            replaceable.add(pack_id)
+    return replaceable
+
+
+def _persona_visual_job_for_portability(jobs_manager: JobManager, job_id: str) -> dict[str, Any] | None:
+    try:
+        return jobs_manager.get_job(int(job_id))
+    except (TypeError, ValueError):
+        return None
+
+
+def _persona_visual_export_download_url(*, persona_id: str, pack_id: str, job_id: str) -> str:
+    return f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}/download"
+
+
+def _persona_visual_portability_repo(db: CharactersRAGDB) -> PersonaVisualPortabilityRepository:
+    return PersonaVisualPortabilityRepository.initialized(db)
+
+
+def _persona_visual_pack_export_staging_root(user_id: str) -> Path:
+    configured = (os.getenv("PERSONA_VISUAL_PACK_EXPORT_STAGING_ROOT") or "").strip()
+    if configured:
+        return Path(configured) / str(user_id)
+    return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_packs"
+
+
+def _persona_visual_pack_import_preview_staging_root(user_id: str) -> Path:
+    configured = (os.getenv("PERSONA_VISUAL_PACK_IMPORT_PREVIEW_STAGING_ROOT") or "").strip()
+    if configured:
+        return Path(configured) / str(user_id)
+    return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_pack_import_previews"
+
+
+async def _read_persona_visual_upload_bytes(file: UploadFile) -> bytes:
+    chunks: list[bytes] = []
+    total_bytes = 0
+    try:
+        while chunk := await file.read(_PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES):
+            total_bytes += len(chunk)
+            if total_bytes > MAX_VISUAL_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail={
+                        "code": "upload_too_large",
+                        "message": "Persona visual upload exceeds the maximum allowed size.",
+                        "details": {"max_bytes": MAX_VISUAL_UPLOAD_BYTES},
+                    },
+                )
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        await file.close()
+
+
+def _validated_persona_visual_export_archive_path(user_id: str, archive_path: str | None) -> Path:
+    if not archive_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_archive_not_found")
+    root = _persona_visual_pack_export_staging_root(user_id).resolve(strict=False)
+    path = Path(archive_path).resolve(strict=False)
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="export_archive_outside_user_root",
+        ) from exc
+    if path.suffix != PERSONA_VISUAL_PACK_EXTENSION:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid_export_archive_type")
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_archive_not_found")
+    return path
+
+
+def _validated_persona_visual_import_preview_archive_path(user_id: str, archive_path: str | None) -> Path:
+    if not archive_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_archive_not_found")
+    root = _persona_visual_pack_import_preview_staging_root(user_id).resolve(strict=False)
+    path = Path(archive_path).resolve(strict=False)
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="import_preview_archive_outside_user_root",
+        ) from exc
+    if path.suffix.casefold() not in _PERSONA_VISUAL_IMPORT_PREVIEW_ARCHIVE_EXTENSIONS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="invalid_import_preview_archive_type")
+    return path
+
+
+async def _save_persona_visual_import_preview_archive(archive: UploadFile, archive_path: Path) -> int:
+    total_bytes = 0
+    try:
+        await aiofiles.os.makedirs(archive_path.parent, exist_ok=True)
+        async with aiofiles.open(archive_path, "wb") as output:
+            while chunk := await archive.read(_PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES):
+                total_bytes += len(chunk)
+                if total_bytes > DEFAULT_MAX_ARCHIVE_SIZE_BYTES:
+                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="archive_too_large")
+                await output.write(chunk)
+    except HTTPException:
+        with contextlib.suppress(OSError):
+            archive_path.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            archive_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="archive_save_failed") from exc
+    finally:
+        await archive.close()
+    return total_bytes
+
+
+def _compose_persona_visual_portability_response(
+    *,
+    portability_job: dict[str, Any],
+    job: dict[str, Any] | None,
+    persona_id: str,
+    pack_id: str,
+) -> PersonaVisualPortabilityJobResponse:
+    visual_status = str(portability_job["status"])
+    job_status = visual_status or str((job or {}).get("status") or "queued")
+    job_id = str(portability_job["job_id"])
+    download_url = portability_job.get("download_url") or _persona_visual_export_download_url(
+        persona_id=persona_id,
+        pack_id=pack_id,
+        job_id=job_id,
+    )
+    return PersonaVisualPortabilityJobResponse(
+        job_id=job_id,
+        portability_job_id=str(portability_job["id"]),
+        operation=str(portability_job["operation"]),
+        persona_id=persona_id,
+        pack_id=pack_id,
+        status=job_status,
+        visual_status=visual_status,
+        stage=str(portability_job["stage"]),
+        progress=_persona_visual_json_field(portability_job, "progress_json", {}),
+        warnings=_persona_visual_json_field(portability_job, "warnings_json", []),
+        archive_sha256=portability_job.get("archive_sha256"),
+        canonical_payload_fingerprint=portability_job.get("canonical_payload_fingerprint"),
+        download_url=download_url,
+        error_code=portability_job.get("error_code"),
+        error_message=portability_job.get("error_message"),
+        expires_at=portability_job.get("expires_at"),
+    )
+
+
+def _compose_persona_visual_import_preview_response(
+    *,
+    preview: dict[str, Any],
+    portability_job: dict[str, Any],
+    job: dict[str, Any] | None,
+) -> PersonaVisualImportPreviewResponse:
+    preview_status = str(preview["status"])
+    job_status = preview_status or str((job or {}).get("status") or portability_job["status"])
+    return PersonaVisualImportPreviewResponse(
+        preview_id=str(preview["id"]),
+        job_id=str(preview["job_id"]),
+        portability_job_id=str(portability_job["id"]),
+        operation=str(portability_job["operation"]),
+        target_persona_id=preview.get("target_persona_id"),
+        status=job_status,
+        visual_status=preview_status,
+        stage=str(preview.get("stage") or portability_job["stage"]),
+        archive_sha256=preview.get("archive_sha256") or portability_job.get("archive_sha256"),
+        canonical_payload_fingerprint=(
+            preview.get("canonical_payload_fingerprint")
+            or portability_job.get("canonical_payload_fingerprint")
+        ),
+        schema_version=preview.get("schema_version"),
+        bundle_summary=_persona_visual_json_field(preview, "bundle_summary_json", {}),
+        validation_warnings=_persona_visual_json_field(preview, "validation_warnings_json", []),
+        conflicts=_persona_visual_json_field(preview, "conflicts_json", []),
+        proposed_plan=_persona_visual_json_field(preview, "proposed_plan_json", {}),
+        quota_estimate=_persona_visual_json_field(preview, "quota_estimate_json", {}),
+        required_choices=_persona_visual_json_field(preview, "required_choices_json", []),
+        target_warnings=_persona_visual_json_field(preview, "target_warnings_json", []),
+        error_code=preview.get("error_code") or portability_job.get("error_code"),
+        error_message=preview.get("error_message") or portability_job.get("error_message"),
+        expires_at=preview.get("expires_at") or portability_job.get("expires_at"),
+    )
+
+
+def _compose_persona_visual_import_commit_response(
+    *,
+    portability_job: dict[str, Any],
+    job: dict[str, Any] | None,
+    persona_id: str,
+) -> PersonaVisualPortabilityJobResponse:
+    visual_status = str(portability_job["status"])
+    job_status = visual_status or str((job or {}).get("status") or "queued")
+    return PersonaVisualPortabilityJobResponse(
+        job_id=str(portability_job["job_id"]),
+        portability_job_id=str(portability_job["id"]),
+        operation=str(portability_job["operation"]),
+        persona_id=persona_id,
+        pack_id=portability_job.get("pack_id"),
+        status=job_status,
+        visual_status=visual_status,
+        stage=str(portability_job["stage"]),
+        progress=_persona_visual_json_field(portability_job, "progress_json", {}),
+        warnings=_persona_visual_json_field(portability_job, "warnings_json", []),
+        archive_sha256=portability_job.get("archive_sha256"),
+        canonical_payload_fingerprint=portability_job.get("canonical_payload_fingerprint"),
+        download_url=None,
+        error_code=portability_job.get("error_code"),
+        error_message=portability_job.get("error_message"),
+        expires_at=portability_job.get("expires_at"),
     )
 
 
@@ -1865,6 +2878,7 @@ def _persona_info_from_profile(
     profile: dict[str, Any],
     *,
     policy_rules: list[dict[str, Any]] | None = None,
+    buddy_row: dict[str, Any] | None = None,
 ) -> PersonaInfo:
     mcp_tools = sorted(
         {
@@ -1901,7 +2915,93 @@ def _persona_info_from_profile(
         avatar_url=None,
         capabilities=capabilities,
         default_tools=default_tools,
+        buddy_summary=_persona_buddy_summary_from_profile(profile, buddy_row=buddy_row),
     )
+
+
+def _persona_buddy_summary_from_profile(
+    profile: dict[str, Any],
+    *,
+    buddy_row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    description = str(profile.get("system_prompt") or "").strip()
+    role_summary = description[:300] if description else _DEFAULT_PERSONA_DESCRIPTION
+    return build_persona_buddy_summary(
+        persona_name=str(profile.get("name") or _DEFAULT_PERSONA_NAME),
+        role_summary=role_summary,
+        buddy_row=buddy_row,
+    )
+
+
+def _load_persona_buddy_row_for_projection(
+    db: CharactersRAGDB,
+    *,
+    profile: dict[str, Any],
+) -> dict[str, Any] | None:
+    persona_id = str(profile.get("id") or "").strip()
+    user_id = str(profile.get("user_id") or "").strip()
+    if not persona_id or not user_id:
+        return None
+
+    try:
+        return db.get_persona_buddy(
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted_personas=bool(profile.get("deleted", False)),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to load persona buddy projection for persona_hash {}: {}",
+            _redacted_id_for_logs(persona_id),
+            exc,
+        )
+        return None
+
+
+def _load_persona_buddy_rows_for_projection(
+    db: CharactersRAGDB,
+    *,
+    profiles: list[dict[str, Any]],
+) -> dict[str, dict[str, Any] | None]:
+    normalized_profiles = [profile for profile in profiles if isinstance(profile, dict)]
+    if not normalized_profiles:
+        return {}
+
+    sorted_profiles = sorted(
+        normalized_profiles,
+        key=lambda profile: (
+            str(profile.get("name") or "").strip().lower(),
+            str(profile.get("id") or "").strip(),
+        ),
+    )
+    persona_ids = [
+        str(profile.get("id") or "").strip()
+        for profile in sorted_profiles
+        if str(profile.get("id") or "").strip()
+    ]
+    user_ids = {
+        str(profile.get("user_id") or "").strip()
+        for profile in normalized_profiles
+        if str(profile.get("user_id") or "").strip()
+    }
+    if not persona_ids or len(user_ids) != 1:
+        return {}
+
+    user_id = next(iter(user_ids))
+    include_deleted_personas = any(bool(profile.get("deleted", False)) for profile in normalized_profiles)
+    try:
+        return db.list_persona_buddies(
+            user_id=user_id,
+            persona_ids=persona_ids,
+            include_deleted_personas=include_deleted_personas,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed bulk persona buddy projection load for user_hash {}: {}",
+            _redacted_id_for_logs(user_id),
+            exc,
+        )
+        return {}
 
 
 def _ensure_default_persona_profile(db: CharactersRAGDB, *, user_id: str) -> dict[str, Any]:
@@ -2218,6 +3318,40 @@ def _apply_persona_live_trigger_phrases(
     return True, cleaned
 
 
+def _get_persona_wake_no_command_timeout_s() -> float:
+    """Return the bounded wake activation grace period for one-shot wake modes."""
+    try:
+        return max(
+            1.0,
+            min(300.0, float(os.getenv("PERSONA_WAKE_NO_COMMAND_TIMEOUT_S", "30"))),
+        )
+    except (TypeError, ValueError):
+        return 30.0
+
+
+def _normalize_persona_wake_phrase(value: object) -> str:
+    """Normalize wake phrases so client-reported matches can be compared safely."""
+    text = re.sub(r"[^\w\s]+|_", " ", str(value or "").strip().lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _match_persona_wake_phrase(
+    matched_phrase: object,
+    configured_phrases: list[str] | None,
+) -> str | None:
+    """Return the configured phrase matching a client wake activation, if any."""
+    normalized_match = _normalize_persona_wake_phrase(matched_phrase)
+    if not normalized_match:
+        return None
+    for phrase in configured_phrases or []:
+        candidate = str(phrase or "").strip()
+        if not candidate:
+            continue
+        if _normalize_persona_wake_phrase(candidate) == normalized_match:
+            return candidate
+    return None
+
+
 async def _generate_tts_audio_chunks(
     text: str,
     audio_format: str,
@@ -2419,11 +3553,9 @@ async def _resolve_authenticated_user_id(
 
     def _set_auth_context(*, method: str | None, api_key_scopes: set[str] | None = None) -> None:
         try:
-            setattr(ws.state, "persona_auth_method", str(method or "").strip().lower())
-            setattr(
-                ws.state,
-                "persona_api_key_scopes",
-                sorted(str(scope).strip().lower() for scope in (api_key_scopes or set()) if str(scope).strip()),
+            ws.state.persona_auth_method = str(method or "").strip().lower()
+            ws.state.persona_api_key_scopes = sorted(
+                str(scope).strip().lower() for scope in (api_key_scopes or set()) if str(scope).strip()
             )
         except Exception:
             return
@@ -2533,7 +3665,14 @@ async def list_persona_profiles(
         )
         if not profiles and not include_deleted:
             profiles = [_ensure_default_persona_profile(db, user_id=user_id)]
-        return [_persona_profile_to_response(profile) for profile in profiles]
+        buddy_rows = _load_persona_buddy_rows_for_projection(db, profiles=profiles)
+        return [
+            _persona_profile_to_response(
+                profile,
+                buddy_row=buddy_rows.get(str(profile.get("id") or "").strip()),
+            )
+            for profile in profiles
+        ]
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="list persona profiles") from exc
 
@@ -2562,17 +3701,23 @@ async def create_persona_profile(
         if profile is None:
             raise HTTPException(status_code=500, detail="Failed to load created persona profile")
         try:
-            await _run_persona_db_call(_ensure_persona_buddy_after_profile_mutation, db=db, profile=profile)
+            buddy_row = await _run_persona_db_call(_ensure_persona_buddy_after_profile_mutation, db=db, profile=profile)
         except (ValueError, InputError, ConflictError, CharactersRAGDBError) as exc:
-            await _run_persona_db_call(
-                _rollback_created_persona_profile_after_buddy_failure,
-                db,
-                persona_id=persona_id,
-                user_id=user_id,
-                expected_version=int(profile.get("version") or 1),
-            )
-            raise HTTPException(status_code=500, detail="Persona buddy sync failed after profile create") from exc
-        return _persona_profile_to_response(profile)
+            try:
+                await _run_persona_db_call(
+                    _rollback_created_persona_profile_after_buddy_failure,
+                    db,
+                    persona_id=persona_id,
+                    user_id=user_id,
+                    expected_version=int(profile.get("version") or 1),
+                )
+            except PersonaBuddyRollbackError as rollback_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to roll back persona profile creation",
+                ) from rollback_exc
+            raise HTTPException(status_code=400, detail="Persona buddy validation failed") from exc
+        return _persona_profile_to_response(profile, buddy_row=buddy_row)
     except HTTPException:
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
@@ -2597,7 +3742,10 @@ async def get_persona_profile(
         profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
         if profile is None:
             raise HTTPException(status_code=404, detail="Persona profile not found")
-        return _persona_profile_to_response(profile)
+        return _persona_profile_to_response(
+            profile,
+            buddy_row=_load_persona_buddy_row_for_projection(db, profile=profile),
+        )
     except HTTPException:
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
@@ -2646,9 +3794,9 @@ async def update_persona_profile(
         if profile is None:
             raise HTTPException(status_code=404, detail="Persona profile not found")
         try:
-            await _run_persona_db_call(_ensure_persona_buddy_after_profile_mutation, db=db, profile=profile)
+            buddy_row = await _run_persona_db_call(_ensure_persona_buddy_after_profile_mutation, db=db, profile=profile)
         except (ValueError, InputError, ConflictError, CharactersRAGDBError) as exc:
-            if previous_profile is not None:
+            try:
                 await _run_persona_db_call(
                     _rollback_updated_persona_profile_after_buddy_failure,
                     db,
@@ -2658,8 +3806,13 @@ async def update_persona_profile(
                     previous_profile=previous_profile,
                     expected_version=int(profile.get("version") or 1),
                 )
-            raise HTTPException(status_code=500, detail="Persona buddy sync failed after profile update") from exc
-        return _persona_profile_to_response(profile)
+            except PersonaBuddyRollbackError as rollback_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to roll back persona profile update",
+                ) from rollback_exc
+            raise HTTPException(status_code=400, detail="Persona buddy validation failed") from exc
+        return _persona_profile_to_response(profile, buddy_row=buddy_row)
     except HTTPException:
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
@@ -2678,6 +3831,7 @@ async def get_persona_buddy(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaBuddyResponse:
+    """Return the resolved buddy profile for one active persona profile."""
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
@@ -2695,6 +3849,1760 @@ async def get_persona_buddy(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona buddy") from exc
+
+
+@router.get(
+    "/visual-renderers",
+    response_model=PersonaVisualRendererCapabilitiesResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_renderers(
+    _current_user: User = Depends(get_request_user),
+) -> PersonaVisualRendererCapabilitiesResponse:
+    """List known Persona/Buddy visual renderer capabilities for this server."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    _require_current_user_id(_current_user)
+    return PersonaVisualRendererCapabilitiesResponse(
+        renderers=[
+            PersonaVisualRendererCapabilityResponse(
+                renderer_type=capability.renderer_type,
+                display_name=capability.display_name,
+                manifest_versions=list(capability.manifest_versions),
+                can_validate=capability.can_validate,
+                can_activate=capability.can_activate,
+                buddy_runtime_supported=capability.buddy_runtime_supported,
+                import_supported=capability.import_supported,
+                export_supported=capability.export_supported,
+                disabled_reason=capability.disabled_reason,
+                renderer_contract_versions=capability.renderer_contract_versions,
+                supported_asset_roles=capability.supported_asset_roles,
+                required_role_categories=capability.required_role_categories,
+                role_category_map=capability.role_category_map,
+                allowed_mime_types=capability.allowed_mime_types,
+                allowed_extensions=capability.allowed_extensions,
+                max_file_count=capability.max_file_count,
+                max_total_bytes=capability.max_total_bytes,
+                max_texture_width=capability.max_texture_width,
+                max_texture_height=capability.max_texture_height,
+                feature_flag=capability.feature_flag,
+                setup_status=capability.setup_status,
+                setup_blockers=capability.setup_blockers,
+                requires_static_fallback=capability.requires_static_fallback,
+                requires_license_ack=capability.requires_license_ack,
+            )
+            for capability in list_persona_visual_renderer_capabilities()
+        ]
+    )
+
+
+@router.get(
+    "/visual-starter-packs",
+    response_model=PersonaVisualStarterPackListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_starter_packs(
+    _current_user: User = Depends(get_request_user),
+    starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
+) -> PersonaVisualStarterPackListResponse:
+    """List bundled Persona Visual starter packs available for draft copy."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    _require_current_user_id(_current_user)
+    try:
+        starter_packs = await _run_persona_db_call(starter_service.list_starter_packs)
+        return PersonaVisualStarterPackListResponse(starter_packs=starter_packs)
+    except PersonaVisualStarterCatalogError as exc:
+        raise _persona_visual_starter_catalog_error_to_http(exc) from exc
+
+
+@router.get(
+    "/visual-starter-packs/{starter_pack_id}",
+    response_model=PersonaVisualStarterPackDetailResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_starter_pack(
+    starter_pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
+) -> PersonaVisualStarterPackDetailResponse:
+    """Return one bundled Persona Visual starter pack fixture preview."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    _require_current_user_id(_current_user)
+    try:
+        return await _run_persona_db_call(starter_service.get_starter_pack, starter_pack_id)
+    except PersonaVisualStarterCatalogError as exc:
+        raise _persona_visual_starter_catalog_error_to_http(exc) from exc
+
+
+@router.post(
+    "/visual-starter-packs/{starter_pack_id}/copy",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def copy_persona_visual_starter_pack(
+    starter_pack_id: str,
+    payload: PersonaVisualStarterPackCopyRequest,
+    _current_user: User = Depends(get_request_user),
+    starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
+) -> PersonaVisualPackResponse:
+    """Copy a bundled starter pack to a target persona as an inactive draft."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        copied = await _run_persona_db_call(
+            starter_service.copy_starter_pack_to_persona,
+            starter_pack_id=starter_pack_id,
+            persona_id=payload.target_persona_id,
+            user_id=user_id,
+            title=payload.title,
+        )
+        return _persona_visual_pack_to_response(copied, assets=list(copied.get("assets") or []))
+    except PersonaVisualStarterCatalogError as exc:
+        raise _persona_visual_starter_catalog_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="copy persona visual starter pack") from exc
+
+
+@router.get(
+    "/visual-library",
+    response_model=PersonaVisualLibraryListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_library_items(
+    include_deleted: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryListResponse:
+    """List the current user's personal Persona Visual pack library."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        items = await _run_persona_db_call(
+            library_service.list_items,
+            user_id=user_id,
+            include_deleted=include_deleted,
+            limit=limit,
+            offset=offset,
+        )
+        return PersonaVisualLibraryListResponse(
+            items=[_persona_visual_library_item_to_response(item) for item in items]
+        )
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona visual library") from exc
+
+
+@router.patch(
+    "/visual-library/{item_id}",
+    response_model=PersonaVisualLibraryItemResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def update_persona_visual_library_item(
+    item_id: str,
+    payload: PersonaVisualLibraryUpdateRequest,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryItemResponse:
+    """Update display metadata for one personal Persona Visual library item."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    update_kwargs: dict[str, Any] = {}
+    if "title" in payload.model_fields_set:
+        update_kwargs["title"] = payload.title
+    if "notes" in payload.model_fields_set:
+        update_kwargs["notes"] = payload.notes
+    if "tags" in payload.model_fields_set:
+        update_kwargs["tags"] = payload.tags
+    if not update_kwargs:
+        raise HTTPException(status_code=400, detail="No library item fields provided for update")
+
+    user_id = _require_current_user_id(_current_user)
+    try:
+        item = await _run_persona_db_call(
+            library_service.update_item,
+            user_id=user_id,
+            item_id=item_id,
+            expected_version=payload.expected_version,
+            **update_kwargs,
+        )
+        return _persona_visual_library_item_to_response(item)
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="update persona visual library item") from exc
+
+
+@router.delete(
+    "/visual-library/{item_id}",
+    response_model=PersonaVisualLibraryDeleteResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def delete_persona_visual_library_item(
+    item_id: str,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryDeleteResponse:
+    """Soft-delete one personal Persona Visual library item."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        deleted = await _run_persona_db_call(
+            library_service.delete_item,
+            user_id=user_id,
+            item_id=item_id,
+        )
+        if not deleted:
+            raise PersonaVisualLibraryServiceError(
+                "library_item_not_found",
+                "Persona Visual library item not found for user.",
+                details={"item_id": item_id},
+            )
+        return PersonaVisualLibraryDeleteResponse(status="deleted", item_id=item_id)
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="delete persona visual library item") from exc
+
+
+@router.post(
+    "/visual-library/{item_id}/use",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def use_persona_visual_library_item(
+    item_id: str,
+    payload: PersonaVisualLibraryUseRequest,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualPackResponse:
+    """Use a personal library item by duplicating its source pack to a target persona as a draft."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        duplicated = await _run_persona_db_call(
+            library_service.use_item_for_persona,
+            user_id=user_id,
+            item_id=item_id,
+            target_persona_id=payload.target_persona_id,
+            title=payload.title,
+        )
+        return _persona_visual_pack_to_response(
+            duplicated,
+            assets=list(duplicated.get("assets") or []),
+        )
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="use persona visual library item") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/library",
+    response_model=PersonaVisualLibraryItemResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def save_persona_visual_pack_to_library(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualLibrarySaveRequest,
+    _current_user: User = Depends(get_request_user),
+    library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
+) -> PersonaVisualLibraryItemResponse:
+    """Save a same-user Persona Visual pack as a reference-backed personal library item."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        existing_item = await _run_persona_db_call(
+            library_service.get_item_for_source,
+            user_id=user_id,
+            source_persona_id=persona_id,
+            source_pack_id=pack_id,
+        )
+        provided_fields = payload.model_fields_set
+        existing_title = existing_item.get("title") if existing_item else None
+        existing_notes = existing_item.get("notes") if existing_item else None
+        existing_tags = existing_item.get("tags") if existing_item else None
+        title = payload.title if "title" in provided_fields else existing_title
+        notes = payload.notes if "notes" in provided_fields else existing_notes
+        tags = payload.tags if "tags" in provided_fields else existing_tags
+        item = await _run_persona_db_call(
+            library_service.save_pack,
+            user_id=user_id,
+            source_persona_id=persona_id,
+            source_pack_id=pack_id,
+            title=title,
+            notes=notes,
+            tags=tags,
+        )
+        return _persona_visual_library_item_to_response(item)
+    except PersonaVisualLibraryServiceError as exc:
+        raise _persona_visual_library_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="save persona visual pack to library") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs",
+    response_model=list[PersonaVisualPackResponse],
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_packs(
+    persona_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> list[PersonaVisualPackResponse]:
+    """List visual packs owned by the current user for one active persona profile."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        packs = await _run_persona_db_call(
+            db.list_persona_visual_packs,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        responses: list[PersonaVisualPackResponse] = []
+        for pack in packs:
+            pack_id = str(pack.get("id") or "")
+            assets = await _run_persona_db_call(
+                db.list_persona_visual_assets,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            responses.append(_persona_visual_pack_to_response(pack, assets=assets))
+        return responses
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona visual packs") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def create_persona_visual_pack(
+    persona_id: str,
+    payload: PersonaVisualPackCreate,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Create a draft visual pack manifest for one active persona profile."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.create_persona_visual_pack,
+            persona_id=persona_id,
+            user_id=user_id,
+            title=payload.title,
+            manifest=payload.manifest,
+        )
+        return _persona_visual_pack_to_response(pack, assets=[])
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="create persona visual pack") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/deactivate",
+    response_model=PersonaVisualDeactivateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def deactivate_persona_visual_pack(
+    persona_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualDeactivateResponse:
+    """Deactivate the current active visual pack for one persona profile."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        await _run_persona_db_call(
+            visual_service.deactivate_pack,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return PersonaVisualDeactivateResponse(status="deactivated", persona_id=persona_id)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="deactivate persona visual pack") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Return one visual pack and its projected asset URLs."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        assets = await _run_persona_db_call(
+            db.list_persona_visual_assets,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_pack_to_response(pack, assets=assets)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack") from exc
+
+
+@router.patch(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/manifest",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def update_persona_visual_pack_manifest(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualManifestUpdate,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualPackResponse:
+    """Replace a draft visual-pack manifest with optimistic version protection."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.update_persona_visual_pack_manifest,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+            manifest=payload.manifest,
+            expected_version=payload.expected_version,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        assets = await _run_persona_db_call(
+            db.list_persona_visual_assets,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_pack_to_response(pack, assets=assets)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="update persona visual pack manifest") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/duplicate",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def duplicate_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualPackDuplicateRequest,
+    _current_user: User = Depends(get_request_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualPackResponse:
+    """Duplicate a persona visual pack to another same-user persona as a draft."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        duplicated = await _run_persona_db_call(
+            visual_service.duplicate_pack_to_persona,
+            source_persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+            target_persona_id=payload.target_persona_id,
+            title=payload.title,
+        )
+        assets = list(duplicated.get("assets") or [])
+        return _persona_visual_pack_to_response(duplicated, assets=assets)
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="duplicate persona visual pack") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/assets",
+    response_model=PersonaVisualAssetResponse,
+    tags=["persona"],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def upload_persona_visual_asset(
+    persona_id: str,
+    pack_id: str,
+    asset_role: str = Form("frame"),
+    file: UploadFile = File(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualAssetResponse:
+    """Validate and store one raster asset for a persona visual pack."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        content = await _read_persona_visual_upload_bytes(file)
+        asset = await _run_persona_db_call(
+            visual_service.create_asset_from_upload,
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+            content=content,
+            mime_type=file.content_type or "application/octet-stream",
+            original_filename=file.filename,
+            asset_role=asset_role,
+        )
+        return _persona_visual_asset_to_response(asset)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="upload persona visual asset") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/assets/{asset_id}/content",
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_asset_content(
+    persona_id: str,
+    pack_id: str,
+    asset_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FileResponse:
+    """Stream stored visual-pack asset bytes after user and pack ownership checks."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        asset = await _run_persona_db_call(
+            db.get_persona_visual_asset,
+            asset_id=asset_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Persona visual asset not found")
+        asset_path = _resolve_persona_visual_asset_path(
+            user_id=user_id,
+            storage_key=str(asset.get("storage_key") or ""),
+        )
+        return FileResponse(
+            asset_path,
+            media_type=str(asset.get("mime_type") or "application/octet-stream"),
+            filename=asset.get("original_filename") or asset_path.name,
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual asset content") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/activate",
+    response_model=PersonaVisualPackResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def activate_persona_visual_pack(
+    persona_id: str,
+    pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualPackResponse:
+    """Validate the manifest and make this pack the active visual for a persona."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        active = await _run_persona_db_call(
+            visual_service.activate_pack,
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+        )
+        assets = list(active.get("assets") or [])
+        return _persona_visual_pack_to_response(active, assets=assets)
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="activate persona visual pack") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates",
+    response_model=PersonaVisualCandidateListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def list_persona_visual_generated_candidates(
+    persona_id: str,
+    pack_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualCandidateListResponse:
+    """Return generated visual candidates and preview asset URLs for review."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        candidates = await _run_persona_db_call(
+            visual_service.list_candidates,
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack_id,
+        )
+        responses: list[PersonaVisualCandidateResponse] = []
+        for candidate in candidates:
+            generated_assets = await _run_persona_db_call(
+                _persona_visual_generated_assets_for_candidate,
+                db=db,
+                candidate=candidate,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            responses.append(
+                _persona_visual_candidate_to_response(
+                    candidate,
+                    generated_assets=generated_assets,
+                )
+            )
+        return PersonaVisualCandidateListResponse(candidates=responses)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona visual candidates") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generated-candidates/{candidate_id}",
+    response_model=PersonaVisualCandidateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_generated_candidate(
+    persona_id: str,
+    pack_id: str,
+    candidate_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualCandidateResponse:
+    """Return one generated visual candidate and its preview asset URLs."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        candidate = await _run_persona_db_call(
+            db.get_persona_visual_candidate,
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Persona visual candidate not found")
+        generated_assets = await _run_persona_db_call(
+            _persona_visual_generated_assets_for_candidate,
+            db=db,
+            candidate=candidate,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_candidate_to_response(
+            candidate,
+            generated_assets=generated_assets,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual candidate") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generation-readiness",
+    response_model=PersonaVisualGenerationReadinessResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_generation_readiness(
+    persona_id: str,
+    pack_id: str,
+    backend: str | None = Query(default=None, max_length=80),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaVisualGenerationReadinessResponse:
+    """Report whether visual generation can be queued for this pack."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        return _build_persona_visual_generation_readiness(backend=backend)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual generation readiness") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/generation-jobs",
+    response_model=PersonaVisualGenerationJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def create_persona_visual_generation_job(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualGenerationRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualGenerationJobResponse:
+    """Queue a generated visual candidate job for later human review."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        has_recipe_fields = bool(payload.starter_pack_id or payload.recipe_output)
+        request_id = (
+            normalize_persona_visual_generation_request_id(payload.request_id)
+            if payload.request_id
+            else None
+        )
+        generation_prompt = payload.prompt.strip()
+        recipe_intent: dict[str, Any] | None = None
+        if has_recipe_fields:
+            request_id = request_id or normalize_persona_visual_generation_request_id(None)
+            recipe_resolution = build_persona_visual_recipe_generation_intent(
+                starter_pack_id=payload.starter_pack_id,
+                recipe_output=payload.recipe_output,
+                user_prompt=generation_prompt,
+                request_id=request_id,
+            )
+            if recipe_resolution is not None:
+                generation_prompt = recipe_resolution.effective_prompt
+                recipe_intent = recipe_resolution.recipe_intent
+        if recipe_intent:
+            logger.bind(
+                request_id=request_id,
+                correlation_id=request_id,
+                persona_id=persona_id,
+                pack_id=pack_id,
+                starter_pack_id=payload.starter_pack_id,
+                recipe_output=payload.recipe_output,
+            ).info("persona_visual.recipe_generation.request_validated")
+        job = await _run_persona_db_call(
+            create_generate_candidate_job,
+            jobs_manager,
+            user_id=user_id,
+            persona_id=persona_id,
+            pack_id=pack_id,
+            prompt=generation_prompt,
+            target_state=payload.target_state,
+            backend=payload.backend,
+            request_id=request_id,
+            recipe_intent=recipe_intent,
+        )
+        if recipe_intent:
+            logger.bind(
+                request_id=request_id,
+                correlation_id=request_id,
+                job_id=str(job.get("id") or ""),
+                persona_id=persona_id,
+                pack_id=pack_id,
+                starter_pack_id=recipe_intent["starter_pack_id"],
+                recipe_output=recipe_intent["recipe_output"],
+            ).info("persona_visual.recipe_generation.job_created")
+        return PersonaVisualGenerationJobResponse(
+            job_id=str(job.get("id") or ""),
+            status=None if job.get("status") is None else str(job.get("status")),
+            request_id=_persona_visual_generation_job_request_id(
+                job,
+                fallback_request_id=request_id,
+            ),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="create persona visual generation job") from exc
+    except PersonaVisualRecipeGenerationError as exc:
+        if exc.code == "starter_pack_not_found":
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "starter_pack_not_found",
+                    "message": "Persona visual starter pack not found.",
+                    "details": {"starter_pack_id": payload.starter_pack_id},
+                },
+            ) from exc
+        raise HTTPException(status_code=400, detail=exc.code) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/export",
+    response_model=PersonaVisualPackExportResponse,
+    tags=["persona"],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def start_persona_visual_pack_export(
+    persona_id: str,
+    pack_id: str,
+    payload: PersonaVisualPackExportRequest | None = None,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPackExportResponse:
+    """Queue a persona visual pack export job for a portable archive."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    export_request = payload or PersonaVisualPackExportRequest()
+    request_id = export_request.request_id or uuid.uuid4().hex
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        options = export_request.model_dump(exclude={"request_id"})
+        job = await _run_persona_db_call(
+            create_visual_pack_export_job,
+            jobs_manager,
+            user_id=user_id,
+            persona_id=persona_id,
+            pack_id=pack_id,
+            portability_job_id="",
+            request_id=request_id,
+            options=options,
+        )
+        job_id = str(job.get("id") or "")
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if portability_job is None:
+            portability_job = await _run_persona_db_call(
+                repo.create_portability_job,
+                owner_user_id=user_id,
+                job_id=job_id,
+                operation="export",
+                status=str(job.get("status") or "queued"),
+                stage="queued",
+                persona_id=persona_id,
+                pack_id=pack_id,
+                progress={"request_id": request_id},
+            )
+        composed = _compose_persona_visual_portability_response(
+            portability_job=portability_job,
+            job=job,
+            persona_id=persona_id,
+            pack_id=pack_id,
+        )
+        return PersonaVisualPackExportResponse(
+            job_id=composed.job_id,
+            portability_job_id=composed.portability_job_id,
+            operation="export",
+            persona_id=persona_id,
+            pack_id=pack_id,
+            status=composed.status,
+            stage=composed.stage,
+            download_url=composed.download_url,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="start persona visual pack export") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}",
+    response_model=PersonaVisualPortabilityJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack_export_status(
+    persona_id: str,
+    pack_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPortabilityJobResponse:
+    """Return one persona visual pack export job row for the current user."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if (
+            portability_job is None
+            or portability_job.get("operation") != "export"
+            or str(portability_job.get("persona_id") or "") != persona_id
+            or str(portability_job.get("pack_id") or "") != pack_id
+        ):
+            raise HTTPException(status_code=404, detail="export_job_not_found")
+        return _compose_persona_visual_portability_response(
+            portability_job=portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, job_id),
+            persona_id=persona_id,
+            pack_id=pack_id,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack export") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}/cancel",
+    response_model=PersonaVisualPortabilityJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def cancel_persona_visual_pack_export(
+    persona_id: str,
+    pack_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPortabilityJobResponse:
+    """Cancel a queued or processing persona visual pack export job."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        pack = await _run_persona_db_call(
+            db.get_persona_visual_pack,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if pack is None:
+            raise HTTPException(status_code=404, detail="Persona visual pack not found")
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if (
+            portability_job is None
+            or portability_job.get("operation") != "export"
+            or str(portability_job.get("persona_id") or "") != persona_id
+            or str(portability_job.get("pack_id") or "") != pack_id
+        ):
+            raise HTTPException(status_code=404, detail="export_job_not_found")
+        try:
+            cancelled = jobs_manager.cancel_job(
+                int(job_id),
+                reason="persona_visual_pack_export_cancel_requested",
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_job_not_found") from exc
+        if not cancelled:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_job_not_found")
+        updated = await _run_persona_db_call(
+            repo.update_portability_job,
+            job_id,
+            {"status": "cancelled", "stage": "cancelled"},
+            owner_user_id=user_id,
+        )
+        return _compose_persona_visual_portability_response(
+            portability_job=updated or portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, job_id),
+            persona_id=persona_id,
+            pack_id=pack_id,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="cancel persona visual pack export") from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/exports/{job_id}/download",
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def download_persona_visual_pack_export(
+    persona_id: str,
+    pack_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> FileResponse:
+    """Download a completed persona visual pack archive."""
+    response = await get_persona_visual_pack_export_status(
+        persona_id=persona_id,
+        pack_id=pack_id,
+        job_id=job_id,
+        _current_user=_current_user,
+        db=db,
+        jobs_manager=jobs_manager,
+    )
+    if response.status != "completed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="export_not_completed")
+    user_id = _require_current_user_id(_current_user)
+    repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+    portability_job = await _run_persona_db_call(
+        repo.get_portability_job_by_job_id,
+        job_id,
+        owner_user_id=user_id,
+    )
+    archive_path = _validated_persona_visual_export_archive_path(
+        user_id,
+        portability_job.get("archive_path") if portability_job else None,
+    )
+    return FileResponse(
+        path=str(archive_path),
+        filename=archive_path.name,
+        media_type="application/zip",
+    )
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/import-previews",
+    response_model=PersonaVisualImportPreviewStartResponse,
+    tags=["persona"],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def start_persona_visual_pack_import_preview(
+    persona_id: str,
+    archive: UploadFile = File(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportPreviewStartResponse:
+    """Upload a persona visual pack archive and queue import-preview validation."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    filename = str(archive.filename or "")
+    archive_suffix = Path(filename).suffix.casefold()
+    if archive_suffix not in _PERSONA_VISUAL_IMPORT_PREVIEW_ARCHIVE_EXTENSIONS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_archive_type")
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        request_id = uuid.uuid4().hex
+        archive_root = _persona_visual_pack_import_preview_staging_root(user_id)
+        archive_path = archive_root / f"{request_id}{archive_suffix}"
+        uploaded_bytes = await _save_persona_visual_import_preview_archive(archive, archive_path)
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.create_import_preview,
+            owner_user_id=user_id,
+            job_id=f"pending:{request_id}",
+            status="queued",
+            archive_path=str(archive_path),
+            target_persona_id=persona_id,
+        )
+        job = await _run_persona_db_call(
+            create_visual_pack_import_preview_job,
+            jobs_manager,
+            user_id=user_id,
+            preview_id=str(preview["id"]),
+            archive_path=str(archive_path),
+            request_id=request_id,
+            target_persona_id=persona_id,
+        )
+        job_id = str(job.get("id") or "")
+        preview = await _run_persona_db_call(
+            repo.update_import_preview,
+            str(preview["id"]),
+            {"job_id": job_id, "status": str(job.get("status") or "queued")},
+            owner_user_id=user_id,
+        ) or preview
+        portability_job = await _run_persona_db_call(
+            repo.create_portability_job,
+            owner_user_id=user_id,
+            job_id=job_id,
+            operation="import_preview",
+            status=str(job.get("status") or "queued"),
+            stage="queued",
+            preview_id=str(preview["id"]),
+            archive_path=str(archive_path),
+            progress={"request_id": request_id, "uploaded_bytes": uploaded_bytes},
+        )
+        return PersonaVisualImportPreviewStartResponse(
+            preview_id=str(preview["id"]),
+            job_id=job_id,
+            portability_job_id=str(portability_job["id"]),
+            operation="import_preview",
+            target_persona_id=persona_id,
+            status=str(job.get("status") or portability_job["status"]),
+            stage=str(portability_job["stage"]),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="start persona visual pack import preview") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/import-previews/{preview_id}",
+    response_model=PersonaVisualImportPreviewResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack_import_preview(
+    persona_id: str,
+    preview_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportPreviewResponse:
+    """Return one import-preview validation row for the current user."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.get_import_preview,
+            preview_id,
+            owner_user_id=user_id,
+        )
+        if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
+            raise HTTPException(status_code=404, detail="import_preview_not_found")
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            str(preview["job_id"]),
+            owner_user_id=user_id,
+        )
+        if portability_job is None or portability_job.get("operation") != "import_preview":
+            raise HTTPException(status_code=404, detail="import_preview_job_not_found")
+        return _compose_persona_visual_import_preview_response(
+            preview=preview,
+            portability_job=portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, str(preview["job_id"])),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack import preview") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/import-previews/{preview_id}/cancel",
+    response_model=PersonaVisualImportPreviewResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def cancel_persona_visual_pack_import_preview(
+    persona_id: str,
+    preview_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportPreviewResponse:
+    """Cancel a queued or processing persona visual pack import-preview job."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.get_import_preview,
+            preview_id,
+            owner_user_id=user_id,
+        )
+        if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
+            raise HTTPException(status_code=404, detail="import_preview_not_found")
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            str(preview["job_id"]),
+            owner_user_id=user_id,
+        )
+        if portability_job is None or portability_job.get("operation") != "import_preview":
+            raise HTTPException(status_code=404, detail="import_preview_job_not_found")
+        job_id = str(preview["job_id"])
+        try:
+            cancelled = jobs_manager.cancel_job(
+                int(job_id),
+                reason="persona_visual_pack_import_preview_cancel_requested",
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_job_not_found") from exc
+        if not cancelled:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_job_not_found")
+
+        updated_preview = await _run_persona_db_call(
+            repo.update_import_preview,
+            preview_id,
+            {"status": "cancelled", "stage": "cancelled"},
+            owner_user_id=user_id,
+        )
+        updated_job = await _run_persona_db_call(
+            repo.update_portability_job,
+            job_id,
+            {"status": "cancelled", "stage": "cancelled"},
+            owner_user_id=user_id,
+        )
+        return _compose_persona_visual_import_preview_response(
+            preview=updated_preview or preview,
+            portability_job=updated_job or portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, job_id),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="cancel persona visual pack import preview") from exc
+
+
+@router.delete(
+    "/profiles/{persona_id}/visual-packs/import-previews/{preview_id}",
+    tags=["persona"],
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def delete_persona_visual_pack_import_preview(
+    persona_id: str,
+    preview_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> Response:
+    """Delete import-preview staging metadata and the user-owned staged archive."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.get_import_preview,
+            preview_id,
+            owner_user_id=user_id,
+        )
+        if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
+            raise HTTPException(status_code=404, detail="import_preview_not_found")
+        if str(preview.get("status") or "") == "processing":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="import_preview_processing")
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            str(preview["job_id"]),
+            owner_user_id=user_id,
+        )
+        if portability_job is None or portability_job.get("operation") != "import_preview":
+            raise HTTPException(status_code=404, detail="import_preview_job_not_found")
+        job_id = str(preview["job_id"])
+        with contextlib.suppress(TypeError, ValueError):
+            jobs_manager.cancel_job(
+                int(job_id),
+                reason="persona_visual_pack_import_preview_delete_requested",
+            )
+        archive_path = _validated_persona_visual_import_preview_archive_path(
+            user_id,
+            str(preview.get("archive_path") or ""),
+        )
+        if archive_path.is_file():
+            await asyncio.to_thread(archive_path.unlink, missing_ok=True)
+        await _run_persona_db_call(
+            repo.update_import_preview,
+            preview_id,
+            {"status": "deleted", "stage": "deleted"},
+            owner_user_id=user_id,
+        )
+        await _run_persona_db_call(
+            repo.update_portability_job,
+            job_id,
+            {"status": "cancelled", "stage": "deleted"},
+            owner_user_id=user_id,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="delete persona visual pack import preview") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/import-previews/{preview_id}/commit",
+    response_model=PersonaVisualImportCommitStartResponse,
+    tags=["persona"],
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def start_persona_visual_pack_import_commit(
+    persona_id: str,
+    preview_id: str,
+    payload: PersonaVisualImportCommitRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualImportCommitStartResponse:
+    """Queue a reviewed import preview for commit into a new draft visual pack."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        preview = await _run_persona_db_call(
+            repo.get_import_preview,
+            preview_id,
+            owner_user_id=user_id,
+        )
+        if preview is None or str(preview.get("target_persona_id") or "") != persona_id:
+            raise HTTPException(status_code=404, detail="import_preview_not_found")
+        if not _persona_visual_import_preview_commit_eligible(preview):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_commit_eligible",
+            )
+        if str(preview.get("status") or "").strip() != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_preview_not_completed",
+            )
+        conflicts = _persona_visual_json_field(preview, "conflicts_json", [])
+        replaceable_pack_ids = _persona_visual_replaceable_pack_ids(conflicts)
+        explicit_target_mode = "target_mode" in getattr(payload, "model_fields_set", set())
+        if conflicts and not explicit_target_mode:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="import_conflict_choice_required",
+            )
+        if payload.target_mode == "replace_draft":
+            if not payload.target_pack_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="target_pack_id_required",
+                )
+            if payload.target_pack_id not in replaceable_pack_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="import_target_pack_not_replaceable",
+                )
+        elif payload.target_pack_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_pack_id_requires_replace_draft",
+            )
+
+        request_id = str(payload.request_id or uuid.uuid4().hex)
+        job = await _run_persona_db_call(
+            create_visual_pack_import_commit_job,
+            jobs_manager,
+            user_id=user_id,
+            preview_id=str(preview["id"]),
+            portability_job_id="",
+            request_id=request_id,
+            target_persona_id=persona_id,
+            trust_mode=payload.trust_mode,
+            target_mode=payload.target_mode,
+            target_pack_id=payload.target_pack_id,
+            title=payload.title,
+            conflict_choice_explicit=bool(conflicts and explicit_target_mode),
+        )
+        job_id = str(job.get("id") or "")
+        portability_job = await _run_persona_db_call(
+            repo.create_portability_job,
+            owner_user_id=user_id,
+            job_id=job_id,
+            operation="import_commit",
+            status=str(job.get("status") or "queued"),
+            stage="queued",
+            persona_id=persona_id,
+            preview_id=str(preview["id"]),
+            archive_path=preview.get("archive_path"),
+            archive_sha256=preview.get("archive_sha256"),
+            canonical_payload_fingerprint=preview.get("canonical_payload_fingerprint"),
+            progress={
+                "request_id": request_id,
+                "trust_mode": payload.trust_mode,
+                "target_mode": payload.target_mode,
+                "target_pack_id": payload.target_pack_id,
+                "title": payload.title,
+                "conflict_choice_explicit": bool(conflicts and explicit_target_mode),
+            },
+        )
+        return PersonaVisualImportCommitStartResponse(
+            job_id=job_id,
+            portability_job_id=str(portability_job["id"]),
+            operation="import_commit",
+            preview_id=str(preview["id"]),
+            target_persona_id=persona_id,
+            status=str(job.get("status") or portability_job["status"]),
+            stage=str(portability_job["stage"]),
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="start persona visual pack import commit") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/profiles/{persona_id}/visual-packs/imports/{job_id}",
+    response_model=PersonaVisualPortabilityJobResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def get_persona_visual_pack_import_commit_status(
+    persona_id: str,
+    job_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
+) -> PersonaVisualPortabilityJobResponse:
+    """Return import-commit status for the current user and target persona."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        repo = await _run_persona_db_call(_persona_visual_portability_repo, db)
+        portability_job = await _run_persona_db_call(
+            repo.get_portability_job_by_job_id,
+            job_id,
+            owner_user_id=user_id,
+        )
+        if (
+            portability_job is None
+            or str(portability_job.get("operation") or "") != "import_commit"
+            or str(portability_job.get("persona_id") or "") != persona_id
+        ):
+            raise HTTPException(status_code=404, detail="import_commit_not_found")
+        return _compose_persona_visual_import_commit_response(
+            portability_job=portability_job,
+            job=_persona_visual_job_for_portability(jobs_manager, job_id),
+            persona_id=persona_id,
+        )
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="get persona visual pack import commit") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/visual-packs/{pack_id}/candidates/{candidate_id}/review",
+    response_model=PersonaVisualCandidateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
+)
+async def review_persona_visual_candidate(
+    persona_id: str,
+    pack_id: str,
+    candidate_id: str,
+    payload: PersonaVisualCandidateReviewRequest,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    visual_service: PersonaVisualService = Depends(get_persona_visual_service),
+) -> PersonaVisualCandidateResponse:
+    """Accept, reject, or mark a generated visual candidate as failed."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        await _get_persona_profile_or_404(
+            db,
+            persona_id=persona_id,
+            user_id=user_id,
+            include_deleted=False,
+        )
+        if payload.status == "accepted":
+            candidate = await _run_persona_db_call(
+                visual_service.accept_candidate,
+                persona_id=persona_id,
+                user_id=user_id,
+                pack_id=pack_id,
+                candidate_id=candidate_id,
+            )
+        else:
+            candidate = await _run_persona_db_call(
+                visual_service.reject_candidate,
+                persona_id=persona_id,
+                user_id=user_id,
+                pack_id=pack_id,
+                candidate_id=candidate_id,
+                status=payload.status,
+                failure_reason=payload.failure_reason,
+            )
+        generated_assets = await _run_persona_db_call(
+            _persona_visual_generated_assets_for_candidate,
+            db=db,
+            candidate=candidate,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        return _persona_visual_candidate_to_response(
+            candidate,
+            generated_assets=generated_assets,
+        )
+    except HTTPException:
+        raise
+    except PersonaVisualServiceError as exc:
+        raise _persona_visual_service_error_to_http(exc) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="review persona visual candidate") from exc
 
 
 @router.delete(
@@ -2741,6 +5649,7 @@ async def restore_persona_profile(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaProfileResponse:
+    """Restore a soft-deleted persona profile and resume its buddy projection."""
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
@@ -2761,7 +5670,10 @@ async def restore_persona_profile(
         )
         if profile is None:
             raise HTTPException(status_code=404, detail="Persona profile not found")
-        return _persona_profile_to_response(profile)
+        return _persona_profile_to_response(
+            profile,
+            buddy_row=_load_persona_buddy_row_for_projection(db, profile=profile),
+        )
     except HTTPException:
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
@@ -4417,6 +7329,7 @@ async def persona_catalog(
         profiles = db.list_persona_profiles(user_id=user_id, active_only=True, limit=200)
         if not profiles:
             profiles = [_ensure_default_persona_profile(db, user_id=user_id)]
+        buddy_rows = _load_persona_buddy_rows_for_projection(db, profiles=profiles)
         catalog: list[PersonaInfo] = []
         for profile in profiles:
             policy_rules = db.list_persona_policy_rules(
@@ -4424,7 +7337,13 @@ async def persona_catalog(
                 user_id=user_id,
                 include_deleted=False,
             )
-            catalog.append(_persona_info_from_profile(profile, policy_rules=policy_rules))
+            catalog.append(
+                _persona_info_from_profile(
+                    profile,
+                    policy_rules=policy_rules,
+                    buddy_row=buddy_rows.get(str(profile.get("id") or "").strip()),
+                )
+            )
         return catalog
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="list persona catalog") from exc
@@ -4455,7 +7374,11 @@ async def persona_session(
             profile = _ensure_default_persona_profile(db, user_id=user_id)
         persona_id = str(profile.get("id") or _DEFAULT_PERSONA_ID)
         policy_rules = db.list_persona_policy_rules(persona_id=persona_id, user_id=user_id, include_deleted=False)
-        persona = _persona_info_from_profile(profile, policy_rules=policy_rules)
+        persona = _persona_info_from_profile(
+            profile,
+            policy_rules=policy_rules,
+            buddy_row=_load_persona_buddy_row_for_projection(db, profile=profile),
+        )
 
         # Preserve scaffold ownership/persona binding semantics for resume IDs in process-local session manager
         # without creating new local entries before DB validation succeeds.
@@ -4645,6 +7568,7 @@ async def persona_stream(
     ws: WebSocket,
     token: str | None = Query(default=None),
     api_key: str | None = Query(default=None),
+    runtime_explorer_provider: PersonaRuntimeExplorerProvider = Depends(get_persona_runtime_explorer_provider),
 ):
     """
     Bi-directional placeholder stream.
@@ -4681,6 +7605,7 @@ async def persona_stream(
     auth_watchdog_stop: asyncio.Event | None = None
     auth_revoked_event: asyncio.Event | None = None
     persona_live_stt_state_by_session: dict[str, dict[str, Any]] = {}
+    persona_live_wake_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_summary_sessions_seen: set[str] = set()
     try:
         user_id, credentials_supplied, auth_ok = await _resolve_authenticated_user_id(ws, token=token, api_key=api_key)
@@ -5169,6 +8094,48 @@ async def persona_stream(
                     turn_detector.reset()
             voice_transcript_buffer_by_session.pop(session_id, None)
 
+        def _clear_persona_live_wake_state(session_id: str) -> None:
+            persona_live_wake_state_by_session.pop(session_id, None)
+
+        def _get_active_persona_live_wake_state(session_id: str) -> dict[str, Any] | None:
+            state = persona_live_wake_state_by_session.get(session_id)
+            if not isinstance(state, dict):
+                return None
+            expires_at = state.get("expires_at_monotonic")
+            if isinstance(expires_at, (int, float)) and time.monotonic() > float(expires_at):
+                _clear_persona_live_wake_state(session_id)
+                return None
+            return state
+
+        async def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
+            runtime_context = await asyncio.to_thread(
+                _load_persona_policy_rules_for_session,
+                persona_scope_db,
+                session_id=session_id,
+                user_id=authenticated_user_id,
+            )
+            if not bool(runtime_context.get("session_exists")):
+                return []
+            runtime_persona_id = str(runtime_context.get("persona_id") or "").strip()
+            if not runtime_persona_id or persona_scope_db is None:
+                return []
+            profile = await asyncio.to_thread(
+                persona_scope_db.get_persona_profile,
+                runtime_persona_id,
+                user_id=authenticated_user_id,
+                include_deleted=False,
+            )
+            if not isinstance(profile, dict):
+                return []
+            voice_defaults = profile.get("voice_defaults")
+            if not isinstance(voice_defaults, dict):
+                return []
+            return [
+                str(phrase or "").strip()
+                for phrase in voice_defaults.get("voice_chat_trigger_phrases") or []
+                if str(phrase or "").strip()
+            ]
+
         def _get_or_create_persona_live_stt_state(
             session_id: str,
         ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -5419,10 +8386,15 @@ async def persona_stream(
                 if isinstance(voice_runtime, dict)
                 else []
             )
-            trigger_matched, cleaned_transcript = _apply_persona_live_trigger_phrases(
-                transcript,
-                trigger_phrases=trigger_phrases,
-            )
+            wake_state = _get_active_persona_live_wake_state(session_id)
+            if wake_state:
+                trigger_matched = True
+                cleaned_transcript = str(transcript or "").strip()
+            else:
+                trigger_matched, cleaned_transcript = _apply_persona_live_trigger_phrases(
+                    transcript,
+                    trigger_phrases=trigger_phrases,
+                )
             if not trigger_matched:
                 await _emit_notice(
                     session_id=session_id,
@@ -5463,6 +8435,11 @@ async def persona_stream(
                 voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
                 commit_source=commit_source,
             )
+            if wake_state and wake_state.get("wake_behavior") in {
+                "one_shot",
+                "push_to_talk_after_wake",
+            }:
+                _clear_persona_live_wake_state(session_id)
             _reset_persona_live_active_turn(session_id)
             _schedule_persona_live_processing_notice(session_id)
             await _handle_persona_live_turn(
@@ -5941,6 +8918,21 @@ async def persona_stream(
                     why=why,
                     description=description,
                 )
+            visual_override = _persona_visual_override_payload_from_tool_result(
+                tool_name=tool_name,
+                result=result,
+                persona_id=persona_id,
+                session_id=session_id,
+            )
+            if visual_override:
+                result["visual_state_override"] = visual_override
+                await stream.send_json(
+                    {
+                        "event": "visual_state_override",
+                        **_next_ws_event_meta(session_id),
+                        **visual_override,
+                    }
+                )
             await _emit_and_persist_tool_step_result(
                 session_id=session_id,
                 plan_id=plan_id,
@@ -6397,6 +9389,32 @@ async def persona_stream(
                 companion_context=companion_context,
                 persona_exemplar_sections=persona_exemplar_assembly.sections,
             )
+            plan = await asyncio.to_thread(
+                _apply_persona_runtime_explorer_to_plan,
+                base_plan=plan,
+                user_message=normalized_text,
+                session_id=session_id,
+                persona_id=runtime_persona_id,
+                runtime_mode=runtime_mode,
+                memory_context=memory_context,
+                persona_state_fields=persona_state_fields,
+                companion_usage=companion_usage,
+                persona_exemplar_selection=persona_exemplar_selection,
+                runtime_explorer_provider=runtime_explorer_provider,
+                include_diagnostics=True,
+            )
+            runtime_explorer_diagnostics = plan.pop(_PERSONA_RUNTIME_EXPLORER_DIAGNOSTICS_KEY, None)
+            runtime_explorer_selected_plan = bool(plan.pop(_PERSONA_RUNTIME_EXPLORER_SELECTED_KEY, False))
+            if isinstance(runtime_explorer_diagnostics, dict):
+                runtime_notice_reason = _runtime_explorer_notice_reason_code(runtime_explorer_diagnostics)
+                if runtime_notice_reason:
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="warning",
+                        message=_runtime_explorer_notice_message(runtime_explorer_diagnostics),
+                        reason_code=runtime_notice_reason,
+                        runtime_explorer=runtime_explorer_diagnostics,
+                    )
             plan_id = uuid.uuid4().hex
             max_tool_steps = _get_persona_max_tool_steps()
             proposed_steps = list(plan.get("steps", []))
@@ -6425,38 +9443,76 @@ async def persona_stream(
                     reason_code="PLAN_INVALID",
                 )
                 return
-            stored_steps: list[dict[str, Any]] = []
-            for step in pending_plan.steps:
-                step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
-                policy = _evaluate_step_policy(
-                    step_type=step_type,
-                    tool_name=step.tool,
-                    args=step.args,
-                    persona_policy_rules=persona_policy_rules,
-                    session_policy_rules=session_policy_rules,
-                    session_scopes=session_scopes,
-                    allow_export=allow_export,
-                    allow_delete=allow_delete,
-                )
-                if not bool(policy.get("allow", False)):
-                    _increment_persona_metric(
-                        "persona_ws_policy_denials_total",
-                        {
-                            "step_type": _bounded_label(step_type, allowed=_PERSONA_WS_ALLOWED_STEP_TYPES, fallback="mcp_tool"),
-                            "reason": _metric_reason_bucket(policy.get("reason_code")),
-                        },
+            def _build_stored_steps_with_policy() -> tuple[list[dict[str, Any]], bool]:
+                stored: list[dict[str, Any]] = []
+                denied = False
+                for step in pending_plan.steps:
+                    step_type = _normalize_persona_step_type(step.step_type, tool_name=step.tool)
+                    policy = _evaluate_step_policy(
+                        step_type=step_type,
+                        tool_name=step.tool,
+                        args=step.args,
+                        persona_policy_rules=persona_policy_rules,
+                        session_policy_rules=session_policy_rules,
+                        session_scopes=session_scopes,
+                        allow_export=allow_export,
+                        allow_delete=allow_delete,
                     )
-                stored_steps.append(
-                    {
-                        "idx": step.idx,
-                        "step_type": step_type,
-                        "tool": step.tool,
-                        "args": step.args,
-                        "description": step.description,
-                        "why": step.why,
-                        "policy": policy,
-                    }
-                )
+                    if not bool(policy.get("allow", False)):
+                        denied = True
+                        _increment_persona_metric(
+                            "persona_ws_policy_denials_total",
+                            {
+                                "step_type": _bounded_label(
+                                    step_type,
+                                    allowed=_PERSONA_WS_ALLOWED_STEP_TYPES,
+                                    fallback="mcp_tool",
+                                ),
+                                "reason": _metric_reason_bucket(policy.get("reason_code")),
+                            },
+                        )
+                    stored.append(
+                        {
+                            "idx": step.idx,
+                            "step_type": step_type,
+                            "tool": step.tool,
+                            "args": step.args,
+                            "description": step.description,
+                            "why": step.why,
+                            "policy": policy,
+                        }
+                    )
+                return stored, denied
+
+            async def _rewrite_runtime_policy_denial_to_safe_plan() -> list[dict[str, Any]] | None:
+                nonlocal pending_plan
+                safe_plan = _runtime_safe_denial_plan(_get_persona_runtime_explorer_config().safe_denial_text)
+                try:
+                    pending_plan = session_manager.put_plan(
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        persona_id=runtime_persona_id,
+                        plan_id=plan_id,
+                        steps=list(safe_plan.get("steps", [])),
+                    )
+                except ValueError as exc:
+                    _cancel_persona_live_processing_notice(session_id)
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message=str(exc),
+                        reason_code="PLAN_INVALID",
+                    )
+                    return None
+                rewritten_steps, _has_safe_denial_policy_denial = _build_stored_steps_with_policy()
+                return rewritten_steps
+
+            stored_steps, has_policy_denial = _build_stored_steps_with_policy()
+            if runtime_explorer_selected_plan and has_policy_denial:
+                rewritten_steps = await _rewrite_runtime_policy_denial_to_safe_plan()
+                if rewritten_steps is None:
+                    return
+                stored_steps = rewritten_steps
             await _emit_tool_plan(
                 session_id=session_id,
                 plan_id=plan_id,
@@ -6484,6 +9540,11 @@ async def persona_stream(
                 "trigger_phrases": normalized_trigger_phrases,
                 "auto_resume": _coerce_bool(voice_payload.get("auto_resume"), default=False),
                 "barge_in": _coerce_bool(voice_payload.get("barge_in"), default=False),
+                "wake_behavior": _bounded_label(
+                    voice_payload.get("wake_behavior"),
+                    allowed=_PERSONA_WAKE_BEHAVIORS,
+                    fallback="one_shot",
+                ),
                 "stt_language": str(stt_payload.get("language") or "").strip() or None,
                 "stt_model": str(stt_payload.get("model") or "").strip() or None,
                 "enable_vad": _coerce_bool(stt_payload.get("enable_vad"), default=True),
@@ -6573,12 +9634,105 @@ async def persona_stream(
                     session_id=session_id,
                     voice_runtime=voice_runtime,
                 )
+                _clear_persona_live_wake_state(session_id)
                 _cleanup_persona_live_stt_state(session_id)
                 await _emit_notice(
                     session_id=session_id,
                     level="info",
                     message="Voice runtime updated for this live session.",
                     reason_code="VOICE_CONFIG_UPDATED",
+                )
+            elif mtype == "wake_activation":
+                original_session_id = msg.get("session_id")
+                session_id = _normalize_ws_identifier(original_session_id, fallback="")
+                if not session_id:
+                    await _emit_notice(
+                        session_id=default_session_id,
+                        level="error",
+                        message="session_id is required",
+                        reason_code="SESSION_ID_REQUIRED",
+                    )
+                    continue
+                matched_phrase = str(msg.get("matched_phrase") or "").strip()
+                detector_kind = _bounded_label(
+                    msg.get("detector_kind"),
+                    allowed={"browser_transcript", "native_companion", "test"},
+                    fallback="browser_transcript",
+                )
+                saved_phrases = await _get_saved_wake_phrases_for_session(session_id)
+                runtime_preferences = session_manager.get_preferences(
+                    session_id=session_id,
+                    user_id=connection_user_id,
+                )
+                voice_runtime = runtime_preferences.get("voice_runtime")
+                runtime_phrases = (
+                    list(voice_runtime.get("trigger_phrases") or [])
+                    if isinstance(voice_runtime, dict)
+                    else []
+                )
+                wake_behavior = _bounded_label(
+                    voice_runtime.get("wake_behavior")
+                    if isinstance(voice_runtime, dict)
+                    else None,
+                    allowed=_PERSONA_WAKE_BEHAVIORS,
+                    fallback="one_shot",
+                )
+                saved_match = _match_persona_wake_phrase(matched_phrase, saved_phrases)
+                runtime_match = _match_persona_wake_phrase(matched_phrase, runtime_phrases)
+                if not saved_match or not runtime_match:
+                    wake_rejection_reason = "phrase_not_configured"
+                    if not saved_match and runtime_match:
+                        wake_rejection_reason = "not_saved_in_profile"
+                    elif saved_match and not runtime_match:
+                        wake_rejection_reason = "missing_from_runtime_config"
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="warning",
+                        reason_code="WAKE_ACTIVATION_REJECTED",
+                        message="Wake activation was rejected for this persona session.",
+                        wake_rejection_reason=wake_rejection_reason,
+                    )
+                    continue
+
+                expires_at: float | None = None
+                if wake_behavior in {"one_shot", "push_to_talk_after_wake"}:
+                    expires_at = time.monotonic() + _get_persona_wake_no_command_timeout_s()
+                persona_live_wake_state_by_session[session_id] = {
+                    "wake_behavior": wake_behavior,
+                    "matched_phrase": saved_match,
+                    "detector_kind": detector_kind,
+                    "expires_at_monotonic": expires_at,
+                }
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="WAKE_ACTIVATION_ACCEPTED",
+                    message="Wake activation accepted for this live session.",
+                    wake_behavior=wake_behavior,
+                    detector_kind=detector_kind,
+                )
+            elif mtype == "wake_deactivation":
+                session_id = _normalize_ws_identifier(msg.get("session_id"), fallback="")
+                if not session_id:
+                    await _emit_notice(
+                        session_id=default_session_id,
+                        level="error",
+                        message="session_id is required",
+                        reason_code="SESSION_ID_REQUIRED",
+                    )
+                    continue
+                reason = _bounded_label(
+                    msg.get("reason"),
+                    allowed=_PERSONA_WAKE_DEACTIVATION_REASONS,
+                    fallback="disarmed",
+                )
+                _clear_persona_live_wake_state(session_id)
+                await _emit_notice(
+                    session_id=session_id,
+                    level="info",
+                    reason_code="WAKE_DEACTIVATED",
+                    message="Wake activation cleared for this live session.",
+                    reason=reason,
                 )
             elif mtype == "voice_commit":
                 original_session_id = msg.get("session_id")
@@ -7249,6 +10403,7 @@ async def persona_stream(
             )
         for session_id in list(persona_live_stt_state_by_session.keys()):
             _cleanup_persona_live_stt_state(session_id)
+        persona_live_wake_state_by_session.clear()
         if stream is not None:
             with contextlib.suppress(Exception):
                 await stream.stop()

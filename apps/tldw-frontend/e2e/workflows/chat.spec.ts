@@ -11,7 +11,7 @@
  */
 import { test, expect, skipIfServerUnavailable, skipIfNoModels, assertNoCriticalErrors } from "../utils/fixtures"
 import { ChatPage } from "../utils/page-objects"
-import { seedAuth, generateTestId } from "../utils/helpers"
+import { dispatchKeyboardShortcut, seedAuth, generateTestId } from "../utils/helpers"
 
 test.describe("Chat Workflow", () => {
   test.beforeEach(async ({ page }) => {
@@ -280,7 +280,7 @@ test.describe("Chat Workflow", () => {
       await chatPage.waitForReady()
 
       // Try to open command palette
-      await authedPage.keyboard.press("Meta+k")
+      await dispatchKeyboardShortcut(authedPage, { key: "k", ctrlKey: true })
 
       // Check if command palette appears
       const palette = authedPage.locator(

@@ -299,16 +299,24 @@ export const RetentionPoliciesSection = ({ refreshSignal }: RetentionPoliciesSec
                       </TableCell>
                     </TableRow>
 
-                    {previewCurrent && (
+                    {previewCurrent && (() => {
+                      const totalAffected = previewCurrent.counts.auditLogEntries + previewCurrent.counts.jobRecords + previewCurrent.counts.backupFiles;
+                      const severityClass = totalAffected > 1000
+                        ? 'border-red-400 bg-red-50'
+                        : totalAffected > 100
+                          ? 'border-yellow-400 bg-yellow-50'
+                          : 'bg-muted/40';
+                      const textClass = totalAffected > 1000
+                        ? 'text-red-700 font-semibold'
+                        : totalAffected > 100
+                          ? 'text-yellow-700'
+                          : '';
+                      return (
                       <TableRow data-testid={`retention-preview-row-${policy.key}`}>
                         <TableCell colSpan={4}>
-                          <div className={`rounded-md border p-3 space-y-2 ${(() => {
-                            const total = previewCurrent.counts.auditLogEntries + previewCurrent.counts.jobRecords + previewCurrent.counts.backupFiles;
-                            if (total > 1000) return 'bg-red-50 border-red-200';
-                            if (total > 100) return 'bg-yellow-50 border-yellow-200';
-                            return 'bg-muted/40';
-                          })()}`}>
-                            <p className="text-sm" data-testid={`retention-preview-text-${policy.key}`}>
+                          <div className={`rounded-md border p-3 space-y-2 ${severityClass}`}>
+                            <p className={`text-sm ${textClass}`} data-testid={`retention-preview-text-${policy.key}`}>
+                              {totalAffected > 1000 && <AlertTriangle className="inline h-4 w-4 mr-1 text-red-600" />}
                               Changing from {previewCurrent.currentDays} to {previewCurrent.newDays} days will delete approximately{' '}
                               {previewCurrent.counts.auditLogEntries} audit log entries, {previewCurrent.counts.jobRecords}{' '}
                               job records, {previewCurrent.counts.backupFiles} backup files.
@@ -334,7 +342,8 @@ export const RetentionPoliciesSection = ({ refreshSignal }: RetentionPoliciesSec
                           </div>
                         </TableCell>
                       </TableRow>
-                    )}
+                      );
+                    })()}
                   </Fragment>
                 );
               })

@@ -10,15 +10,17 @@ Supported backends
 - deepseek (DeepSeek-OCR, Transformers)
 - hunyuan (Tencent HunyuanOCR, vLLM + Transformers)
 - dolphin (ByteDance Dolphin-v2, Transformers + remote server)
+- llamacpp (OCR-capable llama.cpp deployment, remote/managed/cli)
+- chatllm (OCR-capable ChatLLM deployment, remote/managed/cli)
 
 Common usage
-- Set `enable_ocr=true` and choose `ocr_backend` (`mineru`, `tesseract`, `dots`, `points`, `deepseek`, `hunyuan`, or `dolphin`).
+- Set `enable_ocr=true` and choose `ocr_backend` (`mineru`, `tesseract`, `dots`, `points`, `deepseek`, `hunyuan`, `dolphin`, `llamacpp`, or `chatllm`).
 - `ocr_mode`: `fallback` (only pages lacking text) or `always` (force OCR).
 - `ocr_dpi`: 200-300 is a good balance.
 - Structured outputs:
   - `ocr_output_format`: `text|markdown|json`
   - `ocr_prompt_preset`: `general|doc|table|spotting|json`
-- Parallelism: `OCR_PAGE_CONCURRENCY` controls per-page OCR concurrency (default 1). Keep small (1-2) for GPU-backed models.
+- Parallelism: `OCR_PAGE_CONCURRENCY` controls the global per-page OCR concurrency cap (default 1). The PDF pipeline now uses `min(OCR_PAGE_CONCURRENCY, backend profile max_page_concurrency)`, so backend-local caps are respected too. Keep both values small for GPU-backed models unless you have validated higher throughput.
 - Config override: `Config_Files/config.txt` supports `[OCR] backend_priority` (comma-separated list or JSON array) to control auto selection order.
 
 MinerU-specific notes
@@ -50,6 +52,67 @@ Behavior
 Notes
 - MinerU does not participate in generic image OCR flows in v1.
 - The CLI output directory may be nested; the adapter resolves the primary artifact directory automatically.
+
+## Llama.cpp OCR (backend: `llamacpp`)
+
+Summary
+- OCR-capable llama.cpp deployments can run in `remote`, `managed`, `cli`, or `auto` mode.
+- Remote mode is the preferred path when you already have a llama.cpp/OpenAI-compatible endpoint or an existing server managed elsewhere.
+- Managed mode is OCR-private and single-process only in v1.
+
+Environment
+- `LLAMACPP_OCR_MODE`: `auto|remote|managed|cli`.
+- `LLAMACPP_OCR_AUTO_ELIGIBLE`: opt-in flag for `auto`.
+- `LLAMACPP_OCR_AUTO_HIGH_QUALITY_ELIGIBLE`: opt-in flag for `auto_high_quality`.
+- `LLAMACPP_OCR_MAX_PAGE_CONCURRENCY`: backend-local page concurrency cap. The PDF pipeline uses the smaller of this and `OCR_PAGE_CONCURRENCY`.
+
+Remote
+- `LLAMACPP_OCR_HOST`, `LLAMACPP_OCR_PORT`, `LLAMACPP_OCR_MODEL_PATH`, `LLAMACPP_OCR_USE_DATA_URL`.
+
+Managed
+- `LLAMACPP_OCR_ARGV`, `LLAMACPP_OCR_MODEL_PATH`, `LLAMACPP_OCR_HOST`, `LLAMACPP_OCR_PORT`, `LLAMACPP_OCR_STARTUP_TIMEOUT_SEC`.
+- `LLAMACPP_OCR_ALLOW_MANAGED_START=true|false` controls whether the server may start the managed process itself.
+- In `auto`, a configured managed startup profile is preferred over `remote`; set `LLAMACPP_OCR_MODE=remote` to force an external endpoint.
+
+CLI
+- `LLAMACPP_OCR_ARGV`, `LLAMACPP_OCR_MODEL_PATH`.
+
+Docs
+- See [Docs/OCR/LlamaCpp-OCR.md](./LlamaCpp-OCR.md) for the backend-specific setup guide.
+
+Notes
+- `llamacpp` supports the existing OCR presets and structured output contract.
+- Managed mode should be used only in single-API-process deployments in v1.
+
+## ChatLLM OCR (backend: `chatllm`)
+
+Summary
+- ChatLLM OCR mirrors the same OCR contract as llama.cpp, but with ChatLLM-specific runtime configuration.
+- Supported modes are `remote`, `managed`, `cli`, and `auto`.
+- Managed mode is OCR-private and single-process only in v1.
+
+Environment
+- `CHATLLM_OCR_MODE`: `auto|remote|managed|cli`.
+- `CHATLLM_OCR_AUTO_ELIGIBLE`: opt-in flag for `auto`.
+- `CHATLLM_OCR_AUTO_HIGH_QUALITY_ELIGIBLE`: opt-in flag for `auto_high_quality`.
+- `CHATLLM_OCR_MAX_PAGE_CONCURRENCY`: backend-local page concurrency cap. The PDF pipeline uses the smaller of this and `OCR_PAGE_CONCURRENCY`.
+
+Remote
+- `CHATLLM_OCR_URL`, `CHATLLM_OCR_MODEL`, `CHATLLM_OCR_API_KEY`.
+
+Managed
+- `CHATLLM_OCR_SERVER_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_HOST`, `CHATLLM_OCR_PORT`, `CHATLLM_OCR_STARTUP_TIMEOUT_SEC`, `CHATLLM_OCR_SERVER_ARGS_JSON`, `CHATLLM_OCR_HEALTHCHECK_URL`.
+- `CHATLLM_OCR_ALLOW_MANAGED_START=true|false` controls whether the server may start the managed process itself.
+
+CLI
+- `CHATLLM_OCR_CLI_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_CLI_ARGS_JSON`.
+
+Docs
+- See [Docs/OCR/ChatLLM-OCR.md](./ChatLLM-OCR.md) for the backend-specific setup guide.
+
+Notes
+- `chatllm` supports the existing OCR presets and structured output contract.
+- Managed mode should be used only in single-API-process deployments in v1.
 
 ## dots.ocr (backend: `dots`)
 
@@ -212,5 +275,7 @@ Notes
 | points    | Transformers/SGLang | OCR + HTML tables + Markdown text | trust_remote_code required; SGLang ideal |
 | deepseek  | Transformers      | Layout-rich OCR to Markdown       | Heavy GPU stack; trust_remote_code required |
 | hunyuan   | vLLM/Transformers | Structured OCR + JSON outputs     | vLLM recommended for quality/speed     |
+| llamacpp  | Remote/Managed/CLI | Server-owned OCR-capable llama.cpp | Backend-local page concurrency cap 1 by default |
+| chatllm   | Remote/Managed/CLI | Server-owned ChatLLM OCR          | Backend-local page concurrency cap 1 by default |
 
 Note: VCS installs (extras) require `git` and network. For airgapped deployments, install upstream repos manually, then install this project without the extras.

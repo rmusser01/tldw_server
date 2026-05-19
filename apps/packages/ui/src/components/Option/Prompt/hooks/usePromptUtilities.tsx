@@ -1,10 +1,11 @@
 import React from "react"
 import { notification } from "antd"
+import type { TFunction } from "i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 
 export interface UsePromptUtilitiesDeps {
-  t: (key: string, opts?: Record<string, any>) => string
+  t: TFunction
   data: any[] | undefined
 }
 
@@ -114,17 +115,31 @@ export function usePromptUtilities(deps: UsePromptUtilitiesDeps) {
     [data]
   )
 
-  return {
-    confirmDanger,
-    guardPrivateMode,
-    getPromptKeywords,
-    getPromptTexts,
-    getPromptType,
-    getPromptModifiedAt,
-    getPromptUsageCount,
-    getPromptLastUsedAt,
-    formatRelativePromptTime,
-    getPromptRecordById,
-    isFireFoxPrivateMode
-  }
+  return React.useMemo(
+    () => ({
+      confirmDanger,
+      guardPrivateMode,
+      getPromptKeywords,
+      getPromptTexts,
+      getPromptType,
+      getPromptModifiedAt,
+      getPromptUsageCount,
+      getPromptLastUsedAt,
+      formatRelativePromptTime,
+      getPromptRecordById,
+      isFireFoxPrivateMode
+    }),
+    [
+      confirmDanger,
+      guardPrivateMode,
+      getPromptKeywords,
+      getPromptTexts,
+      getPromptType,
+      getPromptModifiedAt,
+      getPromptUsageCount,
+      getPromptLastUsedAt,
+      formatRelativePromptTime,
+      getPromptRecordById
+    ]
+  )
 }

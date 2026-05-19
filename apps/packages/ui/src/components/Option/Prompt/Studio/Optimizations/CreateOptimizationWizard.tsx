@@ -38,6 +38,7 @@ import {
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
 import { CompareStrategiesModal } from "./CompareStrategiesModal"
+import { defaultOptimizationStrategies } from "./strategyMetadata"
 
 type CreateOptimizationWizardProps = {
   open: boolean
@@ -70,63 +71,6 @@ const strategyIcons: Record<string, React.ReactNode> = {
   beam_search: <Shuffle className="size-5" />,
   random_search: <Shuffle className="size-5" />
 }
-
-const defaultStrategies: StrategyInfo[] = [
-  {
-    name: "iterative",
-    display_name: "Iterative",
-    description: "Iteratively refine the prompt based on feedback",
-    supported_params: ["max_iterations", "learning_rate"],
-    default_params: { max_iterations: 10 },
-    requires_test_cases: true,
-    supports_early_stopping: true
-  },
-  {
-    name: "mipro",
-    display_name: "MIPRO",
-    description: "Multi-stage prompt optimization with instruction tuning",
-    supported_params: ["max_iterations"],
-    default_params: { max_iterations: 5 },
-    requires_test_cases: true,
-    supports_early_stopping: true
-  },
-  {
-    name: "bootstrap",
-    display_name: "Bootstrap",
-    description: "Learn from few-shot examples to improve prompts",
-    supported_params: ["max_iterations"],
-    default_params: { max_iterations: 3 },
-    requires_test_cases: true,
-    supports_early_stopping: false
-  },
-  {
-    name: "genetic",
-    display_name: "Genetic Algorithm",
-    description: "Evolve prompts using crossover and mutation",
-    supported_params: ["population_size", "max_iterations"],
-    default_params: { population_size: 10, max_iterations: 20 },
-    requires_test_cases: true,
-    supports_early_stopping: true
-  },
-  {
-    name: "beam_search",
-    display_name: "Beam Search",
-    description: "Explore multiple prompt variations in parallel",
-    supported_params: ["beam_width", "max_iterations"],
-    default_params: { beam_width: 3, max_iterations: 10 },
-    requires_test_cases: true,
-    supports_early_stopping: true
-  },
-  {
-    name: "random_search",
-    display_name: "Random Search",
-    description: "Sample random prompt variations and keep the best",
-    supported_params: ["max_iterations"],
-    default_params: { max_iterations: 20 },
-    requires_test_cases: true,
-    supports_early_stopping: false
-  }
-]
 
 export const CreateOptimizationWizard: React.FC<
   CreateOptimizationWizardProps
@@ -169,7 +113,7 @@ export const CreateOptimizationWizard: React.FC<
     enabled: open
   })
   const strategies: StrategyInfo[] =
-    (strategiesResponse as any)?.data?.data ?? defaultStrategies
+    (strategiesResponse as any)?.data?.data ?? defaultOptimizationStrategies
 
   // Create mutation
   const createMutation = useMutation({

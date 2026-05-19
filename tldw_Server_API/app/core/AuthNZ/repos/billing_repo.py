@@ -536,6 +536,52 @@ class AuthnzBillingRepo:
         result["effective_limits"] = {**result["plan_limits"], **result["custom_limits"]}
         return result
 
+    async def list_all_subscriptions(self) -> list[dict[str, Any]]:
+        """List all org subscriptions with plan details for analytics."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                if self._is_postgres(conn):
+                    rows = await conn.fetch(
+                        """
+                        SELECT os.id, os.org_id, os.plan_id, os.stripe_customer_id,
+                               os.stripe_subscription_id, os.stripe_subscription_status,
+                               os.billing_cycle, os.current_period_start,
+                               os.current_period_end, os.status, os.trial_end,
+                               os.cancel_at_period_end, os.custom_limits_json,
+                               os.created_at,
+                               sp.name as plan_name, sp.display_name as plan_display_name,
+                               sp.price_usd_monthly, sp.price_usd_yearly,
+                               sp.limits_json as plan_limits_json
+                        FROM org_subscriptions os
+                        JOIN subscription_plans sp ON os.plan_id = sp.id
+                        ORDER BY os.created_at DESC
+                        """
+                    )
+                    return [self._subscription_row_to_dict(dict(r)) for r in rows]
+                else:
+                    cur = await conn.execute(
+                        """
+                        SELECT os.id, os.org_id, os.plan_id, os.stripe_customer_id,
+                               os.stripe_subscription_id, os.stripe_subscription_status,
+                               os.billing_cycle, os.current_period_start,
+                               os.current_period_end, os.status, os.trial_end,
+                               os.cancel_at_period_end, os.custom_limits_json,
+                               os.created_at,
+                               sp.name as plan_name, sp.display_name as plan_display_name,
+                               sp.price_usd_monthly, sp.price_usd_yearly,
+                               sp.limits_json as plan_limits_json
+                        FROM org_subscriptions os
+                        JOIN subscription_plans sp ON os.plan_id = sp.id
+                        ORDER BY os.created_at DESC
+                        """
+                    )
+                    rows = await cur.fetchall()
+                    row_dicts = self._rows_to_dicts(cur, rows)
+                    return [self._subscription_row_to_dict(rd) for rd in row_dicts]
+        except Exception as exc:
+            logger.error(f"AuthnzBillingRepo.list_all_subscriptions failed: {exc}")
+            raise
+
     # =========================================================================
     # Payment History
     # =========================================================================

@@ -148,7 +148,7 @@ async def list_admin_rate_limits(db=Depends(get_db_transaction)) -> list[RateLim
 
         return [RateLimitResponse(**row) for row in rows]
     except _RATE_LIMITS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list admin rate limits: {e}")
+        logger.error("Failed to list admin rate limits")
         raise HTTPException(status_code=500, detail="Failed to list admin rate limits") from e
 
 
@@ -178,7 +178,7 @@ async def upsert_role_rate_limit(role_id: int, payload: RateLimitUpsertRequest, 
             await db.commit()
         return RateLimitResponse(scope="role", id=role_id, resource=payload.resource, limit_per_min=payload.limit_per_min, burst=payload.burst)
     except _RATE_LIMITS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to upsert role rate limit: {e}")
+        logger.error("Failed to upsert role rate limit")
         raise HTTPException(status_code=500, detail="Failed to upsert role rate limit") from e
 
 
@@ -193,7 +193,7 @@ async def clear_role_rate_limits(role_id: int, db=Depends(get_db_transaction)) -
             await db.commit()
         return MessageResponse(message="Role rate limits cleared", details={"role_id": role_id})
     except _RATE_LIMITS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to clear role rate limits: {e}")
+        logger.error("Failed to clear role rate limits")
         raise HTTPException(status_code=500, detail="Failed to clear role rate limits") from e
 
 
@@ -229,7 +229,7 @@ async def upsert_user_rate_limit(
             await db.commit()
         return RateLimitResponse(scope="user", id=user_id, resource=payload.resource, limit_per_min=payload.limit_per_min, burst=payload.burst)
     except _RATE_LIMITS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to upsert user rate limit: {e}")
+        logger.error("Failed to upsert user rate limit")
         raise HTTPException(status_code=500, detail="Failed to upsert user rate limit") from e
 
 

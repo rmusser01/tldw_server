@@ -1,5 +1,5 @@
 import React, { useMemo } from "react"
-import type { ThemeColorTokens } from "@/themes/types"
+import type { ThemeColorTokens, ThemeRgbTokenKey } from "@/themes/types"
 import { rgbTripleToHex } from "@/themes/conversion"
 
 interface ThemePreviewProps {
@@ -14,7 +14,7 @@ interface ThemePreviewProps {
 export function ThemePreview({ tokens, label }: ThemePreviewProps) {
   const vars = useMemo(() => {
     const style: Record<string, string> = {}
-    const map: Record<keyof ThemeColorTokens, string> = {
+    const map: Record<ThemeRgbTokenKey, string> = {
       bg: "--color-bg",
       surface: "--color-surface",
       surface2: "--color-surface-2",
@@ -34,12 +34,12 @@ export function ThemePreview({ tokens, label }: ThemePreviewProps) {
       focus: "--color-focus",
     }
     for (const [key, cssVar] of Object.entries(map)) {
-      style[cssVar] = tokens[key as keyof ThemeColorTokens]
+      style[cssVar] = tokens[key as ThemeRgbTokenKey]
     }
     return style as React.CSSProperties
   }, [tokens])
 
-  const hex = (key: keyof ThemeColorTokens) => rgbTripleToHex(tokens[key])
+  const hex = (key: ThemeRgbTokenKey) => rgbTripleToHex(tokens[key])
 
   return (
     <div style={vars} className="rounded-lg overflow-hidden border" >

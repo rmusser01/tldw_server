@@ -76,6 +76,44 @@ class JWTService:
         }
         return filtered or None
 
+    @staticmethod
+    def _extract_refresh_rotation_metadata(payload: dict[str, Any]) -> tuple[str, datetime]:
+        """Return the prior refresh token JTI and expiry needed for revocation."""
+        old_jti = payload.get("jti")
+        old_exp = payload.get("exp")
+        if not old_jti or not isinstance(old_exp, (int, float)):
+            raise InvalidTokenError("Refresh token rotation failed: missing prior token metadata")
+        return str(old_jti), datetime.fromtimestamp(old_exp, tz=timezone.utc)
+
+    async def _revoke_rotated_refresh_token(self, *, payload: dict[str, Any], user_id: int) -> None:
+        """Persist revocation for the prior refresh token before returning rotated credentials."""
+        try:
+            old_jti, exp_dt = self._extract_refresh_rotation_metadata(payload)
+            from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist as _get_bl
+
+            bl = _get_bl()
+            try:
+                bl.hint_blacklisted(old_jti, exp_dt)
+            except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as hint_exc:
+                logger.debug(f"Refresh rotation: hint cache failed: {hint_exc}")
+
+            revoked = await bl.revoke_token(
+                jti=old_jti,
+                expires_at=exp_dt,
+                user_id=user_id,
+                token_type="refresh",
+                reason="refresh-rotated",
+                revoked_by=None,
+                ip_address=None,
+            )
+        except InvalidTokenError:
+            raise
+        except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
+            raise InvalidTokenError(f"Refresh token rotation failed: {exc}") from exc
+
+        if not revoked:
+            raise InvalidTokenError("Refresh token rotation failed: revocation persistence was not confirmed")
+
     def __init__(self, settings: Optional[Settings] = None):
         """Initialize JWT service"""
         self.settings = settings or get_settings()
@@ -1012,64 +1050,13 @@ class JWTService:
                     username=username,
                     additional_claims={k: v for k, v in (payload.items()) if k in {"session_id"}}
                 )
-                # Best-effort: attempt to blacklist old refresh JTI without breaking sync context
-                try:
-                    old_jti = payload.get("jti")
-                    old_exp = payload.get("exp")
-                    if old_jti and isinstance(old_exp, (int, float)):
-                        from datetime import datetime as _dt
-                        from datetime import timezone as _tz
-                        exp_dt = _dt.fromtimestamp(old_exp, tz=_tz.utc)
-                        import asyncio as _asyncio
+                import asyncio as _asyncio
 
-                        from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist as _get_bl
-                        try:
-                            loop = _asyncio.get_running_loop()
-                        except RuntimeError:
-                            loop = None
-                        if loop and loop.is_running():
-                            # Schedule blacklist in the current loop to avoid blocking
-                            try:
-                                bl = _get_bl()
-                                try:
-                                    bl.hint_blacklisted(old_jti, exp_dt)
-                                except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _hint_e:
-                                    logger.debug(f"Refresh rotation: hint cache failed: {_hint_e}")
-                                loop.create_task(
-                                    bl.revoke_token(
-                                        jti=old_jti,
-                                        expires_at=exp_dt,
-                                        user_id=user_id,
-                                        token_type="refresh",
-                                        reason="refresh-rotated",
-                                        revoked_by=None,
-                                        ip_address=None,
-                                    )
-                                )
-                            except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _sched_e:
-                                logger.debug(f"Refresh rotation: failed to schedule blacklist task: {_sched_e}")
-                        else:
-                            bl = _get_bl()
-                            try:
-                                bl.hint_blacklisted(old_jti, exp_dt)
-                            except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _hint_e:
-                                logger.debug(f"Refresh rotation: hint cache failed: {_hint_e}")
-                            # Run async revoke in a temporary loop
-                            _asyncio.run(
-                                bl.revoke_token(
-                                    jti=old_jti,
-                                    expires_at=exp_dt,
-                                    user_id=user_id,
-                                    token_type="refresh",
-                                    reason="refresh-rotated",
-                                    revoked_by=None,
-                                    ip_address=None,
-                                )
-                            )
-                except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _e:
-                    logger.debug(f"Refresh rotation: best-effort blacklist failed: {_e}")
+                _asyncio.run(self._revoke_rotated_refresh_token(payload=payload, user_id=user_id))
+        except InvalidTokenError:
+            raise
         except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _rot_err:
-            logger.debug(f"Refresh rotation not applied: {_rot_err}")
+            raise InvalidTokenError(f"Refresh token rotation failed: {_rot_err}") from _rot_err
 
         if self.settings.PII_REDACT_LOGS:
             logger.info("Refreshed access token for authenticated user (details redacted)")
@@ -1124,33 +1111,11 @@ class JWTService:
                     username=username,
                     additional_claims={k: v for k, v in (payload.items()) if k in {"session_id"}}
                 )
-                # Best-effort: attempt to blacklist old refresh JTI
-                try:
-                    old_jti = payload.get("jti")
-                    old_exp = payload.get("exp")
-                    if old_jti and isinstance(old_exp, (int, float)):
-                        from datetime import datetime as _dt
-                        from datetime import timezone as _tz
-                        exp_dt = _dt.fromtimestamp(old_exp, tz=_tz.utc)
-                        from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist as _get_bl
-                        bl = _get_bl()
-                        try:
-                            bl.hint_blacklisted(old_jti, exp_dt)
-                        except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _hint_e:
-                            logger.debug(f"Refresh rotation: hint cache failed: {_hint_e}")
-                        await bl.revoke_token(
-                            jti=old_jti,
-                            expires_at=exp_dt,
-                            user_id=user_id,
-                            token_type="refresh",
-                            reason="refresh-rotated",
-                            revoked_by=None,
-                            ip_address=None,
-                        )
-                except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _e:
-                    logger.debug(f"Refresh rotation: best-effort blacklist failed (async): {_e}")
+                await self._revoke_rotated_refresh_token(payload=payload, user_id=user_id)
+        except InvalidTokenError:
+            raise
         except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as _rot_err:
-            logger.debug(f"Refresh rotation not applied (async): {_rot_err}")
+            raise InvalidTokenError(f"Refresh token rotation failed: {_rot_err}") from _rot_err
 
         if self.settings.PII_REDACT_LOGS:
             logger.info("Refreshed access token for authenticated user (details redacted)")

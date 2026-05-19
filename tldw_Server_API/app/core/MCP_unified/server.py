@@ -895,7 +895,7 @@ class MCPServer:
                         metadata["roles"] = token_data.roles
                     if token_data.permissions:
                         metadata["permissions"] = token_data.permissions
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as _e:
+                except HTTPException as _e:
                     logger.debug(f"MCP JWT auth failed: {self._mask_secrets(str(_e))}")
             if auth_token and not ok and not api_key:
                 await websocket.close(code=1008, reason="Authentication failed")

@@ -157,6 +157,37 @@ async def test_embeddings_adapter_propagates_failures(monkeypatch):
         await shutdown_audit_adapter_services()
 
 
+def test_embeddings_local_shutdown_helper_stops_loop(monkeypatch):
+    calls = {"local": 0}
+
+    def _local_shutdown() -> None:
+        calls["local"] += 1
+
+    monkeypatch.setattr(emb_adapter, "_stop_sync_loop", _local_shutdown)
+
+    emb_adapter.shutdown_local_audit_adapter_loop()
+
+    assert calls == {"local": 1}
+
+
+def test_embeddings_atexit_only_stops_local_loop(monkeypatch):
+    calls = {"global": 0, "local": 0}
+
+    async def _global_shutdown() -> None:
+        calls["global"] += 1
+
+    def _local_shutdown() -> None:
+        calls["local"] += 1
+
+    monkeypatch.setattr(emb_adapter, "shutdown_all_audit_services", _global_shutdown, raising=False)
+    monkeypatch.setattr(emb_adapter, "_stop_sync_loop", _local_shutdown)
+    monkeypatch.setattr(emb_adapter.logger, "disable", lambda *_args, **_kwargs: None)
+
+    emb_adapter._shutdown_on_exit()
+
+    assert calls == {"global": 0, "local": 1}
+
+
 def test_embeddings_audit_cache_size_clamped(monkeypatch):
     monkeypatch.setenv("EMBEDDINGS_AUDIT_MAX_CACHED_SERVICES", "0")
     assert _parse_cache_size("EMBEDDINGS_AUDIT_MAX_CACHED_SERVICES", 20) == 1

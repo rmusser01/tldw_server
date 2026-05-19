@@ -72,6 +72,16 @@ class _FakeText2SQLCoreService:
         }
 
 
+class _ExplodingText2SQLCoreService:
+    def __init__(self, *args, **kwargs):
+        _ = args
+        _ = kwargs
+
+    async def generate_and_execute(self, **kwargs):
+        _ = kwargs
+        raise RuntimeError("text2sql backend exploded at /private/db/path")
+
+
 @pytest.mark.security
 def test_text2sql_requires_sql_read_permission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _FakeText2SQLCoreService)
@@ -194,4 +204,35 @@ def test_text2sql_allows_explicit_target_acl_permission(tmp_path: Path, monkeypa
             json={"query": "SELECT 1 AS n", "target_id": "media_db"},
         )
 
-    assert response.status_code == 200
+        assert response.status_code == 200
+
+
+@pytest.mark.security
+def test_text2sql_sanitizes_execution_backend_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(text2sql_mod, "Text2SQLCoreService", _ExplodingText2SQLCoreService)
+
+    app = _build_test_app(
+        principal=_make_principal(permissions=["sql.read", "sql.target:media_db"]),
+        user=User(
+            id=1,
+            username="test-user",
+            email=None,
+            is_active=True,
+            roles=["user"],
+            permissions=["sql.read", "sql.target:media_db"],
+            is_admin=False,
+        ),
+        db_path=tmp_path / "media.db",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/text2sql/query",
+            json={"query": "SELECT 1 AS n", "target_id": "media_db"},
+        )
+
+    assert response.status_code == 500
+    assert response.json().get("detail") == {
+        "code": "sql_execution_failed",
+        "message": "SQL execution failed",
+    }

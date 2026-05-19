@@ -14,8 +14,8 @@ from typing import Any, Optional
 from fastapi import Depends, Header, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, User, verify_jwt_and_fetch_user
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.api.v1.API_Deps.v1_endpoint_deps import oauth2_scheme
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -25,12 +25,11 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    verify_jwt_and_fetch_user,
-)
 from tldw_Server_API.app.core.exceptions import InactiveUserError
+from tldw_Server_API.app.core.Evaluations.identity import (
+    EvaluationIdentity,
+    evaluations_identity_from_user,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 
 security = HTTPBearer(auto_error=False)
@@ -57,7 +56,7 @@ def _evals_test_mode_bypass_enabled() -> bool:
 def sanitize_error_message(error: Exception, context: str = "") -> str:
     """Return a safe error string while logging details."""
     with contextlib.suppress(Exception):
-        logger.error(f"Error in {context}: {type(error).__name__}: {str(error)}")
+        logger.error("Error in {}: {}", context, type(error).__name__)
     mapping = {
         "FileNotFoundError": "The requested resource was not found",
         "PermissionError": "Permission denied for this operation",
@@ -191,7 +190,7 @@ async def verify_api_key(
                 }},
             ) from e
         except Exception as exc:
-            logger.error(f"Unexpected error decoding JWT for evaluations auth: {exc}")
+            logger.error("Unexpected error decoding JWT for evaluations auth")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": {
@@ -223,7 +222,7 @@ async def verify_api_key(
                 }},
             ) from exc
         except Exception as exc:
-            logger.error(f"Unexpected error verifying JWT for evaluations auth: {exc}")
+            logger.error("Unexpected error verifying JWT for evaluations auth")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": {
@@ -275,6 +274,11 @@ async def get_eval_request_user(
         token=token,
         legacy_token_header=legacy_token_header,
     )
+
+
+def get_evaluation_identity(current_user: User) -> EvaluationIdentity:
+    """Return the canonical evaluations identity for the authenticated user."""
+    return evaluations_identity_from_user(current_user)
 
 
 def require_eval_permissions(*permissions: str):
@@ -366,8 +370,8 @@ async def _apply_rate_limit_headers(limiter, user_id: str, response: Response, m
         reset_val = int(meta.get("reset_seconds") or 60) if isinstance(meta, dict) else 60
         response.headers["RateLimit-Reset"] = str(reset_val)
         response.headers["X-RateLimit-Reset"] = str(reset_val)
-    except Exception as rate_limit_header_error:
-        logger.debug("Failed to populate rate limit response headers", exc_info=rate_limit_header_error)
+    except Exception:
+        logger.debug("Failed to populate rate limit response headers")
 
 
 def enforce_heavy_evaluations_admin(principal: Optional[AuthPrincipal]) -> None:
@@ -385,7 +389,7 @@ def enforce_heavy_evaluations_admin(principal: Optional[AuthPrincipal]) -> None:
     Raises:
         HTTPException: 403 if admin privileges are required but not present.
     """
-    if os.getenv("EVALS_HEAVY_ADMIN_ONLY", "true").lower() not in ("true", "1", "yes"):
+    if not _evals_heavy_admin_only_enabled():
         return
     if principal is None:
         raise HTTPException(

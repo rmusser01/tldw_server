@@ -8,6 +8,8 @@ import {
   BrainCircuitIcon,
   ClipboardList,
   CombineIcon,
+  DatabaseIcon,
+  Eye,
   FlaskConical,
   ImageIcon,
   InfoIcon,
@@ -20,9 +22,21 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Users,
 } from "lucide-react"
+import {
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH
+} from "@/routes/route-paths"
 
-export type NavGroupKey = "server" | "knowledge" | "workspace" | "about"
+export type NavGroupKey =
+  | "connect"
+  | "aiModels"
+  | "experience"
+  | "knowledgeWorkspace"
+  | "safetyAdmin"
+  | "dataManagement"
+  | "about"
 
 export type SettingsNavRouteMeta = {
   path: string
@@ -36,159 +50,166 @@ export type SettingsNavRouteMeta = {
 export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
   {
     path: "/settings",
-    group: "server",
+    group: "experience",
     labelToken: "settings:generalSettings.title",
     icon: OrbitIcon,
-    order: 2
+    order: 1
   },
   {
     path: "/settings/tldw",
-    group: "server",
+    group: "connect",
     labelToken: "settings:tldw.serverNav",
     icon: ServerIcon,
     order: 1
   },
   {
     path: "/settings/provider-keys",
-    group: "server",
+    group: "connect",
     labelToken: "settings:providerKeys.navTitle",
     icon: ServerIcon,
     order: 2
   },
   {
+    path: "/settings/data",
+    group: "dataManagement",
+    labelToken: "settings:dataManagement.navTitle",
+    icon: DatabaseIcon,
+    order: 1
+  },
+  {
     path: "/settings/model",
-    group: "server",
+    group: "aiModels",
     labelToken: "settings:manageModels.title",
     icon: BrainCircuitIcon,
-    order: 6
+    order: 1
   },
   {
     path: "/settings/mcp-hub",
-    group: "server",
+    group: "aiModels",
     labelToken: "settings:mcpHubNav",
     icon: ServerIcon,
-    order: 7
+    order: 5
   },
   {
     path: "/settings/prompt",
-    group: "workspace",
+    group: "knowledgeWorkspace",
     labelToken: "settings:managePrompts.title",
     icon: BookIcon,
-    order: 6
+    order: 2
   },
   {
     path: "/settings/evaluations",
-    group: "server",
+    group: "safetyAdmin",
     labelToken: "settings:evaluationsSettings.title",
     icon: FlaskConical,
-    order: 9,
+    order: 3,
     beta: true
   },
   {
     path: "/settings/chat",
-    group: "server",
+    group: "experience",
     labelToken: "settings:chatSettingsNav",
     icon: MessageSquare,
-    order: 3
+    order: 2
   },
   {
     path: "/settings/ui",
-    group: "server",
+    group: "experience",
     labelToken: "settings:uiCustomizationNav",
     icon: SlidersHorizontal,
     order: 3.5
   },
   {
     path: "/settings/splash",
-    group: "server",
+    group: "experience",
     labelToken: "settings:splashSettingsNav",
     icon: Sparkles,
     order: 3.6
   },
   {
     path: "/settings/quick-ingest",
-    group: "server",
+    group: "experience",
     labelToken: "settings:quickIngestSettingsNav",
     icon: ClipboardList,
     order: 4
   },
   {
     path: "/settings/speech",
-    group: "server",
+    group: "aiModels",
     labelToken: "settings:speechSettingsNav",
     icon: MicIcon,
-    order: 5
+    order: 3
   },
   {
     path: "/settings/image-generation",
-    group: "server",
+    group: "aiModels",
     labelToken: "settings:imageGenerationSettingsNav",
     icon: ImageIcon,
-    order: 7
+    order: 4
   },
   {
     path: "/settings/share",
-    group: "workspace",
+    group: "knowledgeWorkspace",
     labelToken: "settings:manageShare.title",
     icon: ShareIcon,
     order: 7
   },
   {
     path: "/settings/health",
-    group: "server",
+    group: "connect",
     labelToken: "settings:healthNav",
     icon: ActivityIcon,
-    order: 11
+    order: 3
   },
   {
     path: "/settings/prompt-studio",
-    group: "server",
+    group: "knowledgeWorkspace",
     labelToken: "settings:promptStudio.nav",
     icon: Microscope,
-    order: 10,
+    order: 3,
     beta: true
   },
   {
     path: "/settings/knowledge",
-    group: "knowledge",
+    group: "knowledgeWorkspace",
     labelToken: "settings:manageKnowledge.title",
     icon: BookText,
     order: 1
   },
   {
     path: "/settings/chatbooks",
-    group: "knowledge",
+    group: "knowledgeWorkspace",
     labelToken: "settings:chatbooksNav",
     icon: BookText,
     order: 4
   },
   {
     path: "/settings/characters",
-    group: "knowledge",
+    group: "knowledgeWorkspace",
     labelToken: "settings:charactersNav",
     icon: BookIcon,
     order: 5
   },
   {
     path: "/settings/world-books",
-    group: "knowledge",
+    group: "knowledgeWorkspace",
     labelToken: "settings:worldBooksNav",
     icon: BookOpen,
-    order: 2
+    order: 5.1
   },
   {
     path: "/settings/chat-dictionaries",
-    group: "knowledge",
+    group: "knowledgeWorkspace",
     labelToken: "settings:chatDictionariesNav",
     icon: BookMarked,
-    order: 3
+    order: 5.2
   },
   {
     path: "/settings/rag",
-    group: "server",
+    group: "aiModels",
     labelToken: "settings:rag.title",
     icon: CombineIcon,
-    order: 4
+    order: 2
   },
   {
     path: "/settings/about",
@@ -198,26 +219,31 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     order: 1
   },
   {
-    path: "/moderation-playground",
-    group: "server",
-    labelToken: "option:moderationPlayground.nav",
+    path: MODERATION_REVIEW_PATH,
+    group: "safetyAdmin",
+    labelToken: "option:moderationReview.nav",
+    icon: ClipboardList,
+    order: 4
+  },
+  {
+    path: MODERATION_RULES_PATH,
+    group: "safetyAdmin",
+    labelToken: "option:moderationRules.nav",
     icon: ShieldCheck,
-    order: 10
+    order: 5
   },
   {
     path: "/settings/family-guardrails",
-    group: "server",
+    group: "safetyAdmin",
     labelToken: "settings:familyGuardrailsWizardNav",
-    icon: ShieldCheck,
-    order: 8,
-    beta: true
+    icon: Users,
+    order: 2
   },
   {
     path: "/settings/guardian",
-    group: "server",
+    group: "safetyAdmin",
     labelToken: "settings:guardianNav",
-    icon: ShieldCheck,
-    order: 9,
-    beta: true
+    icon: Eye,
+    order: 1
   }
 ]

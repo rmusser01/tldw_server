@@ -277,4 +277,4 @@ class TestTemplateEmailSending:
         assert "reauth-token-123" not in html_body
         assert "token=[REDACTED]" in email_data["text_body"]
         assert "token=[REDACTED]" in email_data["html_body"]
-        assert "token=[REDACTED]" in html_body
+        assert "body omitted from persisted mock output" in html_body

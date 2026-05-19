@@ -275,22 +275,19 @@ class DatabaseMigrator:
                 else:
                     continue
             except Exception as e:
-                logger.error(f"Failed to load migration from {filepath}: {e}")
-                continue
+                raise MigrationError(
+                    f"Invalid migration set: {filepath.name}"
+                ) from e
 
             if not migration:
                 continue
 
             previous = seen_versions.get(migration.version)
             if previous:
-                logger.warning(
-                    "Skipping migration {} from {}; version {} already provided by {}",
-                    migration.name,
-                    filepath.name,
-                    migration.version,
-                    previous.name,
+                raise MigrationError(
+                    "Duplicate migration version "
+                    f"{migration.version}: {previous.name} and {filepath.name}"
                 )
-                continue
 
             migrations.append(migration)
             seen_versions[migration.version] = filepath
@@ -345,8 +342,9 @@ class DatabaseMigrator:
         try:
             sql_text = filepath.read_text()
         except OSError as exc:
-            logger.error(f"Unable to read migration file {filepath}: {exc}")
-            return None
+            raise MigrationError(
+                f"Unable to read migration file: {filepath.name}"
+            ) from exc
 
         executable_sql = self._strip_sql_comments(sql_text)
         if not executable_sql:
@@ -414,11 +412,22 @@ class DatabaseMigrator:
                 raise MigrationError(
                     f"Migration {migration.name} (v{migration.version}) does not define down_sql; downgrade is not supported."
                 )
-        assert sql is not None  # For type checkers
+        if sql is None:
+            raise MigrationError(
+                f"Migration {migration.name} (v{migration.version}) does not define executable SQL."
+            )
         start_time = datetime.now(timezone.utc)
 
         with self._get_connection() as conn:
             try:
+                # Clean up any prior failed attempt for this version so retries work
+                if direction == "up":
+                    conn.execute(
+                        "DELETE FROM schema_migrations WHERE version = ? AND success = 0",
+                        (migration.version,),
+                    )
+                    conn.commit()
+
                 # Execute migration SQL
                 if direction == "up" and migration.idempotent:
                     statements = [stmt.strip() for stmt in sql.split(";") if stmt.strip()]
@@ -495,7 +504,7 @@ class DatabaseMigrator:
                 if direction == "up":
                     try:
                         conn.execute("""
-                            INSERT INTO schema_migrations
+                            INSERT OR REPLACE INTO schema_migrations
                             (version, name, checksum, applied_at, execution_time,
                              success, error_message)
                             VALUES (?, ?, ?, ?, ?, 0, ?)
@@ -574,15 +583,15 @@ class DatabaseMigrator:
                 "migrations_applied": []
             }
 
+        self._validate_migration_plan(
+            current_version=current_version,
+            target_version=target_version,
+            available_versions=available_versions,
+            direction=direction,
+            to_apply=to_apply,
+        )
+
         if not to_apply:
-            missing_versions: list[int] = []
-            if direction == "up":
-                available_set = set(available_versions)
-                missing_versions = [
-                    version
-                    for version in range(current_version + 1, target_version + 1)
-                    if version not in available_set
-                ]
             return {
                 "status": "no_migrations",
                 "current_version": current_version,
@@ -590,7 +599,7 @@ class DatabaseMigrator:
                 "migrations_applied": [],
                 "migrations_dir": self.migrations_dir,
                 "available_versions": available_versions,
-                "missing_versions": missing_versions,
+                "missing_versions": [],
             }
 
         # Create backup before migration
@@ -636,6 +645,56 @@ class DatabaseMigrator:
 
             raise MigrationError(f"Migration failed: {e}") from e
 
+    @staticmethod
+    def _get_missing_versions(
+        start_version: int,
+        end_version: int,
+        available_versions: list[int],
+    ) -> list[int]:
+        available_set = set(available_versions)
+        return [
+            version
+            for version in range(start_version, end_version + 1)
+            if version not in available_set
+        ]
+
+    def _validate_migration_plan(
+        self,
+        *,
+        current_version: int,
+        target_version: int,
+        available_versions: list[int],
+        direction: str,
+        to_apply: list[Migration],
+    ) -> None:
+        if direction == "up":
+            missing_versions = self._get_missing_versions(
+                current_version + 1,
+                target_version,
+                available_versions,
+            )
+        else:
+            missing_versions = self._get_missing_versions(
+                target_version + 1,
+                current_version,
+                available_versions,
+            )
+
+        if missing_versions:
+            raise MigrationError(f"Missing migration versions: {missing_versions}")
+
+        if direction == "down":
+            missing_down_sql = [
+                migration.version
+                for migration in to_apply
+                if migration.down_sql is None or not str(migration.down_sql).strip()
+            ]
+            if missing_down_sql:
+                raise MigrationError(
+                    "Cannot downgrade; missing down_sql for migration versions: "
+                    f"{missing_down_sql}"
+                )
+
     def rollback_to_backup(self, backup_path: str):
         """Restore database from backup"""
         backup_path_resolved = self._validate_backup_path(backup_path)
@@ -673,27 +732,53 @@ class DatabaseMigrator:
         issues = []
         applied = self.get_applied_migrations()
         available = {m.version: m for m in self.load_migrations()}
+        applied_versions = {migration_record["version"] for migration_record in applied}
+
+        if available:
+            available_versions = sorted(available)
+            expected_versions = range(available_versions[0], available_versions[-1] + 1)
+            missing_versions = [
+                version
+                for version in expected_versions
+                if version not in available and version not in applied_versions
+            ]
+
+            for version in missing_versions:
+                issues.append(
+                    {
+                        "version": version,
+                        "issue": "migration_version_gap",
+                        "message": (
+                            f"Migration file for version {version} "
+                            "is missing from the available set"
+                        ),
+                    }
+                )
 
         for migration_record in applied:
             version = migration_record["version"]
 
             if version not in available:
-                issues.append({
-                    "version": version,
-                    "issue": "migration_file_missing",
-                    "message": f"Migration file for version {version} not found"
-                })
+                issues.append(
+                    {
+                        "version": version,
+                        "issue": "migration_file_missing",
+                        "message": f"Migration file for version {version} not found",
+                    }
+                )
                 continue
 
             migration = available[version]
             if migration.checksum != migration_record["checksum"]:
-                issues.append({
-                    "version": version,
-                    "issue": "checksum_mismatch",
-                    "message": f"Checksum mismatch for migration {version}",
-                    "expected": migration.checksum,
-                    "actual": migration_record["checksum"]
-                })
+                issues.append(
+                    {
+                        "version": version,
+                        "issue": "checksum_mismatch",
+                        "message": f"Checksum mismatch for migration {version}",
+                        "expected": migration.checksum,
+                        "actual": migration_record["checksum"],
+                    }
+                )
 
         return issues
 

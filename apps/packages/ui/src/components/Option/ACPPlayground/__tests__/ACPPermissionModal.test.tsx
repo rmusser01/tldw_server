@@ -107,4 +107,59 @@ describe("ACPPermissionModal", () => {
 
     expect(screen.getByText(/capability_mapping/)).toBeInTheDocument()
   })
+
+  it("does not violate hook ordering when the queue becomes empty", () => {
+    const { rerender } = render(
+      <ACPPermissionModal
+        pendingPermissions={pendingPermissions}
+        approvePermission={vi.fn()}
+        denyPermission={vi.fn()}
+      />
+    )
+
+    expect(() =>
+      rerender(
+        <ACPPermissionModal
+          pendingPermissions={[]}
+          approvePermission={vi.fn()}
+          denyPermission={vi.fn()}
+        />
+      )
+    ).not.toThrow()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("resets batch approval and policy details when the current request changes", () => {
+    const nextPermission: ACPPendingPermission = {
+      ...pendingPermissions[0],
+      request_id: "req-3",
+      tool_name: "fs.appendFile",
+      provenance_summary: { source_kinds: ["policy_cache"] },
+    }
+    const { rerender } = render(
+      <ACPPermissionModal
+        pendingPermissions={[pendingPermissions[0]]}
+        approvePermission={vi.fn()}
+        denyPermission={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }))
+
+    expect(screen.getByRole("checkbox")).toBeChecked()
+    expect(screen.getByText(/capability_mapping/)).toBeInTheDocument()
+
+    rerender(
+      <ACPPermissionModal
+        pendingPermissions={[nextPermission]}
+        approvePermission={vi.fn()}
+        denyPermission={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("checkbox")).not.toBeChecked()
+    expect(screen.getByRole("button", { name: "Show details" })).toBeInTheDocument()
+    expect(screen.queryByText(/policy_cache/)).not.toBeInTheDocument()
+  })
 })

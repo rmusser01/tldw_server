@@ -73,6 +73,10 @@ const createObjectUrl = (
 export const useTtsPlayground = () => {
   const [segments, setSegments] = useState<TtsPlaygroundSegment[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState<{
+    completed: number
+    total: number
+  } | null>(null)
   const notification = useAntdNotification()
   const { t } = useTranslation("playground")
 
@@ -96,6 +100,7 @@ export const useTtsPlayground = () => {
     }
 
     setIsGenerating(true)
+    setGenerationProgress(null)
     const createdUrls: string[] = []
 
     try {
@@ -181,6 +186,7 @@ export const useTtsPlayground = () => {
       }
 
       const idPrefix = provider === "elevenlabs" ? "eleven" : provider
+      setGenerationProgress({ completed: 0, total: sentences.length })
       for (let i = 0; i < sentences.length; i++) {
         const audio = await synthesize(sentences[i])
         const created = createObjectUrl(audio)
@@ -195,6 +201,7 @@ export const useTtsPlayground = () => {
           mimeType: created.mimeType,
           source: "generated"
         })
+        setGenerationProgress({ completed: i + 1, total: sentences.length })
       }
 
       // We do not apply playbackSpeed here because <audio> controls can be used directly.
@@ -216,6 +223,7 @@ export const useTtsPlayground = () => {
       return []
     } finally {
       setIsGenerating(false)
+      setGenerationProgress(null)
     }
   }
 
@@ -227,6 +235,7 @@ export const useTtsPlayground = () => {
   return {
     segments,
     isGenerating,
+    generationProgress,
     generateSegments,
     clearSegments,
     setSegments

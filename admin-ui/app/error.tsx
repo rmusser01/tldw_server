@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import * as Sentry from '@sentry/nextjs';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,8 +19,8 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
   const router = useRouter();
 
   useEffect(() => {
-    // Log the error to console (could also send to error reporting service)
     console.error('Route error:', error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

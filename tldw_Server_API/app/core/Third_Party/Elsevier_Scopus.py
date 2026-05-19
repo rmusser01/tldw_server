@@ -101,8 +101,10 @@ def search_scopus(
         entries = sr.get("entry") or []
         items = [_normalize_entry(e) for e in entries]
         return items, total, None
-    except Exception as e:
-        return None, 0, f"Scopus error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "Scopus request timed out."
+    except Exception:
+        return None, 0, "Scopus request failed."
 
 
 def get_scopus_by_doi(doi: str) -> tuple[dict | None, str | None]:
@@ -127,5 +129,7 @@ def get_scopus_by_doi(doi: str) -> tuple[dict | None, str | None]:
         if not entries:
             return None, None
         return _normalize_entry(entries[0]), None
-    except Exception as e:
-        return None, f"Scopus error: {str(e)}"
+    except TimeoutError:
+        return None, "Scopus request timed out."
+    except Exception:
+        return None, "Scopus request failed."

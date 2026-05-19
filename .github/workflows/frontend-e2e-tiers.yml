@@ -24,6 +24,9 @@ on:
 permissions:
   contents: read
 
+env:
+  SKIP_WXT_PREPARE: '1'
+
 concurrency:
   group: frontend-e2e-tiers-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true

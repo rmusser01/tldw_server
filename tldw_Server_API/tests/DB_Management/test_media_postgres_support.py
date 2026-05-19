@@ -9,8 +9,15 @@ from typing import Any, Dict, List, Tuple
 from unittest.mock import MagicMock
 import uuid
 
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_repository import (
     MediaRepository,
 )
@@ -138,6 +145,212 @@ def test_postgres_migrations_include_current_schema_version() -> None:
 
     migrations = MediaDatabase._get_postgres_migrations(MediaDatabase.__new__(MediaDatabase))
     assert MediaDatabase._CURRENT_SCHEMA_VERSION in migrations
+
+
+def test_postgres_migrations_include_v23() -> None:
+
+    migrations = MediaDatabase._get_postgres_migrations(MediaDatabase.__new__(MediaDatabase))
+    assert 23 in migrations
+
+
+def test_run_postgres_migrate_to_v23_executes_transcript_run_history_updates() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies import (
+        postgres_transcript_run_history as postgres_transcript_run_history_module,
+    )
+
+    conn = object()
+    calls: list[tuple[str, tuple[object, ...] | None, object]] = []
+
+    class FakeBackend:
+        def escape_identifier(self, name: str) -> str:
+            return f'"{name}"'
+
+        def execute(
+            self,
+            query: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            connection: object,
+        ) -> None:
+            calls.append((query, params, connection))
+
+    db = MediaDatabase.__new__(MediaDatabase)
+    db.backend = FakeBackend()
+
+    postgres_transcript_run_history_module.run_postgres_migrate_to_v23(db, conn)
+
+    executed_sql = "\n".join(query for query, _params, _connection in calls)
+    assert 'ALTER TABLE "media" ADD COLUMN IF NOT EXISTS "latest_transcription_run_id" BIGINT' in executed_sql
+    assert 'ALTER TABLE "transcripts" ADD COLUMN IF NOT EXISTS "transcription_run_id" BIGINT' in executed_sql
+    assert 'CREATE UNIQUE INDEX IF NOT EXISTS "idx_transcripts_media_run_id"' in executed_sql
+    assert 'WHERE "transcription_run_id" IS NOT NULL' in executed_sql
+    assert 'CREATE UNIQUE INDEX IF NOT EXISTS "idx_transcripts_media_idempotency_key"' in executed_sql
+    assert 'WHERE "idempotency_key" IS NOT NULL' in executed_sql
+    assert 'DROP CONSTRAINT IF EXISTS transcripts_media_id_whisper_model_key' in executed_sql
+    assert "ROW_NUMBER() OVER (" in executed_sql
+    assert "PARTITION BY media_id" in executed_sql
+    assert "ORDER BY created_at NULLS FIRST, id ASC" in executed_sql
+    assert "WHERE deleted = FALSE" in executed_sql
+
+
+@pytest.mark.integration
+def test_fresh_postgres_schema_enforces_transcript_run_history_uniqueness(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="pg-bootstrap-v23", backend=backend)
+
+    try:
+        media_uuid = str(uuid.uuid4())
+        now = db._get_current_utc_timestamp_str()
+
+        with backend.transaction() as conn:
+            backend.execute(
+                """
+                INSERT INTO Media (uuid, title, type, content_hash, last_modified, version, client_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    media_uuid,
+                    "Bootstrap uniqueness",
+                    "audio",
+                    f"hash-{media_uuid}",
+                    now,
+                    1,
+                    db.client_id,
+                ),
+                connection=conn,
+            )
+            media_id = int(
+                backend.execute(
+                    "SELECT id FROM media WHERE uuid = %s",
+                    (media_uuid,),
+                    connection=conn,
+                ).scalar
+            )
+            backend.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id, whisper_model, transcription, created_at, transcription_run_id,
+                    idempotency_key, uuid, last_modified, version, client_id, deleted
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    media_id,
+                    "small",
+                    "baseline transcript",
+                    now,
+                    1,
+                    "job-1",
+                    str(uuid.uuid4()),
+                    now,
+                    1,
+                    db.client_id,
+                    False,
+                ),
+                connection=conn,
+            )
+            backend.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id, whisper_model, transcription, created_at, transcription_run_id,
+                    idempotency_key, uuid, last_modified, version, client_id, deleted
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    media_id,
+                    "medium",
+                    "nullable key transcript",
+                    now,
+                    2,
+                    None,
+                    str(uuid.uuid4()),
+                    now,
+                    1,
+                    db.client_id,
+                    False,
+                ),
+                connection=conn,
+            )
+            backend.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id, whisper_model, transcription, created_at, transcription_run_id,
+                    idempotency_key, uuid, last_modified, version, client_id, deleted
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    media_id,
+                    "large",
+                    "second nullable key transcript",
+                    now,
+                    3,
+                    None,
+                    str(uuid.uuid4()),
+                    now,
+                    1,
+                    db.client_id,
+                    False,
+                ),
+                connection=conn,
+            )
+
+        with pytest.raises(BackendDatabaseError, match="unique|duplicate key"):
+            with backend.transaction() as conn:
+                backend.execute(
+                    """
+                    INSERT INTO Transcripts (
+                        media_id, whisper_model, transcription, created_at, transcription_run_id,
+                        idempotency_key, uuid, last_modified, version, client_id, deleted
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        media_id,
+                        "duplicate-run",
+                        "duplicate run transcript",
+                        now,
+                        1,
+                        "job-2",
+                        str(uuid.uuid4()),
+                        now,
+                        1,
+                        db.client_id,
+                        False,
+                    ),
+                    connection=conn,
+                )
+
+        with pytest.raises(BackendDatabaseError, match="unique|duplicate key"):
+            with backend.transaction() as conn:
+                backend.execute(
+                    """
+                    INSERT INTO Transcripts (
+                        media_id, whisper_model, transcription, created_at, transcription_run_id,
+                        idempotency_key, uuid, last_modified, version, client_id, deleted
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        media_id,
+                        "duplicate-key",
+                        "duplicate idempotency transcript",
+                        now,
+                        4,
+                        "job-1",
+                        str(uuid.uuid4()),
+                        now,
+                        1,
+                        db.client_id,
+                        False,
+                    ),
+                    connection=conn,
+                )
+    finally:
+        db.close_connection()
 
 
 def test_postgres_migrate_to_v6_creates_identifier_table() -> None:

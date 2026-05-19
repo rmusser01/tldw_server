@@ -87,11 +87,20 @@ class TracingManager:
 
     def __init__(self):
         """Initialize the tracing manager."""
-        self.telemetry = get_telemetry_manager()
-        self.tracer = self.telemetry.get_tracer("tldw_server.tracing")
         self.active_spans = {}
         # Local baggage store when OpenTelemetry baggage is unavailable
         self._local_baggage = contextvars.ContextVar("tldw_local_baggage", default=None)
+
+    @property
+    def telemetry(self):
+        """Always return the *current* global telemetry manager so that a
+        shutdown/re-init cycle is picked up automatically."""
+        return get_telemetry_manager()
+
+    @property
+    def tracer(self):
+        """Return a tracer from the current telemetry manager."""
+        return self.telemetry.get_tracer("tldw_server.tracing")
 
     @contextmanager
     def span(
@@ -121,7 +130,9 @@ class TracingManager:
             name,
             kind=kind,
             attributes=attributes,
-            links=links
+            links=links,
+            record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             span_id: Optional[str] = None
             try:
@@ -172,7 +183,9 @@ class TracingManager:
             name,
             kind=kind,
             attributes=attributes,
-            links=links
+            links=links,
+            record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             span_id: Optional[str] = None
             try:
@@ -389,26 +402,19 @@ def trace_operation(
                     try:
                         span_attributes["args"] = json.dumps(str(args)[:1000])
                         span_attributes["kwargs"] = json.dumps(str(kwargs)[:1000])
-                    except Exception as e:
-                        logger.debug(f"trace_operation arg serialization failed: error={e}")
+                    except Exception:
+                        logger.debug("trace_operation arg serialization failed")
 
                 async with manager.async_span(span_name, kind=kind, attributes=span_attributes) as span:
-                    try:
-                        result = await func(*args, **kwargs)
+                    result = await func(*args, **kwargs)
 
-                        if record_result and span:
-                            try:
-                                span.set_attribute("result", json.dumps(str(result)[:1000]))
-                            except Exception as e:
-                                logger.debug(f"trace_operation result serialization failed: error={e}")
+                    if record_result and span:
+                        try:
+                            span.set_attribute("result", json.dumps(str(result)[:1000]))
+                        except Exception:
+                            logger.debug("trace_operation result serialization failed")
 
-                        return result
-
-                    except Exception as e:
-                        if span:
-                            span.record_exception(e)
-                            span.set_status(Status(StatusCode.ERROR, str(e)))
-                        raise
+                    return result
 
             return async_wrapper
 
@@ -426,26 +432,19 @@ def trace_operation(
                     try:
                         span_attributes["args"] = json.dumps(str(args)[:1000])
                         span_attributes["kwargs"] = json.dumps(str(kwargs)[:1000])
-                    except Exception as e:
-                        logger.debug(f"trace_operation arg serialization failed: error={e}")
+                    except Exception:
+                        logger.debug("trace_operation arg serialization failed")
 
                 with manager.span(span_name, kind=kind, attributes=span_attributes) as span:
-                    try:
-                        result = func(*args, **kwargs)
+                    result = func(*args, **kwargs)
 
-                        if record_result and span:
-                            try:
-                                span.set_attribute("result", json.dumps(str(result)[:1000]))
-                            except Exception as e:
-                                logger.debug(f"trace_operation result serialization failed: error={e}")
+                    if record_result and span:
+                        try:
+                            span.set_attribute("result", json.dumps(str(result)[:1000]))
+                        except Exception:
+                            logger.debug("trace_operation result serialization failed")
 
-                        return result
-
-                    except Exception as e:
-                        if span:
-                            span.record_exception(e)
-                            span.set_status(Status(StatusCode.ERROR, str(e)))
-                        raise
+                    return result
 
             return sync_wrapper
 
@@ -463,25 +462,30 @@ def trace_method(
     Similar to trace_operation but includes class name in span name.
     """
     def decorator(func: F) -> F:
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            span_name = name or f"{self.__class__.__name__}.{func.__name__}"
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(self, *args, **kwargs):
+                span_name = name or f"{self.__class__.__name__}.{func.__name__}"
+                manager = get_tracing_manager()
+                span_attributes = dict(attributes) if attributes else {}
+                span_attributes["class"] = self.__class__.__name__
+                span_attributes["method"] = func.__name__
+                async with manager.async_span(span_name, kind=kind, attributes=span_attributes):
+                    return await func(self, *args, **kwargs)
 
+            return async_wrapper
+
+        @functools.wraps(func)
+        def sync_wrapper(self, *args, **kwargs):
+            span_name = name or f"{self.__class__.__name__}.{func.__name__}"
             manager = get_tracing_manager()
             span_attributes = dict(attributes) if attributes else {}
             span_attributes["class"] = self.__class__.__name__
             span_attributes["method"] = func.__name__
+            with manager.span(span_name, kind=kind, attributes=span_attributes):
+                return func(self, *args, **kwargs)
 
-            if asyncio.iscoroutinefunction(func):
-                async def async_execution():
-                    async with manager.async_span(span_name, kind=kind, attributes=span_attributes):
-                        return await func(self, *args, **kwargs)
-                return async_execution()
-            else:
-                with manager.span(span_name, kind=kind, attributes=span_attributes):
-                    return func(self, *args, **kwargs)
-
-        return wrapper
+        return sync_wrapper
 
     return decorator
 

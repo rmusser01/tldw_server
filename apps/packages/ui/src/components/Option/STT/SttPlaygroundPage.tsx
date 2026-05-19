@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
-import { useTranslation } from "react-i18next"
+import { Trans, useTranslation } from "react-i18next"
+import { Link } from "react-router-dom"
 import { Alert, Button, Typography } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { PageShell } from "@/components/Common/PageShell"
@@ -316,14 +317,39 @@ export const SttPlaygroundPage: React.FC = () => {
   // ── Render ────────────────────────────────────────────────────────
   return (
     <PageShell maxWidthClassName="max-w-5xl" className="py-6">
-      <Title level={3}>
-        {t("playground:stt.title", "STT Playground")}
+      <Title level={1} className="!text-2xl">
+        {t("playground:speechToText", "Speech to Text")}
       </Title>
       <Text type="secondary">
         {t("playground:stt.subtitle", "Record audio and compare transcription results across multiple models.")}
       </Text>
+      <p className="text-[11px] text-text-subtle mt-1">
+        {t("playground:stt.serverRequirement", "Transcription requires a configured STT engine on your tldw server.")}
+      </p>
+      <p className="text-[11px] text-text-subtle">
+        <Trans
+          i18nKey="playground:stt.combinedWorkflowHint"
+          defaults="For combined TTS + STT workflows, try the <speechLink>Speech Playground</speechLink>."
+          components={{ speechLink: <Link to="/speech" className="underline" /> }}
+        />
+      </p>
+      <div className="mt-1">
+        <a
+          href="https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/First_Time_Audio_Setup_CPU.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-text-muted underline hover:text-text"
+        >
+          {t("playground:stt.audioSetupGuide", "Audio Setup Guide")}
+        </a>
+      </div>
 
       <div className="mt-4 space-y-4">
+        {!currentBlob && (
+          <p className="text-center text-sm text-text-muted mb-4">
+            {t("playground:stt.firstUseHint", "Press the record button or upload an audio file to get started with transcription.")}
+          </p>
+        )}
         {serverModelsError && (
           <Alert
             type="warning"
@@ -343,18 +369,38 @@ export const SttPlaygroundPage: React.FC = () => {
             }
           />
         )}
-        <RecordingStrip
-          onBlobReady={handleBlobReady}
-          onSettingsToggle={toggleSettings}
-        />
-        {showSettings && <InlineSettingsPanel onChange={setSttSettings} />}
-        <ComparisonPanel
-          blob={currentBlob}
-          availableModels={serverModels}
-          sttOptions={sttOptions}
-          onSaveToNotes={handleSaveToNotes}
-          onComparisonComplete={handleComparisonComplete}
-        />
+        {!serverModelsLoading && !serverModelsError && serverModels.length === 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            className="mb-4"
+            message={t("playground:stt.noModelsTitle", "No transcription models available")}
+            description={t("playground:stt.noModelsBody", "Configure STT models in your server settings. Check the Audio Setup Guide for instructions.")}
+          />
+        )}
+        <div data-testid="stt-record-strip">
+          <RecordingStrip
+            onBlobReady={handleBlobReady}
+            onSettingsToggle={toggleSettings}
+          />
+        </div>
+        <p className="text-[11px] text-text-subtle text-center mt-1">
+          <Trans
+            i18nKey="playground:stt.spaceKeyHint"
+            defaults="Press <kbd>Space</kbd> to toggle recording"
+            components={{ kbd: <kbd className="rounded border border-border px-1 py-0.5 text-[10px]" /> }}
+          />
+        </p>
+        {showSettings && <div data-testid="stt-settings-panel"><InlineSettingsPanel onChange={setSttSettings} /></div>}
+        <div data-testid="stt-transcription-output">
+          <ComparisonPanel
+            blob={currentBlob}
+            availableModels={serverModels}
+            sttOptions={sttOptions}
+            onSaveToNotes={handleSaveToNotes}
+            onComparisonComplete={handleComparisonComplete}
+          />
+        </div>
         <HistoryPanel
           entries={history ?? []}
           onRecompare={handleRecompare}

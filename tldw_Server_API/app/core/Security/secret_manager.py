@@ -26,11 +26,11 @@ from tldw_Server_API.app.core.config import load_comprehensive_config
 class SecretType(Enum):
     """Types of secrets managed by the system."""
     API_KEY = "api_key"
-    JWT_SECRET = "jwt_secret"
-    DATABASE_PASSWORD = "database_password"
-    WEBHOOK_SECRET = "webhook_secret"
+    JWT_SECRET = "jwt_secret"  # nosec B105
+    DATABASE_PASSWORD = "database_password"  # nosec B105
+    WEBHOOK_SECRET = "webhook_secret"  # nosec B105
     ENCRYPTION_KEY = "encryption_key"
-    OAUTH_SECRET = "oauth_secret"
+    OAUTH_SECRET = "oauth_secret"  # nosec B105
     CUSTOM = "custom"
 
 
@@ -116,8 +116,8 @@ class SecretManager:
                 logger.debug(f"SecretManager: .env file found at {env_path} (already loaded by config.py)")
             else:
                 logger.debug(f"SecretManager: No .env file found at {env_path}")
-        except Exception as e:
-            logger.warning(f"SecretManager: Error checking .env file: {e}")
+        except Exception:
+            logger.warning("SecretManager: Error checking .env file")
 
     def _get_config_value(self, section: str, key: str, fallback: Optional[str] = None) -> Optional[str]:
         """Get value from existing tldw config system."""
@@ -495,8 +495,8 @@ class SecretManager:
                         health["issues"].append(f"Secret '{name}' is too short")
                     elif value == config.default_value:
                         health["recommendations"].append(f"Secret '{name}' using default value - should be changed for production")
-                except Exception as e:
-                    health["issues"].append(f"Error checking secret '{name}': {e}")
+                except Exception:
+                    health["issues"].append(f"Error checking secret '{name}'")
 
             # Check for rotation warnings
             for name, cached in self._secrets_cache.items():
@@ -509,9 +509,9 @@ class SecretManager:
             elif health["recommendations"] or health["rotation_warnings"]:
                 health["status"] = "warning"
 
-        except Exception as e:
+        except Exception:
             health["status"] = "error"
-            health["issues"].append(f"Health check failed: {e}")
+            health["issues"].append("Health check failed")
 
         return health
 

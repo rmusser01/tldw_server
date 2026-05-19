@@ -1251,6 +1251,60 @@ async def test_logout_all_devices_uses_session_manager_only(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_logout_rejects_api_key_authenticated_current_session_logout(monkeypatch):
+    reset_settings()
+
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    class _StubBlacklist:
+        async def revoke_all_user_tokens(self, **kwargs):
+            raise AssertionError("current-session API-key logout should fail before token revocation")
+
+        async def revoke_token(self, **kwargs):
+            raise AssertionError("current-session API-key logout should fail before access token revocation")
+
+    class _StubSessionManager:
+        def __init__(self):
+            self.calls = []
+
+        async def revoke_all_user_sessions(self, **kwargs):
+            self.calls.append(("all", kwargs))
+            return 0
+
+        async def revoke_session(self, **kwargs):
+            self.calls.append(("single", kwargs))
+            return None
+
+    monkeypatch.setattr(auth, "get_token_blacklist", lambda: _StubBlacklist())
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "headers": [(b"x-api-key", b"test-api-key-123")],
+        "client": ("203.0.113.5", 1234),
+        "scheme": "http",
+        "query_string": b"",
+        "server": ("testserver", 80),
+    }
+    request = Request(scope)
+    session_manager = _StubSessionManager()
+
+    with pytest.raises(auth.HTTPException) as exc:
+        await auth.logout(
+            data=auth.LogoutRequest(all_devices=False),
+            request=request,
+            current_user=SimpleNamespace(user_id=12, kind="api_key"),
+            session_manager=session_manager,
+            jwt_service=object(),
+        )
+
+    assert exc.value.status_code == 400
+    assert "bearer token" in exc.value.detail.lower()
+    assert session_manager.calls == []
+
+
+@pytest.mark.asyncio
 async def test_logout_all_devices_ignores_blacklist_factory_failure(monkeypatch):
     reset_settings()
 
@@ -1366,6 +1420,28 @@ async def test_revoke_all_sessions_returns_revoked_count():
     assert captured["user_id"] == 77
     assert captured["except_session_id"] is None
     assert captured["reason"] == "User requested logout from all devices"
+
+
+@pytest.mark.asyncio
+async def test_list_user_sessions_sanitizes_backend_error_in_test_mode(monkeypatch):
+    reset_settings()
+
+    import tldw_Server_API.app.api.v1.endpoints.auth as auth
+
+    class _FailingSessionManager:
+        async def get_user_sessions(self, user_id: int):
+            raise RuntimeError(f"session backend exploded for user {user_id}")
+
+    monkeypatch.setattr(auth, "_is_test_mode", lambda: True)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth.list_user_sessions(
+            current_user=SimpleNamespace(id=77),
+            session_manager=_FailingSessionManager(),
+        )
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "Failed to retrieve sessions"
 
 
 @pytest.mark.asyncio

@@ -100,7 +100,7 @@ export const isTldwServerRunning = async () => {
   try {
     const config = await tldwClient.getConfig()
     if (!config) return false
-    
+
     const health = await tldwClient.healthCheck()
     return health
   } catch (e) {
@@ -110,6 +110,7 @@ export const isTldwServerRunning = async () => {
 }
 
 const mapTldwModelToUi = (model: any) => ({
+  id: model.id,
   name: `tldw:${model.id}`,
   model: `tldw:${model.id}`,
   provider: String(model.provider || "unknown").toLowerCase(),
@@ -119,11 +120,27 @@ const mapTldwModelToUi = (model: any) => ({
   modified_at: new Date().toISOString(),
   size: 0,
   digest: "",
+  is_configured:
+    typeof model.isConfigured === "boolean" ? model.isConfigured : undefined,
+  provider_is_configured:
+    typeof model.providerIsConfigured === "boolean"
+      ? model.providerIsConfigured
+      : undefined,
+  catalog_only:
+    typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
     type: model.type,
-    modalities: model.modalities
+    modalities: model.modalities,
+    is_configured:
+      typeof model.isConfigured === "boolean" ? model.isConfigured : undefined,
+    provider_is_configured:
+      typeof model.providerIsConfigured === "boolean"
+        ? model.providerIsConfigured
+        : undefined,
+    catalog_only:
+      typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined
   }
 })
 
@@ -137,7 +154,9 @@ const dedupeChatModelsByModel = (models: any[]) => {
   const duplicates: string[] = []
 
   for (const model of models) {
-    const key = String(model?.model || model?.name || "").trim()
+    const modelId = String(model?.model || model?.name || "").trim()
+    const provider = String(model?.provider || "unknown").trim().toLowerCase()
+    const key = modelId ? `${provider}:${modelId}` : ""
     if (!key) {
       unique.push(model)
       continue

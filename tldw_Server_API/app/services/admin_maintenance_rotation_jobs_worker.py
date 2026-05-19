@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 from typing import TYPE_CHECKING, Any, Callable
@@ -135,7 +136,9 @@ async def handle_maintenance_rotation_job(
     }
 
 
-async def run_admin_maintenance_rotation_jobs_worker() -> None:
+async def run_admin_maintenance_rotation_jobs_worker(
+    stop_event: asyncio.Event | None = None,
+) -> None:
     """Run the WorkerSDK loop for authoritative maintenance rotation jobs."""
     worker_id = (
         os.getenv("ADMIN_MAINTENANCE_ROTATION_JOBS_WORKER_ID") or f"admin-maintenance-{os.getpid()}"
@@ -147,20 +150,38 @@ async def run_admin_maintenance_rotation_jobs_worker() -> None:
     )
     jm = JobManager()
     sdk = WorkerSDK(jm, cfg)
+    stop_task: asyncio.Task[None] | None = None
+    if stop_event is not None:
+        async def _watch_stop() -> None:
+            await stop_event.wait()
+            sdk.stop()
+
+        stop_task = asyncio.create_task(
+            _watch_stop(),
+            name="admin_maintenance_rotation_jobs_worker_stop_watch",
+        )
     logger.info(
         "Admin maintenance rotation Jobs worker starting: queue={} worker_id={}",
         cfg.queue,
         worker_id,
     )
-    await sdk.run(handler=handle_maintenance_rotation_job)
+    try:
+        await sdk.run(handler=handle_maintenance_rotation_job)
+    finally:
+        if stop_task is not None:
+            stop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_task
 
 
-async def start_admin_maintenance_rotation_jobs_worker() -> asyncio.Task | None:
+async def start_admin_maintenance_rotation_jobs_worker(
+    stop_event: asyncio.Event | None = None,
+) -> asyncio.Task | None:
     """Start the maintenance rotation Jobs worker when explicitly enabled."""
     if not maintenance_rotation_worker_enabled():
         return None
     return asyncio.create_task(
-        run_admin_maintenance_rotation_jobs_worker(),
+        run_admin_maintenance_rotation_jobs_worker(stop_event),
         name="admin_maintenance_rotation_jobs_worker",
     )
 

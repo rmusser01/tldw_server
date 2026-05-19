@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     ttsVoice: "af_heart",
     confirmationMode: "destructive_only" as const,
     voiceChatTriggerPhrases: ["hey helper"],
+    wakeBehavior: "one_shot" as const,
     autoResume: true,
     bargeIn: false,
     autoCommitEnabled: true,
@@ -81,6 +82,12 @@ vi.mock("@/hooks/useResolvedPersonaVoiceDefaults", () => ({
     voiceChatTriggerPhrases: Array.isArray(voiceDefaults?.voice_chat_trigger_phrases)
       ? voiceDefaults.voice_chat_trigger_phrases.map((phrase) => String(phrase))
       : mocks.resolvedDefaults.voiceChatTriggerPhrases,
+    wakeBehavior:
+      voiceDefaults?.wake_behavior === "continuous" ||
+      voiceDefaults?.wake_behavior === "push_to_talk_after_wake" ||
+      voiceDefaults?.wake_behavior === "one_shot"
+        ? voiceDefaults.wake_behavior
+        : mocks.resolvedDefaults.wakeBehavior,
     autoResume:
       typeof voiceDefaults?.auto_resume === "boolean"
         ? voiceDefaults.auto_resume
@@ -209,6 +216,7 @@ describe("AssistantDefaultsPanel", () => {
       ttsVoice: "af_heart",
       confirmationMode: "destructive_only",
       voiceChatTriggerPhrases: ["hey helper"],
+      wakeBehavior: "one_shot",
       autoResume: true,
       bargeIn: false,
       autoCommitEnabled: true,
@@ -233,6 +241,7 @@ describe("AssistantDefaultsPanel", () => {
               tts_voice: "af_heart",
               confirmation_mode: "destructive_only",
               voice_chat_trigger_phrases: ["hey helper"],
+              wake_behavior: "continuous",
               auto_resume: true,
               barge_in: false,
               auto_commit_enabled: true,
@@ -284,6 +293,11 @@ describe("AssistantDefaultsPanel", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("STT language")).toHaveValue("en-US")
       expect(screen.getByLabelText("STT model")).toHaveValue("whisper-1")
+      expect(screen.getByLabelText("Wake behavior")).toHaveValue("continuous")
+      expect(screen.getByLabelText("Wake behavior").closest("label")).toHaveAttribute(
+        "for",
+        "persona-assistant-defaults-wake-behavior"
+      )
     })
     expect(screen.getByText("Turn detection defaults")).toBeInTheDocument()
     expect(screen.getByTestId("assistant-defaults-vad-auto-commit")).toBeChecked()
@@ -311,6 +325,9 @@ describe("AssistantDefaultsPanel", () => {
     })
     fireEvent.change(screen.getByLabelText("Trigger phrases"), {
       target: { value: "bonjour helper\nhey garden, start research" }
+    })
+    fireEvent.change(screen.getByLabelText("Wake behavior"), {
+      target: { value: "push_to_talk_after_wake" }
     })
     fireEvent.change(screen.getByLabelText("Auto-resume"), {
       target: { value: "false" }
@@ -353,6 +370,7 @@ describe("AssistantDefaultsPanel", () => {
                 "bonjour helper",
                 "hey garden, start research"
               ],
+              wake_behavior: "push_to_talk_after_wake",
               auto_resume: false,
               barge_in: true,
               auto_commit_enabled: false,

@@ -14,7 +14,8 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockPromptModal
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -25,8 +26,14 @@ const {
   mockConfirmDanger: vi.fn(),
   mockGetSetting: vi.fn(),
   mockSetSetting: vi.fn(),
-  mockClearSetting: vi.fn()
+  mockClearSetting: vi.fn(),
+  mockPromptModal: vi.fn()
 }))
+
+vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
+  return { ...actual, promptModal: mockPromptModal }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -224,7 +231,7 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
         const nextId = seededMoodboards.reduce((max, item) => Math.max(max, item.id), 0) + 1
         const created = {
           id: nextId,
-          name: String(body.name || "").trim() || `Moodboard ${nextId}`,
+          name: String(body.name || "").trim() || `Collection ${nextId}`,
           description: null,
           version: 1
         }
@@ -315,15 +322,20 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
   })
 
   it("supports create, rename, and delete actions for moodboards", async () => {
-    const promptSpy = vi
-      .spyOn(window, "prompt")
-      .mockReturnValueOnce("Fresh Board")
-      .mockReturnValueOnce("Renamed Board")
+    mockPromptModal
+      .mockResolvedValueOnce("Fresh Board")
+      .mockResolvedValueOnce("Renamed Board")
 
     renderPage()
 
     allowMoodboardFetch = true
     fireEvent.click(screen.getByTestId("notes-view-mode-moodboard"))
+
+    // Open the nested Organize section (collapsed by default)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-section-organize-toggle")).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId("notes-section-organize-toggle"))
 
     await waitFor(() => {
       expect(screen.getByTestId("notes-moodboard-controls")).toBeInTheDocument()
@@ -362,7 +374,6 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
       )
     })
 
-    promptSpy.mockRestore()
   })
 
   it("supports moodboard pagination controls and page navigation", async () => {

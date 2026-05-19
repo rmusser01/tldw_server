@@ -79,7 +79,7 @@ export const QuickActionsCard = () => (
           <Activity className="h-5 w-5 text-primary" />
           <div>
             <p className="font-medium">Monitoring</p>
-            <p className="text-xs text-muted-foreground">Health & alerts</p>
+            <p className="text-xs text-muted-foreground">System health &amp; alerts</p>
           </div>
         </Link>
       </div>

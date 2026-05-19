@@ -323,13 +323,13 @@ export const GenerateCharacterPanel: React.FC<GenerateCharacterPanelProps> = ({
         type="info"
         showIcon
         title={t("settings:manageCharacters.generate.noModelsTitle", {
-          defaultValue: "No models available"
+          defaultValue: "No AI generation model available"
         })}
         description={
           <span>
             {t("settings:manageCharacters.generate.noModelsDesc", {
               defaultValue:
-                "Configure at least one LLM provider in settings to enable AI character generation."
+                "AI character generation needs a configured LLM model. Saved characters remain available for browsing, editing, and chat once a chat model is configured."
             })}{" "}
             <Link to="/settings/model" className="text-primary hover:underline">
               {t("settings:manageCharacters.generate.goToSettings", {

@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories import (
     DocumentVersionsRepository,
     KeywordsRepository,
@@ -69,6 +70,10 @@ def _require_read_method(
 def _deleted_false_value(db_instance: Any) -> bool | int:
     backend_name = getattr(getattr(db_instance, "backend_type", None), "name", None)
     return False if backend_name == "POSTGRESQL" else 0
+
+
+def _raise_read_error(operation: str, exc: Exception) -> None:
+    raise DatabaseError(f"{operation} failed") from exc  # noqa: TRY003
 
 
 def _supports_keyword_delete_repository(db_instance: Any) -> bool:
@@ -185,8 +190,8 @@ def has_unvectorized_chunks(
                 (media_id,),
             )
             return cursor.fetchone() is not None
-        except Exception:
-            return False
+        except Exception as exc:
+            _raise_read_error("has_unvectorized_chunks", exc)
 
     reader = _require_read_method(
         db,
@@ -572,8 +577,8 @@ def get_unvectorized_chunk_count(
             with contextlib.suppress(Exception):
                 return int(row[0] or 0)
             return 0
-        except Exception:
-            return None
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_chunk_count", exc)
 
     reader = _require_read_method(
         db,
@@ -607,8 +612,8 @@ def get_unvectorized_anchor_index_for_offset(
             if not row:
                 return None
             return int(row["chunk_index"]) if isinstance(row, dict) else int(row[0])
-        except Exception:
-            return None
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_anchor_index_for_offset", exc)
 
     reader = _require_read_method(
         db,
@@ -636,8 +641,8 @@ def get_unvectorized_chunk_index_by_uuid(
             if not row:
                 return None
             return int(row["chunk_index"]) if isinstance(row, dict) else int(row[0])
-        except Exception:
-            return None
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_chunk_index_by_uuid", exc)
 
     reader = _require_read_method(
         db,
@@ -668,8 +673,8 @@ def get_unvectorized_chunk_by_index(
             )
             row = cursor.fetchone()
             return dict(row) if row else None
-        except Exception:
-            return None
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_chunk_by_index", exc)
 
     reader = _require_read_method(
         db,
@@ -701,8 +706,8 @@ def get_unvectorized_chunks_in_range(
                 (media_id, start_index, end_index),
             )
             return [dict(row) for row in cursor.fetchall()]
-        except Exception:
-            return []
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_chunks_in_range", exc)
 
     reader = _require_read_method(
         db,
@@ -876,8 +881,8 @@ def lookup_section_for_offset(
                     (media_id, _deleted_false_value(db_instance), char_offset, char_offset),
                 )
                 row = cur.fetchone()
-        except Exception:
-            return None
+        except Exception as exc:
+            _raise_read_error("lookup_section_for_offset", exc)
 
         if not row:
             return None
@@ -920,8 +925,8 @@ def lookup_section_by_heading(
                     (media_id, _deleted_false_value(db_instance), f"%{heading.strip()}%"),
                 )
                 row = cur.fetchone()
-        except Exception:
-            return None
+        except Exception as exc:
+            _raise_read_error("lookup_section_by_heading", exc)
 
         if not row:
             return None

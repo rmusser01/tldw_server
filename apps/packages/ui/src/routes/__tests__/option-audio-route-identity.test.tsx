@@ -28,6 +28,12 @@ vi.mock("@/components/Common/RouteErrorBoundary", () => ({
   )
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback: string) => fallback
+  })
+}))
+
 vi.mock("@/components/Option/TTS/TtsPlaygroundPage", () => ({
   __esModule: true,
   default: () => <div data-testid="tts-playground">TTS</div>
@@ -61,10 +67,10 @@ vi.mock("@/components/Option/Speech/SpeechPlaygroundPage", () => ({
 }))
 
 describe("audio option routes", () => {
-  it("routes /tts into the shared speech playground locked to TTS mode", () => {
+  it("routes /tts into the shared speech playground locked to TTS mode", async () => {
     render(<OptionTts />)
 
-    const speech = screen.getByTestId("speech-playground")
+    const speech = await screen.findByTestId("speech-playground")
     const boundary = screen.getByTestId("route-boundary")
 
     expect(screen.getByTestId("option-layout")).toBeVisible()
@@ -76,10 +82,10 @@ describe("audio option routes", () => {
     expect(screen.queryByTestId("tts-playground")).not.toBeInTheDocument()
   })
 
-  it("renders dedicated STT playground on /stt route component", () => {
+  it("renders dedicated STT playground on /stt route component", async () => {
     render(<OptionStt />)
     expect(screen.getByTestId("option-layout")).toBeVisible()
-    expect(screen.getByTestId("stt-playground")).toBeVisible()
+    expect(await screen.findByTestId("stt-playground")).toBeVisible()
     expect(screen.queryByTestId("speech-playground")).not.toBeInTheDocument()
   })
 

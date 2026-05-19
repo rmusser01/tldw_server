@@ -259,6 +259,44 @@ class TestRaceConditionScenarios:
             # init should not have been called after the initial configure
             assert init_count == 0
 
+    def test_chunk_text_generator_does_not_hold_shared_lock_while_paused(self, monkeypatch):
+        """A paused generator consumer should not block unrelated chunk_text calls."""
+        from tldw_Server_API.app.core.Chunking.chunker import Chunker
+        from tldw_Server_API.app.core.Chunking.base import ChunkerConfig
+        from tldw_Server_API.app.core.Chunking.strategies.words import WordChunkingStrategy
+
+        started = threading.Event()
+        completed = threading.Event()
+        result_holder = {}
+
+        def controlled_chunk_generator(self, text, max_size, overlap=0, **options):
+            yield "chunk-1"
+            yield "chunk-2"
+
+        monkeypatch.setattr(WordChunkingStrategy, "chunk_generator", controlled_chunk_generator)
+
+        chunker = Chunker(ChunkerConfig(strategy_cache_mode="shared"))
+        generator = chunker.chunk_text_generator("one two three", method="words", max_size=2, overlap=0)
+
+        assert next(generator) == "chunk-1"
+
+        def run_competing_call():
+            started.set()
+            result_holder["chunks"] = chunker.chunk_text("alpha beta gamma", method="words", max_size=2, overlap=0)
+            completed.set()
+
+        thread = threading.Thread(target=run_competing_call)
+        thread.start()
+
+        try:
+            assert started.wait(0.2)
+            assert completed.wait(0.2), "chunk_text blocked behind paused generator"
+        finally:
+            generator.close()
+            thread.join(timeout=1)
+
+        assert result_holder["chunks"]
+
 
 class TestThreadPoolExecutorAccess:
     """Tests using ThreadPoolExecutor for more controlled concurrency."""

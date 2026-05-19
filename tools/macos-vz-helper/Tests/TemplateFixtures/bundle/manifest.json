@@ -1,0 +1,10 @@
+{
+  "bundle_version": "1",
+  "boot_mode": "bundle",
+  "kernel": "kernel",
+  "initrd": "initrd.img",
+  "rootfs": "rootfs.img",
+  "guest_agent_path": "/usr/local/bin/tldw-agent-guest",
+  "workspace_mount_tag": "workspace",
+  "vsock_port": 1024
+}

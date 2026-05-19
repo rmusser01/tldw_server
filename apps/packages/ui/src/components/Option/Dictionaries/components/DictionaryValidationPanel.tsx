@@ -1,6 +1,7 @@
 import { Descriptions } from "antd"
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { humanizeValidationCode } from "./dictionaryEntryUtils"
 
 type DictionaryValidationPanelProps = {
   entriesLength: number
@@ -20,6 +21,10 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
   onJumpToValidationEntry,
 }) => {
   const { t } = useTranslation(["common", "option"])
+  const localize = React.useCallback(
+    (key: string, fallback: string) => t(key, fallback),
+    [t]
+  )
 
   const validationErrors = Array.isArray(validationReport?.errors)
     ? validationReport.errors
@@ -28,6 +33,55 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
     ? validationReport.warnings
     : []
   const entryStats = validationReport?.entry_stats || null
+
+  const renderValidationItems = React.useCallback(
+    (items: any[], kind: "error" | "warning") => {
+      if (items.length === 0) {
+        return (
+          <div className="text-xs text-text-muted">
+            {kind === "error"
+              ? t("option:dictionariesTools.noErrors", "No errors found.")
+              : t("option:dictionariesTools.noWarnings", "No warnings found.")}
+          </div>
+        )
+      }
+
+      return (
+        <ul className="list-disc pl-4 text-xs text-text-muted">
+          {items.map((item: any, idx: number) => {
+            const humanized = humanizeValidationCode(
+              item?.code || kind,
+              localize
+            )
+            return (
+              <li key={`${kind}-${idx}`}>
+                <button
+                  type="button"
+                  className={
+                    isEntryFieldPath(item?.field)
+                      ? "w-full text-left hover:text-text hover:underline"
+                      : "w-full cursor-default text-left"
+                  }
+                  onClick={() => onJumpToValidationEntry(item?.field)}
+                  disabled={!isEntryFieldPath(item?.field)}
+                >
+                  <span className="font-medium text-text">{humanized.label}:</span>{" "}
+                  {item?.message || String(item)}
+                  {item?.field ? ` (${item.field})` : ""}
+                  {humanized.fix && (
+                    <span className="block text-text-muted mt-0.5">
+                      {t("option:dictionariesTools.tipLabel", "Tip")}: {humanized.fix}
+                    </span>
+                  )}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )
+    },
+    [localize, onJumpToValidationEntry, t]
+  )
 
   return (
     <div
@@ -57,16 +111,12 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
           <Descriptions size="small" column={1} bordered>
             <Descriptions.Item
               label={t("option:dictionariesTools.validationOk", "Valid")}>
-              {validationReport.ok ? "Yes" : "No"}
-            </Descriptions.Item>
-            <Descriptions.Item
-              label={t("option:dictionariesTools.schemaVersion", "Schema version")}>
-              {validationReport.schema_version ?? "—"}
+              {validationReport.ok ? t("common:yes", "Yes") : t("common:no", "No")}
             </Descriptions.Item>
             {entryStats && (
               <Descriptions.Item
                 label={t("option:dictionariesTools.entryStats", "Entry stats")}>
-                {`${entryStats.total ?? 0} total · ${entryStats.literal ?? 0} literal · ${entryStats.regex ?? 0} regex`}
+                {`${entryStats.total ?? 0} ${t("option:dictionariesTools.entryStatsTotal", "total")} · ${entryStats.literal ?? 0} ${t("option:dictionariesTools.entryStatsLiteral", "literal")} · ${entryStats.regex ?? 0} ${t("option:dictionariesTools.entryStatsRegex", "regex")}`}
               </Descriptions.Item>
             )}
           </Descriptions>
@@ -74,67 +124,13 @@ export const DictionaryValidationPanel: React.FC<DictionaryValidationPanelProps>
             <div className="text-xs font-medium text-text">
               {t("option:dictionariesTools.errorsLabel", "Errors")}
             </div>
-            {validationErrors.length > 0 ? (
-              <ul className="list-disc pl-4 text-xs text-text-muted">
-                {validationErrors.map((err: any, idx: number) => (
-                  <li key={`err-${idx}`}>
-                    <button
-                      type="button"
-                      className={
-                        isEntryFieldPath(err?.field)
-                          ? "w-full text-left hover:text-text hover:underline"
-                          : "w-full cursor-default text-left"
-                      }
-                      onClick={() => onJumpToValidationEntry(err?.field)}
-                      disabled={!isEntryFieldPath(err?.field)}
-                    >
-                      <span className="font-medium text-text">
-                        {err?.code || "error"}:
-                      </span>{" "}
-                      {err?.message || String(err)}
-                      {err?.field ? ` (${err.field})` : ""}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-xs text-text-muted">
-                {t("option:dictionariesTools.noErrors", "No errors found.")}
-              </div>
-            )}
+            {renderValidationItems(validationErrors, "error")}
           </div>
           <div>
             <div className="text-xs font-medium text-text">
               {t("option:dictionariesTools.warningsLabel", "Warnings")}
             </div>
-            {validationWarnings.length > 0 ? (
-              <ul className="list-disc pl-4 text-xs text-text-muted">
-                {validationWarnings.map((warn: any, idx: number) => (
-                  <li key={`warn-${idx}`}>
-                    <button
-                      type="button"
-                      className={
-                        isEntryFieldPath(warn?.field)
-                          ? "w-full text-left hover:text-text hover:underline"
-                          : "w-full cursor-default text-left"
-                      }
-                      onClick={() => onJumpToValidationEntry(warn?.field)}
-                      disabled={!isEntryFieldPath(warn?.field)}
-                    >
-                      <span className="font-medium text-text">
-                        {warn?.code || "warning"}:
-                      </span>{" "}
-                      {warn?.message || String(warn)}
-                      {warn?.field ? ` (${warn.field})` : ""}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="text-xs text-text-muted">
-                {t("option:dictionariesTools.noWarnings", "No warnings found.")}
-              </div>
-            )}
+            {renderValidationItems(validationWarnings, "warning")}
           </div>
         </div>
       )}

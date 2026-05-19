@@ -345,11 +345,11 @@ describe("DictionariesManager entry stage-2 editing and validation flows", () =>
 
     await user.click(screen.getByRole("button", { name: "Advanced options" }))
     await user.type(
-      screen.getByPlaceholderText("e.g., KCl or /hel+o/i"),
+      screen.getByPlaceholderText("e.g., gonna or /colour/i"),
       "Temp"
     )
     await user.type(
-      screen.getByPlaceholderText("e.g., Potassium Chloride"),
+      screen.getByPlaceholderText("e.g., going to or color"),
       "Temperature"
     )
 
@@ -452,11 +452,11 @@ describe("DictionariesManager entry stage-2 editing and validation flows", () =>
     )
     await screen.findByRole("button", { name: "Add Entry" })
     await user.type(
-      screen.getByPlaceholderText("e.g., KCl or /hel+o/i"),
+      screen.getByPlaceholderText("e.g., gonna or /colour/i"),
       "Temp"
     )
     await user.type(
-      screen.getByPlaceholderText("e.g., Potassium Chloride"),
+      screen.getByPlaceholderText("e.g., going to or color"),
       "Temperature"
     )
     await user.click(screen.getByRole("button", { name: "Add Entry" }))
@@ -532,11 +532,11 @@ describe("DictionariesManager entry stage-2 editing and validation flows", () =>
       await screen.findByText(/Regex helper: `\.\*` = any text/i)
     ).toBeInTheDocument()
     await user.type(
-      screen.getByPlaceholderText("e.g., KCl or /hel+o/i"),
+      screen.getByPlaceholderText("e.g., gonna or /colour/i"),
       "(.+)+"
     )
     await user.type(
-      screen.getByPlaceholderText("e.g., Potassium Chloride"),
+      screen.getByPlaceholderText("e.g., going to or color"),
       "x"
     )
     await user.click(screen.getByRole("button", { name: "Add Entry" }))

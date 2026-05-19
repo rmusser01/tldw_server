@@ -1,8 +1,6 @@
 name: Publish PyPI Package
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       target:
@@ -58,7 +56,7 @@ jobs:
       name: testpypi
     steps:
       - name: Download dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pypi-dist
           path: dist
@@ -71,7 +69,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: build
-    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -80,7 +78,7 @@ jobs:
       name: pypi
     steps:
       - name: Download dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pypi-dist
           path: dist

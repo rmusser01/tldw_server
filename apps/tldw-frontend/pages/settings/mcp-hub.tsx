@@ -1,3 +1,3 @@
 import dynamic from "next/dynamic"
 
-export default dynamic(() => import("@/routes/option-mcp-hub"), { ssr: false })
+export default dynamic(() => import("@/routes/option-settings-mcp-hub"), { ssr: false })

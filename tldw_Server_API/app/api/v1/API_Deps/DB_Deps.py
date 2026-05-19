@@ -26,6 +26,9 @@ except ImportError:
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    reset_managed_sqlite_backends,
+)
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import MediaDbFactory, MediaDbSession
@@ -35,6 +38,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 #######################################################################################################################
 
@@ -98,9 +102,8 @@ def _get_db_path_for_user(user_id: int) -> Path:
             os.environ.setdefault("USER_DB_BASE_DIR", base_dir_env)
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.warning(
-                'TESTING mode: failed to derive project-root user DB dir; falling back to temp dir. Error: {}',
-                e,
-                exc_info=True,
+                "TESTING mode: failed to derive project-root user DB dir; falling back to temp dir ({})",
+                type(e).__name__,
             )
             import tempfile
             base_dir_env = str(
@@ -110,7 +113,10 @@ def _get_db_path_for_user(user_id: int) -> Path:
     try:
         return DatabasePaths.get_media_db_path(user_id)
     except Exception as e:
-        logger.error(f"Could not resolve database directory for user_id {user_id}: {e}", exc_info=True)
+        logger.error(
+            "Could not resolve database directory ({})",
+            type(e).__name__,
+        )
         raise OSError(f"Could not initialize storage directory for user {user_id}.") from e
 
 def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
@@ -131,7 +137,10 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
     try:
         shared_backend = get_content_backend_instance()
     except RuntimeError as exc:
-        logger.error(f"Content backend initialization failed: {exc}")
+        logger.error(
+            "Content backend initialization failed ({})",
+            type(exc).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="PostgreSQL content backend required but unavailable. Check server logs."
@@ -164,7 +173,6 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
         return factory
 
     # --- Factory Not Cached: Create New One ---
-    logger.info(f"No cached MediaDbFactory found for user_id: {user_id}. Initializing.")
     with _user_db_lock:
         factory = _media_db_factories.get(user_id)
         if factory:
@@ -183,7 +191,6 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
         try:
             if use_shared_backend:
                 db_path = Path(":memory:")
-                logger.info(f"Initializing MediaDbFactory for user {user_id} using shared Postgres backend")
                 factory = MediaDbFactory(
                     db_path=str(db_path),
                     client_id=str(current_user.id),
@@ -191,14 +198,16 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
                 )
             else:
                 db_path = _get_db_path_for_user(user_id)
-                logger.info(f"Initializing MediaDbFactory for user {user_id} at path: {db_path}")
                 factory = MediaDbFactory.for_sqlite_path(
                     db_path=str(db_path),
                     client_id=str(current_user.id),
                 )
 
+            logger.info(
+                "Initializing MediaDbFactory backend={}",
+                "postgresql" if use_shared_backend else "sqlite",
+            )
             _media_db_factories[user_id] = factory
-            logger.info(f"MediaDbFactory created and cached successfully for user {user_id}")
             try:
                 if is_test_mode():
                     logger.warning(
@@ -211,21 +220,25 @@ def _get_or_create_media_db_factory(current_user: User) -> MediaDbFactory:
                 pass
 
         except (DatabaseError, SchemaError) as e:
-            log_path = db_path or f"directory for user_id {user_id}"
-            logger.error(f"Failed to initialize database for user {user_id} at {log_path}: {e}", exc_info=True)
+            logger.error(
+                "Failed to initialize database ({})",
+                type(e).__name__,
+            )
+            raise map_db_error_to_http(e, default_detail="Media DB unavailable") from e
+        except OSError as e:
+            logger.error(
+                "Failed to get DB path ({})",
+                type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Could not initialize database for user: {e}"
+                detail="Media DB unavailable",
             ) from e
-        except OSError as e:
-            logger.error(f"Failed to get DB path for user {user_id}: {e}", exc_info=True)
-            raise HTTPException(
-                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                 detail=str(e)
-             ) from e
         except Exception as e:
-            log_path = db_path or f"directory for user_id {user_id}"
-            logger.error(f"Unexpected error initializing database for user {user_id} at {log_path}: {e}", exc_info=True)
+            logger.error(
+                "Unexpected error initializing database ({})",
+                type(e).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred during database setup for user."
@@ -338,6 +351,14 @@ def get_media_db_path_for_rag(media_db: Any) -> str | None:
 
 def reset_media_db_cache() -> None:
     """Clear cached Media DB factories and any legacy cached instances."""
+    def _warn(step: str, exc: Exception) -> None:
+        logger.warning(
+            "Failed {} during media DB cache reset ({})",
+            step,
+            type(exc).__name__,
+        )
+
+    managed_backends = []
     with _user_db_lock:
         try:
             # Attempt to close outstanding connections for cache entries
@@ -348,31 +369,50 @@ def reset_media_db_cache() -> None:
             )
             for db in list(values_iter):  # type: ignore[arg-type]
                 try:
+                    backend = db.backend
+                except AttributeError:
+                    backend = None
+                except (RuntimeError, TypeError, ValueError) as exc:
+                    _warn("legacy DB backend", exc)
+                    backend = None
+                if backend is not None:
+                    managed_backends.append(backend)
+                try:
                     if hasattr(db, "release_context_connection"):
                         db.release_context_connection()
                     if hasattr(db, "close_connection"):
                         db.close_connection()
-                except (DatabaseError, OSError, RuntimeError, TypeError, ValueError):
-                    pass
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+                except (DatabaseError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    _warn("legacy DB connection cleanup", exc)
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("legacy DB cache iteration", exc)
         try:
             _user_db_instances.clear()  # type: ignore[attr-defined]
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("legacy DB cache clear", exc)
         try:
             for factory in list(_media_db_factories.values()):  # type: ignore[attr-defined]
                 try:
+                    backend = factory.backend
+                except AttributeError:
+                    backend = None
+                except (RuntimeError, TypeError, ValueError) as exc:
+                    _warn("factory backend", exc)
+                    backend = None
+                if backend is not None:
+                    managed_backends.append(backend)
+                try:
                     if hasattr(factory, "close"):
                         factory.close()
-                except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                    pass
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+                except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                    _warn("factory close", exc)
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("factory cache iteration", exc)
         try:
             _media_db_factories.clear()  # type: ignore[attr-defined]
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            _warn("factory cache clear", exc)
+        reset_managed_sqlite_backends(mode="hard", backends=managed_backends)
 
 
 async def try_get_media_db_for_user(
@@ -389,13 +429,13 @@ async def try_get_media_db_for_user(
     except HTTPException as e:
         if e.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
             raise
-        logger.warning(f"Optional Media DB unavailable for user {getattr(current_user, 'id', '?')}: {e.detail}")
+        logger.warning("Optional Media DB unavailable (status_code={})", e.status_code)
         yield None
         return
     except (DatabaseError, OSError, RuntimeError, SchemaError, TypeError, ValueError) as e:
         logger.warning(
-            f"Optional Media DB unexpected error for user {getattr(current_user, 'id', '?')}: {e}",
-            exc_info=True
+            "Optional Media DB unexpected error ({})",
+            type(e).__name__,
         )
         yield None
         return

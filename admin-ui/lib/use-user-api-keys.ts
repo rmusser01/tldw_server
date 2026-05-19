@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api-client';
+import { logger } from '@/lib/logger';
 import { ApiKey, User } from '@/types';
 
 type UseUserApiKeysOptions = {
@@ -32,7 +33,7 @@ export const useUserApiKeys = (
       setUser(userData);
       setApiKeys(Array.isArray(keysData) ? keysData : []);
     } catch (err: unknown) {
-      console.error('Failed to load data:', err);
+      logger.error('Failed to load data', { component: 'use-user-api-keys', error: err instanceof Error ? err.message : String(err) });
       const message = err instanceof Error && err.message ? err.message : 'Failed to load data';
       onError?.(message);
     } finally {

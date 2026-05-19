@@ -35,7 +35,6 @@ import {
 } from "./hooks/useRagResultsDisplay"
 import {
   useRagFilterPanel,
-  SOURCE_OPTIONS,
   STRATEGY_OPTIONS,
   SEARCH_MODE_OPTIONS,
   FTS_LEVEL_OPTIONS,
@@ -57,6 +56,7 @@ import {
   stringifyIdList,
 } from "./hooks/useRagFilterPanel"
 import { useRagSearchHistory } from "./hooks/useRagSearchHistory"
+import { getRagSourceOptions } from "@/services/rag/sourceMetadata"
 
 type Props = {
   onInsert: (text: string) => void
@@ -104,6 +104,10 @@ export const RagSearchBar: React.FC<Props> = ({
   onClearFiles
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
+  const sourceOptions = React.useMemo(
+    () => getRagSourceOptions((key, fallback) => t(key, fallback)),
+    [t]
+  )
   const [internalOpen, setInternalOpen] = React.useState(false)
   const isControlled = typeof open === "boolean"
   const isOpen = isControlled ? open : internalOpen
@@ -979,7 +983,7 @@ export const RagSearchBar: React.FC<Props> = ({
               <div className="rounded border border-border bg-surface p-3">
                 <div className="text-xs font-semibold text-text mb-2">{t("sidepanel:rag.sourcesFilters", "Sources & Filters")}</div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  {filter.renderMultiSelect(t("sidepanel:rag.sources", "Sources"), search.draftSettings.sources, (next) => search.updateSetting("sources", next as any), SOURCE_OPTIONS)}
+                  {filter.renderMultiSelect(t("sidepanel:rag.sources", "Sources"), search.draftSettings.sources, (next) => search.updateSetting("sources", next as any), sourceOptions)}
                   {filter.renderTextInput(t("sidepanel:rag.keywordFilter", "Keyword filter"), search.draftSettings.keyword_filter, (next) => search.updateSetting("keyword_filter", next), { placeholder: t("sidepanel:rag.keywordFilterPlaceholder", "Comma-separated keywords") as string })}
                   {filter.renderTextInput(t("sidepanel:rag.includeMediaIds", "Include media IDs"), stringifyIdList(search.draftSettings.include_media_ids), (next) => search.updateSetting("include_media_ids", parseNumericIdList(next)), { placeholder: "1, 2, 3" })}
                   {filter.renderTextInput(t("sidepanel:rag.includeNoteIds", "Include note IDs"), stringifyIdList(search.draftSettings.include_note_ids), (next) => search.updateSetting("include_note_ids", parseStringIdList(next)), { placeholder: "10, 11, 12" })}

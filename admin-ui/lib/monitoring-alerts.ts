@@ -12,6 +12,7 @@ import type {
   SnoozeDurationOption,
   SystemAlert,
 } from '@/app/monitoring/types';
+import { getScopedItem, setScopedItem } from '@/lib/scoped-storage';
 
 type AlertRuleValidationResult = {
   valid: boolean;
@@ -170,10 +171,10 @@ const getBrowserStorage = (): Storage | null => {
 };
 
 const storageRead = (key: string, fallback: unknown, storage?: Storage | null): unknown => {
-  const resolvedStorage = storage ?? getBrowserStorage();
-  if (!resolvedStorage) return fallback;
   try {
-    const raw = resolvedStorage.getItem(key);
+    // When an explicit Storage handle is provided (e.g. tests), use it directly.
+    // Otherwise delegate to the scoped-storage helper for tenant isolation.
+    const raw = storage ? storage.getItem(key) : getScopedItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw);
   } catch {
@@ -182,10 +183,12 @@ const storageRead = (key: string, fallback: unknown, storage?: Storage | null): 
 };
 
 const storageWrite = (key: string, value: unknown, storage?: Storage | null): void => {
-  const resolvedStorage = storage ?? getBrowserStorage();
-  if (!resolvedStorage) return;
   try {
-    resolvedStorage.setItem(key, JSON.stringify(value));
+    if (storage) {
+      storage.setItem(key, JSON.stringify(value));
+    } else {
+      setScopedItem(key, JSON.stringify(value));
+    }
   } catch {
     // no-op when storage is unavailable or quota is exceeded
   }

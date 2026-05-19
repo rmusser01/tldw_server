@@ -14,8 +14,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { AlertTriangle, CheckCircle, Clock, Eye, Plus, Trash2 } from 'lucide-react';
-import type { Watchlist, WatchlistDraft } from '../types';
 import { CardSkeleton } from '@/components/ui/skeleton';
+import type { Watchlist, WatchlistDraft } from '../types';
 
 type WatchlistsPanelProps = {
   watchlists: Watchlist[];
@@ -170,7 +170,7 @@ export default function WatchlistsPanel({
       </CardHeader>
       <CardContent>
         {loading ? (
-          <CardSkeleton />
+          <div className="space-y-3"><CardSkeleton /><CardSkeleton /></div>
         ) : watchlists.length === 0 ? (
           <div className="text-center text-muted-foreground py-8">
             <Eye className="h-12 w-12 mx-auto mb-2 opacity-50" />

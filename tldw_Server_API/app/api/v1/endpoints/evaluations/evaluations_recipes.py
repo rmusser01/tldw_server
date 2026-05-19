@@ -14,14 +14,19 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     verify_api_key,
 )
 from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
+    EmbeddingRecipeCandidatesResponse,
     RecipeDatasetValidationRequest,
     RecipeDatasetValidationResponse,
     RecipeLaunchReadiness,
     RecipeManifest,
+    RecipeRecommendationApplyRequest,
+    RecipeRecommendationApplyPreviewRequest,
+    RecipeRecommendationApplyPreviewResponse,
+    RecipeRecommendationApplyResponse,
     RecipeRunCreateRequest,
     RecipeRunRecord,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs import (
     enqueue_recipe_run,
@@ -34,20 +39,28 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
     RecipeDefinitionNotFoundError,
     RecipeDefinitionNotLaunchableError,
     RecipeRunNotFoundError,
+    RecipeRunsService,
     get_recipe_runs_service_for_user,
 )
+from tldw_Server_API.app.core.Evaluations.recipes.embeddings_recipe_hints import (
+    ConfigUpdater,
+    apply_embedding_recipe_recommendation,
+    build_embedding_recipe_apply_preview,
+    build_embedding_recipe_candidate_hints,
+)
 from tldw_Server_API.app.core.Evaluations.recipes.reporting import RecipeRunReport
+from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.exceptions import RecipeEnqueueError
 
 recipes_router = APIRouter()
 
 
-def _service_for_user(current_user: User):
+def _service_for_user(current_user: User) -> RecipeRunsService:
     stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
     return get_recipe_runs_service_for_user(stable_user_id)
 
 
-def _get_manifest_or_404(service, recipe_id: str) -> RecipeManifest:
+def _get_manifest_or_404(service: RecipeRunsService, recipe_id: str) -> RecipeManifest:
     try:
         return service.get_manifest(recipe_id)
     except RecipeDefinitionNotFoundError as exc:
@@ -57,6 +70,33 @@ def _get_manifest_or_404(service, recipe_id: str) -> RecipeManifest:
 def get_recipe_run_job_enqueuer() -> Callable[..., str]:
     """Return the callable used to enqueue recipe-run Jobs."""
     return enqueue_recipe_run
+
+
+def get_recipe_config_updater() -> ConfigUpdater:
+    """Return the callable used to update persisted config during recipe apply."""
+    return setup_manager.update_config
+
+
+def _user_has_eval_permission(current_user: User, permission: str) -> bool:
+    role_values = {
+        str(role).strip().lower()
+        for role in (getattr(current_user, "roles", []) or [])
+        if str(role).strip()
+    }
+    if "admin" in role_values:
+        return True
+
+    user_perm_values = {
+        str(perm).strip().lower()
+        for perm in (getattr(current_user, "permissions", []) or [])
+        if str(perm).strip()
+    }
+    return (
+        "*"
+        in user_perm_values
+        or "system.configure" in user_perm_values
+        or permission.lower() in user_perm_values
+    )
 
 
 @recipes_router.get(
@@ -134,6 +174,30 @@ async def get_recipe_launch_readiness(
         },
         message=message,
     )
+
+
+@recipes_router.get(
+    "/recipes/embeddings_model_selection/candidates",
+    response_model=EmbeddingRecipeCandidatesResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
+async def get_embeddings_recipe_candidates(
+    user_ctx: str = Depends(verify_api_key),
+    current_user: User = Depends(get_eval_request_user),
+):
+    del user_ctx
+    try:
+        return build_embedding_recipe_candidate_hints(user=current_user)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=sanitize_error_message(exc, "building embeddings recipe candidates"),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=sanitize_error_message(exc, "building embeddings recipe candidates"),
+        ) from exc
 
 
 @recipes_router.post(
@@ -274,3 +338,85 @@ async def get_recipe_run_report(
         return service.get_report(run_id)
     except RecipeRunNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe run not found") from exc
+
+
+@recipes_router.post(
+    "/recipe-runs/{run_id}/apply-preview",
+    response_model=RecipeRecommendationApplyPreviewResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
+async def preview_recipe_recommendation_apply(
+    run_id: str,
+    payload: RecipeRecommendationApplyPreviewRequest,
+    user_ctx: str = Depends(verify_api_key),
+    current_user: User = Depends(get_eval_request_user),
+):
+    del user_ctx
+    service = _service_for_user(current_user)
+    try:
+        preview = build_embedding_recipe_apply_preview(
+            service,
+            run_id=run_id,
+            slot_name=payload.slot_name,
+            candidate_run_id=payload.candidate_run_id,
+            live_apply_supported=_user_has_eval_permission(current_user, EVALS_MANAGE),
+        )
+    except RecipeRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=sanitize_error_message(exc, "previewing recipe recommendation apply"),
+        ) from exc
+
+    if preview.get("blocked_reason"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(preview["blocked_reason"]),
+        )
+    return preview
+
+
+@recipes_router.post(
+    "/recipe-runs/{run_id}/apply",
+    response_model=RecipeRecommendationApplyResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_MANAGE))],
+)
+async def apply_recipe_recommendation(
+    run_id: str,
+    payload: RecipeRecommendationApplyRequest,
+    user_ctx: str = Depends(verify_api_key),
+    current_user: User = Depends(get_eval_request_user),
+    config_updater: ConfigUpdater = Depends(get_recipe_config_updater),
+):
+    del user_ctx
+    service = _service_for_user(current_user)
+    try:
+        return apply_embedding_recipe_recommendation(
+            service,
+            run_id=run_id,
+            slot_name=payload.slot_name,
+            candidate_run_id=payload.candidate_run_id,
+            confirmed_provider=payload.confirmed_provider,
+            confirmed_model=payload.confirmed_model,
+            config_updater=config_updater,
+        )
+    except RecipeRunNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        logger.warning("Recipe recommendation apply failed for run {}: {}", run_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=sanitize_error_message(exc, "applying recipe recommendation"),
+        ) from exc
+    except OSError as exc:
+        logger.warning("Recipe recommendation apply file operation failed for run {}: {}", run_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=sanitize_error_message(exc, "applying recipe recommendation"),
+        ) from exc

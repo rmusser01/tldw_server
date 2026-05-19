@@ -274,8 +274,9 @@ describe("QuizPlayground navigation intents", () => {
     const tabsRoot = screen.getByTestId("quiz-tabs")
     expect(tabsRoot.className).toContain("quiz-tabs")
     expect(tabsRoot.className).toContain("ant-tabs-nav-wrap")
-    expect(screen.getByText("Gen")).toBeInTheDocument()
-    expect(screen.getByText("Stats")).toBeInTheDocument()
+    expect(screen.getAllByText("Generate").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("Create").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("Results").length).toBeGreaterThanOrEqual(1)
   })
 
   it("routes generate navigation payload into Take tab intent", async () => {

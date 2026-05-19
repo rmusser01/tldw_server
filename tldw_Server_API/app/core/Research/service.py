@@ -558,9 +558,18 @@ class ResearchService:
         *,
         owner_user_id: str,
         limit: int = 25,
+        offset: int = 0,
+        status: str | None = None,
+        session_id: str | None = None,
     ) -> list[ResearchSessionRow]:
         db = self._db_for_user(owner_user_id)
-        return db.list_sessions(owner_user_id, limit=limit)
+        return db.list_sessions(
+            owner_user_id,
+            limit=limit,
+            offset=offset,
+            status=status,
+            session_id=session_id,
+        )
 
     def list_chat_linked_runs(
         self,
@@ -616,6 +625,30 @@ class ResearchService:
             progress_percent=progress_percent,
             progress_message=progress_message,
         )
+
+    def delete_session(self, *, owner_user_id: str, session_id: str) -> bool:
+        db = self._db_for_user(owner_user_id)
+        session = db.get_session(session_id)
+        if session is None or session.owner_user_id != str(owner_user_id):
+            raise KeyError(session_id)
+        numeric_job_id = self._numeric_job_id(session.active_job_id)
+        if numeric_job_id is not None and not self._is_terminal(session):
+            manager = self._job_manager if self._job_manager is not None else self._job_manager_for_session()
+            cancel_job = getattr(manager, "cancel_job", None)
+            if callable(cancel_job):
+                try:
+                    cancel_job(numeric_job_id, reason="research_run_deleted")
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to cancel active research job {} while deleting session {}: {}",
+                        numeric_job_id,
+                        session_id,
+                        exc,
+                    )
+        return db.delete_session_cascade(session_id)
+
+    def delete_run(self, *, owner_user_id: str, session_id: str) -> bool:
+        return self.delete_session(owner_user_id=owner_user_id, session_id=session_id)
 
     def pause_run(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)

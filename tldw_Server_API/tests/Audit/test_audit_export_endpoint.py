@@ -6,7 +6,16 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.endpoints import audit as audit_endpoint
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.debugs = []
+
+    def debug(self, message, *args, **kwargs):
+        self.debugs.append((message, args, kwargs))
 
 
 def _make_principal(
@@ -71,6 +80,30 @@ async def _get_client(monkeypatch):
             yield client, app
         finally:
             app.dependency_overrides.clear()
+
+
+def test_audit_event_type_value_mapping_debug_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audit_endpoint, "logger", logger_stub)
+
+    mapped = audit_endpoint._map_event_types("auth.login.success")
+
+    assert mapped == [audit_endpoint.AuditEventType.AUTH_LOGIN_SUCCESS]
+    assert logger_stub.debugs == [("Audit event type enum-key mapping failed", (), {})]
+    assert "auth.login.success" not in repr(logger_stub.debugs)
+    assert "exc_info" not in repr(logger_stub.debugs)
+
+
+def test_audit_category_value_mapping_debug_log_is_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(audit_endpoint, "logger", logger_stub)
+
+    mapped = audit_endpoint._map_categories("data_access")
+
+    assert mapped == [audit_endpoint.AuditEventCategory.DATA_ACCESS]
+    assert logger_stub.debugs == [("Audit category enum-key mapping failed", (), {})]
+    assert "data_access" not in repr(logger_stub.debugs)
+    assert "exc_info" not in repr(logger_stub.debugs)
 
 
 @pytest.mark.asyncio
@@ -831,3 +864,37 @@ async def test_audit_count_returns_500_on_read_failure(monkeypatch):
             assert r.status_code == 500
         finally:
             app.dependency_overrides.clear()
+
+@pytest.mark.asyncio
+async def test_audit_export_sets_truncation_headers_when_default_cap_applies(monkeypatch):
+    async with _get_client(monkeypatch) as (client, app):
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, User
+
+        app.dependency_overrides[get_request_user] = lambda: User(id=1, username="admin", is_active=True)
+        principal = _make_principal(is_admin=True, roles=["admin"], permissions=["system.logs"])
+        _override_principal(app, principal)
+
+        from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps as audit_deps
+
+        class _StubAudit:
+            non_stream_max_rows = 2
+
+            async def export_events(self, **kwargs):
+                return "[]"
+
+            async def count_events(self, **kwargs):
+                return 5
+
+        async def _get_stub_service():
+            return _StubAudit()
+
+        app.dependency_overrides[audit_deps.get_audit_service_for_user] = _get_stub_service
+
+        r = await client.get(
+            "/api/v1/audit/export?format=json",
+            headers={"X-API-KEY": "test-api-key-12345"},
+        )
+
+        assert r.status_code == 200
+        assert r.headers.get("x-audit-export-truncated") == "true"
+        assert r.headers.get("x-audit-export-row-limit") == "2"

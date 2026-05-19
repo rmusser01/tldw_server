@@ -152,11 +152,63 @@ class WebhookManager:
         # Background task for retries
         self._retry_task = None
 
-    def _init_database(self):
-        """Initialize webhook tables."""
-        # These tables are created in the migration
-        # but we ensure they exist here for standalone usage
-        schema_sql = """
+    def _is_postgres_backend(self) -> bool:
+        backend_type = getattr(self.db_adapter, "backend_type", None)
+        backend_value = getattr(backend_type, "value", backend_type)
+        if backend_value is None:
+            nested_backend = getattr(self.db_adapter, "backend", None)
+            nested_type = getattr(nested_backend, "backend_type", None)
+            backend_value = getattr(nested_type, "value", nested_type)
+        return str(backend_value).lower() in {"postgresql", "postgres"}
+
+    def _active_flag(self, is_active: bool) -> bool | int:
+        if self._is_postgres_backend():
+            return bool(is_active)
+        return 1 if is_active else 0
+
+    def _webhook_schema_sql(self) -> str:
+        if self._is_postgres_backend():
+            return """
+            CREATE TABLE IF NOT EXISTS webhook_registrations (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                url TEXT NOT NULL,
+                secret TEXT NOT NULL,
+                events TEXT NOT NULL,
+                active BOOLEAN DEFAULT TRUE,
+                retry_count INTEGER DEFAULT 3,
+                timeout_seconds INTEGER DEFAULT 30,
+                total_deliveries INTEGER DEFAULT 0,
+                successful_deliveries INTEGER DEFAULT 0,
+                failed_deliveries INTEGER DEFAULT 0,
+                last_delivery_at TIMESTAMP,
+                last_error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, url)
+            );
+
+            CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                id BIGSERIAL PRIMARY KEY,
+                webhook_id BIGINT NOT NULL,
+                evaluation_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                signature TEXT NOT NULL,
+                status_code INTEGER,
+                response_body TEXT,
+                response_time_ms INTEGER,
+                delivered BOOLEAN DEFAULT FALSE,
+                retry_count INTEGER DEFAULT 0,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                delivered_at TIMESTAMP,
+                next_retry_at TIMESTAMP,
+                FOREIGN KEY (webhook_id) REFERENCES webhook_registrations(id)
+            );
+            """
+
+        return """
             CREATE TABLE IF NOT EXISTS webhook_registrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -195,6 +247,12 @@ class WebhookManager:
                 FOREIGN KEY (webhook_id) REFERENCES webhook_registrations(id)
             );
         """
+
+    def _init_database(self):
+        """Initialize webhook tables."""
+        # These tables are created in the migration but we ensure they exist
+        # here for standalone usage and cross-backend tests.
+        schema_sql = self._webhook_schema_sql()
 
         self.db_adapter.init_schema(schema_sql)
 
@@ -299,9 +357,9 @@ class WebhookManager:
                     # Update existing webhook
                     self.db_adapter.update("""
                         UPDATE webhook_registrations
-                        SET events = ?, active = 1, retry_count = ?, timeout_seconds = ?, secret = ?, updated_at = CURRENT_TIMESTAMP
+                        SET events = ?, active = ?, retry_count = ?, timeout_seconds = ?, secret = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (events_json, effective_retries, effective_timeout, secret_to_store, webhook_id))
+                    """, (events_json, self._active_flag(True), effective_retries, effective_timeout, secret_to_store, webhook_id))
 
                     secret = secret_to_store
 
@@ -406,8 +464,8 @@ class WebhookManager:
                 # Get webhook details before unregistering
                 webhook_data = self.db_adapter.fetch_one("""
                     SELECT id, events FROM webhook_registrations
-                    WHERE user_id = ? AND url = ? AND active = 1
-                """, (user_id, url))
+                    WHERE user_id = ? AND url = ? AND active = ?
+                """, (user_id, url, self._active_flag(True)))
                 if not webhook_data:
                     return False
 
@@ -417,9 +475,9 @@ class WebhookManager:
                 # Deactivate webhook
                 rowcount = self.db_adapter.update("""
                     UPDATE webhook_registrations
-                    SET active = 0, updated_at = CURRENT_TIMESTAMP
+                    SET active = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = ? AND url = ?
-                """, (user_id, url))
+                """, (self._active_flag(False), user_id, url))
 
                 if rowcount > 0:
                     # Transaction auto-commits
@@ -492,8 +550,8 @@ class WebhookManager:
                 rows = self.db_adapter.fetch_all("""
                     SELECT id, url, secret, retry_count, timeout_seconds
                     FROM webhook_registrations
-                    WHERE user_id = ? AND active = 1
-                """, (user_id,))
+                    WHERE user_id = ? AND active = ?
+                """, (user_id, self._active_flag(True)))
                 return [
                     {
                         "id": row['id'],
@@ -509,9 +567,9 @@ class WebhookManager:
             rows = self.db_adapter.fetch_all("""
                 SELECT id, url, secret, retry_count, timeout_seconds
                 FROM webhook_registrations
-                WHERE user_id = ? AND active = 1
+                WHERE user_id = ? AND active = ?
                 AND events LIKE ?
-            """, (user_id, f'%"{event.value}"%'))
+            """, (user_id, self._active_flag(True), f'%"{event.value}"%'))
 
             webhooks: list[dict[str, Any]] = []
             for row in rows:
@@ -529,8 +587,8 @@ class WebhookManager:
                 rows = self.db_adapter.fetch_all("""
                     SELECT id, url, secret, retry_count, timeout_seconds
                     FROM webhook_registrations
-                    WHERE user_id = ? AND active = 1
-                """, (user_id,))
+                    WHERE user_id = ? AND active = ?
+                """, (user_id, self._active_flag(True)))
                 for row in rows:
                     webhooks.append({
                         "id": row['id'],
@@ -546,8 +604,8 @@ class WebhookManager:
                 rows = self.db_adapter.fetch_all("""
                     SELECT id, url, secret, retry_count, timeout_seconds
                     FROM webhook_registrations
-                    WHERE active = 1
-                """)
+                    WHERE active = ?
+                """, (self._active_flag(True),))
                 for row in rows:
                     webhooks.append({
                         "id": row['id'],

@@ -50,14 +50,29 @@ def test_vllm_strict_filter_drops_top_k_from_payload_non_streaming():
         mock_client.close.return_value = None
         mock_client_cls.return_value = mock_client
 
-        chat_api_call(
+        response = chat_api_call(
             api_endpoint="vllm",
             api_key=None,
             messages_payload=[{"role": "user", "content": "hello"}],
             topk=7,
+            temp=0.8,
+            n=2,
             streaming=False,
+            extra_body={"prompt_cache_key": "must-not-forward"},
+            inference_prefix_cache_intent={
+                "enabled": True,
+                "scope": ["world_books"],
+                "static_segment_fingerprint": "worldbook:v1",
+            },
         )
 
     assert "top_k" not in captured_payload
+    assert "prompt_cache_key" not in captured_payload
+    assert "inference_prefix_cache_intent" not in captured_payload
     assert "messages" in captured_payload
     assert "stream" in captured_payload
+    diagnostics = response["tldw_local_cache_diagnostics"]
+    assert diagnostics["provider"] == "vllM".lower()
+    assert diagnostics["prefix_cache_intent_requested"] is True
+    assert diagnostics["billing_cache_authoritative"] is False
+    assert "cached_input_tokens" not in diagnostics

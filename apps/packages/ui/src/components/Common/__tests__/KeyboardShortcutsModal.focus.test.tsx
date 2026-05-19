@@ -18,13 +18,29 @@ vi.mock("@/hooks/keyboard/useShortcutConfig", () => ({
     toggleWebSearch: { key: "w", altKey: true },
     toggleQuickChatHelper: { key: "h", ctrlKey: true, shiftKey: true },
     modePlayground: { key: "1", altKey: true },
+    modeSources: { key: "2", altKey: true },
     modeMedia: { key: "3", altKey: true },
     modeKnowledge: { key: "4", altKey: true },
     modeNotes: { key: "5", altKey: true },
     modePrompts: { key: "6", altKey: true },
     modeFlashcards: { key: "7", altKey: true }
   },
-  formatShortcut: ({ key }: { key: string }) => key
+  formatShortcut: ({
+    key,
+    altKey,
+    ctrlKey,
+    shiftKey
+  }: {
+    key: string
+    altKey?: boolean
+    ctrlKey?: boolean
+    shiftKey?: boolean
+  }) => [
+    ...(ctrlKey ? ["Ctrl"] : []),
+    ...(altKey ? ["Alt"] : []),
+    ...(shiftKey ? ["Shift"] : []),
+    key
+  ].join(" + ")
 }))
 
 vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
@@ -40,5 +56,13 @@ describe("KeyboardShortcutsModal focus styling", () => {
     expect(closeButton.className).toContain("focus-visible:outline")
     expect(closeButton.className).toContain("focus-visible:outline-2")
     expect(closeButton.className).toContain("focus-visible:outline-focus")
+  })
+
+  it("lists the Sources navigation shortcut", async () => {
+    render(<KeyboardShortcutsModal />)
+    window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+
+    expect(await screen.findByText("Go to Sources")).toBeVisible()
+    expect(screen.getByText("Alt + 2")).toBeVisible()
   })
 })

@@ -2,7 +2,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
-import { useWorkflowDynamicOptions } from "../dynamic-options"
+import {
+  __resetWorkflowDynamicOptionsCacheForTests,
+  useWorkflowDynamicOptions
+} from "../dynamic-options"
 import type { ConfigFieldSchema } from "@/types/workflow-editor"
 
 const { listRunsSpy, listRunsGlobalSpy } = vi.hoisted(() => ({
@@ -64,6 +67,7 @@ describe("useWorkflowDynamicOptions evaluation runs", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    __resetWorkflowDynamicOptionsCacheForTests()
     listRunsSpy.mockResolvedValue({
       ok: true,
       data: {
@@ -113,5 +117,41 @@ describe("useWorkflowDynamicOptions evaluation runs", () => {
     expect(listRunsSpy).not.toHaveBeenCalled()
     expect(listRunsGlobalSpy).not.toHaveBeenCalled()
     expect(result.current.optionsByKey.run_id ?? []).toEqual([])
+  })
+
+  it("does not refetch already loaded sources on rerender with equivalent inputs", async () => {
+    const { result, rerender } = renderHook(
+      ({ config }) =>
+        useWorkflowDynamicOptions({
+          fields,
+          stepType: "evaluations",
+          config
+        }),
+      {
+        initialProps: {
+          config: { evaluation_id: "eval-1" }
+        }
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.optionsByKey.run_id).toEqual([
+        { value: "run-1", label: "run-1" }
+      ])
+    })
+
+    expect(listRunsSpy).toHaveBeenCalledTimes(1)
+
+    rerender({
+      config: { evaluation_id: "eval-1" }
+    })
+
+    await waitFor(() => {
+      expect(result.current.optionsByKey.run_id).toEqual([
+        { value: "run-1", label: "run-1" }
+      ])
+    })
+
+    expect(listRunsSpy).toHaveBeenCalledTimes(1)
   })
 })

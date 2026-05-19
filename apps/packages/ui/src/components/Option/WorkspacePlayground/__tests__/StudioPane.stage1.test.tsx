@@ -311,6 +311,12 @@ const createChatCompletionResponse = (
 const renderStudioPane = () => {
   const renderResult = render(<StudioPane />)
   expandOutputTypesSection()
+  const moreOutputsToggle = screen.queryByRole("button", {
+    name: /More outputs/i
+  })
+  if (moreOutputsToggle?.getAttribute("aria-expanded") === "false") {
+    fireEvent.click(moreOutputsToggle)
+  }
   expandGeneratedOutputsSection()
   return renderResult
 }
@@ -597,6 +603,181 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockMessageSuccess).toHaveBeenCalledWith(
       expect.stringContaining("generated successfully")
     )
+  })
+
+  it("renders work products before secondary output actions", () => {
+    renderStudioPane()
+
+    const workProductsLabel = screen.getByText("Work Products")
+    const otherOutputsLabel = screen.getByText("Other outputs")
+
+    expect(
+      screen.getByRole("button", { name: /executive brief/i })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/decision-ready summary/i)).toBeInTheDocument()
+    expect(
+      workProductsLabel.compareDocumentPosition(otherOutputsLabel) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Report" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Slides" })).toBeEnabled()
+  })
+
+  it("shows source readiness instead of unavailable generation actions until sources are selected", () => {
+    workspaceStoreState.selectedSourceIds = []
+
+    renderStudioPane()
+
+    expect(screen.getByTestId("studio-source-readiness")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /executive brief/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Summary" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /More outputs/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("generates executive brief artifacts with template review metadata", async () => {
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "Project Falcon improved retention by 18 percent after the March 2026 onboarding update."
+      }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(
+        "## Situation\nProject Falcon improved retention.\n\n## Key Findings\nRetention improved by 18 percent."
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /executive brief/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-1",
+        "completed",
+        expect.objectContaining({
+          content: expect.stringContaining("Project Falcon"),
+          templateId: "executive_brief",
+          reviewStatus: "draft",
+          sourceLineage: [
+            {
+              sourceId: "source-1",
+              mediaId: 101,
+              title: "DSPy Prompting Talk"
+            }
+          ],
+          reviewChecklist: [
+            expect.objectContaining({
+              id: "executive_brief-review-1",
+              checked: false
+            }),
+            expect.objectContaining({
+              id: "executive_brief-review-2",
+              checked: false
+            }),
+            expect.objectContaining({
+              id: "executive_brief-review-3",
+              checked: false
+            })
+          ]
+        })
+      )
+    })
+
+    expect(mockAddArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "report",
+        title: "Executive Brief",
+        status: "generating",
+        templateId: "executive_brief"
+      })
+    )
+  })
+
+  it("preserves executive brief template metadata when regenerating", async () => {
+    workspaceStoreState.generatedArtifacts = [
+      {
+        id: "artifact-executive-brief",
+        type: "report",
+        title: "Executive Brief",
+        status: "completed",
+        content: "Existing executive brief",
+        templateId: "executive_brief",
+        reviewStatus: "draft",
+        sourceLineage: [
+          {
+            sourceId: "source-1",
+            mediaId: 101,
+            title: "DSPy Prompting Talk"
+          }
+        ],
+        reviewChecklist: [
+          {
+            id: "executive_brief-review-1",
+            label: "Every material claim has a source or explicit uncertainty.",
+            checked: false
+          }
+        ],
+        createdAt: new Date("2026-02-18T10:00:00.000Z")
+      }
+    ]
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: {
+        text: "Project Falcon improved retention by 18 percent after the March 2026 onboarding update."
+      }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse(
+        "## Situation\nProject Falcon improved retention.\n\n## Key Findings\nRetention improved by 18 percent."
+      )
+    )
+
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate options" }))
+    fireEvent.click(await screen.findByText("Replace existing"))
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-executive-brief",
+        "generating",
+        expect.objectContaining({
+          templateId: "executive_brief",
+          sourceLineage: [
+            {
+              sourceId: "source-1",
+              mediaId: 101,
+              title: "DSPy Prompting Talk"
+            }
+          ]
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+        "artifact-executive-brief",
+        "completed",
+        expect.objectContaining({
+          templateId: "executive_brief",
+          reviewStatus: "draft",
+          reviewChecklist: expect.arrayContaining([
+            expect.objectContaining({
+              id: "executive_brief-review-1",
+              checked: false
+            })
+          ])
+        })
+      )
+    })
   })
 
   it("preserves summary usage metrics from chat completion responses", async () => {

@@ -1,0 +1,95 @@
+name: publish-ghcr-main
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: publish-ghcr-main-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish-ghcr-main:
+    name: publish-ghcr-main
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            dockerfile: Dockerfiles/Dockerfile.prod
+            image_suffix: ""
+            build_args: ""
+          - name: webui
+            dockerfile: Dockerfiles/Dockerfile.webui
+            image_suffix: "-webui"
+            build_args: |
+              NEXT_PUBLIC_API_URL=
+              NEXT_PUBLIC_API_BASE_URL=
+              NEXT_PUBLIC_API_VERSION=v1
+              NEXT_PUBLIC_X_API_KEY=
+              NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart
+              TLDW_INTERNAL_API_ORIGIN=http://app:8000
+          - name: admin-ui
+            dockerfile: Dockerfiles/Dockerfile.admin-ui
+            image_suffix: "-admin-ui"
+            build_args: |
+              NEXT_PUBLIC_API_URL=http://app:8000
+              NEXT_PUBLIC_API_VERSION=v1
+              NEXT_PUBLIC_DEFAULT_AUTH_MODE=multi_user
+              NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=false
+              NEXT_PUBLIC_BILLING_ENABLED=false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for GHCR
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
+          tags: |
+            type=raw,value=main
+            type=sha,format=short
+
+      - name: Build and push Docker images
+        id: push
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: ${{ matrix.build_args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate artifact attestation (GHCR)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_suffix }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

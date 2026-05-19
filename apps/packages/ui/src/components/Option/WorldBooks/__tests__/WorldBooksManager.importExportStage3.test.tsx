@@ -168,7 +168,9 @@ describe("WorldBooksManager import/export stage-3 external format conversion", (
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+    // Open Tools dropdown then click Import JSON
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Import JSON"))
     const titles = await screen.findAllByText("Import World Book (JSON)")
     const modalTitle = titles[titles.length - 1]
     const modal = modalTitle.closest(".ant-modal") as HTMLElement | null

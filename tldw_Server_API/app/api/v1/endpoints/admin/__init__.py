@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_roles
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
 from tldw_Server_API.app.core.AuthNZ.alerting import (
     get_security_alert_dispatcher as _core_get_security_alert_dispatcher,
 )
@@ -22,12 +22,16 @@ from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services import admin_profiles_service, admin_scope_service
 
+from . import admin_acp_agents as admin_acp_agents_endpoints
 from . import admin_api_keys as admin_api_keys_endpoints
 from . import admin_budgets as admin_budgets_endpoints
 from . import admin_bundle_ops as admin_bundle_ops_endpoints
 from . import admin_byok as admin_byok_endpoints
 from . import admin_circuit_breakers as admin_circuit_breakers_endpoints
 from . import admin_data_ops as admin_data_ops_endpoints
+from . import admin_events_stream as admin_events_stream_endpoints
+from . import admin_identity_providers as admin_identity_providers_endpoints
+from . import admin_impersonation as admin_impersonation_endpoints
 from . import admin_llm_providers as admin_llm_providers_endpoints
 from . import admin_monitoring as admin_monitoring_endpoints
 from . import admin_network as admin_network_endpoints
@@ -38,20 +42,16 @@ from . import admin_profiles as admin_profiles_endpoints
 from . import admin_rate_limits as admin_rate_limits_endpoints
 from . import admin_rbac as admin_rbac_endpoints
 from . import admin_registration as admin_registration_endpoints
+from . import admin_router_analytics as admin_router_analytics_endpoints
 from . import admin_sessions_mfa as admin_sessions_mfa_endpoints
 from . import admin_settings as admin_settings_endpoints
+from . import admin_storage_quotas as admin_storage_quotas_endpoints
 from . import admin_system as admin_system_endpoints
+from . import admin_tenant_provisioning as admin_tenant_provisioning_endpoints
 from . import admin_tools as admin_tools_endpoints
 from . import admin_usage as admin_usage_endpoints
-from . import admin_router_analytics as admin_router_analytics_endpoints
-from . import admin_acp_agents as admin_acp_agents_endpoints
-from . import admin_events_stream as admin_events_stream_endpoints
-from . import admin_identity_providers as admin_identity_providers_endpoints
-from . import admin_storage_quotas as admin_storage_quotas_endpoints
 from . import admin_user as admin_user_endpoints
-from . import admin_tenant_provisioning as admin_tenant_provisioning_endpoints
-from . import admin_impersonation as admin_impersonation_endpoints
-from . import admin_webhooks as admin_webhooks_endpoints
+from . import startup_warnings as startup_warnings_endpoints
 
 _ADMIN_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -78,12 +78,13 @@ _ADMIN_NONCRITICAL_EXCEPTIONS = (
     ResourceNotFoundError,
 )
 
+
 async def _is_postgres_backend() -> bool:
     """Return True when AuthNZ is backed by PostgreSQL."""
     try:
         pool = await get_db_pool()
-    except _ADMIN_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Admin backend detection falling back to SQLite due to pool error: {}", exc)
+    except _ADMIN_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Admin backend detection falling back to SQLite due to pool error")
         return False
     return bool(getattr(pool, "pool", None) is not None)
 
@@ -107,7 +108,7 @@ _authnz_migration_lock = asyncio.Lock()
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(require_roles("admin"))],  # All endpoints require admin role
+    dependencies=[Depends(RequireRole("admin"))],  # All endpoints require admin role
     responses={403: {"description": "Not authorized"}},
 )
 
@@ -140,7 +141,7 @@ router.include_router(admin_identity_providers_endpoints.router)
 router.include_router(admin_storage_quotas_endpoints.router)
 router.include_router(admin_tenant_provisioning_endpoints.router)
 router.include_router(admin_impersonation_endpoints.router)
-router.include_router(admin_webhooks_endpoints.router)
+router.include_router(startup_warnings_endpoints.router)
 
 
 # Backend detection now standardized via core AuthNZ database helper
@@ -174,15 +175,13 @@ async def _ensure_sqlite_authnz_ready_if_test_mode() -> None:
             # another coroutine completed migrations while we waited
             try:
                 async with pool.acquire() as conn:
-                    cur = await conn.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='organizations'"
-                    )
+                    cur = await conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organizations'")
                     row = await cur.fetchone()
                     if row:
                         return
-            except _ADMIN_NONCRITICAL_EXCEPTIONS as exc:
+            except _ADMIN_NONCRITICAL_EXCEPTIONS:
                 # Proceed to ensure migrations (best-effort check)
-                logger.debug("AuthNZ test ensure table check failed: {}", exc)
+                logger.debug("AuthNZ test ensure table check failed")
 
             from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables as _ensure
 
@@ -192,16 +191,12 @@ async def _ensure_sqlite_authnz_ready_if_test_mode() -> None:
                 # Best-effort: ensure parent directories exist to avoid path issues in CI
                 try:
                     path_obj.parent.mkdir(parents=True, exist_ok=True)
-                except _ADMIN_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(
-                        "AuthNZ test ensure mkdir failed for {}: {}",
-                        path_obj.parent,
-                        exc,
-                    )
+                except _ADMIN_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("AuthNZ test ensure mkdir failed")
                 await asyncio.to_thread(_ensure, path_obj)
-    except _ADMIN_NONCRITICAL_EXCEPTIONS as _e:
+    except _ADMIN_NONCRITICAL_EXCEPTIONS:
         # Best-effort only; do not interfere with request handling
-        logger.debug(f"AuthNZ test ensure skipped/failed: {_e}")
+        logger.debug("AuthNZ test ensure skipped/failed")
 
 
 async def _emit_admin_audit_event(
@@ -235,11 +230,7 @@ async def _emit_admin_audit_event(
 
         audit_service = await get_or_create_audit_service_for_user_id(actor_id)
         correlation_id = request.headers.get("X-Correlation-ID") or getattr(request.state, "correlation_id", None)
-        request_id = (
-            request.headers.get("X-Request-ID")
-            or getattr(request.state, "request_id", None)
-            or ""
-        )
+        request_id = request.headers.get("X-Request-ID") or getattr(request.state, "request_id", None) or ""
         ctx = AuditContext(
             user_id=str(actor_id),
             correlation_id=correlation_id,
@@ -258,8 +249,8 @@ async def _emit_admin_audit_event(
             action=action,
             metadata=metadata,
         )
-    except _ADMIN_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Admin audit emission failed: {}", exc, exc_info=True)
+    except _ADMIN_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Admin audit emission failed")
 
 
 # Test shim: budgets tests monkeypatch this symbol via the admin module path.

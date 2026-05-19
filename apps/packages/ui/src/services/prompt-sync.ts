@@ -28,6 +28,7 @@ import {
   StandardResponse
 } from '@/services/prompt-studio'
 import type { ApiSendResponse } from '@/services/api-send'
+import { unwrapApiResponseData } from '@/services/response-envelope'
 import {
   getPromptStudioDefaults,
   setPromptStudioDefaults
@@ -84,11 +85,7 @@ const isValidProjectId = (value: unknown): value is number =>
 const unwrapResponseData = <T>(
   response: ApiSendResponse<StandardResponse<T>> | ApiSendResponse<T>
 ): T | null => {
-  const outer = response?.data
-  if (outer && typeof outer === 'object' && 'data' in outer) {
-    return (outer as StandardResponse<T>).data ?? null
-  }
-  return (outer as T) ?? null
+  return unwrapApiResponseData<T>(response?.data) ?? null
 }
 
 const toText = (value: unknown): string => (typeof value === 'string' ? value : '')

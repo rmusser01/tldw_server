@@ -1,10 +1,18 @@
 import sqlite3
+from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+import json
+
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+)
 from tldw_Server_API.app.core.Persona.buddy import ensure_persona_buddy_for_profile
 
 
@@ -56,7 +64,7 @@ def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) ->
 
     fk_targets = {(row["table"], row["from"], row["to"]) for row in foreign_keys}
 
-    assert schema_version == 40
+    assert schema_version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
     assert "persona_buddies" in tables
     assert "source_fingerprint" in buddy_columns
     assert "derivation_version" in buddy_columns
@@ -189,6 +197,57 @@ def test_ensure_persona_buddy_preserves_overlay_preferences_on_rederive(
     assert repaired["overlay_preferences"] == overlay_preferences
 
 
+def test_get_persona_buddy_surfaces_resolver_failures(
+    db_instance: CharactersRAGDB,
+    monkeypatch,
+) -> None:
+    persona_id = db_instance.create_persona_profile(
+        {"user_id": "user-1", "name": "Broken Buddy Persona"}
+    )
+    profile = db_instance.get_persona_profile(persona_id, user_id="user-1")
+    assert profile is not None
+    ensure_persona_buddy_for_profile(db_instance, profile)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.chacha.persona_state_store.resolve_persona_buddy_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("invalid resolved profile")),
+    )
+
+    with pytest.raises(CharactersRAGDBError, match="Unable to resolve persona buddy profile"):
+        db_instance.get_persona_buddy(persona_id=persona_id, user_id="user-1")
+
+
+def test_get_persona_buddy_uses_backend_aware_deleted_filter_for_postgres(
+    db_instance: CharactersRAGDB,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Cursor:
+        def fetchone(self):
+            return None
+
+    def _fake_execute_query(query: str, params: tuple[object, ...]):
+        captured["query"] = query
+        captured["params"] = params
+        return _Cursor()
+
+    monkeypatch.setattr(type(db_instance), "backend_type", BackendType.POSTGRESQL)
+    monkeypatch.setattr(db_instance, "execute_query", _fake_execute_query)
+
+    assert (
+        db_instance.get_persona_buddy(
+            persona_id="persona-1",
+            user_id="user-1",
+            include_deleted_personas=False,
+        )
+        is None
+    )
+
+    assert "pp.deleted = ?" in str(captured["query"])
+    assert captured["params"] == ("persona-1", "user-1", False, False)
+
+
 def test_soft_delete_hides_buddy_and_restore_reuses_same_row(
     db_instance: CharactersRAGDB,
 ) -> None:
@@ -229,6 +288,52 @@ def test_soft_delete_hides_buddy_and_restore_reuses_same_row(
     assert restored_buddy["resolved_profile"] == buddy_before_delete["resolved_profile"]
 
 
+def test_restore_persona_profile_uses_backend_aware_deleted_filter_for_postgres(
+    db_instance: CharactersRAGDB,
+    monkeypatch,
+) -> None:
+    executed: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Cursor:
+        def __init__(self, row: dict[str, object] | None = None, rowcount: int = 0):
+            self._row = row
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._row
+
+    class _Conn:
+        def execute(self, query: str, params: tuple[object, ...]):
+            executed.append((query, params))
+            if query.startswith("SELECT version, deleted FROM persona_profiles"):
+                return _Cursor({"version": 3, "deleted": True})
+            if query.startswith("UPDATE persona_profiles"):
+                return _Cursor(rowcount=1)
+            raise AssertionError(f"Unexpected query: {query}")
+
+    @contextmanager
+    def _fake_transaction():
+        yield _Conn()
+
+    monkeypatch.setattr(type(db_instance), "backend_type", BackendType.POSTGRESQL)
+    monkeypatch.setattr(db_instance, "transaction", _fake_transaction)
+    monkeypatch.setattr(db_instance, "_prepare_backend_statement", lambda query, params: (query, params))
+
+    assert db_instance.restore_persona_profile(
+        persona_id="persona-1",
+        user_id="user-1",
+        expected_version=3,
+    )
+
+    update_query, update_params = next(
+        (query, params)
+        for query, params in executed
+        if query.startswith("UPDATE persona_profiles")
+    )
+    assert "deleted = ?" in update_query
+    assert update_params[-1] is True
+
+
 def test_restore_persona_profile_with_stale_expected_version_raises_conflict(
     db_instance: CharactersRAGDB,
 ) -> None:
@@ -250,3 +355,50 @@ def test_restore_persona_profile_with_stale_expected_version_raises_conflict(
             user_id="user-1",
             expected_version=stale_version,
         )
+
+
+def test_row_to_dict_raises_on_corrupt_derived_core(db_instance: CharactersRAGDB) -> None:
+    """_persona_buddy_row_to_dict must raise CharactersRAGDBError when
+    derived_core is empty/corrupt, not silently return resolved_profile=None."""
+    fake_row = {
+        "persona_id": "test-persona-corrupt",
+        "user_id": "1",
+        "derivation_version": 1,
+        "source_fingerprint": "abc123",
+        "derived_core_json": "{}",
+        "overlay_preferences_json": "{}",
+        "created_at": "2026-03-31T00:00:00",
+        "last_modified": "2026-03-31T00:00:00",
+        "version": 1,
+    }
+    with pytest.raises(CharactersRAGDBError, match="Unable to resolve persona buddy profile"):
+        db_instance._persona_buddy_row_to_dict(fake_row)
+
+
+def test_row_to_dict_succeeds_with_valid_data(db_instance: CharactersRAGDB) -> None:
+    """Happy path: well-formed derived_core produces a resolved_profile."""
+    import json
+
+    derived_core = {
+        "species_id": "owl",
+        "silhouette_id": "owl_round",
+        "palette_id": "moss",
+        "behavior_family": "steady",
+        "expression_profile": "warm",
+    }
+    fake_row = {
+        "persona_id": "test-persona-valid",
+        "user_id": "1",
+        "derivation_version": 1,
+        "source_fingerprint": "abc123",
+        "derived_core_json": json.dumps(derived_core),
+        "overlay_preferences_json": "{}",
+        "created_at": "2026-03-31T00:00:00",
+        "last_modified": "2026-03-31T00:00:00",
+        "version": 1,
+    }
+    result = db_instance._persona_buddy_row_to_dict(fake_row)
+    assert result is not None
+    assert result["resolved_profile"] is not None
+    assert result["resolved_profile"]["species_id"] == "owl"
+    assert result["resolved_profile"]["compatibility_status"] == "exact"

@@ -32,7 +32,7 @@ This document explains how to run and understand the test suite for this repo, a
 - **Playwright + Chromium**
   - If Chromium is not installed for Playwright, run: `npx playwright install chromium`.
 - **Build tooling**
-  - Global setup prefers `npm run build:chrome`; falls back to `cross-env TARGET=chrome wxt build` and then `bun run build:chrome`.
+  - Global setup prefers `npm run build:chrome:prod`; falls back to `bun run build:chrome:prod`, then `node scripts/build-with-profile.mjs --browser=chrome` with `TLDW_BUILD_PROFILE=production` injected via the process environment.
   - You do not need to build manually for E2E runs, but a local build can speed iteration.
 - **Real server E2E checklist (tldw_server)**
   - Ensure media/audio routes load: install server deps (`yt_dlp`, `numpy`, `soundfile`) and confirm logs do not show "Media endpoints unavailable" or "Audio endpoints unavailable".
@@ -57,6 +57,11 @@ bun run compile
 # Build extension for all browsers (optional for tests)
 bun run build
 
+# Force production artifacts from a non-main branch
+bun run build:prod
+bun run build:chrome:prod
+bun run zip:prod
+
 # Run all Playwright E2E tests
 bun run test:e2e
 
@@ -68,6 +73,15 @@ bun run test:e2e:ui
 ```
 
 Artifacts (traces, screenshots, videos) are written under `test-results/`.
+
+Branch-aware artifact defaults:
+
+- `main` => production artifacts
+- any other branch => development artifacts
+- development unpacked exports use `build/chrome-mv3-dev`
+- development zip artifacts add `-dev` to the filename
+
+When you are reproducing CI or release-like behavior locally, use the explicit `:prod` scripts rather than relying on the current branch name.
 
 ### 3.1 Watchlists Real-Server Strict Gate (No Skips)
 
@@ -95,7 +109,7 @@ Important notes:
 
 ## 4. E2E Test Suites (By Area)
 
-All E2E tests live in `tests/e2e`. They load the unpacked extension either from `.output/chrome-mv3` (dev) or `build/chrome-mv3` (CI / fallback).
+All E2E tests live in `tests/e2e`. They load the unpacked extension from the stable internal WXT root `.output/chrome-mv3` when available, or from the exported production install directory `build/chrome-mv3` as the CI/fallback path.
 
 ### 4.1 Connection, Onboarding, & Server Card
 
@@ -229,8 +243,8 @@ Recommended manual pass (per browser: Chrome, Firefox, Edge):
 - **“Browser specified in your config is not installed”**
   - Run `npx playwright install chromium` once locally.
 - **Extension build issues in tests**
-  - Ensure `npm` is available (global setup uses `npm run build:chrome` first).
-  - If `npm` is not installed, run `bun run build:chrome` manually before `bun run test:e2e`.
+  - Ensure `npm` is available (global setup uses `npm run build:chrome:prod` first).
+  - If `npm` is not installed, run `bun run build:chrome:prod` manually before `bun run test:e2e`.
 - **Flaky connection‑dependent tests**
   - Many suites use `MockTldwServer`; check console output and ensure no other process is using the chosen port.
   - For tests that use a real server (`ux-validate.spec.ts` with `TLDW_URL` / `TLDW_API_KEY`), confirm the server is reachable and CORS is configured for `http://127.0.0.1`.

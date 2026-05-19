@@ -4,6 +4,28 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-SemiBold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
 .arimo {
   font-family: "Arimo", sans-serif;
   font-weight: 500;
@@ -66,6 +88,36 @@
   --color-text-muted: 91 100 114;
   --color-text-subtle: 110 120 135;
   --color-focus: 13 134 119;
+  --state-ready: var(--color-success);
+  --state-unavailable: var(--color-danger);
+  --state-setup-required: var(--color-warn);
+  --state-auth-required: var(--color-warn);
+  --state-permission-denied: var(--color-danger);
+  --state-degraded: var(--color-warn);
+  --state-retrying: var(--color-primary);
+  --state-blocked: var(--color-danger);
+  --state-empty: var(--color-muted);
+  --state-loading: var(--color-muted);
+  --state-error: var(--color-danger);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
+  --shadow-md: 0 6px 18px rgba(0,0,0,0.08);
+  --font-family: "Inter", system-ui, sans-serif;
+  --font-family-mono: "Courier New", monospace;
+  --font-size-body: 14px;
+  --font-size-message: 15px;
+  --font-size-caption: 12px;
+  --font-size-label: 11px;
+  --radius-sm: 2px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --surface-blur: 0px;
+  --sidebar-width: 260px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 56px;
+  --content-max-width: 960px;
+  --spacing-unit: 4px;
+  --duration-base: 150ms;
   --moderation-hero-start: #fdf7ec;
   --moderation-hero-end: #f6efdf;
   --moderation-hero-border: #e8dcc8;
@@ -73,6 +125,14 @@
   --moderation-hero-grid-1: rgba(73, 55, 36, 0.08);
   --moderation-hero-grid-2: rgba(73, 55, 36, 0.06);
   --moderation-hero-grid-opacity: 0.35;
+
+  /* Phosphor glows — theme-agnostic; derive from current primary/accent/success.
+     Used by composer variants (V1/V3/V5) and other Primer-aesthetic surfaces.
+     Any registered theme contributes its own color automatically — names stay
+     semantic (primary/accent/success) rather than hardcoding Primer's cyan. */
+  --glow-primary: 0 0 0 1px rgb(var(--color-primary) / 0.35), 0 0 24px -6px rgb(var(--color-primary) / 0.55);
+  --glow-accent: 0 0 0 1px rgb(var(--color-accent) / 0.35), 0 0 24px -6px rgb(var(--color-accent) / 0.50);
+  --glow-success: 0 0 0 1px rgb(var(--color-success) / 0.30), 0 0 24px -6px rgb(var(--color-success) / 0.45);
 }
 
 .dark {
@@ -94,6 +154,19 @@
   --color-text-muted: 179 186 198;
   --color-text-subtle: 144 152 166;
   --color-focus: 79 209 176;
+  --state-ready: var(--color-success);
+  --state-unavailable: var(--color-danger);
+  --state-setup-required: var(--color-warn);
+  --state-auth-required: var(--color-warn);
+  --state-permission-denied: var(--color-danger);
+  --state-degraded: var(--color-warn);
+  --state-retrying: var(--color-primary);
+  --state-blocked: var(--color-danger);
+  --state-empty: var(--color-muted);
+  --state-loading: var(--color-muted);
+  --state-error: var(--color-danger);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
   --moderation-hero-start: #141a22;
   --moderation-hero-end: #0f141a;
   --moderation-hero-border: #2a3442;
@@ -139,6 +212,13 @@ body {
 }
 
 @layer components {
+  .citation-mark {
+    background: rgb(var(--color-primary) / 0.1);
+    border-bottom: 1px dashed rgb(var(--color-primary));
+    cursor: pointer;
+    padding: 0 2px;
+  }
+
   .timeline-modal .ant-modal-content {
     @apply h-screen bg-bg text-text;
   }
@@ -202,7 +282,8 @@ body {
   }
 
   .panel-card {
-    @apply rounded-xl border border-border bg-surface text-text shadow-card transition-shadow duration-150 ease-out motion-reduce:transition-none;
+    @apply rounded-xl border border-border bg-surface text-text shadow-card transition-shadow ease-out motion-reduce:transition-none;
+    transition-duration: var(--duration-base);
   }
 
   .panel-elevated {
@@ -210,11 +291,13 @@ body {
   }
 
   .panel-input {
-    @apply w-full rounded-md border border-border bg-surface px-3 py-2 text-body text-text placeholder:text-text-muted outline-none transition-colors duration-150 ease-out motion-reduce:transition-none focus:ring-2 focus:ring-focus;
+    @apply w-full rounded-md border border-border bg-surface px-3 py-2 text-body text-text placeholder:text-text-muted outline-none transition-colors ease-out motion-reduce:transition-none focus:ring-2 focus:ring-focus;
+    transition-duration: var(--duration-base);
   }
 
   .panel-icon-button {
-    @apply inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors duration-150 ease-out motion-reduce:transition-none hover:bg-surface2 hover:text-text;
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors ease-out motion-reduce:transition-none hover:bg-surface2 hover:text-text;
+    transition-duration: var(--duration-base);
   }
 
   .panel-section-label {
@@ -223,6 +306,57 @@ body {
 
   .panel-divider {
     @apply h-px w-full bg-border;
+  }
+
+  /* ===== Density ===== */
+  [data-density="compact"]     { --spacing-unit: 3px; }
+  [data-density="comfortable"] { --spacing-unit: 5px; }
+
+  /* Density for custom inputs */
+  [data-density="compact"] .panel-input {
+    padding: round(calc(var(--spacing-unit) * 1.5), 1px) round(calc(var(--spacing-unit) * 2.5), 1px);
+    font-size: 13px;
+  }
+  [data-density="comfortable"] .panel-input {
+    padding: round(calc(var(--spacing-unit) * 2.5), 1px) round(calc(var(--spacing-unit) * 3.5), 1px);
+  }
+
+  /* Density for icon buttons */
+  [data-density="compact"] .panel-icon-button {
+    height: 1.5rem;
+    width: 1.5rem;
+  }
+  [data-density="comfortable"] .panel-icon-button {
+    height: 2rem;
+    width: 2rem;
+  }
+
+
+  /* ===== Animation speed ===== */
+  [data-animation="none"]   { --duration-base: 0ms; }
+  [data-animation="subtle"] { --duration-base: 75ms; }
+
+  /* ===== Button variants (custom components only) ===== */
+  [data-button-style="square"]  .tldw-btn { border-radius: var(--radius-sm); }
+  [data-button-style="rounded"] .tldw-btn { border-radius: var(--radius-md); }
+  [data-button-style="pill"]    .tldw-btn { border-radius: 9999px; }
+
+  /* ===== Input variants (custom components only) ===== */
+  [data-input-style="underlined"] .panel-input {
+    border-radius: 0;
+    border: none;
+    border-bottom: 1px solid rgb(var(--color-border));
+  }
+  [data-input-style="filled"] .panel-input {
+    border: none;
+    background: rgb(var(--color-surface-2));
+  }
+
+  /* ===== Card variants ===== */
+  [data-card-style="flat"]     .panel-card { box-shadow: none; border: none; }
+  [data-card-style="outlined"] .panel-card {
+    box-shadow: none;
+    border: 1px solid rgb(var(--color-border));
   }
 }
 

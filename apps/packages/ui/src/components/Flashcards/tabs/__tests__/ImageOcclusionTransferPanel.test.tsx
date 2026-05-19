@@ -280,6 +280,8 @@ describe("ImageOcclusionTransferPanel", () => {
     fireEvent.change(screen.getByTestId("flashcards-occlusion-new-deck-name"), {
       target: { value: "Occlusion deck" }
     })
+    fireEvent.mouseDown(screen.getByTestId("deck-study-defaults-review-prompt-side"))
+    fireEvent.click(await screen.findByText("Back first"))
     fireEvent.click(screen.getByTestId("deck-scheduler-editor-preset-fast_acquisition"))
 
     fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
@@ -294,6 +296,7 @@ describe("ImageOcclusionTransferPanel", () => {
     await waitFor(() =>
       expect(createDeckMutateAsync).toHaveBeenCalledWith({
         name: "Occlusion deck",
+        review_prompt_side: "back",
         scheduler_type: "sm2_plus",
         scheduler_settings: fastAcquisitionEnvelope
       })

@@ -7,6 +7,7 @@ import re
 from typing import Any, Mapping
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
+from tldw_Server_API.app.core.StudyPacks.provenance import FlashcardProvenanceStore
 
 try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
@@ -106,8 +107,11 @@ def build_flashcard_assistant_context(
         flashcard_uuid=flashcard_uuid,
     )
     history = db.list_study_assistant_messages(thread["id"])
+    provenance_store = FlashcardProvenanceStore(db)
+    provenance = provenance_store.read_flashcard_provenance(flashcard_uuid)
+    study_pack_summary = provenance_store.get_study_pack_summary(flashcard_uuid)
 
-    return {
+    existing_context = {
         "context_type": "flashcard",
         "thread": _normalize_thread(thread),
         "flashcard": {
@@ -131,6 +135,13 @@ def build_flashcard_assistant_context(
             max_field_chars=max_field_chars,
         ),
         "available_actions": list(STUDY_ASSISTANT_ACTIONS),
+    }
+    return {
+        **existing_context,
+        "study_pack": study_pack_summary,
+        "citations": provenance["citations"],
+        "primary_citation": provenance["primary_citation"],
+        "deep_dive_target": provenance["deep_dive_target"],
     }
 
 

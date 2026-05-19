@@ -61,12 +61,17 @@ async def test_retrying_step_records_multiple_attempt_rows(tmp_path, monkeypatch
 
     attempts = db.list_step_attempts(run_id=run_id, step_id="s1")
     assert len(attempts) == 2
+    assert [attempt["attempt_number"] for attempt in attempts] == [1, 2]
+    assert attempts[0]["attempt_id"] != attempts[1]["attempt_id"]
     assert attempts[0]["status"] == "failed"
+    assert attempts[0]["ended_at"] is not None
     assert attempts[0]["reason_code_core"] == "transient_network_error"
     assert bool(attempts[0]["retryable"]) is True
     assert attempts[0]["metadata_json"]["retry_recommendation"] == "safe"
     assert attempts[0]["metadata_json"]["blame_scope"] == "step"
+    assert attempts[0]["metadata_json"]["failure_envelope"]["reason_code_core"] == "transient_network_error"
     assert attempts[1]["status"] == "succeeded"
+    assert attempts[1]["ended_at"] is not None
     assert attempts[1]["reason_code_core"] is None
 
 
@@ -95,4 +100,5 @@ async def test_unsafe_step_types_do_not_report_safe_replay(tmp_path, monkeypatch
     assert attempts[0]["reason_code_core"] == "transient_network_error"
     assert bool(attempts[0]["retryable"]) is True
     assert attempts[0]["metadata_json"]["retry_recommendation"] == "conditional"
+    assert attempts[0]["metadata_json"]["failure_envelope"]["reason_code_core"] == "transient_network_error"
     assert attempts[0]["metadata_json"]["step_capability"]["replay_safe"] is False

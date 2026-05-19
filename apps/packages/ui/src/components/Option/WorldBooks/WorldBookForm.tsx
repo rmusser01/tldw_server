@@ -3,6 +3,7 @@ import React from "react"
 import { Select } from "antd"
 import { HelpCircle } from "lucide-react"
 import { normalizeKeywordList } from "./worldBookEntryUtils"
+import { getSettingLabel, getSettingDescription } from "./worldBookLabelUtils"
 import {
   WORLD_BOOK_FORM_DEFAULTS,
   WORLD_BOOK_STARTER_TEMPLATES,
@@ -44,6 +45,7 @@ export type WorldBookFormProps = {
   submitting: boolean
   currentWorldBookId?: number | null
   maxRecursiveDepth?: number
+  showTechnicalLabels?: boolean
   onSubmit: (values: Record<string, any>) => void
 }
 
@@ -54,8 +56,10 @@ export const WorldBookForm: React.FC<WorldBookFormProps> = ({
   submitting,
   currentWorldBookId,
   maxRecursiveDepth = 10,
+  showTechnicalLabels,
   onSubmit
 }) => {
+  const technical = showTechnicalLabels ?? false
   const submitLabel = mode === "create" ? "Create" : "Save"
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = React.useState(false)
   const advancedSettingsContentId = React.useId()
@@ -149,24 +153,24 @@ export const WorldBookForm: React.FC<WorldBookFormProps> = ({
           aria-expanded={advancedSettingsOpen}
           aria-controls={advancedSettingsContentId}
         >
-          Advanced Settings
+          Matching & Budget
         </summary>
         <div id={advancedSettingsContentId} className="mt-3 pl-2 border-l-2 border-border space-y-0">
           <Form.Item
             name="scan_depth"
-            label={<LabelWithHelp label="Scan Depth" help="How many recent messages to search for keywords (1-20). Higher values find more matches but use more processing." />}
+            label={<LabelWithHelp label={getSettingLabel("scan_depth", technical)} help={getSettingDescription("scan_depth", technical)} />}
           >
             <InputNumber style={{ width: "100%" }} min={1} max={20} />
           </Form.Item>
           <Form.Item
             name="token_budget"
-            label={<LabelWithHelp label="Token Budget" help="Maximum characters of world info to inject into context (~4 characters = 1 token). This is the most impactful setting for context usage." />}
+            label={<LabelWithHelp label={getSettingLabel("token_budget", technical)} help={getSettingDescription("token_budget", technical)} />}
           >
             <InputNumber style={{ width: "100%" }} min={50} max={5000} />
           </Form.Item>
           <Form.Item
             name="recursive_scanning"
-            label={<LabelWithHelp label="Recursive Scanning" help="Also search matched content for additional keyword matches. Useful for interconnected lore but may increase context usage." />}
+            label={<LabelWithHelp label={getSettingLabel("recursive_scanning", technical)} help={getSettingDescription("recursive_scanning", technical)} />}
             valuePropName="checked"
           >
             <Switch {...ACCESSIBLE_SWITCH_TEXT_PROPS} />

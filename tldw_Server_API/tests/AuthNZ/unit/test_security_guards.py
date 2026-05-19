@@ -10,6 +10,7 @@ Tests cover:
 """
 import pytest
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -232,6 +233,17 @@ class TestInputValidationXSS:
         validator = InputValidator()
         ok, error = validator.validate_username("data:text/html,<script>alert('xss')</script>")
         assert ok is False
+
+
+def test_env_example_keeps_jwt_secret_placeholder_commented() -> None:
+    env_example = Path(__file__).resolve().parents[3] / "Config_Files" / ".env.example"
+    jwt_placeholder_line = next(
+        line
+        for line in env_example.read_text(encoding="utf-8").splitlines()
+        if "JWT_SECRET_KEY=CHANGE_ME_TO_SECURE_RANDOM_KEY_MIN_32_CHARS" in line
+    )
+
+    assert jwt_placeholder_line.lstrip().startswith("#")
 
     def test_path_traversal_blocked(self):
 

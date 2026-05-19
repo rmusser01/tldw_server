@@ -810,9 +810,7 @@ class TestConversationsAndMessages:
         assert deleted is True
         assert db_instance.get_conversation_by_id(conv_id) is None
 
-        msg1 = db_instance.get_message_by_id(msg1_id)
-        assert msg1 is not None
-        assert msg1["conversation_id"] == conv_id
+        assert db_instance.get_message_by_id(msg1_id) is None
 
         # FTS search for conversation should not find it
         # UNCOMMENTED AND VERIFIED:

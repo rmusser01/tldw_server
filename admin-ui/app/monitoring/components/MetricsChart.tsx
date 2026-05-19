@@ -100,58 +100,89 @@ export default function MetricsChart({
             Enable at least one metric series to render the chart.
           </div>
         ) : (
-          <div
-            className="h-64"
-            role="img"
-            aria-label={`System metrics chart showing ${metricsHistory.length} data points for ${visibleSeries.map((series) => series.label).join(', ')}`}
-          >
-            <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
-              <LineChart data={metricsHistory}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="label" className="text-xs" minTickGap={24} />
-                <YAxis
-                  yAxisId="percent"
-                  className="text-xs"
-                  domain={[0, 100]}
-                  tickFormatter={(value) => `${value}%`}
-                />
-                <YAxis
-                  yAxisId="count"
-                  orientation="right"
-                  className="text-xs"
-                  tickFormatter={(value) => formatCount(value)}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--background))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                  }}
-                  formatter={(value, name, item) => {
-                    const key = String(item?.dataKey ?? name ?? '');
-                    if (['cpu', 'memory', 'diskUsage'].includes(key)) {
-                      const percent = typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : value;
-                      return [`${percent}%`, SERIES_DEFINITIONS.find((series) => series.key === key)?.label ?? key];
-                    }
-                    return [formatCount(value), SERIES_DEFINITIONS.find((series) => series.key === key)?.label ?? key];
-                  }}
-                />
-                {visibleSeries.map((series) => (
-                  <Line
-                    key={series.key}
-                    type="monotone"
-                    dataKey={series.key}
-                    yAxisId={series.axis}
-                    stroke={series.color}
-                    strokeWidth={2}
-                    dot={false}
-                    isAnimationActive={false}
-                    name={series.label}
+          <>
+          <div role="img" aria-label={`System metrics chart showing ${metricsHistory.length} data points for ${visibleSeries.map((s) => s.label).join(', ')} over ${rangeLabel}`}>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%" minHeight={1} minWidth={1}>
+                <LineChart data={metricsHistory}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="label" className="text-xs" minTickGap={24} />
+                  <YAxis
+                    yAxisId="percent"
+                    className="text-xs"
+                    domain={[0, 100]}
+                    tickFormatter={(value) => `${value}%`}
                   />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
+                  <YAxis
+                    yAxisId="count"
+                    orientation="right"
+                    className="text-xs"
+                    tickFormatter={(value) => formatCount(value)}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--background))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                    }}
+                    formatter={(value, name, item) => {
+                      const key = String(item?.dataKey ?? name ?? '');
+                      if (['cpu', 'memory', 'diskUsage'].includes(key)) {
+                        const percent = typeof value === 'number' && Number.isFinite(value) ? value.toFixed(1) : '—';
+                        return [`${percent}%`, SERIES_DEFINITIONS.find((series) => series.key === key)?.label ?? key];
+                      }
+                      return [formatCount(value), SERIES_DEFINITIONS.find((series) => series.key === key)?.label ?? key];
+                    }}
+                  />
+                  {visibleSeries.map((series) => (
+                    <Line
+                      key={series.key}
+                      type="monotone"
+                      dataKey={series.key}
+                      yAxisId={series.axis}
+                      stroke={series.color}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                      name={series.label}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
+          <details className="mt-2">
+            <summary className="text-xs text-muted-foreground cursor-pointer">
+              View chart data as table
+            </summary>
+            <div className="mt-1 max-h-48 overflow-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className="text-left px-2 py-1">Time</th>
+                    {visibleSeries.map((series) => (
+                      <th key={series.key} className="text-right px-2 py-1">{series.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {metricsHistory.map((point, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-2 py-1">{point.label}</td>
+                      {visibleSeries.map((series) => (
+                        <td key={series.key} className="text-right px-2 py-1">
+                          {series.axis === 'percent'
+                            ? `${typeof point[series.key] === 'number' ? point[series.key].toFixed(1) : point[series.key]}%`
+                            : formatCount(point[series.key])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+          </>
         )}
       </CardContent>
     </Card>

@@ -136,6 +136,53 @@ def resolve_persona_buddy_profile(
     }
 
 
+def build_persona_buddy_summary(
+    *,
+    persona_name: str,
+    role_summary: str | None,
+    buddy_row: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a compact, render-oriented buddy summary from an existing Track A row."""
+    safe_persona_name = str(persona_name or "").strip()
+    safe_role_summary = str(role_summary or "").strip() or None
+
+    summary: dict[str, Any] = {
+        "has_buddy": False,
+        "persona_name": safe_persona_name,
+        "role_summary": safe_role_summary,
+        "visual": None,
+    }
+    if not isinstance(buddy_row, dict):
+        return summary
+
+    resolved_profile = buddy_row.get("resolved_profile")
+    if not isinstance(resolved_profile, dict):
+        return summary
+
+    species_id = str(resolved_profile.get("species_id") or "").strip()
+    silhouette_id = str(resolved_profile.get("silhouette_id") or "").strip()
+    palette_id = str(resolved_profile.get("palette_id") or "").strip()
+    if not species_id or not silhouette_id or not palette_id:
+        return summary
+
+    summary["has_buddy"] = True
+    summary["visual"] = {
+        "species_id": species_id,
+        "silhouette_id": silhouette_id,
+        "palette_id": palette_id,
+        "accessory_id": None
+        if resolved_profile.get("accessory_id") is None
+        else str(resolved_profile.get("accessory_id")),
+        "eye_style": None
+        if resolved_profile.get("eye_style") is None
+        else str(resolved_profile.get("eye_style")),
+        "expression_profile": None
+        if resolved_profile.get("expression_profile") is None
+        else str(resolved_profile.get("expression_profile")),
+    }
+    return summary
+
+
 def ensure_persona_buddy_for_profile(
     db: "CharactersRAGDB",
     profile: dict[str, Any],

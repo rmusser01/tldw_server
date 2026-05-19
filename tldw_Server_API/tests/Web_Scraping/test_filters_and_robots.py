@@ -55,3 +55,20 @@ async def test_robots_filter_mocked(monkeypatch):
     rf = RobotsFilter(user_agent="TestBot/1.0", ttl_seconds=1)
     allowed = await rf.allowed("https://example.com/private")
     assert allowed is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_robots_filter_reports_egress_error_when_policy_evaluation_fails(monkeypatch):
+    from tldw_Server_API.app.core.Security import egress as eg
+
+    def raise_eval_error(_url):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(eg, "evaluate_url_policy", raise_eval_error, raising=False)
+
+    rf = RobotsFilter(user_agent="TestBot/1.0", ttl_seconds=1)
+    result = await rf.check("https://example.com/private")
+
+    assert result.allowed is False
+    assert result.status == "egress_error"

@@ -7,13 +7,9 @@ import {
   Collapse
 } from "antd"
 import type { RagSettings } from "@/services/rag/unified-rag"
+import { getRagSourceOptions } from "@/services/rag/sourceMetadata"
 
-export const SOURCE_OPTIONS = [
-  { label: "Media DB", value: "media_db" },
-  { label: "Notes", value: "notes" },
-  { label: "Characters", value: "characters" },
-  { label: "Chats", value: "chats" }
-]
+export const SOURCE_OPTIONS = getRagSourceOptions()
 
 export const STRATEGY_OPTIONS = [
   { label: "Standard", value: "standard" },

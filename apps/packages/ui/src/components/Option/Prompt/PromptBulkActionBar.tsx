@@ -1,5 +1,6 @@
 import React from "react"
 import { Download, Star, Tag, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 type PromptBulkActionBarV1Props = {
   mode?: "v1"
@@ -24,9 +25,14 @@ type PromptBulkActionBarProps =
   | PromptBulkActionBarLegacyProps
 
 export const PromptBulkActionBar: React.FC<PromptBulkActionBarProps> = (props) => {
+  const { t } = useTranslation(["option"])
+  const bulkActionsLabel = t("option:bulkActions", { defaultValue: "Bulk actions" })
+
   if (props.mode === "legacy") {
     return (
       <div
+        role="toolbar"
+        aria-label={bulkActionsLabel}
         data-testid={props.testId || "prompts-bulk-action-bar-legacy"}
         className={
           props.className ||
@@ -54,6 +60,8 @@ export const PromptBulkActionBar: React.FC<PromptBulkActionBarProps> = (props) =
 
   return (
     <div
+      role="toolbar"
+      aria-label={bulkActionsLabel}
       data-testid="prompts-bulk-action-bar-scaffold"
       className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/10 p-2"
     >

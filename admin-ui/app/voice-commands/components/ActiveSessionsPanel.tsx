@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import type { VoiceSession } from '@/types';
 import { formatDistanceToNow } from 'date-fns';
+import { logger } from '@/lib/logger';
 
 interface ActiveSessionsPanelProps {
   onSessionEnded?: () => void;
@@ -32,7 +33,7 @@ export function ActiveSessionsPanel({ onSessionEnded }: ActiveSessionsPanelProps
       const items = Array.isArray(data) ? data : (data?.sessions || data?.items || []);
       setSessions(items);
     } catch (err) {
-      console.warn('Failed to load voice sessions:', err);
+      logger.warn('Failed to load voice sessions', { component: 'ActiveSessionsPanel', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to load sessions');
       setSessions([]);
     } finally {
@@ -108,7 +109,7 @@ export function ActiveSessionsPanel({ onSessionEnded }: ActiveSessionsPanelProps
         {error ? (
           <div className="text-sm text-destructive py-4 text-center">{error}</div>
         ) : loading && sessions.length === 0 ? (
-          <div className="text-sm text-muted-foreground py-4 text-center">Loading sessions...</div>
+          <div className="text-sm text-muted-foreground py-4 text-center" role="status" aria-live="polite">Loading sessions...</div>
         ) : sessions.length === 0 ? (
           <div className="text-sm text-muted-foreground py-4 text-center">No active sessions</div>
         ) : (

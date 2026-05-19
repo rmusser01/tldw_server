@@ -27,8 +27,7 @@ The project is a FastAPI-first backend with a Next.js WebUI, mature AuthNZ (sing
 │   │   └── main.py               # FastAPI entry point
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   ├── tests/                    # Pytest suite
-│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
+│   └── tests/                    # Pytest suite
 ├── Dockerfiles/                  # Docker images and compose files
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)
 ├── Helper_Scripts/               # Utilities (installers, prompt tools, doc generators)
@@ -413,6 +412,22 @@ This guide is maintained to help coding agents understand the project structure,
 
 ## Process
 
+### 0. Backlog.md Task Tracking
+
+This repository uses Backlog.md for task tracking and historical work records. Any work that changes repository files must have an associated Backlog.md task before file edits begin. This includes code, tests, docs, config, scripts, tracked generated artifacts, cleanup edits, and agent-instruction changes.
+
+Read-only investigation can proceed without a Backlog.md task. If investigation turns into edits, stop, find or create a Backlog.md task, and then continue. Creating or updating Backlog.md task records is the tracking mechanism itself and does not require a separate recursive task.
+
+Use Backlog.md through the official MCP workflow when available. First read the workflow overview exposed by the installed MCP server, such as `backlog://workflow/overview` or `backlog://docs/task-workflow`; if MCP resources are unavailable, call `backlog.get_backlog_instructions()` if that tool exists. Use the `instruction` selector for `task-creation`, `task-execution`, or `task-finalization` when needed.
+
+Search before creating tasks to avoid duplicates. Prefer one Backlog.md task per reviewable unit of work, and split work that grows too broad. Keep the task current with status, notes, plan links, touched files when useful, verification results, blockers, PR links, and final summary.
+
+Backlog.md does not replace this repo's superpowers workflow. Use the existing brainstorming, spec, implementation-plan, test-driven development, review, verification, Bandit, and commit requirements whenever they apply; link those artifacts from the Backlog.md task instead of duplicating them.
+
+If MCP is unavailable but the CLI works, use CLI fallback commands such as `backlog search "query" --plain`, `backlog task list --plain`, `backlog task <id> --plain`, `backlog task create`, `backlog task edit`, and `backlog board`. Do not manually edit Backlog.md task files unless MCP/CLI/Web paths are unavailable and the user explicitly approves the exception.
+
+If neither MCP nor CLI is available, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
+
 ### 1. Planning & Staging
 
 Break complex work into 3-5 stages. Document in a uniquely named plan file for the specific task (avoid generic names like `IMPLEMENTATION.md` or `IMPLEMENTATION_PLAN.md`), for example `IMPLEMENTATION_PLAN_<short_task_slug>.md` (e.g., `IMPLEMENTATION_PLAN_feedback_system.md`, `IMPLEMENTATION_PLAN_auth_refactor.md`):
@@ -523,7 +538,16 @@ When multiple valid approaches exist, choose based on:
 - [ ] No new security findings introduced in touched code
 - [ ] Commit messages are clear
 - [ ] Implementation matches plan
+- [ ] AI-generated PRs include a human-written `Change summary` that explains both what changed and why those implementation choices were made
 - [ ] No TODOs without issue numbers
+
+### AI-Generated PR Merge Gate
+
+- For PRs materially authored by AI, merge is blocked unless the human requester writes a `Change summary`.
+- That summary must explain both what changed and why those specific implementation choices were made.
+- A diff recap or pasted AI text without clear human ownership does not satisfy this gate.
+- If the human requester cannot explain the rationale in their own words, the PR is not merge-ready.
+- Canonical policy: `Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md`
 
 ### Security Validation
 

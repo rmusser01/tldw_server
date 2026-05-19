@@ -12,6 +12,8 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
+
 
 class NormalizationOptions(BaseModel):
     """Options for the normalization system"""
@@ -107,7 +109,9 @@ class OpenAISpeechRequest(BaseModel):
         default=None,
         description=(
             "Base64-encoded audio data for voice cloning/reference. Supported by PocketTTS, NeuTTS, "
-            "Higgs (3-10s), Chatterbox (5-20s), VibeVoice, and IndexTTS2 models."
+            "OmniVoice, Higgs (3-10s), Chatterbox (5-20s), VibeVoice, and IndexTTS2 models. "
+            "OmniVoice cloning also requires `extra_params.reference_text`, whether the reference "
+            "audio is uploaded directly here or loaded from a stored `custom:<voice_id>` voice."
         ),
     )
     reference_duration_min: Optional[float] = Field(
@@ -118,7 +122,11 @@ class OpenAISpeechRequest(BaseModel):
     )
     extra_params: Optional[dict[str, Any]] = Field(
         default=None,
-        description="Provider-specific parameters passed through to adapters (e.g., stability, clarity, cfg_scale).",
+        description=(
+            "Provider-specific parameters passed through to adapters (e.g., stability, clarity, cfg_scale). "
+            "For OmniVoice cloning, include `reference_text` describing the spoken transcript of the "
+            "reference audio."
+        ),
     )
 
 
@@ -128,7 +136,7 @@ class VoiceEncodeRequest(BaseModel):
     provider: str = Field(default="neutts", description="Target provider for encoding artifacts")
     reference_text: Optional[str] = Field(
         default=None,
-        description="Reference text associated with the stored audio (required for NeuTTS)",
+        description="Reference text associated with the stored audio (required for NeuTTS and OmniVoice)",
     )
     force: bool = Field(
         default=False,
@@ -273,7 +281,8 @@ class OpenAITranscriptionRequest(BaseModel):
     model: Optional[str] = Field(
         default=None,
         description=(
-            "ID of the model to use. Options: whisper-1, parakeet, canary, qwen2audio. "
+            "ID of the model to use. Options: parakeet-tdt-0.6b-v3-onnx, "
+            "parakeet-onnx, whisper-1, parakeet, canary, qwen2audio. "
             "Defaults to the configured STT provider when omitted."
         ),
     )
@@ -608,6 +617,7 @@ class TTSHistoryListResponse(BaseModel):
     limit: int
     offset: int
     next_cursor: Optional[str] = None
+    pagination: CursorPaginationMeta
 
 
 class TTSHistoryDetailResponse(BaseModel):

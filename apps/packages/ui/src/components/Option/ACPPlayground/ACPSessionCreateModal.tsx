@@ -8,9 +8,7 @@ import {
   Radio,
   Collapse,
   notification,
-  Alert,
   Steps,
-  Tag,
   Tooltip,
 } from "antd"
 import {
@@ -23,6 +21,8 @@ import {
   Loader2,
 } from "lucide-react"
 import { Button } from "@/components/Common/Button"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
+import { getDesignSystemState } from "@/design-system"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
 import { buildACPClientConfig } from "@/services/acp/connection"
@@ -93,7 +93,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, selected, onSelect }) => {
             <Tooltip
               title={t("acp.create.requiresApiKey", {
                 key: agent.requires_api_key,
-                defaultValue: `Requires ${agent.requires_api_key}`,
+                defaultValue: `Requires {{key}}. Set it in your shell (export {{key}}=...) or in the [ACP] runner_env in config.txt.`,
               })}
             >
               <AlertCircle className="h-4 w-4 text-warning" />
@@ -146,28 +146,29 @@ const CreationProgress: React.FC<CreationProgressProps> = ({ step, error }) => {
           { title: t("acp.create.steps.creating", "Creating") },
           { title: t("acp.create.steps.startingAgent", "Starting Agent") },
           { title: t("acp.create.steps.connecting", "Connecting") },
-          { title: t("acp.create.steps.ready", "Ready") },
+          { title: t("acp.create.steps.ready", getDesignSystemState("ready").label) },
         ]}
       />
       {error && (
         <Alert
           className="mt-3"
           type="error"
-          showIcon
           title={error.message}
-          description={
-            error.suggestions.length > 0 && (
-              <ul className="mt-2 list-inside list-disc text-sm">
-                {error.suggestions.map((s, i) => (
-                  <li key={i}>
-                    <strong>{s.action}</strong>
-                    {s.description && `: ${s.description}`}
-                  </li>
-                ))}
-              </ul>
-            )
-          }
-        />
+          showIcon
+        >
+          {error.suggestions.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc text-sm">
+              {error.suggestions.map((s, i) => (
+                <li key={i}>
+                  <strong>{s.action}</strong>
+                  {s.description && `: ${s.description}`}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            t("acp.create.errorNoSuggestions", "Review the error details and try again.")
+          )}
+        </Alert>
       )}
     </div>
   )
@@ -317,10 +318,34 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
       onSuccess?.(result.serverSessionId)
       onClose()
     },
-    onError: (error: Error) => {
+    onError: (
+      error: Error &
+        Partial<ACPStructuredError> & {
+          data?: Partial<ACPStructuredError>
+        }
+    ) => {
       setCreationStep("error")
 
-      // Parse error for structured response
+      // Read structured ACP errors from top level first, then fall back to error.data
+      const errorCode = error.code ?? error.data?.code
+      const errorMessage = error.message ?? error.data?.message
+      const errorSuggestions = error.suggestions ?? error.data?.suggestions
+
+      // Prefer structured error from backend if available
+      if (errorCode && errorMessage) {
+        setCreationError({
+          code: errorCode,
+          message: errorMessage,
+          suggestions: errorSuggestions ?? [],
+        })
+        notification.error({
+          message: t("common:error", "Error"),
+          description: errorMessage,
+        })
+        return
+      }
+
+      // Fall back to client-side string matching
       const structuredError: ACPStructuredError = {
         code: "creation_failed",
         message: error.message || t("acp.create.error", "Failed to create session"),
@@ -371,7 +396,7 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
 
       notification.error({
         message: t("common:error", "Error"),
-        description: error.message,
+        description: structuredError.message,
       })
     },
   })
@@ -430,7 +455,7 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
           ]}
           extra={t(
             "acp.create.cwdHelp",
-            "The root directory the agent will work within."
+            "Absolute path on the tldw_server machine where the agent will read and write files."
           )}
         >
           <Input

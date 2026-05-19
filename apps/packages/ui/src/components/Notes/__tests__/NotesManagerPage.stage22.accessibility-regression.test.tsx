@@ -301,12 +301,12 @@ describe("NotesManagerPage stage 22 accessibility regression", () => {
   it("has no core aria/name violations in the keyword picker modal state", async () => {
     renderPage()
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     const modalBody = await screen.findByTestId("notes-keyword-picker-modal")
     const modalRoot = modalBody.closest(".ant-modal-root") || document.body
 
     const modalTitle = modalRoot.querySelector(".ant-modal-title")
-    expect(modalTitle).toHaveTextContent("Browse keywords")
+    expect(modalTitle).toHaveTextContent("Browse tags")
     const results = await runA11yRules(modalRoot, CORE_RULES)
     expect(results.violations).toEqual([])
   })

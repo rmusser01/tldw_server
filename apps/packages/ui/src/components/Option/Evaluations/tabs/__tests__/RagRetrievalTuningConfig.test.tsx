@@ -490,4 +490,58 @@ describe("RagRetrievalTuningConfig", () => {
       ]
     })
   })
+
+  it("allows clearing numeric retrieval inputs without snapping back to defaults", () => {
+    let runConfigState: Record<string, any> = {}
+
+    const Harness = () => {
+      const [dataset, setDataset] = React.useState<DatasetSample[]>([])
+      const [runConfig, setRunConfig] = React.useState<Record<string, any>>({
+        candidate_creation_mode: "auto_sweep",
+        corpus_scope: { sources: ["media_db"] },
+        retrieval_config: {
+          search_mode: "hybrid",
+          top_k: 10,
+          hybrid_alpha: 0.7,
+          enable_reranking: true,
+          reranking_strategy: "flashrank",
+          rerank_top_k: 10
+        },
+        indexing_config: {
+          chunking_preset: "baseline"
+        },
+        weak_supervision_budget: DEFAULT_WEAK_SUPERVISION_BUDGET
+      })
+
+      React.useEffect(() => {
+        runConfigState = runConfig
+      }, [runConfig])
+
+      return (
+        <RagRetrievalTuningConfig
+          datasetSource="saved"
+          dataset={dataset}
+          runConfig={runConfig}
+          onDatasetChange={setDataset}
+          onRunConfigChange={setRunConfig}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    const topKInput = screen.getByLabelText("Top K") as HTMLInputElement
+
+    fireEvent.change(topKInput, {
+      target: { value: "" }
+    })
+
+    expect(topKInput).toHaveValue("")
+
+    fireEvent.change(topKInput, {
+      target: { value: "12" }
+    })
+
+    expect(runConfigState.retrieval_config.top_k).toBe(12)
+  })
 })

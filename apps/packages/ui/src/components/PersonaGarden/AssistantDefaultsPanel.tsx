@@ -11,6 +11,7 @@ import {
 import {
   PERSONA_TURN_DETECTION_BALANCED_DEFAULTS,
   type PersonaConfirmationMode,
+  type PersonaWakeBehavior,
   type PersonaVoiceDefaults,
   useResolvedPersonaVoiceDefaults
 } from "@/hooks/useResolvedPersonaVoiceDefaults"
@@ -42,6 +43,7 @@ type AssistantDefaultsFormState = {
   ttsProvider: string
   ttsVoice: string
   confirmationMode: PersonaConfirmationMode
+  wakeBehavior: PersonaWakeBehavior
   triggerPhrasesText: string
   autoResume: boolean | null
   bargeIn: boolean | null
@@ -58,6 +60,7 @@ const DEFAULT_FORM_STATE: AssistantDefaultsFormState = {
   ttsProvider: "",
   ttsVoice: "",
   confirmationMode: "destructive_only",
+  wakeBehavior: "one_shot",
   triggerPhrasesText: "",
   autoResume: null,
   bargeIn: null,
@@ -92,6 +95,7 @@ const buildFormState = (
   ttsProvider: normalizeText(voiceDefaults?.tts_provider),
   ttsVoice: normalizeText(voiceDefaults?.tts_voice),
   confirmationMode: voiceDefaults?.confirmation_mode || "destructive_only",
+  wakeBehavior: voiceDefaults?.wake_behavior || "one_shot",
   triggerPhrasesText: (voiceDefaults?.voice_chat_trigger_phrases || []).join("\n"),
   autoResume:
     typeof voiceDefaults?.auto_resume === "boolean"
@@ -129,6 +133,7 @@ const buildPayload = (
   tts_provider: normalizeText(formState.ttsProvider) || null,
   tts_voice: normalizeText(formState.ttsVoice) || null,
   confirmation_mode: formState.confirmationMode,
+  wake_behavior: formState.wakeBehavior,
   voice_chat_trigger_phrases: normalizePhrases(formState.triggerPhrasesText),
   auto_resume: formState.autoResume,
   barge_in: formState.bargeIn,
@@ -471,6 +476,32 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
           </select>
         </label>
 
+        <label
+          htmlFor="persona-assistant-defaults-wake-behavior"
+          className="flex flex-col gap-1 text-sm text-text"
+        >
+          <span>
+            {t("sidepanel:personaGarden.profile.assistantDefaults.wakeBehavior", {
+              defaultValue: "Wake behavior"
+            })}
+          </span>
+          <select
+            id="persona-assistant-defaults-wake-behavior"
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
+            value={formState.wakeBehavior}
+            onChange={(event) =>
+              updateField("wakeBehavior", event.target.value as PersonaWakeBehavior)
+            }
+            disabled={!selectedPersonaId || loading || saving}
+          >
+            <option value="one_shot">One turn after wake</option>
+            <option value="continuous">Continuous after wake</option>
+            <option value="push_to_talk_after_wake">
+              Push to talk after wake
+            </option>
+          </select>
+        </label>
+
         <div className="flex flex-col gap-3 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text">
           <label className="flex flex-col gap-1">
             <span>
@@ -609,6 +640,10 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
           <div>
             <dt className="text-xs text-text-muted">Confirmation mode</dt>
             <dd>{resolvedDefaults.confirmationMode}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-text-muted">Wake behavior</dt>
+            <dd>{resolvedDefaults.wakeBehavior}</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Auto-resume</dt>

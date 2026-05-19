@@ -22,6 +22,18 @@ from tldw_Server_API.app.core.Persona.memory_integration import (
 pytestmark = pytest.mark.unit
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+        self.debug_args: list[tuple[object, ...]] = []
+        self.debug_kwargs: list[dict[str, object]] = []
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.debugs.append(message.format(*args, **kwargs) if args or kwargs else message)
+        self.debug_args.append(args)
+        self.debug_kwargs.append(dict(kwargs))
+
+
 def _seed_memory_db(tmp_path, monkeypatch, *, user_id: str, enabled: bool) -> PersonalizationDB:
     base = tmp_path / "user_db"
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base))
@@ -91,6 +103,30 @@ def test_retrieve_top_memories_returns_empty_when_opted_out(tmp_path, monkeypatc
 
     memories = retrieve_top_memories(user_id=user_id, query_text="used", top_k=3)
     assert memories == []
+
+
+def test_retrieve_top_memories_sanitizes_fail_open_fallback_log(monkeypatch):
+    from tldw_Server_API.app.core.Persona import memory_integration as mem
+
+    logger_stub = _LoggerStub()
+
+    def _fail_get_db_for_user(_user_id: str):
+        raise RuntimeError("retrieval exploded with token sk-live-secret at /private/persona.db")
+
+    monkeypatch.setattr(mem, "logger", logger_stub)
+    monkeypatch.setattr(mem, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr(mem, "_get_db_for_user", _fail_get_db_for_user)
+
+    memories = retrieve_top_memories(user_id="101", query_text="secret", top_k=3)
+
+    assert memories == []
+    assert logger_stub.debugs == ["persona memory retrieval skipped"]
+    assert logger_stub.debug_args == [()]
+    assert logger_stub.debug_kwargs == [{}]
+    rendered = "\n".join(logger_stub.debugs)
+    assert "sk-live-secret" not in rendered
+    assert "/private/persona.db" not in rendered
+    assert "exploded" not in rendered
 
 
 def test_persist_turn_and_tool_outcome_when_opted_in(tmp_path, monkeypatch):
@@ -183,6 +219,37 @@ def test_persist_turn_skips_when_opted_out(tmp_path, monkeypatch):
     memories, total = db.list_semantic_memories(user_id=user_id, limit=10, offset=0)
     assert total == 0
     assert memories == []
+
+
+def test_persist_persona_turn_sanitizes_fail_open_fallback_log(monkeypatch):
+    from tldw_Server_API.app.core.Persona import memory_integration as mem
+
+    logger_stub = _LoggerStub()
+
+    def _fail_get_db_for_user(_user_id: str):
+        raise RuntimeError("persistence exploded with token sk-live-secret at /private/persona.db")
+
+    monkeypatch.setattr(mem, "logger", logger_stub)
+    monkeypatch.setattr(mem, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr(mem, "_get_db_for_user", _fail_get_db_for_user)
+
+    ok = persist_persona_turn(
+        user_id="103",
+        session_id="sess_memory",
+        persona_id="research_assistant",
+        role="assistant",
+        content="Should fail open.",
+        turn_type="assistant_delta",
+    )
+
+    assert ok is False
+    assert logger_stub.debugs == ["persona turn persistence skipped"]
+    assert logger_stub.debug_args == [()]
+    assert logger_stub.debug_kwargs == [{}]
+    rendered = "\n".join(logger_stub.debugs)
+    assert "sk-live-secret" not in rendered
+    assert "/private/persona.db" not in rendered
+    assert "exploded" not in rendered
 
 
 def test_dual_read_chacha_first_falls_back_to_legacy(tmp_path, monkeypatch):

@@ -5,9 +5,12 @@
 import pytest
 pytestmark = pytest.mark.unit
 import asyncio
+import sys
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS.adapters import higgs_adapter as higgs_mod
 from tldw_Server_API.app.core.TTS.adapters.higgs_adapter import HiggsAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
@@ -25,6 +28,62 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 #######################################################################################################################
 #
 # Mock Tests for Higgs Adapter
+
+class _LogCapture:
+    def __init__(self, level: str = "ERROR"):
+        self.messages: list[str] = []
+        self._level = level
+        self._sink_id: int | None = None
+
+    def __enter__(self):
+        self._sink_id = higgs_mod.logger.add(
+            lambda message: self.messages.append(message.record["message"]),
+            level=self._level,
+        )
+        return self.messages
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._sink_id is not None:
+            higgs_mod.logger.remove(self._sink_id)
+
+
+def _install_higgs_streaming_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
+    boson_root = types.ModuleType("boson_multimodal")
+    boson_serve = types.ModuleType("boson_multimodal.serve")
+    boson_engine = types.ModuleType("boson_multimodal.serve.serve_engine")
+
+    class HiggsAudioResponse:
+        pass
+
+    boson_engine.HiggsAudioResponse = HiggsAudioResponse
+    monkeypatch.setitem(sys.modules, "boson_multimodal", boson_root)
+    monkeypatch.setitem(sys.modules, "boson_multimodal.serve", boson_serve)
+    monkeypatch.setitem(sys.modules, "boson_multimodal.serve.serve_engine", boson_engine)
+
+    streaming_module = types.ModuleType("tldw_Server_API.app.core.TTS.streaming_audio_writer")
+
+    class AudioNormalizer:
+        def normalize(self, chunk, target_dtype):
+            return chunk
+
+    class StreamingAudioWriter:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+
+        def write_chunk(self, chunk=None, finalize=False):
+            return b""
+
+        def close(self):
+            self.closed = True
+
+    streaming_module.AudioNormalizer = AudioNormalizer
+    streaming_module.StreamingAudioWriter = StreamingAudioWriter
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.core.TTS.streaming_audio_writer",
+        streaming_module,
+    )
+
 
 @pytest.mark.asyncio
 class TestHiggsAdapterMock:
@@ -307,6 +366,134 @@ class TestHiggsAdapterMock:
         url = getattr(content, "audio_url", content.get("audio_url") if isinstance(content, dict) else None)
         assert ctype == "audio"
         assert url == voice_ref_path
+
+
+@pytest.mark.asyncio
+class TestHiggsAdapterSanitizedLogs:
+    async def test_initialization_failure_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_HIGGS_INIT_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+
+        with _LogCapture() as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.adapters.higgs_adapter._get_torch",
+                return_value=MagicMock(),
+            ):
+                with patch(
+                    "tldw_Server_API.app.core.TTS.adapters.higgs_adapter.get_resource_manager",
+                    new=AsyncMock(side_effect=ValueError(raw_marker)),
+                ):
+                    with pytest.raises(higgs_mod.TTSProviderInitializationError) as exc_info:
+                        await adapter.initialize()
+
+        assert raw_marker in exc_info.value.details["error"]
+        assert any("Initialization failed" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+
+    async def test_request_validation_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_HIGGS_VALIDATION_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+        request = TTSRequest(text="Hello", format=AudioFormat.WAV)
+
+        with _LogCapture() as messages:
+            with patch.object(adapter, "ensure_initialized", new=AsyncMock(return_value=True)):
+                with patch(
+                    "tldw_Server_API.app.core.TTS.adapters.higgs_adapter.validate_tts_request",
+                    side_effect=RuntimeError(raw_marker),
+                ):
+                    with pytest.raises(RuntimeError, match=raw_marker):
+                        await adapter.generate(request)
+
+        assert any("request validation failed" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+
+    async def test_generation_error_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_HIGGS_GENERATION_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+        request = TTSRequest(text="Hello", format=AudioFormat.WAV, stream=False)
+
+        with _LogCapture() as messages:
+            with patch.object(adapter, "ensure_initialized", new=AsyncMock(return_value=True)):
+                with patch(
+                    "tldw_Server_API.app.core.TTS.adapters.higgs_adapter.validate_tts_request",
+                    return_value=None,
+                ):
+                    with patch.object(
+                        adapter,
+                        "_generate_complete_higgs",
+                        new=AsyncMock(side_effect=RuntimeError(raw_marker)),
+                    ):
+                        with pytest.raises(RuntimeError, match=raw_marker):
+                            await adapter.generate(request)
+
+        assert any("generation error" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+
+    async def test_streaming_error_log_sanitizes_exception_text(self, monkeypatch):
+        raw_marker = "RAW_HIGGS_STREAMING_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+        adapter.serve_engine = MagicMock()
+        adapter.serve_engine.generate.side_effect = RuntimeError(raw_marker)
+        request = TTSRequest(text="Hello", format=AudioFormat.WAV)
+        _install_higgs_streaming_stubs(monkeypatch)
+
+        with _LogCapture() as messages:
+            with pytest.raises(RuntimeError, match=raw_marker):
+                async for _chunk in adapter._stream_audio_higgs(request):
+                    pass
+
+        assert any("streaming error" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+
+    async def test_voice_reference_cleanup_log_sanitizes_exception_text(self, monkeypatch):
+        raw_marker = "RAW_HIGGS_CLEANUP_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+        adapter.serve_engine = MagicMock()
+        adapter.serve_engine.generate.return_value = MagicMock(audio=[], generated_text="")
+        request = TTSRequest(text="Hello", format=AudioFormat.WAV)
+        _install_higgs_streaming_stubs(monkeypatch)
+
+        def _failing_unlink(self, missing_ok=False):
+            raise RuntimeError(raw_marker)
+
+        monkeypatch.setattr("pathlib.Path.unlink", _failing_unlink)
+
+        with _LogCapture("WARNING") as messages:
+            async for _chunk in adapter._stream_audio_higgs(request, "/tmp/higgs-voice.wav"):  # nosec B108
+                pass
+
+        assert any("Failed to clean up voice reference" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+
+    async def test_voice_reference_processing_log_sanitizes_error_text(self):
+        raw_marker = "RAW_HIGGS_REFERENCE_PROCESSING_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+
+        with _LogCapture() as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.audio_utils.process_voice_reference_async",
+                new=AsyncMock(return_value=(b"", raw_marker)),
+            ):
+                result = await adapter._prepare_voice_reference(b"audio")
+
+        assert result is None
+        assert any("Voice reference processing failed" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+
+    async def test_prepare_voice_reference_fallback_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_HIGGS_PREPARE_REFERENCE_SECRET_MARKER"
+        adapter = HiggsAdapter({})
+
+        with _LogCapture() as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.audio_utils.process_voice_reference_async",
+                new=AsyncMock(side_effect=RuntimeError(raw_marker)),
+            ):
+                result = await adapter._prepare_voice_reference(b"audio")
+
+        assert result is None
+        assert any("Failed to prepare voice reference" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
 
 #######################################################################################################################
 #

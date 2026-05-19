@@ -127,3 +127,5 @@ export function ConfirmProvider({ children }: ConfirmProviderProps) {
   );
 }
 
+// Note: The deprecated ConfirmDialog component has been removed.
+// All consumers have been migrated to useConfirm() via ConfirmProvider.

@@ -13,6 +13,11 @@ import numpy as np
 from loguru import logger
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class StreamingAudioWriter:
     """Handles streaming audio format conversions for TTS output.
 
@@ -192,7 +197,9 @@ class StreamingAudioWriter:
                 container.close()
                 self.container = None
             except Exception as e:
-                logger.error(f"Error closing container: {e}")
+                logger.error(
+                    f"Error closing container; exception_type={_safe_exception_label(e)}"
+                )
 
         buf = getattr(self, "output_buffer", None)
         if buf is not None:
@@ -200,14 +207,18 @@ class StreamingAudioWriter:
                 buf.close()
                 self.output_buffer = None
             except Exception as e:
-                logger.error(f"Error closing output buffer: {e}")
+                logger.error(
+                    f"Error closing output buffer; exception_type={_safe_exception_label(e)}"
+                )
 
         wav_path = getattr(self, "_wav_file_path", None)
         if wav_path:
             try:
                 os.remove(wav_path)
             except OSError as e:
-                logger.debug(f"Error removing WAV temp file {wav_path}: {e}")
+                logger.debug(
+                    f"Error removing WAV temp file; exception_type={_safe_exception_label(e)}"
+                )
             finally:
                 self._wav_file_path = None
 
@@ -253,11 +264,14 @@ class StreamingAudioWriter:
             self.output_buffer = None  # type: ignore[assignment]
             self._wav_file_path = path
             logger.warning(
-                f"StreamingAudioWriter WAV buffer spilled to disk at {path} "
+                "StreamingAudioWriter WAV buffer spilled to disk "
                 f"after exceeding {self.max_in_memory_bytes} bytes"
             )
         except Exception as exc:
-            logger.error(f"Failed to spill WAV buffer to temp file: {exc}")
+            logger.error(
+                "Failed to spill WAV buffer to temp file; "
+                f"exception_type={_safe_exception_label(exc)}"
+            )
             raise
 
     def _finalize_wav(self) -> bytes:
@@ -315,7 +329,7 @@ class StreamingAudioWriter:
 
             logger.debug(
                 f"StreamingAudioWriter finalize: format=wav (file-backed), "
-                f"wav_bytes={len(data)}, pcm_path={pcm_path}"
+                f"wav_bytes={len(data)}"
             )
             return data
         finally:
@@ -324,7 +338,9 @@ class StreamingAudioWriter:
                     try:
                         os.remove(path)
                     except OSError as e:
-                        logger.debug(f"Error removing temp WAV file {path}: {e}")
+                        logger.debug(
+                            f"Error removing temp WAV file; exception_type={type(e).__name__}"
+                        )
             self._wav_file_path = None
 
 

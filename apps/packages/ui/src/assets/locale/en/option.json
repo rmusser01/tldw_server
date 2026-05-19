@@ -3,6 +3,87 @@
   "selectAPrompt": "Select a Prompt",
   "githubRepository": "GitHub Repository",
   "settings": "Settings",
+  "setupRoute": {
+    "title": "Setup Wizard",
+    "panelTitle": "Connect your server",
+    "panelMessage": "Guided connection setup for production use.",
+    "startAction": "Start setup"
+  },
+  "setupReadiness": {
+    "title": "Setup readiness",
+    "description": "Choose the defaults that make chat, search, ingestion, and speech ready before the first large import.",
+    "valueNotSet": "Not set",
+    "actions": {
+      "openBackendSetup": "Open backend setup",
+      "refresh": "Refresh",
+      "preview": "Preview selection",
+      "provision": "Provision now",
+      "verify": "Verify readiness",
+      "continue": "Continue"
+    },
+    "errors": {
+      "adminRequiredTitle": "Admin access required",
+      "requestFailedTitle": "Readiness request failed",
+      "localSetupRequiredTitle": "Local setup required",
+      "localSetupRequiredDescription": "First-run setup is restricted to local requests.",
+      "load": "Unable to load setup readiness.",
+      "preview": "Unable to preview setup readiness.",
+      "provision": "Unable to provision setup readiness.",
+      "verify": "Unable to verify setup readiness."
+    },
+    "profile": {
+      "title": "Readiness profile",
+      "description": "Profiles set defaults only. Provisioning is a separate action.",
+      "empty": "No setup readiness profiles are available.",
+      "advancedControls": "Advanced controls"
+    },
+    "machine": {
+      "appleSilicon": "Apple Silicon",
+      "freeDiskGb": "{{value}} GB free"
+    },
+    "lanes": {
+      "noSelection": "No selection yet.",
+      "ttsSelection": "TTS: {{value}}"
+    },
+    "preview": {
+      "title": "Preview and provision",
+      "configUpdates": "Config updates",
+      "configUpdateCount": "{{count}} section(s)",
+      "installPlan": "Install plan",
+      "installPlanWork": "Provisioning work planned",
+      "noDownloads": "No downloads needed",
+      "overlays": "Overlays",
+      "none": "None",
+      "reviewTitle": "Review before provisioning",
+      "reviewDescription": "Select a profile or preview the current selection before running Provision now."
+    },
+    "consequences": {
+      "title": "Skipped-lane consequences"
+    },
+    "provision": {
+      "statusTitle": "Provision status: {{status}}",
+      "description": "Readiness provisioning has started. Refresh or watch the status cards for progress."
+    },
+    "verification": {
+      "statusTitle": "Verification: {{status}}",
+      "description": "Verification completed."
+    },
+    "statuses": {
+      "not_configured": "not configured",
+      "ready": "ready",
+      "ready_with_warnings": "ready with warnings",
+      "previewed": "previewed",
+      "failed": "failed",
+      "blocked": "blocked",
+      "provisioning": "provisioning",
+      "queued": "queued",
+      "running": "running",
+      "in_progress": "in progress",
+      "completed": "completed",
+      "skipped": "skipped",
+      "restart_required": "restart required"
+    }
+  },
   "connectionCard": {
     "headlineMissing": "Connect tldw Assistant to your server",
     "headlineSearching": "Searching for your tldw server…",
@@ -67,7 +148,9 @@
     "modePrompts": "Prompts",
     "modePromptsPlayground": "Prompts",
     "modeStt": "STT Playground",
+    "modeSttHostedDesc": "Requires a self-hosted tldw server for speech transcription.",
     "modeSpeech": "Speech",
+    "modeTtsHostedDesc": "Requires a self-hosted tldw server for speech generation.",
     "modePromptStudio": "Prompt Studio",
     "modeDocumentation": "Documentation",
     "modeFlashcards": "Flashcards",
@@ -141,7 +224,7 @@
     "uploadFailed": "Upload failed",
     "uploadMissingMediaId": "Upload succeeded but no media ID was returned",
     "unsupportedType": "This media type isn’t supported in the document workspace.",
-    "missingFile": "The original file is not available (it may have failed to store). Open in Media or re-upload with \"Keep original file\" enabled.",
+    "missingFile": "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it \u2014 newer ingests automatically preserve document files.",
     "fileUnauthorized": "You don't have permission to access this document.",
     "openFailed": "Failed to open document",
     "healthWarningTitle": "Document workspace storage unavailable",
@@ -362,6 +445,64 @@
     "noMatchesTitle": "No matches",
     "noMatchesDescription": "Try a different search term.",
     "noMatchesList": "No matches in this source."
+  },
+  "agentRegistry": {
+    "health": {
+      "title": "ACP System Health",
+      "runnerBinary": "Runner Binary",
+      "agentStatus": "Agent Status",
+      "apiKeys": "API Keys",
+      "unavailableTitle": "Health check unavailable",
+      "unavailableBody": "Could not reach the ACP health endpoint. Ensure the server is running."
+    },
+    "executionHealth": {
+      "title": "ACP Execution Health",
+      "unavailableTitle": "Execution health summary unavailable",
+      "unavailableBody": "The admin summary endpoint may require newer backend support or elevated permissions.",
+      "sessions": "Sessions",
+      "sessionWindowSingular": "{{total}} session in {{days}}d",
+      "sessionWindowPlural": "{{total}} sessions in {{days}}d",
+      "statusCount": "{{count}} {{status}}",
+      "noSessions": "No sessions recorded",
+      "compatibility": "Compatibility",
+      "liveCertificationRequired": "Live certification required",
+      "noLiveCertificationBlocker": "No live-certification blocker",
+      "supportStateCount": "{{count}} {{state}}",
+      "unverifiedAgents": "Unverified agents: {{agents}}",
+      "noDocumentedUnverifiedAgents": "No documented-unverified agents",
+      "executionEvidenceDocs": "Execution evidence docs",
+      "retentionAndRedaction": "Retention and redaction",
+      "retentionSummary": "Retention {{sessionDays}}d sessions / {{auditDays}}d audit",
+      "redactedDrillThroughEnabled": "Redacted drill-through enabled",
+      "reviewRedactionSettings": "Review redaction settings",
+      "failureBucketsTitle": "Failure buckets",
+      "noRecentFailureBuckets": "No recent failure buckets",
+      "setupHealthTitle": "Setup health",
+      "setupStatus": "{{label}} {{status}}",
+      "evidenceCount": "{{count}} evidence",
+      "setupBlockers": "{{label}} {{status}}: {{blockers}}",
+      "noSetupBlockers": "No setup blockers in this window",
+      "failureBuckets": {
+        "setupBlockers": "Setup blockers",
+        "runnerSessionFailures": "Runner/session failures",
+        "reviewerRejections": "Reviewer rejections",
+        "reviewerFailures": "Reviewer failures",
+        "governanceDenials": "Governance denials",
+        "structuredCompletionFailures": "Structured completion failures",
+        "sandboxRuntimeErrors": "Sandbox runtime errors",
+        "retentionRedactionActions": "Retention/redaction actions"
+      },
+      "setupDimensions": {
+        "agent": "Agent",
+        "workspace": "Workspace",
+        "sandboxRuntime": "Sandbox runtime",
+        "mcpInjection": "MCP injection",
+        "schedulerTriggerPath": "Scheduler trigger path"
+      }
+    },
+    "loadFailedTitle": "Agent registry could not load",
+    "registeredAgents": "Registered Agents",
+    "empty": "No agents registered"
   },
   "promptStudio": {
     "title": "Prompt Studio Playground",
@@ -604,18 +745,18 @@
     "tipsHybrid": "Hybrid input: drop files or paste URLs (comma/newline separated) to build the queue.",
     "tipsPerType": "Per-type settings (Audio/PDF/Video) apply to new items of that type.",
     "tipsInspector": "Use the Inspector to see status, type, and quick checks before ingesting.",
-    "supportedFormats": "Supported: docs, PDFs, audio, video, and web URLs.",
+    "supportedFormats": "Supported: docs, PDFs, HTML/XML/JSON, audio, video, and web URLs.",
     "localFilesWarning": "Local files are kept only while this dialog is open. Complete your ingest run before closing, or reattach files when you return.",
     "itemsReady": "{{count}} item(s) ready",
     "itemsReadySr": "{{count}} item(s) ready",
     "dragAndDrop": "Drag and drop files",
-    "dragAndDropHint": "Docs, PDFs, audio, and video are all welcome.",
+    "dragAndDropHint": "Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome.",
     "dropzoneProcessing": "Processing in progress...",
     "dropzoneWaitProcessing": "Wait for completion to add more",
     "dropzoneOffline": "Server not connected",
     "dropzoneConnectHint": "Connect to add files",
     "dropzoneRejectTitle": "Some files not supported",
-    "dropzoneRejectHint": "Check file type and size (max 500 MB)",
+    "dropzoneRejectHint": "Check file type and size (max {{maxSize}})",
     "dropzoneRelease": "Release to add files",
     "dropzoneReleaseSingle": "Release to add 1 file",
     "dropzoneReleaseMultiple": "Release to add {{count}} files",
@@ -827,6 +968,15 @@
   "tts": {
     "playground": "TTS Playground"
   },
+  "hostedAudio": {
+    "badge": "Hosted mode",
+    "title": "Audio features require a self-hosted tldw server",
+    "description": "{{featureName}} depends on server-side audio runtimes, local model dependencies, host audio tooling, or provider keys that are only exposed in self-hosted deployments. The hosted product keeps these routes visible so you can find the feature boundary without exposing controls that cannot run here.",
+    "quickstart": "Open self-hosting quickstart",
+    "opensInNewTab": "(opens in new tab)",
+    "loadingTts": "Loading TTS playground.",
+    "loadingStt": "Loading STT playground."
+  },
   "notesEmpty": {
     "connectTitle": "Connect to use Notes",
     "connectDescription": "To use Notes, first connect to your tldw server.",
@@ -886,6 +1036,7 @@
     "connectExample1": "Open Settings → tldw server to add your server URL.",
     "connectExample2": "Use Diagnostics if your server is running but not reachable.",
     "headerDescription": "Define reusable substitutions so tldw understands your organization’s names, acronyms, and terminology.",
+    "learnMore": "Learn more about dictionaries",
     "offlineTitle": "Chat dictionaries are offline",
     "offlineDescription": "Connect to your tldw server from the main settings page to view and edit Chat dictionaries."
   },
@@ -908,7 +1059,9 @@
     "sampleTextLabel": "Sample text",
     "sampleTextPlaceholder": "Paste text to preview dictionary substitutions.",
     "tokenBudgetLabel": "Token budget",
+    "tokenBudgetHelp": "Maximum amount of text processed. Leave empty for no limit.",
     "maxIterationsLabel": "Max iterations",
+    "maxIterationsHelp": "Number of passes over the text. Usually 1 is enough. Increase if rules can trigger other rules.",
     "previewButton": "Run preview",
     "previewEmpty": "Enter sample text to preview.",
     "previewError": "Preview failed.",
@@ -916,7 +1069,40 @@
     "replacementsLabel": "Replacements",
     "iterationsLabel": "Iterations",
     "entriesUsedLabel": "Entries used",
-    "tokenBudgetExceeded": "Token budget exceeded"
+    "tokenBudgetExceeded": "Token budget exceeded",
+    "tipLabel": "Tip"
+  },
+  "dictionariesList": {
+    "howItWorksTitle": "How it works",
+    "stepCreateTitle": "Create a dictionary",
+    "stepCreateBody": "— a set of find-and-replace rules (or start from a template).",
+    "stepEntriesTitle": "Add entries",
+    "stepEntriesBody": "— each entry has a pattern to find and text to replace it with.",
+    "stepPreviewTitle": "Test with preview",
+    "stepPreviewBody": "— paste sample text to see the rules in action before going live.",
+    "stepAssignTitle": "Assign to chats",
+    "stepAssignBody": "— link the dictionary to chat sessions so rules apply automatically.",
+    "searchPlaceholder": "Search dictionaries by name, description, category, or tags",
+    "searchAria": "Search dictionaries",
+    "allCategories": "All categories",
+    "categoryFilterAria": "Filter dictionaries by category",
+    "tagsPlaceholder": "Filter by tags",
+    "tagsFilterAria": "Filter dictionaries by tags",
+    "importButton": "Import",
+    "newDictionary": "New Dictionary",
+    "processingOrderHint": "Processing order for active dictionaries uses Priority (alphabetical by dictionary name), then each dictionary's entry order.",
+    "emptyTitle": "No dictionaries yet",
+    "emptyDescription": "Create your first dictionary to transform text consistently across chats.",
+    "emptyExampleMedical": "Medical abbreviations (e.g., BP -> blood pressure)",
+    "emptyExampleTerminology": "Custom terminology (e.g., internal product names)",
+    "emptyExampleRoleplay": "Roleplay language style mappings",
+    "emptyPrimaryAction": "Create your first dictionary",
+    "emptySecondaryAction": "Import dictionary",
+    "ofTotal": "of",
+    "errorTitle": "Unable to load dictionaries",
+    "errorDescriptionWithMessage": "Could not load dictionaries: {{message}}",
+    "errorDescription": "Could not load dictionaries right now. Check your server connection and try again.",
+    "retry": "Retry"
   },
   "charactersEmpty": {
     "demoTitle": "Explore Characters in demo mode",
@@ -970,6 +1156,7 @@
     "create": "Create",
     "manage": "Manage",
     "importExport": "Import / Export",
+    "largeImportUndoHint": "Large imports may take a moment to process. You'll have {{seconds}} seconds to undo after import completes.",
     "emptyConnectTitle": "Connect to use Flashcards",
     "emptyConnectDescription": "To review or generate flashcards, first connect to your tldw server.",
     "emptyConnectExample1": "Go to Settings → tldw server to add your server URL.",
@@ -986,6 +1173,31 @@
     "demoSample2Summary": "8 cards · Names, acronyms, and key definitions.",
     "demoSample3Title": "Demo deck: Meeting follow-ups",
     "demoSample3Summary": "6 cards · Example action items to review.",
+    "demoCard1Front": "What is spaced repetition?",
+    "demoCard1Back": "A learning technique that reviews material at increasing intervals based on how well you remember it. Cards you know well are shown less often; cards you struggle with are shown more frequently.",
+    "demoCard1Deck": "Study Techniques",
+    "demoCard2Front": "What does RAG stand for in AI?",
+    "demoCard2Back": "Retrieval-Augmented Generation — a technique that enhances LLM responses by retrieving relevant documents from a knowledge base before generating an answer.",
+    "demoCard2Deck": "AI Concepts",
+    "demoCard3Front": "What is the difference between a podcast and an audiobook?",
+    "demoCard3Back": "Podcasts are episodic audio series, often conversational, released on a schedule. Audiobooks are narrated versions of written books, typically consumed as a complete work.",
+    "demoCard3Deck": "Media Literacy",
+    "demoCard4Front": "What is an API key?",
+    "demoCard4Back": "A unique identifier used to authenticate requests to an API. Like a password for software — it proves your application is authorized to access the service.",
+    "demoCard4Deck": "Developer Basics",
+    "demoCard5Front": "What is the Feynman Technique?",
+    "demoCard5Back": "A learning method: (1) Choose a concept, (2) Explain it simply as if teaching a child, (3) Identify gaps in your explanation, (4) Review and simplify further.",
+    "demoCard5Deck": "Study Techniques",
+    "demoQuestionLabel": "Question",
+    "demoAnswerLabel": "Answer",
+    "demoShowQuestion": "Show question",
+    "demoShowAnswer": "Show answer",
+    "demoClickToSeeQuestion": "Click to see question",
+    "demoClickToRevealAnswer": "Click to reveal answer",
+    "demoPreviousCard": "Previous card",
+    "demoNextCard": "Next card",
+    "demoFlip": "Flip",
+    "demoPreviewDescription": "This is a preview. Connect a server to create your own decks with spaced repetition.",
     "offlineTitle": "Flashcards API not available on this server",
     "offlineDescription": "This tldw server does not advertise the Flashcards endpoints. Upgrade your server to a version that includes /api/v1/flashcards… to use this workspace.",
     "offlineExample1": "Check Health & diagnostics to confirm your server version and available APIs.",
@@ -1023,6 +1235,8 @@
     "createMoreCards": "Create more cards",
     "deck": "Deck",
     "newDeck": "New Deck",
+    "createNewDeck": "Create new deck",
+    "orCreateNewDeck": "or create a new deck",
     "newDeckNameRequired": "Enter a deck name.",
     "modelType": "Card template",
     "templateBasic": "Basic (Question - Answer)",
@@ -1125,6 +1339,12 @@
     "reverseHelp": "Also create a card where the back becomes the question.",
     "isClozeHelp": "Use for fill‑in‑the‑blank cards. Wrap hidden text in {{...}} on the front.",
     "markdownSupportHint": "Supports Markdown and LaTeX.",
+    "writingTipsHeader": "Tips for effective flashcards",
+    "writingTip1": "Keep each card focused on one concept",
+    "writingTip2": "Use simple, clear language on the front",
+    "writingTip3": "Include context clues but avoid giving away the answer",
+    "writingTip4": "Use images or diagrams when they help understanding",
+    "writingTip5": "For cloze deletions, use {{syntax}} syntax",
     "extraHint": "Optional hints/explanations (Markdown + LaTeX supported).",
     "notesHint": "Internal notes (Markdown + LaTeX supported).",
     "bulkActions": "Bulk actions",
@@ -1358,10 +1578,29 @@
     "system": "System prompts",
     "quick": "Quick prompts"
   },
+  "moderationReview": {
+    "nav": "Moderation Review",
+    "title": "Moderation Review",
+    "desc": "Review flagged items, escalations, and decisions"
+  },
+  "moderationRules": {
+    "nav": "Content Rules",
+    "title": "Content Rules",
+    "desc": "Configure moderation policies, blocklists, and testing"
+  },
   "moderationPlayground": {
-    "nav": "Moderation Playground",
-    "title": "Moderation Playground",
-    "subtitle": "Family safety controls and server guardrails in one place."
+    "nav": "Content Rules",
+    "title": "Content Rules",
+    "subtitle": "Configure moderation policies, blocklists, user overrides, and rule tests.",
+    "desc": "Configure moderation policies, blocklists, and testing",
+    "onboarding": {
+      "title": "Welcome to Content Rules",
+      "description": "Set up content safety rules, blocklists, overrides, and test cases.",
+      "guardrailsCta": "Set up Family Guardrails",
+      "dismiss": "Skip \u2014 I\u2019ll explore on my own",
+      "tabHint": "Start here: Policy & Settings tab sets your base rules. Then test them in the Test Sandbox.",
+      "startHereBadge": "Start here"
+    }
   },
   "repo2txt": {
     "nav": "Repo2Txt",

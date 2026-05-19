@@ -38,7 +38,7 @@ export function useTranscriptionModelsCatalog(
   } = options
 
   const [serverModels, setServerModels] = React.useState<string[]>([])
-  const [serverModelsLoading, setServerModelsLoading] = React.useState(false)
+  const [serverModelsLoading, setServerModelsLoading] = React.useState(true)
   const [serverModelsError, setServerModelsError] = React.useState<string | null>(
     null
   )

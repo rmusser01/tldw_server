@@ -305,6 +305,23 @@ def test_resolve_default_transcription_model_prefers_batch_default(monkeypatch):
 
 
 @pytest.mark.unit
+def test_resolve_default_transcription_model_uses_canonical_parakeet_onnx_alias(monkeypatch):
+    spa = _import_module()
+
+    def fake_get_stt_config():
+        return {
+            "default_transcriber": "parakeet",
+            "default_stt_provider": "parakeet",
+            "nemo_model_variant": "onnx",
+        }
+
+    monkeypatch.setattr(spa, "get_stt_config", fake_get_stt_config)
+
+    default_model = spa.resolve_default_transcription_model("whisper-1")
+    assert default_model == "parakeet-tdt-0.6b-v3-onnx"
+
+
+@pytest.mark.unit
 def test_capabilities_exposed_for_known_providers():
     spa = _import_module()
 

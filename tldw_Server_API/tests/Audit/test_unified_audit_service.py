@@ -18,9 +18,11 @@ from unittest.mock import Mock, patch
 import pytest
 import aiosqlite
 
+from tldw_Server_API.app.core.AuthNZ.audit_integrity import verify_audit_chain
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     UnifiedAuditService,
     AuditReadError,
+    AuditShutdownError,
     AuditEvent,
     AuditContext,
     AuditEventType,
@@ -799,6 +801,177 @@ class TestUnifiedAuditService:
         assert any(row.get("event_id") == ev.event_id for row in events)
         # Fallback file cleaned up
         assert not fallback_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_stop_spills_remaining_events_to_fallback_before_raising(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "audit_stop.db"
+        service = UnifiedAuditService(
+            db_path=str(db_path),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+        await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="stop-user"),
+            resource_type="doc",
+            resource_id="doc-1",
+        )
+
+        original_update_daily_stats = service._update_daily_stats
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await service.stop()
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        fb_path = db_path.parent / "audit_fallback_queue.jsonl"
+        assert fb_path.exists()
+        assert len(fb_path.read_text(encoding="utf-8").splitlines()) == 1
+        assert service.event_buffer == []
+        assert service._db_pool is None
+        assert service.owner_loop is None
+        monkeypatch.setattr(service, "_update_daily_stats", original_update_daily_stats)
+
+    @pytest.mark.asyncio
+    async def test_stop_wraps_original_flush_failure_in_shutdown_error(self, tmp_path, monkeypatch):
+        service = UnifiedAuditService(
+            db_path=str(tmp_path / "audit_stop_cause.db"),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("flush exploded")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+
+        await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="stop-user-cause"),
+            resource_type="doc",
+            resource_id="doc-2",
+        )
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await service.stop()
+
+        assert "durable shutdown" in str(exc_info.value).lower()
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert service._db_pool is None
+        assert service.owner_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_keeps_buffer_when_fallback_spill_fails(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "audit_stop_spill_fail.db"
+        service = UnifiedAuditService(
+            db_path=str(db_path),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+        await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="stop-spill-user"),
+            resource_type="doc",
+            resource_id="doc-3",
+        )
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("flush exploded")
+
+        async def _boom_spill(_events):
+            raise OSError("spill failed")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+        monkeypatch.setattr(service, "_spill_events_to_fallback", _boom_spill)
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await service.stop()
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert "spill failed" in str(exc_info.value).lower()
+        assert len(service.event_buffer) == 1
+        assert service._db_pool is None
+        assert service.owner_loop is None
+
+    @pytest.mark.asyncio
+    async def test_stop_preserves_late_arrivals_during_fallback_spill(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "audit_stop_race.db"
+        service = UnifiedAuditService(
+            db_path=str(db_path),
+            enable_pii_detection=False,
+            enable_risk_scoring=False,
+            buffer_size=10,
+            flush_interval=60.0,
+        )
+        await service.initialize(start_background_tasks=False)
+        await service._ensure_db_pool()
+
+        first_event_id = await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="race-user"),
+            resource_type="doc",
+            resource_id="doc-4",
+        )
+
+        async def _boom_update_daily_stats(*_args, **_kwargs):
+            raise RuntimeError("flush exploded")
+
+        spill_started = asyncio.Event()
+        release_spill = asyncio.Event()
+        captured_event_ids: list[str] = []
+        original_spill = service._spill_events_to_fallback
+
+        async def _blocked_spill(events):
+            captured_event_ids.extend(event.event_id for event in events)
+            spill_started.set()
+            await release_spill.wait()
+            return await original_spill(events)
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_update_daily_stats)
+        monkeypatch.setattr(service, "_spill_events_to_fallback", _blocked_spill)
+
+        stop_task = asyncio.create_task(service.stop())
+        await asyncio.wait_for(spill_started.wait(), timeout=5)
+
+        second_event_id = await service.log_event(
+            AuditEventType.DATA_WRITE,
+            context=AuditContext(user_id="race-user"),
+            resource_type="doc",
+            resource_id="doc-5",
+        )
+
+        release_spill.set()
+
+        with pytest.raises(AuditShutdownError) as exc_info:
+            await stop_task
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert captured_event_ids == [first_event_id]
+        fb_path = db_path.parent / "audit_fallback_queue.jsonl"
+        assert fb_path.exists()
+        fallback_contents = fb_path.read_text(encoding="utf-8")
+        assert first_event_id in fallback_contents
+        assert second_event_id not in fallback_contents
+        assert len(service.event_buffer) == 1
+        assert service.event_buffer[0].event_id == second_event_id
+        assert service._db_pool is None
+        assert service.owner_loop is None
 
     @pytest.mark.asyncio
     async def test_export_events_json_and_csv(self, audit_service):
@@ -2109,6 +2282,7 @@ async def test_flush_propagates_cancellation_and_preserves_buffer(audit_service,
         await audit_service.flush()
 
     assert len(audit_service.event_buffer) == 1
+    monkeypatch.undo()
 
 
 @pytest.mark.asyncio
@@ -2251,3 +2425,337 @@ async def test_export_events_raises_on_read_failure(audit_service, monkeypatch):
             stream=False,
             max_rows=10,
         )
+
+@pytest.mark.asyncio
+async def test_legacy_migration_allows_new_events_with_chain_hash(tmp_path):
+    """A migrated legacy table should accept fresh writes with chain hashes."""
+    db_path = tmp_path / "legacy_insert_audit.db"
+
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT UNIQUE NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                user_id TEXT,
+                session_id TEXT,
+                ip_address TEXT,
+                user_agent TEXT,
+                endpoint TEXT,
+                method TEXT,
+                resource_id TEXT,
+                resource_type TEXT,
+                action TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                details TEXT,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.commit()
+
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        retention_days=7,
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=10,
+        flush_interval=1.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            event_type=AuditEventType.DATA_READ,
+            context=AuditContext(user_id="legacy-writer"),
+            action="read",
+            resource_type="doc",
+            resource_id="legacy-doc",
+        )
+        await service.flush(raise_on_failure=True)
+    finally:
+        await service.stop()
+
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cols = [row[1] for row in cur.execute("PRAGMA table_info(audit_events)")]
+        row = cur.execute(
+            "SELECT chain_hash FROM audit_events WHERE resource_id = ?",
+            ("legacy-doc",),
+        ).fetchone()
+
+    assert "chain_hash" in cols
+    assert row is not None
+    assert row[0]
+
+
+@pytest.mark.asyncio
+async def test_legacy_migration_populated_rows_preserves_chain_hash_binding(tmp_path):
+    """Legacy rows should migrate without failing chain-hash bindings."""
+    db_path = tmp_path / "legacy_populated_audit.db"
+
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE audit_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT UNIQUE NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                user_id TEXT,
+                action TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                metadata TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO audit_events (
+                event_id,
+                timestamp,
+                event_type,
+                severity,
+                user_id,
+                action,
+                outcome,
+                metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-1",
+                "2026-01-01T00:00:00+00:00",
+                "data.read",
+                "info",
+                "17",
+                "read",
+                "success",
+                "{}",
+            ),
+        )
+        conn.commit()
+
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=10,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            event_type=AuditEventType.DATA_READ,
+            context=AuditContext(user_id="17"),
+            action="post_migration_read",
+            resource_id="doc-1",
+        )
+        await service.flush(raise_on_failure=True)
+    finally:
+        await service.stop()
+
+    # Verify post-migration row exists and chain integrity holds for new rows.
+    # Legacy migrated rows have empty chain_hash (by design), so we verify only
+    # the post-migration sub-chain which starts a fresh hash sequence.
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT action, context_user_id, timestamp, event_type, chain_hash "
+            "FROM audit_events ORDER BY timestamp ASC, event_id ASC"
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+    assert len(rows) >= 2, "Expected at least the migrated row and the post-migration row"
+    assert len([r for r in rows if r["action"] == "post_migration_read"]) == 1
+
+    # Rows with non-empty chain_hash form the verifiable chain
+    chained_rows = [r for r in rows if r.get("chain_hash")]
+    assert len(chained_rows) >= 1, "Post-migration row should have a chain_hash"
+
+    result = verify_audit_chain([
+        {
+            "action": row.get("action", ""),
+            "user_id": row.get("context_user_id"),
+            "timestamp": row.get("timestamp", ""),
+            "detail": row.get("event_type", ""),
+            "chain_hash": row.get("chain_hash", ""),
+        }
+        for row in chained_rows
+    ])
+    assert result["valid"] is True, f"Chain integrity broken after migration: {result}"
+
+
+@pytest.mark.asyncio
+async def test_failed_flush_does_not_advance_chain_state(tmp_path, monkeypatch):
+    """Failed flushes must not advance the persisted hash-chain head."""
+    db_path = tmp_path / "failed_flush_chain.db"
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=10,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            AuditEventType.AUTH_LOGIN_SUCCESS,
+            context=AuditContext(user_id="chain-user"),
+            action="login",
+        )
+
+        original_update_daily_stats = service._update_daily_stats
+
+        async def _boom_stats(*_args, **_kwargs):
+            raise RuntimeError("boom-after-chain")
+
+        monkeypatch.setattr(service, "_update_daily_stats", _boom_stats)
+
+        with pytest.raises(RuntimeError):
+            await service.flush(raise_on_failure=True)
+
+        assert service._last_chain_hash == ""
+
+        monkeypatch.setattr(service, "_update_daily_stats", original_update_daily_stats)
+        await service.flush(raise_on_failure=True)
+
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT action, context_user_id, timestamp, event_type, chain_hash FROM audit_events ORDER BY timestamp ASC, event_id ASC"
+            ) as cur:
+                rows = [dict(r) for r in await cur.fetchall()]
+
+        result = verify_audit_chain([
+            {
+                "action": row.get("action", ""),
+                "user_id": row.get("context_user_id"),
+                "timestamp": row.get("timestamp", ""),
+                "detail": row.get("event_type", ""),
+                "chain_hash": row.get("chain_hash", ""),
+            }
+            for row in rows
+        ])
+
+        assert result["valid"] is True
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_replay_fallback_queue_recomputes_chain_hashes(audit_service):
+    """Fallback replay should restore events with valid chain hashes."""
+    first = AuditEvent(
+        event_id="fallback-chain-1",
+        event_type=AuditEventType.DATA_READ,
+        category=AuditEventCategory.DATA_ACCESS,
+        context=AuditContext(user_id="fallback-chain-user"),
+        action="read",
+        resource_id="fb-1",
+    )
+    second = AuditEvent(
+        event_id="fallback-chain-2",
+        event_type=AuditEventType.DATA_EXPORT,
+        category=AuditEventCategory.DATA_MODIFICATION,
+        context=AuditContext(user_id="fallback-chain-user"),
+        action="export",
+        resource_id="fb-2",
+    )
+
+    fb_path = Path(audit_service.db_path).parent / "audit_fallback_queue.jsonl"
+    fb_path.write_text(
+        json.dumps(first.to_dict()) + "\n" + json.dumps(second.to_dict()) + "\n",
+        encoding="utf-8",
+    )
+
+    inserted = await audit_service.replay_fallback_queue(max_batch=100)
+    assert inserted == 2
+
+    async with aiosqlite.connect(audit_service.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT action, context_user_id, timestamp, event_type, chain_hash FROM audit_events WHERE context_user_id = ? ORDER BY timestamp ASC, event_id ASC",
+            ("fallback-chain-user",),
+        ) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+
+    assert len(rows) == 2
+    assert all(row.get("chain_hash") for row in rows)
+
+    result = verify_audit_chain([
+        {
+            "action": row.get("action", ""),
+            "user_id": row.get("context_user_id"),
+            "timestamp": row.get("timestamp", ""),
+            "detail": row.get("event_type", ""),
+            "chain_hash": row.get("chain_hash", ""),
+        }
+        for row in rows
+    ])
+    assert result["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_count_events_flushes_buffered_events(tmp_path):
+    """Counting should reflect buffered events without waiting for background flush."""
+    db_path = tmp_path / "count_flushes_buffer.db"
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=100,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            AuditEventType.DATA_READ,
+            context=AuditContext(user_id="buffered-count-user"),
+            resource_id="count-me",
+        )
+
+        count = await service.count_events(user_id="buffered-count-user")
+
+        assert count == 1
+        assert service.event_buffer == []
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_export_events_flushes_buffered_events(tmp_path):
+    """Exports should include buffered events without waiting for periodic flush."""
+    db_path = tmp_path / "export_flushes_buffer.db"
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=100,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            AuditEventType.DATA_READ,
+            context=AuditContext(user_id="buffered-export-user"),
+            resource_id="export-me",
+        )
+
+        content = await service.export_events(
+            user_id="buffered-export-user",
+            format="json",
+            stream=False,
+            max_rows=10,
+        )
+        data = json.loads(content)
+
+        assert any(row.get("resource_id") == "export-me" for row in data)
+        assert service.event_buffer == []
+    finally:
+        await service.stop()

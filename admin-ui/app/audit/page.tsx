@@ -14,16 +14,19 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Pagination } from '@/components/ui/pagination';
-import { FileText, RefreshCw, Filter, Eye, Clipboard, Trash2, Bell } from 'lucide-react';
+import { FileText, RefreshCw, Filter, Eye, Clipboard, Trash2, Bell, ExternalLink, ShieldAlert } from 'lucide-react';
 import { api } from '@/lib/api-client';
-import { AuditLog } from '@/types';
+import type { AuditLog, UserWithKeyCount } from '@/types';
 import { ExportMenu } from '@/components/ui/export-menu';
 import { exportAuditLogs, ExportFormat } from '@/lib/export';
 import { Skeleton, TableSkeleton } from '@/components/ui/skeleton';
 import { useUrlMultiState, useUrlPagination } from '@/lib/use-url-state';
 import { useOrgContext } from '@/components/OrgContextSwitcher';
 import { useToast } from '@/components/ui/toast';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getScopedItem, setScopedItem } from '@/lib/scoped-storage';
+import { logger } from '@/lib/logger';
 
 type AuditFilters = {
   user: string;
@@ -54,9 +57,43 @@ type ComplianceReportSummary = {
   anomalies: string[];
 };
 
+type AdminUserCandidate = UserWithKeyCount & {
+  is_superuser?: boolean;
+};
+
 const SAVED_SEARCHES_STORAGE_KEY = 'admin.audit.saved-searches.v1';
 const ALERT_CHECK_INTERVAL_MS = 60_000;
 const COMPLIANCE_REPORT_LIMIT = 5000;
+
+/**
+ * Action prefix used for the "Admin Actions Only" quick filter.
+ * Matches dotted-namespace admin actions: maintenance.*, monitoring.*,
+ * backup.*, config.*, incident.*, webhook.*, feature_flag.*, etc.
+ * The trailing `*` triggers prefix matching on the backend.
+ */
+const ADMIN_ACTIONS_FILTER_PREFIXES = [
+  'maintenance.',
+  'monitoring.',
+  'backup.',
+  'backup_schedule.',
+  'config.',
+  'incident.',
+  'webhook.',
+  'feature_flag.',
+  'data_subject_request.',
+  'admin.',
+] as const;
+
+/**
+ * Client-side predicate to check whether an audit log entry looks like an
+ * admin-originated action, based on well-known action name prefixes.
+ */
+const ADMIN_ACTIONS_GLOB = ADMIN_ACTIONS_FILTER_PREFIXES.map((p) => `${p}*`).join(',');
+
+const isAdminAction = (action: string): boolean => {
+  const lower = action.toLowerCase();
+  return ADMIN_ACTIONS_FILTER_PREFIXES.some((prefix) => lower.startsWith(prefix));
+};
 
 const COMPLIANCE_REPORT_TYPE_LABELS: Record<ComplianceReportType, string> = {
   activity_summary: 'Activity Summary',
@@ -336,6 +373,7 @@ const parseSavedSearches = (value: string | null): SavedAuditSearch[] => {
 function AuditPageContent() {
   const { selectedOrg } = useOrgContext();
   const { success, error: showError } = useToast();
+  const router = useRouter();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -352,6 +390,9 @@ function AuditPageContent() {
   });
   const [reportEndDate, setReportEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reportGenerating, setReportGenerating] = useState(false);
+  const [adminUserIds, setAdminUserIds] = useState<Set<number> | null>(null);
+  const [adminUsersFilterActive, setAdminUsersFilterActive] = useState(false);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const storageHydratedRef = useRef(false);
   const savedSearchesRef = useRef<SavedAuditSearch[]>([]);
 
@@ -389,7 +430,7 @@ function AuditPageContent() {
   }, [filters]);
 
   useEffect(() => {
-    const parsed = parseSavedSearches(window.localStorage.getItem(SAVED_SEARCHES_STORAGE_KEY));
+    const parsed = parseSavedSearches(getScopedItem(SAVED_SEARCHES_STORAGE_KEY));
     setSavedSearches(parsed);
     savedSearchesRef.current = parsed;
     storageHydratedRef.current = true;
@@ -398,7 +439,7 @@ function AuditPageContent() {
   useEffect(() => {
     if (!storageHydratedRef.current) return;
     savedSearchesRef.current = savedSearches;
-    window.localStorage.setItem(SAVED_SEARCHES_STORAGE_KEY, JSON.stringify(savedSearches));
+    setScopedItem(SAVED_SEARCHES_STORAGE_KEY, JSON.stringify(savedSearches));
   }, [savedSearches]);
 
   const loadLogs = useCallback(async (activeFilters: AuditFilters, page: number, size: number) => {
@@ -433,7 +474,7 @@ function AuditPageContent() {
         setTotalItems(Number(data.total ?? rawItems.length ?? 0));
       }
     } catch (err: unknown) {
-      console.error('Failed to load audit logs:', err);
+      logger.error('Failed to load audit logs', { component: 'AuditPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to load audit logs');
       setLogs([]);
       setTotalItems(0);
@@ -454,8 +495,51 @@ function AuditPageContent() {
   const handleClearFilters = () => {
     clearFilters();
     setActiveSavedSearchId(null);
+    setAdminUsersFilterActive(false);
     resetPagination();
   };
+
+  const loadAdminUserIds = useCallback(async (): Promise<Set<number>> => {
+    if (adminUserIds !== null) return adminUserIds;
+    try {
+      setAdminUsersLoading(true);
+      const response = await api.getUsersPage({ limit: '200' });
+      const items: AdminUserCandidate[] = Array.isArray(response?.items) ? response.items : [];
+      const ids = new Set<number>();
+      for (const user of items) {
+        const role = user.role.toLowerCase();
+        const roles = Array.isArray(user.roles) ? user.roles.map((r) => String(r).toLowerCase()) : [];
+        if (
+          role === 'admin' || role === 'owner' || role === 'super_admin'
+          || roles.includes('admin') || roles.includes('owner') || roles.includes('super_admin')
+          || user.is_superuser === true
+        ) {
+          const id = Number(user.id);
+          if (Number.isFinite(id)) ids.add(id);
+        }
+      }
+      setAdminUserIds(ids);
+      return ids;
+    } catch {
+      return new Set();
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  }, [adminUserIds]);
+
+  const handleToggleAdminUsersFilter = useCallback(async () => {
+    if (adminUsersFilterActive) {
+      setAdminUsersFilterActive(false);
+      return;
+    }
+    await loadAdminUserIds();
+    setAdminUsersFilterActive(true);
+  }, [adminUsersFilterActive, loadAdminUserIds]);
+
+  const displayedLogs = useMemo(() => {
+    if (!adminUsersFilterActive || !adminUserIds) return logs;
+    return logs.filter((log) => adminUserIds.has(Number(log.user_id)));
+  }, [logs, adminUsersFilterActive, adminUserIds]);
 
   const dateRangeError = useMemo(() => getDateRangeError(filters.start, filters.end), [filters.end, filters.start]);
   const complianceDateRangeError = useMemo(
@@ -698,7 +782,7 @@ function AuditPageContent() {
       if (entries.length >= COMPLIANCE_REPORT_LIMIT) {
         showError(
           'Report may be incomplete',
-          `Reached the ${COMPLIANCE_REPORT_LIMIT.toLocaleString()} event limit. Narrow the date range for complete data.`
+          `The report reached the ${COMPLIANCE_REPORT_LIMIT.toLocaleString()} event limit. Narrow the date range for a complete report.`
         );
       }
       success(
@@ -706,7 +790,7 @@ function AuditPageContent() {
         `${COMPLIANCE_REPORT_TYPE_LABELS[reportType]} exported with ${entries.length} events.`
       );
     } catch (err: unknown) {
-      console.error('Failed to generate compliance report:', err);
+      logger.error('Failed to generate compliance report', { component: 'AuditPage', error: err instanceof Error ? err.message : String(err) });
       showError(
         'Compliance report generation failed',
         err instanceof Error && err.message ? err.message : 'Unable to build compliance report.'
@@ -736,7 +820,7 @@ function AuditPageContent() {
       await navigator.clipboard.writeText(JSON.stringify(rawPayload, null, 2));
       success('Copied audit event');
     } catch (err) {
-      console.error('Failed to copy audit log:', err);
+      logger.error('Failed to copy audit log', { component: 'AuditPage', error: err instanceof Error ? err.message : String(err) });
       showError('Copy failed', 'Unable to copy audit event details.');
     }
   };
@@ -963,10 +1047,10 @@ function AuditPageContent() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="actionFilter">Action (exact)</Label>
+                    <Label htmlFor="actionFilter">Action (exact or prefix*)</Label>
                     <Input
                       id="actionFilter"
-                      placeholder="e.g., user.create"
+                      placeholder="e.g., user.create or admin*"
                       value={filters.action}
                       onChange={(e) => handleFilterChange({ action: e.target.value, actionPrefix: '' })}
                     />
@@ -1008,6 +1092,29 @@ function AuditPageContent() {
                 <div className="flex flex-wrap gap-2 mt-4">
                   <Button variant="outline" onClick={handleClearFilters}>
                     Clear Filters
+                  </Button>
+                  <Button
+                    variant={filters.action === ADMIN_ACTIONS_GLOB ? 'default' : 'outline'}
+                    onClick={() => {
+                      if (filters.action === ADMIN_ACTIONS_GLOB) {
+                        handleFilterChange({ action: '' });
+                      } else {
+                        handleFilterChange({ action: ADMIN_ACTIONS_GLOB });
+                      }
+                    }}
+                    data-testid="admin-actions-filter"
+                  >
+                    <ShieldAlert className="mr-1.5 h-4 w-4" />
+                    Admin Actions Only
+                  </Button>
+                  <Button
+                    variant={adminUsersFilterActive ? 'default' : 'outline'}
+                    onClick={() => void handleToggleAdminUsersFilter()}
+                    disabled={adminUsersLoading}
+                    data-testid="admin-users-filter"
+                  >
+                    <Filter className="mr-1.5 h-4 w-4" />
+                    {adminUsersLoading ? 'Loading...' : 'Admin Users'}
                   </Button>
                   <Button
                     variant="secondary"
@@ -1071,6 +1178,20 @@ function AuditPageContent() {
                         <Label>IP Address</Label>
                         <div className="text-sm font-mono">{selectedLog.ip_address || '—'}</div>
                       </div>
+                      {selectedLog.request_id && (
+                        <div className="space-y-1">
+                          <Label>Request ID</Label>
+                          <Button
+                            variant="link"
+                            className="h-auto p-0 font-mono text-xs"
+                            onClick={() => {
+                              router.push(`/logs?request_id=${encodeURIComponent(selectedLog.request_id!)}`);
+                            }}
+                          >
+                            {selectedLog.request_id}
+                          </Button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -1113,6 +1234,7 @@ function AuditPageContent() {
                 <CardTitle>Activity Log</CardTitle>
                 <CardDescription>
                   {totalItems} record{totalItems !== 1 ? 's' : ''} found
+                  {adminUsersFilterActive ? ` (showing ${displayedLogs.length} from admin users)` : ''}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -1120,9 +1242,11 @@ function AuditPageContent() {
                   <div className="py-4">
                     <TableSkeleton rows={5} columns={5} />
                   </div>
-                ) : logs.length === 0 ? (
+                ) : displayedLogs.length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
-                    No audit logs found for the selected filters.
+                    {adminUsersFilterActive && logs.length > 0
+                      ? 'No audit logs from admin-role users in current results.'
+                      : 'No audit logs found for the selected filters.'}
                   </div>
                 ) : (
                   <>
@@ -1139,7 +1263,7 @@ function AuditPageContent() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {logs.map((log) => (
+                          {displayedLogs.map((log) => (
                             <TableRow key={log.id}>
                               <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                                 {formatTimestamp(log.timestamp)}
@@ -1175,19 +1299,15 @@ function AuditPageContent() {
                                     <Eye className="mr-2 h-4 w-4" />
                                     View
                                   </Button>
-                                  {typeof (log.details as Record<string, unknown>)?.request_id === 'string' && (
-                                    <Link
-                                      href={{
-                                        pathname: '/logs',
-                                        query: {
-                                          requestId: String((log.details as Record<string, unknown>).request_id),
-                                        },
-                                      }}
-                                      className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium transition-all hover:bg-accent hover:text-accent-foreground"
-                                      title="View related system logs"
+                                  {log.request_id && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => router.push(`/logs?request_id=${encodeURIComponent(log.request_id!)}`)}
                                     >
-                                      Logs
-                                    </Link>
+                                      <ExternalLink className="mr-2 h-4 w-4" />
+                                      View Logs
+                                    </Button>
                                   )}
                                 </div>
                               </TableCell>

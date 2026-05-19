@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -79,8 +80,19 @@ def test_reading_save_get_search_delete(reading_app):
 
         r = client.get("/api/v1/reading/items", params={"q": "Example"})
         assert r.status_code == 200, r.text
-        listed_ids = [item["id"] for item in r.json()["items"]]
+        listed_payload = r.json()
+        listed_ids = [item["id"] for item in listed_payload["items"]]
         assert item_id in listed_ids
+        assert listed_payload["pagination"] == {
+            "mode": "offset",
+            "total": 1,
+            "limit": 20,
+            "offset": 0,
+            "has_more": False,
+            "next_offset": None,
+        }
+        assert listed_payload["has_more"] is False
+        assert listed_payload["next_offset"] is None
 
         r = client.delete(f"/api/v1/reading/items/{item_id}")
         assert r.status_code == 200, r.text
@@ -196,6 +208,16 @@ def test_saved_search_endpoints_crud(reading_app):
         body = r.json()
         assert body["total"] == 1
         assert body["items"][0]["id"] == search_id
+        assert body["pagination"] == {
+            "mode": "offset",
+            "total": 1,
+            "limit": 10,
+            "offset": 0,
+            "has_more": False,
+            "next_offset": None,
+        }
+        assert body["has_more"] is False
+        assert body["next_offset"] is None
 
         r = client.patch(
             f"/api/v1/reading/saved-searches/{search_id}",
@@ -211,7 +233,22 @@ def test_saved_search_endpoints_crud(reading_app):
 
         r = client.get("/api/v1/reading/saved-searches", params={"limit": 10, "offset": 0})
         assert r.status_code == 200, r.text
-        assert r.json()["total"] == 0
+        assert r.json() == {
+            "items": [],
+            "total": 0,
+            "limit": 10,
+            "offset": 0,
+            "has_more": False,
+            "next_offset": None,
+            "pagination": {
+                "mode": "offset",
+                "total": 0,
+                "limit": 10,
+                "offset": 0,
+                "has_more": False,
+                "next_offset": None,
+            },
+        }
 
 
 def test_saved_search_rejects_unsupported_query_key(reading_app):
@@ -574,3 +611,27 @@ def test_reading_summarize_and_tts(reading_app, monkeypatch):
         )
         assert r.status_code == 200, r.text
         assert r.content == b"audiodata"
+
+
+def test_reading_tts_sanitizes_generic_tts_error():
+    from tldw_Server_API.app.api.v1.endpoints import reading as reading_endpoint
+
+    with pytest.raises(HTTPException) as excinfo:
+        reading_endpoint._raise_for_tts_error(
+            reading_endpoint.TTSError("provider backend exploded"),
+        )
+
+    assert excinfo.value.status_code == 500
+    assert excinfo.value.detail == "TTS generation failed"
+
+
+def test_reading_tts_sanitizes_provider_not_configured_error():
+    from tldw_Server_API.app.api.v1.endpoints import reading as reading_endpoint
+
+    with pytest.raises(HTTPException) as excinfo:
+        reading_endpoint._raise_for_tts_error(
+            reading_endpoint.TTSProviderNotConfiguredError("tts provider secret path missing"),
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.detail == "TTS service unavailable"

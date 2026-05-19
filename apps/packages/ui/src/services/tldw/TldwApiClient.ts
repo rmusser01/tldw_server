@@ -1,5 +1,24 @@
 import type { ChatScope } from "@/types/chat-scope"
 import { toChatScopeParams } from "@/types/chat-scope"
+import type {
+  LlamacppAsset,
+  LlamacppAssetsResponse,
+  LlamacppConfigResponse,
+  LlamacppConfigUpdateRequest,
+  LlamacppHardwareSnapshotResponse,
+  LlamacppInventoryItem,
+  LlamacppInventoryResponse,
+  LlamacppLifecycleActionResponse,
+  LlamacppLogTailResponse,
+  LlamacppProfile,
+  LlamacppProfileCreateRequest,
+  LlamacppProfileListResponse,
+  LlamacppProfileUpdateRequest,
+  LlamacppRuntimeListResponse,
+  LlamacppUseInChatResponse,
+  LlamacppValidationRequest,
+  LlamacppValidationResponse
+} from "@/types/llamacpp-admin"
 import { Storage } from "@plasmohq/storage"
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 import { bgRequest, bgStream, bgUpload } from "@/services/background-proxy"
@@ -10,7 +29,10 @@ import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
-import { captureChatRequestDebugSnapshot } from "@/services/tldw/chat-request-debug"
+import {
+  captureChatRequestDebugSnapshot,
+  type ChatRequestDebugMetadata
+} from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { toTrimmedStringArray } from "@/services/tldw/client-utils"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
@@ -18,6 +40,7 @@ import {
   DEFAULT_CHARACTER_PROFILE_PREFERENCE_KEY,
   normalizeDefaultCharacterPreferenceId
 } from "@/utils/default-character-preference"
+import type { PersonaBuddySummary } from "@/types/persona-buddy"
 import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
@@ -46,6 +69,49 @@ import type {
   UpdateReadingSavedSearchRequest,
   UpdateReadingDigestScheduleRequest
 } from "@/types/collections"
+import {
+  normalizeIngestionSource,
+  normalizeIngestionSourceItem,
+  normalizeIngestionSourceItemsListResponse,
+  normalizeIngestionSourceListResponse,
+  normalizeIngestionSourceSyncSummary,
+  normalizeIngestionSourceSyncTrigger,
+  normalizeIngestionSourceType,
+  normalizeReadingDigestSchedule,
+  toFiniteNumber,
+  toOptionalString,
+  toRecord
+} from "./collections-normalizers"
+import {
+  buildPresentationVisualStyleSnapshot,
+  clonePresentationVisualStyleSnapshot
+} from "./presentation-style"
+import {
+  normalizePersonaExemplar,
+  normalizePersonaProfile
+} from "./persona-normalizers"
+
+export {
+  normalizeIngestionSource,
+  normalizeIngestionSourceItem,
+  normalizeIngestionSourceItemsListResponse,
+  normalizeIngestionSourceListResponse,
+  normalizeIngestionSourceSyncSummary,
+  normalizeIngestionSourceSyncTrigger,
+  normalizeIngestionSourceType,
+  normalizeReadingDigestSchedule,
+  toFiniteNumber,
+  toOptionalString,
+  toRecord
+} from "./collections-normalizers"
+export {
+  buildPresentationVisualStyleSnapshot,
+  clonePresentationVisualStyleSnapshot
+} from "./presentation-style"
+export {
+  normalizePersonaExemplar,
+  normalizePersonaProfile
+} from "./persona-normalizers"
 
 const DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 const CHARACTER_CACHE_TTL_MS = 5 * 60 * 1000
@@ -54,6 +120,25 @@ const RAG_QUERY_MAX_LENGTH = 20000
 const CHAT_COMPLETION_ERROR_MESSAGE = "Chat completion failed."
 const CHAT_COMPLETION_ERRORS_MESSAGE =
   "One or more internal errors were suppressed."
+
+const toRecordOrNull = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const isSavedDegradedCharacterPersistError = (error: unknown): boolean => {
+  const candidate = error as
+    | {
+        detail?: unknown
+        details?: { detail?: unknown; code?: unknown; saved?: unknown }
+      }
+    | null
+  const detail =
+    toRecordOrNull(candidate?.detail)
+    ?? toRecordOrNull(candidate?.details?.detail)
+    ?? toRecordOrNull(candidate?.details)
+  return detail?.code === "persist_validation_degraded" && detail?.saved === true
+}
 
 const isSuspiciousChatCompletionString = (value: string): boolean =>
   /traceback|stack(?:\s*trace)?|exception|error|\/Users\/|[A-Za-z]:\\|\.py:\d+/i.test(
@@ -118,62 +203,6 @@ const sanitizeChatCompletionPayload = (value: unknown): unknown => {
   return value
 }
 
-export const normalizeReadingDigestSchedule = (schedule: any): ReadingDigestSchedule => ({
-  ...schedule,
-  id: String(schedule?.id ?? ""),
-  name: schedule?.name ?? null,
-  cron: String(schedule?.cron ?? ""),
-  timezone: schedule?.timezone ?? null,
-  enabled: Boolean(schedule?.enabled),
-  require_online: Boolean(schedule?.require_online),
-  format: schedule?.format === "html" ? "html" : "md",
-  template_id:
-    typeof schedule?.template_id === "number" && Number.isFinite(schedule.template_id)
-      ? schedule.template_id
-      : null,
-  template_name: schedule?.template_name ?? null,
-  retention_days:
-    typeof schedule?.retention_days === "number" && Number.isFinite(schedule.retention_days)
-      ? schedule.retention_days
-      : null,
-  filters:
-    schedule?.filters && typeof schedule.filters === "object" && !Array.isArray(schedule.filters)
-      ? schedule.filters
-      : null,
-  last_run_at: schedule?.last_run_at ?? null,
-  next_run_at: schedule?.next_run_at ?? null,
-  last_status: schedule?.last_status ?? null,
-  created_at: schedule?.created_at ?? null,
-  updated_at: schedule?.updated_at ?? null
-})
-
-export const toFiniteNumber = (value: unknown, fallback = 0): number => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return fallback
-}
-
-export const toOptionalString = (value: unknown): string | null => {
-  if (value === null || typeof value === "undefined") {
-    return null
-  }
-  return String(value)
-}
-
-export const toRecord = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {}
-  }
-  return { ...(value as Record<string, unknown>) }
-}
-
 const toOptionalNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
@@ -186,105 +215,6 @@ const toOptionalNumber = (value: unknown): number | null => {
   }
   return null
 }
-
-export const normalizeIngestionSourceSyncSummary = (
-  summary: unknown
-): IngestionSourceSyncSummary | null => {
-  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
-    return null
-  }
-  const record = summary as Record<string, unknown>
-  return {
-    changed_count: toFiniteNumber(record.changed_count),
-    degraded_count: toFiniteNumber(record.degraded_count),
-    conflict_count: toFiniteNumber(record.conflict_count),
-    sink_failure_count: toFiniteNumber(record.sink_failure_count),
-    ingestion_failure_count: toFiniteNumber(record.ingestion_failure_count),
-    created_count: toFiniteNumber(record.created_count),
-    updated_count: toFiniteNumber(record.updated_count),
-    deleted_count: toFiniteNumber(record.deleted_count),
-    unchanged_count: toFiniteNumber(record.unchanged_count)
-  }
-}
-
-export const normalizeIngestionSourceType = (value: unknown): IngestionSourceSummary["source_type"] => {
-  if (value === "archive_snapshot" || value === "git_repository") {
-    return value
-  }
-  return "local_directory"
-}
-
-export const normalizeIngestionSource = (source: any): IngestionSourceSummary => ({
-  id: String(source?.id ?? ""),
-  user_id: toFiniteNumber(source?.user_id),
-  source_type: normalizeIngestionSourceType(source?.source_type),
-  sink_type: source?.sink_type === "notes" ? "notes" : "media",
-  policy: source?.policy === "import_only" ? "import_only" : "canonical",
-  enabled: Boolean(source?.enabled),
-  schedule_enabled: Boolean(source?.schedule_enabled),
-  schedule_config: toRecord(source?.schedule_config),
-  config: toRecord(source?.config),
-  active_job_id: toOptionalString(source?.active_job_id),
-  last_successful_snapshot_id: toOptionalString(source?.last_successful_snapshot_id),
-  last_sync_started_at: toOptionalString(source?.last_sync_started_at),
-  last_sync_completed_at: toOptionalString(source?.last_sync_completed_at),
-  last_sync_status: toOptionalString(source?.last_sync_status),
-  last_error: toOptionalString(source?.last_error),
-  last_successful_sync_summary: normalizeIngestionSourceSyncSummary(
-    source?.last_successful_sync_summary
-  ),
-  created_at: toOptionalString(source?.created_at),
-  updated_at: toOptionalString(source?.updated_at)
-})
-
-export const normalizeIngestionSourceListResponse = (payload: any): IngestionSourceListResponse => {
-  const rawSources = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.sources)
-      ? payload.sources
-      : []
-  const sources = rawSources.map((source: any) => normalizeIngestionSource(source))
-  return {
-    sources,
-    total: toFiniteNumber(payload?.total, sources.length)
-  }
-}
-
-export const normalizeIngestionSourceItem = (item: any): IngestionSourceItem => ({
-  id: String(item?.id ?? ""),
-  source_id: String(item?.source_id ?? ""),
-  normalized_relative_path: String(item?.normalized_relative_path ?? ""),
-  content_hash: item?.content_hash == null ? null : String(item.content_hash),
-  sync_status: String(item?.sync_status ?? "unknown"),
-  binding: toRecord(item?.binding),
-  present_in_source: Boolean(item?.present_in_source),
-  created_at: toOptionalString(item?.created_at),
-  updated_at: toOptionalString(item?.updated_at)
-})
-
-export const normalizeIngestionSourceItemsListResponse = (
-  payload: any
-): IngestionSourceItemsListResponse => {
-  const rawItems = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.items)
-      ? payload.items
-      : []
-  const items = rawItems.map((item: any) => normalizeIngestionSourceItem(item))
-  return {
-    items,
-    total: toFiniteNumber(payload?.total, items.length)
-  }
-}
-
-export const normalizeIngestionSourceSyncTrigger = (
-  payload: any
-): IngestionSourceSyncTriggerResponse => ({
-  status: String(payload?.status ?? ""),
-  source_id: String(payload?.source_id ?? ""),
-  job_id: toOptionalString(payload?.job_id),
-  snapshot_status: toOptionalString(payload?.snapshot_status)
-})
 
 export interface TldwConfig {
   serverUrl: string
@@ -336,6 +266,17 @@ export interface OpenAICredentialSourceSwitchResponse {
   provider: "openai"
   auth_source: "api_key" | "oauth"
   updated_at?: string | null
+}
+
+export type OpenWebUIHydrationScopeRequest = {
+  conversation_ids?: string[]
+  source_user_id?: string | null
+}
+
+export type OpenWebUIHydrationRequest = {
+  openwebui_data_root: string
+  scope?: OpenWebUIHydrationScopeRequest
+  process_supported_files?: boolean
 }
 
 const getCurrentBrowserSurface = (): BrowserSurface => {
@@ -433,83 +374,6 @@ export type VisualStylePatchInput = {
   appearance_defaults?: Record<string, any> | null
   fallback_policy?: Record<string, any> | null
 }
-
-const cloneVisualStyleValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map((item) => cloneVisualStyleValue(item))
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
-        key,
-        cloneVisualStyleValue(entryValue)
-      ])
-    )
-  }
-  return value
-}
-
-const cloneVisualStyleObject = (value: Record<string, any> | null | undefined): Record<string, any> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (cloneVisualStyleValue(value) as Record<string, any>)
-    : {}
-
-export const clonePresentationVisualStyleSnapshot = (
-  snapshot: PresentationVisualStyleSnapshot | null | undefined
-): PresentationVisualStyleSnapshot | null => {
-  if (!snapshot) {
-    return null
-  }
-  return {
-    id: snapshot.id,
-    scope: snapshot.scope,
-    name: snapshot.name,
-    description: snapshot.description ?? null,
-    category: snapshot.category ?? null,
-    guide_number: snapshot.guide_number ?? null,
-    tags: [...(snapshot.tags || [])],
-    best_for: [...(snapshot.best_for || [])],
-    generation_rules: cloneVisualStyleObject(snapshot.generation_rules),
-    artifact_preferences: [...(snapshot.artifact_preferences || [])],
-    appearance_defaults: cloneVisualStyleObject(snapshot.appearance_defaults),
-    fallback_policy: cloneVisualStyleObject(snapshot.fallback_policy),
-    version: snapshot.version ?? null
-  }
-}
-
-export const buildPresentationVisualStyleSnapshot = (
-  style: Pick<
-    VisualStyleRecord,
-    | "id"
-    | "scope"
-    | "name"
-    | "description"
-    | "category"
-    | "guide_number"
-    | "tags"
-    | "best_for"
-    | "generation_rules"
-    | "artifact_preferences"
-    | "appearance_defaults"
-    | "fallback_policy"
-    | "version"
-  >
-): PresentationVisualStyleSnapshot =>
-  clonePresentationVisualStyleSnapshot({
-    id: style.id,
-    scope: style.scope,
-    name: style.name,
-    description: style.description ?? null,
-    category: style.category ?? null,
-    guide_number: style.guide_number ?? null,
-    tags: [...(style.tags || [])],
-    best_for: [...(style.best_for || [])],
-    generation_rules: cloneVisualStyleObject(style.generation_rules),
-    artifact_preferences: [...(style.artifact_preferences || [])],
-    appearance_defaults: cloneVisualStyleObject(style.appearance_defaults),
-    fallback_policy: cloneVisualStyleObject(style.fallback_policy),
-    version: style.version ?? null
-  })!
 
 export type PresentationStudioRecord = {
   id: string
@@ -676,6 +540,9 @@ export interface TldwModel {
   function_calling?: boolean
   json_output?: boolean
   type?: string
+  is_configured?: boolean
+  provider_is_configured?: boolean
+  catalog_only?: boolean
   modalities?: {
     input?: string[]
     output?: string[]
@@ -872,6 +739,15 @@ export interface ChatCompletionRequest {
   research_context?: ChatResearchContext
 }
 
+export type ChatCompletionRequestOptions = {
+  signal?: AbortSignal
+  debugMetadata?: ChatRequestDebugMetadata
+}
+
+export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
+  streamIdleTimeoutMs?: number
+}
+
 export interface ServerChatSummary {
   id: string
   title: string
@@ -886,6 +762,9 @@ export interface ServerChatSummary {
   external_ref?: string | null
   bm25_norm?: number | null
   character_id?: string | number | null
+  assistant_kind?: "character" | "persona" | null
+  assistant_id?: string | number | null
+  persona_memory_mode?: "read_only" | "read_write" | null
   parent_conversation_id?: string | null
   root_id?: string | null
   forked_from_message_id?: string | null
@@ -915,7 +794,8 @@ export interface PersonaProfileSummary {
   name?: string | null
   character_card_id?: number | null
   origin_character_id?: number | null
-  [key: string]: unknown
+  buddy_summary?: PersonaBuddySummary | null
+  metadata?: Record<string, unknown> | null
 }
 
 export interface PersonaProfile extends PersonaProfileSummary {
@@ -1031,63 +911,6 @@ export type ChatSettingsResponse = {
   last_modified: string
 }
 
-export const normalizePersonaProfile = <T extends Record<string, unknown>>(
-  input: T | null | undefined
-): PersonaProfile => {
-  const candidate = input && typeof input === "object" ? input : ({} as T)
-  return {
-    ...candidate,
-    id: String(candidate?.id ?? candidate?.persona_id ?? "")
-  }
-}
-
-export const normalizeStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((item) => String(item ?? "").trim())
-    .filter((item) => item.length > 0)
-}
-
-export const normalizePersonaExemplar = (
-  input: Record<string, unknown> | null | undefined
-): PersonaExemplar => {
-  const candidate = input && typeof input === "object" ? input : {}
-  const priorityValue = Number(candidate?.priority)
-  return {
-    id: String(candidate?.id ?? ""),
-    persona_id: String(candidate?.persona_id ?? candidate?.personaId ?? ""),
-    kind: String(candidate?.kind ?? "style"),
-    content: String(candidate?.content ?? ""),
-    tone:
-      candidate?.tone == null || String(candidate.tone).trim() === ""
-        ? null
-        : String(candidate.tone),
-    scenario_tags: normalizeStringArray(
-      candidate?.scenario_tags ?? candidate?.scenarioTags
-    ),
-    capability_tags: normalizeStringArray(
-      candidate?.capability_tags ?? candidate?.capabilityTags
-    ),
-    priority: Number.isFinite(priorityValue) ? priorityValue : 0,
-    enabled: candidate?.enabled !== false,
-    source_type:
-      candidate?.source_type == null || String(candidate.source_type).trim() === ""
-        ? null
-        : String(candidate.source_type),
-    source_ref:
-      candidate?.source_ref == null || String(candidate.source_ref).trim() === ""
-        ? null
-        : String(candidate.source_ref),
-    notes:
-      candidate?.notes == null || String(candidate.notes).trim() === ""
-        ? null
-        : String(candidate.notes),
-    created_at:
-      candidate?.created_at == null ? null : String(candidate.created_at),
-    last_modified:
-      candidate?.last_modified == null ? null : String(candidate.last_modified)
-  }
-}
 export type WorldBookProcessDiagnostic = {
   entry_id: number | null
   world_book_id: number | null
@@ -1394,7 +1217,49 @@ export interface MediaIngestionBudgetDiagnostics {
   error?: string | null
 }
 
-export class TldwApiClient {
+export interface SandboxAdminRuntimeDiagnosticsSummary {
+  total: number
+  ready: number
+  unavailable: number
+  host_gated: number
+  scaffold: number
+  host_local_warning_runtimes?: string[]
+  repair_supported_runtimes?: string[]
+}
+
+export interface SandboxAdminRuntimeDiagnosticsItem {
+  name: string
+  available: boolean
+  implementation_state?: string | null
+  readiness: string
+  reasons?: string[]
+  normalized_reasons?: string[]
+  boundary_class?: string | null
+  vm_grade_isolation?: boolean
+  untrusted_eligible?: boolean
+  isolation_warnings?: string[]
+  strict_deny_all_supported?: boolean
+  strict_allowlist_supported?: boolean
+  session_reuse_model?: string | null
+  requires_live_health_check?: boolean
+  repair_supported?: boolean
+  recommended_action?: string
+}
+
+export interface SandboxAdminStartupWarningSummary {
+  present: boolean
+  blocking: boolean
+  codes?: string[]
+}
+
+export interface SandboxAdminRuntimeDiagnosticsResponse {
+  source: "feature_discovery"
+  summary: SandboxAdminRuntimeDiagnosticsSummary
+  runtimes: SandboxAdminRuntimeDiagnosticsItem[]
+  startup_warning_summary?: SandboxAdminStartupWarningSummary | null
+}
+
+export class TldwApiClientBase {
   private storage: Storage
   private config: TldwConfig | null = null
   private baseUrl: string = ''
@@ -1534,7 +1399,7 @@ export class TldwApiClient {
     return cfg
   }
 
-  async request<T>(init: any, requireAuth = true): Promise<T> {
+  async request<T = any>(init: any, requireAuth = true): Promise<T> {
     await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
     return await bgRequest<T>(init)
   }
@@ -2049,6 +1914,7 @@ export class TldwApiClient {
           : canonicalModelId
 
       return {
+        ...m,
         id: canonicalModelId,
         name: displayName,
         provider: String(m.provider || "default"),
@@ -2080,6 +1946,9 @@ export class TldwApiClient {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
+        is_configured: m.is_configured,
+        provider_is_configured: m.provider_is_configured,
+        catalog_only: m.catalog_only,
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {
@@ -2112,6 +1981,23 @@ export class TldwApiClient {
 
   async getProviders(): Promise<any> {
     return await bgRequest<any>({ path: '/api/v1/llm/providers', method: 'GET' })
+  }
+
+  /**
+   * Check which LLM providers are configured on the server.
+   * Returns `{ providers: [...], any_configured: boolean }`.
+   */
+  async getProvidersStatus(): Promise<{
+    providers: Array<{
+      name: string
+      configured: boolean
+      requires_api_key: boolean
+      key_hint?: string | null
+      key_source?: string | null
+    }>
+    any_configured: boolean
+  }> {
+    return await bgRequest<any>({ path: '/api/v1/config/providers', method: 'GET' })
   }
 
   async getModelsMetadata(options?: {
@@ -2260,6 +2146,13 @@ export class TldwApiClient {
     })
   }
 
+  async getSandboxRuntimeDiagnostics(): Promise<SandboxAdminRuntimeDiagnosticsResponse> {
+    return await bgRequest<SandboxAdminRuntimeDiagnosticsResponse>({
+      path: "/api/v1/sandbox/admin/runtime-diagnostics",
+      method: "GET"
+    })
+  }
+
   async getLlamacppStatus(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/status",
@@ -2271,6 +2164,76 @@ export class TldwApiClient {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/models",
       method: "GET"
+    })
+  }
+
+  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "GET"
+    })
+  }
+
+  async updateLlamacppConfig(
+    payload: LlamacppConfigUpdateRequest
+  ): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async validateLlamacpp(
+    payload: LlamacppValidationRequest
+  ): Promise<LlamacppValidationResponse> {
+    return await bgRequest<LlamacppValidationResponse>({
+      path: "/api/v1/llamacpp/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+    return await bgRequest<LlamacppInventoryResponse>({
+      path: "/api/v1/llamacpp/inventory",
+      method: "GET"
+    })
+  }
+
+  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+    return await bgRequest<LlamacppAssetsResponse>({
+      path: "/api/v1/llamacpp/assets",
+      method: "GET"
+    })
+  }
+
+  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+    return await bgRequest<LlamacppInventoryItem>({
+      path: "/api/v1/llamacpp/models/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
+  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  }
+
+  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/import-folder",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
     })
   }
 
@@ -2289,12 +2252,163 @@ export class TldwApiClient {
     })
   }
 
+  async startLlamacppModel(
+    modelId: string,
+    serverArgs?: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return await bgRequest<Record<string, unknown>>({
+      path: "/api/v1/llamacpp/start-by-model",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        model_id: modelId,
+        server_args: serverArgs || {}
+      }
+    })
+  }
+
   async stopLlamacppServer(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {}
+    })
+  }
+
+  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: "/api/v1/llamacpp/use-in-chat",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+    const query = this.buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/logs/tail${query}`,
+      method: "GET"
+    })
+  }
+
+  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+    return await bgRequest<LlamacppProfileListResponse>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "GET"
+    })
+  }
+
+  async createLlamacppProfile(
+    payload: LlamacppProfileCreateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async updateLlamacppProfile(
+    profileId: string,
+    payload: LlamacppProfileUpdateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteLlamacppProfile(
+    profileId: string
+  ): Promise<{ profile_id: string; deleted: boolean }> {
+    return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "DELETE"
+    })
+  }
+
+  async startLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async stopLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async pauseLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async resumeLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async useLlamacppProfileInChat(
+    profileId: string
+  ): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  }
+
+  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+    return await bgRequest<LlamacppRuntimeListResponse>({
+      path: "/api/v1/llamacpp/instances",
+      method: "GET"
+    })
+  }
+
+  async tailLlamacppInstanceLogs(
+    profileId: string,
+    lines?: number
+  ): Promise<LlamacppLogTailResponse> {
+    const query = this.buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
+      method: "GET"
+    })
+  }
+
+  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+    return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      path: "/api/v1/llamacpp/hardware",
+      method: "GET"
     })
   }
 
@@ -2334,67 +2448,25 @@ export class TldwApiClient {
     })
   }
 
-  async listAdminUsers(params?: {
-    page?: number
-    limit?: number
-    role?: string
-    is_active?: boolean
-    search?: string
-  }): Promise<AdminUserListResponse> {
-    const query = this.buildQuery(params as Record<string, any>)
-    return await bgRequest<AdminUserListResponse>({
-      path: `/api/v1/admin/users${query}`,
-      method: "GET"
-    })
-  }
-
-  async updateAdminUser(
-    userId: number,
-    payload: AdminUserUpdateRequest
-  ): Promise<{ message: string }> {
-    return await bgRequest<{ message: string }>({
-      path: `/api/v1/admin/users/${userId}`,
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-  }
-
-  async listAdminRoles(): Promise<AdminRole[]> {
-    return await bgRequest<AdminRole[]>({
-      path: "/api/v1/admin/roles",
-      method: "GET"
-    })
-  }
-
-  async createAdminRole(
-    name: string,
-    description?: string
-  ): Promise<AdminRole> {
-    return await bgRequest<AdminRole>({
-      path: "/api/v1/admin/roles",
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { name, description }
-    })
-  }
-
-  async deleteAdminRole(roleId: number): Promise<{ message: string }> {
-    return await bgRequest<{ message: string }>({
-      path: `/api/v1/admin/roles/${roleId}`,
-      method: "DELETE"
-    })
-  }
-
-  async createChatCompletion(request: ChatCompletionRequest): Promise<Response> {
+  async createChatCompletion(
+    request: ChatCompletionRequest,
+    options?: ChatCompletionRequestOptions
+  ): Promise<Response> {
     // Non-stream request via background
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "non-stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
-    const res = await bgRequest<Response>({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request })
+    const res = await bgRequest<Response>({
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: request,
+      abortSignal: options?.signal
+    })
     // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like
     // For simplicity, return a minimal object with json() and text()
     const data = res as any
@@ -2402,13 +2474,14 @@ export class TldwApiClient {
     return createJsonResponseLike(safeData, { status: 200 })
   }
 
-  async *streamChatCompletion(request: ChatCompletionRequest, options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }): AsyncGenerator<any, void, unknown> {
+  async *streamChatCompletion(request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
     request.stream = true
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
       mode: "stream",
-      body: request
+      body: request,
+      metadata: options?.debugMetadata
     })
     for await (const line of bgStream({ path: '/api/v1/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: request, abortSignal: options?.signal, streamIdleTimeoutMs: options?.streamIdleTimeoutMs })) {
       try {
@@ -2421,6 +2494,13 @@ export class TldwApiClient {
   }
 
   // RAG Methods
+  async getResearchStudioCapabilities(): Promise<unknown> {
+    return await this.request<unknown>({
+      path: '/api/v1/research-studio/capabilities',
+      method: 'GET'
+    })
+  }
+
   async ragHealth(): Promise<any> {
     return await this.request<any>({ path: '/api/v1/rag/health', method: 'GET' })
   }
@@ -3516,7 +3596,7 @@ export class TldwApiClient {
   }
 
   // Characters API
-  private normalizeCharacterListResponse(payload: unknown): any[] {
+  normalizeCharacterListResponse(payload: unknown): any[] {
     if (Array.isArray(payload)) {
       return payload
     }
@@ -3814,7 +3894,7 @@ export class TldwApiClient {
     }
   }
 
-  private getCharacterListIdentity(character: any, fallbackIndex: number): string {
+  getCharacterListIdentity(character: any, fallbackIndex: number): string {
     const id = character?.id ?? character?.character_id ?? character?.characterId
     if (id !== undefined && id !== null && String(id).trim().length > 0) {
       return `id:${String(id)}`
@@ -4433,7 +4513,7 @@ export class TldwApiClient {
     }
   }
 
-  private normalizeChatSummary(input: any): ServerChatSummary {
+  normalizeChatSummary(input: any): ServerChatSummary {
     const created_at = String(input?.created_at || input?.createdAt || "")
     const updated_at =
       input?.updated_at ??
@@ -4455,6 +4535,30 @@ export class TldwApiClient {
         : typeof messageCountRaw === "string" && messageCountRaw.trim().length > 0
           ? Number.parseFloat(messageCountRaw)
           : null
+    const character_id = input?.character_id ?? input?.characterId ?? null
+    const assistant_kind =
+      input?.assistant_kind ??
+      input?.assistantKind ??
+      (character_id != null ? "character" : null)
+    const assistant_id =
+      input?.assistant_id ??
+      input?.assistantId ??
+      (assistant_kind === "character" && character_id != null
+        ? String(character_id)
+        : null)
+    const scope_type =
+      input?.scope_type === "global" || input?.scopeType === "global"
+        ? "global"
+        : input?.scope_type === "workspace" || input?.scopeType === "workspace"
+          ? "workspace"
+          : null
+    const workspace_id =
+      typeof input?.workspace_id === "string" && input.workspace_id.trim().length > 0
+        ? input.workspace_id
+        : typeof input?.workspaceId === "string" &&
+            input.workspaceId.trim().length > 0
+          ? input.workspaceId
+          : null
     return {
       id: String(input?.id ?? ""),
       title: String(input?.title || ""),
@@ -4475,7 +4579,23 @@ export class TldwApiClient {
           : typeof input?.relevance === "number"
             ? input?.relevance
             : null,
-      character_id: input?.character_id ?? input?.characterId ?? null,
+      character_id,
+      assistant_kind:
+        assistant_kind === "character" || assistant_kind === "persona"
+          ? assistant_kind
+          : null,
+      assistant_id:
+        assistant_id == null || assistant_id === ""
+          ? null
+          : String(assistant_id),
+      persona_memory_mode:
+        input?.persona_memory_mode === "read_only" ||
+        input?.persona_memory_mode === "read_write"
+          ? input.persona_memory_mode
+          : input?.personaMemoryMode === "read_only" ||
+              input?.personaMemoryMode === "read_write"
+            ? input.personaMemoryMode
+            : null,
       parent_conversation_id:
         input?.parent_conversation_id ?? input?.parentConversationId ?? null,
       root_id: input?.root_id ?? input?.rootId ?? null,
@@ -4486,7 +4606,9 @@ export class TldwApiClient {
           ? input.version
           : typeof input?.expected_version === "number"
             ? input.expected_version
-            : null
+            : null,
+      scope_type,
+      workspace_id
     }
   }
 
@@ -4500,9 +4622,9 @@ export class TldwApiClient {
 
   async listChats(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatSummary[]> {
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4531,9 +4653,9 @@ export class TldwApiClient {
 
   async listChatsWithMeta(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
@@ -4570,12 +4692,12 @@ export class TldwApiClient {
     }
   }
 
-  async createChat(payload: Record<string, any>): Promise<ServerChatSummary> {
+  async createChat(payload: Record<string, any>, options?: { scope?: ChatScope }): Promise<ServerChatSummary> {
     const res = await bgRequest<any>({
       path: "/api/v1/chats/",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: { ...payload, ...toChatScopeParams(options?.scope) }
     })
     return this.normalizeChatSummary(res)
   }
@@ -4593,10 +4715,14 @@ export class TldwApiClient {
     })
   }
 
-  async getChat(chat_id: string | number): Promise<ServerChatSummary> {
+  async getChat(
+    chat_id: string | number,
+    options?: { scope?: ChatScope }
+  ): Promise<ServerChatSummary> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}`,
+      path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET"
     })
     return this.normalizeChatSummary(res)
@@ -4671,10 +4797,11 @@ export class TldwApiClient {
 
   async getChatLorebookDiagnostics(
     chat_id: string | number,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<LorebookDiagnosticExportResponse> {
     const cid = String(chat_id)
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     return await bgRequest<LorebookDiagnosticExportResponse>({
       path: `/api/v1/chats/${cid}/diagnostics/lorebook${query}`,
       method: "GET"
@@ -4754,11 +4881,16 @@ export class TldwApiClient {
       permission?: ConversationSharePermission
       ttl_seconds?: number
       label?: string
-    }
+    },
+    options?: { scope?: ChatScope }
   ): Promise<ConversationShareLinkCreateResponse> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ConversationShareLinkCreateResponse>({
-      path: `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+      path: appendPathQuery(
+        `/api/v1/chat/conversations/${encodeURIComponent(cid)}/share-links`,
+        query
+      ),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload || {},
@@ -4801,10 +4933,13 @@ export class TldwApiClient {
   async listChatMessages(
     chat_id: string | number,
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; scope?: ChatScope }
   ): Promise<ServerChatMessage[]> {
     const cid = String(chat_id)
-    const query = this.buildQuery(params)
+    const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(params || {})
+    })
     const cacheKey = this.getChatMessagesCacheKey(cid, query)
     const cached = this.chatMessagesCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) {
@@ -4945,11 +5080,13 @@ export class TldwApiClient {
 
   async addChatMessage(
     chat_id: string | number,
-    payload: Record<string, any>
+    payload: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<ServerChatMessage> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<ServerChatMessage>({
-      path: `/api/v1/chats/${cid}/messages`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload
@@ -4996,14 +5133,21 @@ export class TldwApiClient {
     payload: Record<string, any>
   ): Promise<any> {
     const cid = String(chat_id)
-    const res = await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/completions/persist`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-    this.invalidateChatMessagesCache(cid)
-    return res
+    try {
+      const res = await bgRequest<any>({
+        path: `/api/v1/chats/${cid}/completions/persist`,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      })
+      this.invalidateChatMessagesCache(cid)
+      return res
+    } catch (error) {
+      if (isSavedDegradedCharacterPersistError(error)) {
+        this.invalidateChatMessagesCache(cid)
+      }
+      throw error
+    }
   }
 
   async *streamCharacterChatCompletion(
@@ -5122,9 +5266,10 @@ export class TldwApiClient {
     snippet: string
     tags?: string[]
     make_flashcard?: boolean
-  }): Promise<any> {
+  }, options?: { scope?: ChatScope }): Promise<any> {
     const body = {
       ...payload,
+      ...toChatScopeParams(options?.scope),
       conversation_id: String(payload.conversation_id),
       message_id: String(payload.message_id)
     }
@@ -5246,12 +5391,13 @@ export class TldwApiClient {
     scan_depth?: number
     token_budget?: number
     recursive_scanning?: boolean
-  }): Promise<WorldBookProcessResponse> {
+  }, options?: { signal?: AbortSignal }): Promise<WorldBookProcessResponse> {
     return await bgRequest<WorldBookProcessResponse>({
       path: "/api/v1/characters/world-books/process",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      abortSignal: options?.signal
     })
   }
 
@@ -5395,14 +5541,16 @@ export class TldwApiClient {
     text: string
     token_budget?: number
     dictionary_id?: number | string
+    dictionary_ids?: Array<number | string>
     max_iterations?: number
     chat_id?: string
-  }): Promise<any> {
+  }, options?: { signal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/chat/dictionaries/process",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      abortSignal: options?.signal
     })
   }
 
@@ -5597,13 +5745,16 @@ export class TldwApiClient {
     })
   }
 
-  async previewChatbook(file: File): Promise<any> {
+  async previewChatbook(file: File, options?: { source_format?: string }): Promise<any> {
     const data = await file.arrayBuffer()
     const name = file.name || "chatbook.zip"
     const type = file.type || "application/zip"
+    const fields: Record<string, any> = {}
+    if (options?.source_format) fields.source_format = options.source_format
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/preview",
       method: "POST",
+      fields,
       file: { name, type, data }
     })
   }
@@ -5617,6 +5768,8 @@ export class TldwApiClient {
       import_embeddings?: boolean
       async_mode?: boolean
       content_selections?: Record<string, string[]>
+      source_format?: string
+      selected_openwebui_user_id?: string
     }
   ): Promise<any> {
     const data = await file.arrayBuffer()
@@ -5625,13 +5778,45 @@ export class TldwApiClient {
     const normalized: Record<string, any> = {}
     for (const [k, v] of Object.entries(options || {})) {
       if (typeof v === "undefined" || v === null) continue
-      normalized[k] = typeof v === "boolean" ? (v ? "true" : "false") : v
+      if (typeof v === "boolean") {
+        normalized[k] = v ? "true" : "false"
+      } else if (typeof v === "object") {
+        normalized[k] = JSON.stringify(v)
+      } else {
+        normalized[k] = v
+      }
     }
     return await bgUpload<any>({
       path: "/api/v1/chatbooks/import",
       method: "POST",
       fields: normalized,
       file: { name, type, data }
+    })
+  }
+
+  async previewOpenWebUIHydration(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async createOpenWebUIHydrationJob(payload: OpenWebUIHydrationRequest): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/chatbooks/openwebui/hydration/jobs",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async getOpenWebUIHydrationJob(job_id: string): Promise<any> {
+    const id = encodeURIComponent(String(job_id))
+    return await bgRequest<any>({
+      path: `/api/v1/chatbooks/openwebui/hydration/jobs/${id}`,
+      method: "GET"
     })
   }
 
@@ -6621,6 +6806,7 @@ export class TldwApiClient {
     title?: string
     tags?: string[]
     notes?: string
+    archive_mode?: "use_default" | "always" | "never"
     status?: string
     favorite?: boolean
     summary?: string
@@ -7283,277 +7469,6 @@ export class TldwApiClient {
   // Slides / Presentations API
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async generateSlidesFromMedia(
-    mediaId: number,
-    options?: {
-      titleHint?: string
-      theme?: string
-      provider?: string
-      model?: string
-      temperature?: number
-      signal?: AbortSignal
-    }
-  ): Promise<{
-    id: string
-    title: string
-    description?: string
-    theme: string
-    slides: Array<{
-      order: number
-      layout: string
-      title?: string
-      content: string
-      speaker_notes?: string
-    }>
-    version: number
-    created_at: string
-  }> {
-    const body: Record<string, unknown> = { media_id: mediaId }
-    if (options?.titleHint) body.title_hint = options.titleHint
-    if (options?.theme) body.theme = options.theme
-    if (options?.provider) body.provider = options.provider
-    if (options?.model) body.model = options.model
-    if (options?.temperature != null) body.temperature = options.temperature
-    return await this.request<any>({
-      path: "/api/v1/slides/generate/from-media",
-      method: "POST",
-      body,
-      abortSignal: options?.signal
-    })
-  }
-
-  async getPresentation(presentationId: string): Promise<{
-    id: string
-    title: string
-    description?: string
-    theme: string
-    slides: Array<{
-      order: number
-      layout: string
-      title?: string
-      content: string
-      speaker_notes?: string
-    }>
-    version: number
-    created_at: string
-    last_modified: string
-  }> {
-    return await this.request<any>({
-      path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}`,
-      method: "GET"
-    })
-  }
-
-  async exportPresentation(
-    presentationId: string,
-    format: "revealjs" | "markdown" | "json" | "pdf"
-  ): Promise<Blob> {
-    await this.ensureConfigForRequest(true)
-
-    const response = await this.request<any>({
-      path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}/export?format=${encodeURIComponent(format)}`,
-      method: "GET",
-      responseType: "arrayBuffer",
-      returnResponse: true
-    })
-
-    if (!response) {
-      throw new Error("Export failed")
-    }
-
-    // Handle response data
-    let data: ArrayBuffer
-    if (response.data instanceof ArrayBuffer) {
-      data = response.data
-    } else if (response.data instanceof Uint8Array) {
-      data = response.data.buffer.slice(
-        response.data.byteOffset,
-        response.data.byteOffset + response.data.byteLength
-      )
-    } else if (typeof response.data === "string") {
-      const encoder = new TextEncoder()
-      data = encoder.encode(response.data).buffer
-    } else if (response.data && typeof response.data === "object") {
-      // Handle JSON response
-      const encoder = new TextEncoder()
-      data = encoder.encode(JSON.stringify(response.data)).buffer
-    } else {
-      throw new Error("Invalid export response")
-    }
-
-    // Determine MIME type based on format
-    let mimeType: string
-    switch (format) {
-      case "revealjs":
-        mimeType = "application/zip"
-        break
-      case "markdown":
-        mimeType = "text/markdown"
-        break
-      case "json":
-        mimeType = "application/json"
-        break
-      case "pdf":
-        mimeType = "application/pdf"
-        break
-      default:
-        mimeType = "application/octet-stream"
-    }
-
-    return new Blob([data], { type: mimeType })
-  }
-
-  // Skills API
-  async listSkills(params?: {
-    limit?: number
-    offset?: number
-  }): Promise<any> {
-    const query = this.buildQuery(params)
-    const base = await this.resolveApiPath("skills.list", [
-      "/api/v1/skills",
-      "/api/v1/skills/"
-    ])
-    return await bgRequest<any>({
-      path: appendPathQuery(base, query),
-      method: "GET"
-    })
-  }
-
-  async getSkill(name: string): Promise<any> {
-    const base = await this.resolveApiPath("skills.get", [
-      "/api/v1/skills/{name}",
-      "/api/v1/skills/{name}/"
-    ])
-    const path = this.fillPathParams(base, name)
-    return await bgRequest<any>({ path, method: "GET" })
-  }
-
-  async createSkill(payload: {
-    name: string
-    content: string
-    supporting_files?: Record<string, string> | null
-  }): Promise<any> {
-    const base = await this.resolveApiPath("skills.create", [
-      "/api/v1/skills",
-      "/api/v1/skills/"
-    ])
-    return await bgRequest<any>({
-      path: base,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-  }
-
-  async updateSkill(
-    name: string,
-    payload: {
-      content?: string
-      supporting_files?: Record<string, string | null> | null
-    },
-    version?: number
-  ): Promise<any> {
-    const base = await this.resolveApiPath("skills.update", [
-      "/api/v1/skills/{name}",
-      "/api/v1/skills/{name}/"
-    ])
-    const path = this.fillPathParams(base, name)
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
-    if (version != null) {
-      headers["If-Match"] = String(version)
-    }
-    return await bgRequest<any>({ path, method: "PUT", headers, body: payload })
-  }
-
-  async deleteSkill(name: string): Promise<void> {
-    const base = await this.resolveApiPath("skills.delete", [
-      "/api/v1/skills/{name}",
-      "/api/v1/skills/{name}/"
-    ])
-    const path = this.fillPathParams(base, name)
-    await bgRequest<any>({ path, method: "DELETE" })
-  }
-
-  async importSkill(payload: {
-    name?: string
-    content: string
-    supporting_files?: Record<string, string> | null
-    overwrite?: boolean
-  }): Promise<any> {
-    const base = await this.resolveApiPath("skills.import", [
-      "/api/v1/skills/import",
-      "/api/v1/skills/import/"
-    ])
-    return await bgRequest<any>({
-      path: base,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
-  }
-
-  async importSkillFile(file: File): Promise<any> {
-    const data = await file.arrayBuffer()
-    return await this.upload<any>({
-      path: "/api/v1/skills/import/file" as AllowedPath,
-      method: "POST",
-      fileFieldName: "file",
-      file: {
-        name: file.name || "skill-import",
-        type: file.type || "application/octet-stream",
-        data
-      }
-    })
-  }
-
-  async seedSkills(params?: {
-    overwrite?: boolean
-  }): Promise<any> {
-    const query = this.buildQuery(params)
-    const base = await this.resolveApiPath("skills.seed", [
-      "/api/v1/skills/seed",
-      "/api/v1/skills/seed/"
-    ])
-    return await bgRequest<any>({
-      path: appendPathQuery(base, query),
-      method: "POST"
-    })
-  }
-
-  async exportSkill(name: string): Promise<Blob> {
-    await this.ensureConfigForRequest(true)
-    const res = await bgRequest<ArrayBuffer, AllowedPath>({
-      path: `/api/v1/skills/${encodeURIComponent(name)}/export` as AllowedPath,
-      method: "GET",
-      responseType: "arrayBuffer"
-    })
-    return new Blob([res], { type: "application/zip" })
-  }
-
-  async executeSkill(
-    name: string,
-    args?: string
-  ): Promise<any> {
-    const base = await this.resolveApiPath("skills.execute", [
-      "/api/v1/skills/{name}/execute",
-      "/api/v1/skills/{name}/execute/"
-    ])
-    const path = this.fillPathParams(base, name)
-    return await bgRequest<any>({
-      path,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: { args: args || "" }
-    })
-  }
-
-  async getSkillsContext(): Promise<any> {
-    const base = await this.resolveApiPath("skills.context", [
-      "/api/v1/skills/context",
-      "/api/v1/skills/context/"
-    ])
-    return await bgRequest<any>({ path: base, method: "GET" })
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -7567,19 +7482,32 @@ import { chatRagMethods } from "./domains/chat-rag"
 import { collectionsMethods } from "./domains/collections"
 import { modelsAudioMethods } from "./domains/models-audio"
 import { presentationsMethods } from "./domains/presentations"
+import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
 import { workspaceApiMethods } from "./domains/workspace-api"
+import { webClipperMethods } from "./domains/web-clipper"
+
+export class TldwApiClient extends TldwApiClientBase {}
 
 // Declaration merging: extend the class type with all domain methods
+type TldwDomainMethodOverride =
+  | keyof TldwApiClientBase
+  | "normalizeCharacterListResponse"
+  | "getCharacterListIdentity"
+  | "normalizeChatSummary"
+type TldwDomainMethods<T> = Omit<T, TldwDomainMethodOverride>
+
 export interface TldwApiClient
   extends
-    Omit<typeof adminMethods, never>,
-    Omit<typeof mediaMethods, never>,
-    Omit<typeof characterMethods, never>,
-    Omit<typeof chatRagMethods, never>,
-    Omit<typeof collectionsMethods, never>,
-    Omit<typeof modelsAudioMethods, never>,
-    Omit<typeof presentationsMethods, never>,
-    Omit<typeof workspaceApiMethods, never> {}
+    TldwDomainMethods<typeof adminMethods>,
+    TldwDomainMethods<typeof mediaMethods>,
+    TldwDomainMethods<typeof characterMethods>,
+    TldwDomainMethods<typeof chatRagMethods>,
+    TldwDomainMethods<typeof collectionsMethods>,
+    TldwDomainMethods<typeof modelsAudioMethods>,
+    TldwDomainMethods<typeof presentationsMethods>,
+    TldwDomainMethods<typeof prototypeWorkspaceMethods>,
+    TldwDomainMethods<typeof workspaceApiMethods>,
+    TldwDomainMethods<typeof webClipperMethods> {}
 
 // Apply domain methods to the prototype
 Object.assign(
@@ -7591,7 +7519,9 @@ Object.assign(
   collectionsMethods,
   modelsAudioMethods,
   presentationsMethods,
-  workspaceApiMethods
+  prototypeWorkspaceMethods,
+  workspaceApiMethods,
+  webClipperMethods
 )
 
 // Also expose core helpers that domain files reference via `this`

@@ -160,9 +160,9 @@ Return exactly {max_rewrites} rewritten queries, one per line. No numbering, no 
             "strategy": strategy,
         }
 
-    except _QUERY_ADAPTER_EXCEPTIONS as e:
-        logger.exception(f"Query rewrite adapter error: {e}")
-        return {"error": f"query_rewrite_error:{e}", "original_query": query, "rewritten_queries": []}
+    except _QUERY_ADAPTER_EXCEPTIONS:
+        logger.exception("Query rewrite adapter error")
+        return {"error": "query_rewrite_error", "original_query": query, "rewritten_queries": []}
 
 
 @registry.register(
@@ -286,8 +286,8 @@ async def run_query_expand_adapter(config: dict[str, Any], context: dict[str, An
                         all_synonyms.update(result.synonyms)
                         all_keywords.extend(result.keywords)
                         all_entities.extend(result.entities)
-                    except _QUERY_STRATEGY_EXCEPTIONS as strat_e:
-                        logger.debug(f"Query expansion strategy {strat_name} failed: {strat_e}")
+                    except _QUERY_STRATEGY_EXCEPTIONS:
+                        logger.debug("Query expansion strategy failed")
 
         # Deduplicate
         seen = set()
@@ -315,9 +315,9 @@ async def run_query_expand_adapter(config: dict[str, Any], context: dict[str, An
             "strategies_used": strategies,
         }
 
-    except _QUERY_ADAPTER_EXCEPTIONS as e:
-        logger.exception(f"Query expand adapter error: {e}")
-        return {"error": f"query_expand_error:{e}"}
+    except _QUERY_ADAPTER_EXCEPTIONS:
+        logger.exception("Query expand adapter error")
+        return {"error": "query_expand_error"}
 
 
 @registry.register(
@@ -394,9 +394,9 @@ Generate {num_hypothetical} hypothetical document(s). If multiple, separate with
             "document_type": document_type,
         }
 
-    except _QUERY_ADAPTER_EXCEPTIONS as e:
-        logger.exception(f"HyDE generate adapter error: {e}")
-        return {"error": f"hyde_error:{e}", "query": query, "hypothetical_documents": []}
+    except _QUERY_ADAPTER_EXCEPTIONS:
+        logger.exception("HyDE generate adapter error")
+        return {"error": "hyde_error", "query": query, "hypothetical_documents": []}
 
 
 @registry.register(
@@ -480,9 +480,9 @@ async def run_semantic_cache_check_adapter(config: dict[str, Any], context: dict
 
         return {"cache_hit": False, "query": query}
 
-    except _QUERY_ADAPTER_EXCEPTIONS as e:
-        logger.exception(f"Semantic cache check error: {e}")
-        return {"cache_hit": False, "query": query, "error": str(e)}
+    except _QUERY_ADAPTER_EXCEPTIONS:
+        logger.exception("Semantic cache check error")
+        return {"cache_hit": False, "query": query, "error": "semantic_cache_error"}
 
 
 @registry.register(
@@ -515,7 +515,9 @@ async def run_search_aggregate_adapter(config: dict[str, Any], context: dict[str
     if not results:
         prev = context.get("prev") or context.get("last") or {}
         if isinstance(prev, dict):
-            results = prev.get("results") or prev.get("documents") or []
+            results = prev.get("results")
+            if not results and prev.get("documents"):
+                results = [{"documents": prev.get("documents"), "source": prev.get("source", "prev")}]
 
     if not isinstance(results, list):
         results = [results] if results else []

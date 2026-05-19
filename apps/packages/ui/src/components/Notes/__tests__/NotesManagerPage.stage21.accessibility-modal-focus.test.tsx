@@ -241,10 +241,10 @@ describe("NotesManagerPage stage 21 accessibility modal focus handoff", () => {
     })
   })
 
-  it("closes keyword picker with Escape and restores focus to Browse keywords trigger", async () => {
+  it("closes keyword picker with Escape and restores focus to Browse tags trigger", async () => {
     renderPage()
 
-    const browseButton = screen.getByRole("button", { name: "Browse keywords" })
+    const browseButton = screen.getByRole("button", { name: "Browse tags" })
     browseButton.focus()
     fireEvent.click(browseButton)
 

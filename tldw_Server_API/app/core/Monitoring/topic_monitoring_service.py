@@ -534,6 +534,14 @@ class TopicMonitoringService:
             ) or {}
             self._enabled = self._resolve_enabled(monitoring_cfg)
             self._max_scan_chars = self._resolve_max_scan_chars()
+            self._dedup_window_seconds = self._coerce_int(
+                os.getenv("TOPIC_MONITOR_DEDUP_SECONDS", monitoring_cfg.get("dedup_seconds", 300)),
+                300,
+            )
+            self._simhash_distance = self._coerce_int(
+                os.getenv("TOPIC_MONITOR_SIMHASH_DISTANCE", monitoring_cfg.get("simhash_distance", 3)),
+                3,
+            )
             self._dedupe_state = {}
             self._dedupe_stream_last_seen = {}
             self._dedupe_last_cleanup = 0.0
@@ -815,8 +823,11 @@ class TopicMonitoringService:
                 try:
                     notifier = get_notification_service()
                     notifier.notify(alert)
-                except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as _ne:
-                    logger.debug(f"Topic monitoring notify skipped: {_ne}")
+                except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug(
+                        "Topic monitoring notify skipped after {}",
+                        type(exc).__name__,
+                    )
                 total_created += 1
         return total_created
 
@@ -859,7 +870,10 @@ class TopicMonitoringService:
                     metadata=metadata,
                 )
             except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Topic monitoring background evaluation failed: {exc}")
+                logger.debug(
+                    "Topic monitoring background evaluation failed after {}",
+                    type(exc).__name__,
+                )
 
         try:
             loop = asyncio.get_running_loop()
@@ -871,7 +885,10 @@ class TopicMonitoringService:
             try:
                 await asyncio.to_thread(_run_sync)
             except _TOPIC_MONITOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Topic monitoring background evaluation failed: {exc}")
+                logger.debug(
+                    "Topic monitoring background evaluation failed after {}",
+                    type(exc).__name__,
+                )
 
         loop.create_task(_runner())
 

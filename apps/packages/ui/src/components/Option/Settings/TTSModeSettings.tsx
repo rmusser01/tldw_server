@@ -3,6 +3,9 @@ import { getModels, getVoices } from "@/services/elevenlabs"
 import {
   DEFAULT_TLDW_TTS_MODEL,
   getTTSSettings,
+  setElevenLabsApiKey,
+  setElevenLabsKeyTestedAt,
+  setElevenLabsKeyValid,
   setTTSSettings,
   SUPPORTED_TLDW_TTS_FORMATS
 } from "@/services/tts"
@@ -27,12 +30,37 @@ import {
 import { normalizeTtsProviderKey, toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 import { listCustomVoices, type TldwCustomVoice } from "@/services/tldw/voice-cloning"
 import { useWebUI } from "@/store/webui"
-import { Alert, Button, Input, InputNumber, Select, Skeleton, Switch, Space } from "antd"
+import { Alert, Button, Input, InputNumber, Select, Skeleton, Switch, Space, Tag } from "antd"
+import {
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  QuestionCircleOutlined
+} from "@ant-design/icons"
 import { useTranslation } from "react-i18next"
 import React, { useState } from "react"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
+
+const ELEVENLABS_KEY_DEBOUNCE_MS = 350
+
+const formatValidationTimestamp = (value?: string | null) => {
+  if (!value) return ""
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString()
+}
+
+const getErrorSignature = (error: unknown) => {
+  if (!error) return ""
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
 
 export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   const { t } = useTranslation("settings")
@@ -43,6 +71,8 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   // API key test states
   const [elevenLabsTestResult, setElevenLabsTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [testingElevenLabs, setTestingElevenLabs] = useState(false)
+  const [debouncedElevenLabsApiKey, setDebouncedElevenLabsApiKey] = useState("")
+  const lastPersistedElevenLabsValidationRef = React.useRef<string | null>(null)
 
   const ids = {
     ttsEnabled: "tts-enabled-toggle",
@@ -83,11 +113,15 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       elevenLabsApiKey: "",
       elevenLabsVoiceId: "",
       elevenLabsModel: "",
+      elevenLabsKeyValid: null as boolean | null,
+      elevenLabsKeyTestedAt: "",
       responseSplitting: "",
       openAITTSBaseUrl: "",
       openAITTSApiKey: "",
       openAITTSModel: "",
       openAITTSVoice: "",
+      openAITTSKeyValid: null as boolean | null,
+      openAITTSKeyTestedAt: "",
       ttsAutoPlay: false,
       playbackSpeed: 1,
     tldwTtsModel: "",
@@ -126,18 +160,105 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     }
   })
 
+  React.useEffect(() => {
+    const key = String(form.values.elevenLabsApiKey || "").trim()
+    const timer = window.setTimeout(() => {
+      setDebouncedElevenLabsApiKey(key)
+    }, ELEVENLABS_KEY_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [form.values.elevenLabsApiKey])
+
   const { data: elevenLabsData, error: elevenLabsError } = useQuery({
-    queryKey: ["fetchElevenLabsData", form.values.elevenLabsApiKey],
+    queryKey: ["fetchElevenLabsData", debouncedElevenLabsApiKey],
     queryFn: async () => {
       const [voices, models] = await Promise.all([
-        getVoices(form.values.elevenLabsApiKey),
-        getModels(form.values.elevenLabsApiKey)
+        getVoices(debouncedElevenLabsApiKey),
+        getModels(debouncedElevenLabsApiKey)
       ])
       return { voices, models }
     },
     enabled:
-      form.values.ttsProvider === "elevenlabs" && !!form.values.elevenLabsApiKey
+      form.values.ttsProvider === "elevenlabs" && !!debouncedElevenLabsApiKey
   })
+
+  const persistElevenLabsValidation = React.useCallback(
+    async (
+      ok: boolean,
+      validatedKey?: string,
+      options?: { notifyOnError?: boolean }
+    ) => {
+      const currentKey = String(form.values.elevenLabsApiKey || "").trim()
+      if (validatedKey && currentKey !== validatedKey) return
+      const testedAt = new Date().toISOString()
+      const validationValues = {
+        elevenLabsApiKey: currentKey,
+        elevenLabsKeyValid: ok,
+        elevenLabsKeyTestedAt: testedAt
+      }
+
+      try {
+        await Promise.all([
+          setElevenLabsApiKey(currentKey),
+          setElevenLabsKeyValid(ok),
+          setElevenLabsKeyTestedAt(testedAt)
+        ])
+        const wasDirty = form.isDirty()
+        const nextFormValues = {
+          ...form.values,
+          ...validationValues
+        }
+        form.setValues(validationValues)
+        if (!wasDirty) {
+          form.resetDirty(nextFormValues)
+        }
+        queryClient.setQueryData(
+          ["fetchTTSSettings"],
+          (previous: typeof form.values | undefined) => ({
+            ...(previous || form.values),
+            ...validationValues
+          })
+        )
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to persist ElevenLabs validation status:", error)
+        if (options?.notifyOnError) {
+          message.error(
+            t(
+              "generalSettings.tts.apiKeyStatus.persistError",
+              "API key validation completed, but the validation status could not be saved."
+            ) as string
+          )
+        }
+      }
+    },
+    [form, message, queryClient, t]
+  )
+
+  React.useEffect(() => {
+    if (form.values.ttsProvider !== "elevenlabs" || !debouncedElevenLabsApiKey) {
+      return
+    }
+    if (!elevenLabsData && !elevenLabsError) return
+    const ok =
+      Boolean(elevenLabsData) &&
+      !elevenLabsError &&
+      Array.isArray(elevenLabsData.voices) &&
+      elevenLabsData.voices.length > 0 &&
+      Array.isArray(elevenLabsData.models) &&
+      elevenLabsData.models.length > 0
+    const persistKey = `${debouncedElevenLabsApiKey}:${ok}:${getErrorSignature(
+      elevenLabsError
+    )}`
+    if (lastPersistedElevenLabsValidationRef.current === persistKey) return
+    lastPersistedElevenLabsValidationRef.current = persistKey
+    void persistElevenLabsValidation(ok, debouncedElevenLabsApiKey)
+  }, [
+    debouncedElevenLabsApiKey,
+    elevenLabsData,
+    elevenLabsError,
+    form.values.ttsProvider,
+    persistElevenLabsValidation
+  ])
 
   const inferredTldwProviderKey = React.useMemo(
     () => inferTldwProviderFromModel(form.values.tldwTtsModel),
@@ -358,7 +479,12 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   // Save mutation with loading state
   const { mutate: saveTTSMutation, isPending: isSaving } = useMutation({
     mutationFn: async (values: typeof form.values) => {
-      await setTTSSettings(values)
+      const normalizedValues = {
+        ...values,
+        elevenLabsApiKey: String(values.elevenLabsApiKey || "").trim(),
+        openAITTSApiKey: String(values.openAITTSApiKey || "").trim()
+      }
+      await setTTSSettings(normalizedValues)
       setTTSEnabled(values.ttsEnabled)
     },
     onSuccess: () => {
@@ -383,7 +509,8 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
 
   // Test ElevenLabs API key
   const testElevenLabsApiKey = async () => {
-    if (!form.values.elevenLabsApiKey) {
+    const elevenLabsApiKey = String(form.values.elevenLabsApiKey || "").trim()
+    if (!elevenLabsApiKey) {
       setElevenLabsTestResult({ ok: false, message: t("generalSettings.tts.apiKeyTest.enterKey", "Please enter an API key first") })
       return
     }
@@ -391,8 +518,8 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     setElevenLabsTestResult(null)
     try {
       const [voices, models] = await Promise.all([
-        getVoices(form.values.elevenLabsApiKey),
-        getModels(form.values.elevenLabsApiKey)
+        getVoices(elevenLabsApiKey),
+        getModels(elevenLabsApiKey)
       ])
       const hasVoices = Array.isArray(voices) && voices.length > 0
       const hasModels = Array.isArray(models) && models.length > 0
@@ -403,6 +530,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
           "API key valid! Found {{voiceCount}} voices and {{modelCount}} models.",
           { voiceCount: voices.length, modelCount: models.length }
         )
+        await persistElevenLabsValidation(true, elevenLabsApiKey, { notifyOnError: true })
         message.success(successMessage as string)
         setElevenLabsTestResult({
           ok: true,
@@ -413,6 +541,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
           "generalSettings.tts.apiKeyTest.noVoices",
           "API key accepted but no voices or models found"
         )
+        await persistElevenLabsValidation(false, elevenLabsApiKey, { notifyOnError: true })
         setElevenLabsTestResult({
           ok: false,
           message: noResourcesMessage as string
@@ -432,6 +561,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
             ? e
             : JSON.stringify(e)
       const failureMessage = `${baseMessage} (${errorDetail})`
+      await persistElevenLabsValidation(false, elevenLabsApiKey, { notifyOnError: true })
       message.error(failureMessage)
       setElevenLabsTestResult({
         ok: false,
@@ -441,6 +571,79 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       setTestingElevenLabs(false)
     }
   }
+
+  const elevenLabsValidationBadge = React.useMemo(() => {
+    if (form.values.elevenLabsKeyValid === true) {
+      return {
+        color: "success",
+        icon: <CheckCircleOutlined aria-label="valid" />,
+        label: t("generalSettings.tts.apiKeyStatus.valid", "Valid") as string
+      }
+    }
+    if (form.values.elevenLabsKeyValid === false) {
+      return {
+        color: "error",
+        icon: <ExclamationCircleOutlined aria-label="failed" />,
+        label: t("generalSettings.tts.apiKeyStatus.failed", "Failed") as string
+      }
+    }
+    return {
+      color: "default",
+      icon: <QuestionCircleOutlined aria-label="untested" />,
+      label: t("generalSettings.tts.apiKeyStatus.untested", "Untested") as string
+    }
+  }, [form.values.elevenLabsKeyValid, t])
+  const elevenLabsLastTested = formatValidationTimestamp(
+    form.values.elevenLabsKeyTestedAt
+  )
+
+  const openAIValidationBadge = React.useMemo(() => {
+    if (form.values.openAITTSKeyValid === true) {
+      return {
+        color: "success",
+        icon: <CheckCircleOutlined aria-label="valid" />,
+        label: t("generalSettings.tts.apiKeyStatus.valid", "Valid") as string
+      }
+    }
+    if (form.values.openAITTSKeyValid === false) {
+      return {
+        color: "error",
+        icon: <ExclamationCircleOutlined aria-label="failed" />,
+        label: t("generalSettings.tts.apiKeyStatus.failed", "Failed") as string
+      }
+    }
+    return {
+      color: "default",
+      icon: <QuestionCircleOutlined aria-label="untested" />,
+      label: t("generalSettings.tts.apiKeyStatus.untested", "Untested") as string
+    }
+  }, [form.values.openAITTSKeyValid, t])
+  const openAILastTested = formatValidationTimestamp(
+    form.values.openAITTSKeyTestedAt
+  )
+
+  const handleElevenLabsKeyChange = React.useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      form.setValues({
+        elevenLabsApiKey: event.target.value.trim(),
+        elevenLabsKeyValid: null,
+        elevenLabsKeyTestedAt: ""
+      })
+      setElevenLabsTestResult(null)
+    },
+    [form]
+  )
+
+  const handleOpenAIKeyChange = React.useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      form.setValues({
+        openAITTSApiKey: event.target.value.trim(),
+        openAITTSKeyValid: null,
+        openAITTSKeyTestedAt: ""
+      })
+    },
+    [form]
+  )
 
   if (status === "pending") {
     return <Skeleton active />
@@ -554,16 +757,36 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         {form.values.ttsProvider === "elevenlabs" && (
           <>
             <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
-              <span className="text-text">
-                {t("generalSettings.tts.elevenLabs.apiKey", "API Key")}
-              </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-text">
+                    {t("generalSettings.tts.elevenLabs.apiKey", "API Key")}
+                  </span>
+                  <Tag
+                    color={elevenLabsValidationBadge.color}
+                    icon={elevenLabsValidationBadge.icon}
+                  >
+                    {elevenLabsValidationBadge.label}
+                  </Tag>
+                </div>
+                {elevenLabsLastTested && (
+                  <span className="text-xs text-text-subtle">
+                    {t(
+                      "generalSettings.tts.apiKeyStatus.lastTested",
+                      "Last tested {{timestamp}}",
+                      { timestamp: elevenLabsLastTested }
+                    )}
+                  </span>
+                )}
+              </div>
               <Space.Compact className="mt-4 sm:mt-0">
                 <Input.Password
                   id={ids.elevenApiKey}
                   placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   className="!w-[220px]"
                   required
-                  {...form.getInputProps("elevenLabsApiKey")}
+                  value={form.values.elevenLabsApiKey}
+                  onChange={handleElevenLabsKeyChange}
                   onFocus={() => setElevenLabsTestResult(null)}
                 />
                 <Button
@@ -653,13 +876,33 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
             </div>
 
             <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
-              <span className="text-text">
-                API Key
-              </span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-text">
+                    API Key
+                  </span>
+                  <Tag
+                    color={openAIValidationBadge.color}
+                    icon={openAIValidationBadge.icon}
+                  >
+                    {openAIValidationBadge.label}
+                  </Tag>
+                </div>
+                {openAILastTested && (
+                  <span className="text-xs text-text-subtle">
+                    {t(
+                      "generalSettings.tts.apiKeyStatus.lastTested",
+                      "Last tested {{timestamp}}",
+                      { timestamp: openAILastTested }
+                    )}
+                  </span>
+                )}
+              </div>
               <Input.Password
                 placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                 className=" mt-4 sm:mt-0 !w-[300px] sm:w-[200px]"
-                {...form.getInputProps("openAITTSApiKey")}
+                value={form.values.openAITTSApiKey}
+                onChange={handleOpenAIKeyChange}
               />
             </div>
 
@@ -745,9 +988,12 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
               )}
             </div>
             <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
-              <span className="text-text">
-                TTS Voice
-              </span>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-text">
+                  TTS Voice
+                </span>
+                <a href="https://github.com/rmusser01/tldw_server/tree/main/Docs/STT-TTS/" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted underline">Voice cloning setup guide</a>
+              </div>
               <Select
                 id={ids.tldwVoice}
                 aria-label="tldw TTS voice"

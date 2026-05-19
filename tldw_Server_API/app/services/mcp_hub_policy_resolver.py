@@ -5,6 +5,13 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Agent_Client_Protocol.merge_utils import (
+    UNION_LIST_KEYS as _UNION_LIST_KEYS,
+    _as_dict,
+    _as_str_list,
+    _unique,
+    merge_config,
+)
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 from tldw_Server_API.app.services.mcp_hub_capability_resolution_service import (
@@ -14,47 +21,6 @@ from tldw_Server_API.app.services.mcp_hub_capability_resolution_service import (
 
 _TARGET_ORDER = {"default": 0, "group": 1, "persona": 2}
 _SCOPE_ORDER = {"global": 0, "org": 1, "team": 2, "user": 3}
-_UNION_LIST_KEYS = {
-    "allowed_tools",
-    "denied_tools",
-    "tool_names",
-    "tool_patterns",
-    "capabilities",
-    "tool_modules",
-    "module_ids",
-}
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    """Return a shallow dict copy for mapping values, otherwise an empty dict."""
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _as_str_list(value: Any) -> list[str]:
-    """Normalize a scalar or iterable value into a list of non-empty strings."""
-    if isinstance(value, str):
-        cleaned = value.strip()
-        return [cleaned] if cleaned else []
-    if not isinstance(value, (list, tuple, set)):
-        return []
-    out: list[str] = []
-    for entry in value:
-        cleaned = str(entry or "").strip()
-        if cleaned:
-            out.append(cleaned)
-    return out
-
-
-def _unique(items: list[str]) -> list[str]:
-    """Preserve order while removing duplicate strings."""
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def _collect_scope_ids(metadata: dict[str, Any], singular_key: str, plural_key: str) -> list[int]:
@@ -118,17 +84,8 @@ def _candidate_scope_filters(user_id: int | None, metadata: dict[str, Any]) -> l
 
 
 def _merge_policy_documents(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Merge policy documents with union semantics for list-based capability fields."""
-    merged = deepcopy(base)
-    for key, value in overlay.items():
-        if key in _UNION_LIST_KEYS:
-            merged[key] = _unique(_as_str_list(merged.get(key)) + _as_str_list(value))
-            continue
-        if isinstance(merged.get(key), dict) and isinstance(value, dict):
-            merged[key] = _merge_policy_documents(_as_dict(merged.get(key)), value)
-            continue
-        merged[key] = deepcopy(value)
-    return merged
+    """Merge policy documents with union semantics and explicit-null overrides."""
+    return merge_config(base, overlay, skip_none=False)
 
 
 def _has_explicit_scalar_value(value: Any) -> bool:
@@ -597,6 +554,13 @@ class McpHubPolicyResolver:
             + deny_capability_resolution.unsupported_environment_requirements
         )
 
+        # Ensure tool_tier_overrides is present in the resolved document so
+        # downstream consumers (GovernanceFilter, runner_client) can rely on it.
+        resolved_policy_document.setdefault("tool_tier_overrides", {})
+
+        # Ensure conditions key is present so GovernanceFilter can always read it.
+        resolved_policy_document.setdefault("conditions", {})
+
         return {
             "enabled": True,
             "allowed_tools": _allowed_tool_patterns(resolved_policy_document),
@@ -674,7 +638,7 @@ class McpHubPolicyResolver:
             "approval_mode": None,
             "policy_document": {},
             "authored_policy_document": {},
-            "resolved_policy_document": {},
+            "resolved_policy_document": {"tool_tier_overrides": {}},
             "resolved_capabilities": [],
             "unresolved_capabilities": [],
             "capability_mapping_summary": [],

@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import pytest
+
+from tldw_Server_API.app.core.Setup import setup_manager
+from tldw_Server_API.app.core.Setup import readiness_service
+from tldw_Server_API.app.core.Setup.readiness_service import (
+    preview_readiness_selection,
+    verify_readiness_lanes,
+)
+
+
+def test_preview_returns_config_updates_and_install_plan_without_writing(monkeypatch):
+    called = False
+
+    def fail_if_called(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("preview must not write config")
+
+    monkeypatch.setattr(setup_manager, "update_config", fail_if_called)
+
+    preview = preview_readiness_selection(
+        {
+            "profile_id": "local_balanced",
+            "lanes": {
+                "chat": {"mode": "skip"},
+                "embeddings_rag": {
+                    "provider": "huggingface",
+                    "model": "Qwen/Qwen3-Embedding-0.6B",
+                },
+                "speech": {"bundle_id": "cpu_local", "resource_profile": "balanced"},
+            },
+        }
+    )
+
+    assert called is False
+    assert preview["operation_required"] is True
+    assert "restart_required" in preview["overlays"]
+    assert preview["lanes"]["chat"]["status"] == "skipped"
+    assert preview["config_updates"]["Embeddings"]["embedding_provider"] == "huggingface"
+    assert preview["config_updates"]["Embeddings"]["embedding_model"] == "Qwen/Qwen3-Embedding-0.6B"
+    assert "Qwen/Qwen3-Embedding-0.6B" in preview["install_plan"]["embeddings"]["huggingface"]
+    assert preview["install_plan"]["stt"][0]["engine"] == "faster_whisper"
+    assert preview["install_plan"]["tts"][0]["engine"] == "kokoro"
+
+
+def test_preview_never_echoes_hosted_provider_secret():
+    preview = preview_readiness_selection(
+        {
+            "profile_id": "advanced_custom",
+            "lanes": {
+                "chat": {
+                    "mode": "hosted",
+                    "provider": "openai",
+                    "api_key": "sk-sensitive",
+                    "model": "gpt-4.1-mini",
+                }
+            },
+        }
+    )
+
+    assert "sk-sensitive" not in str(preview)
+    assert preview["config_updates"]["API"]["default_api"] == "openai"
+    assert preview["config_updates"]["API"]["openai_model"] == "gpt-4.1-mini"
+    assert "openai_api_key" not in preview["config_updates"]["API"]
+    assert preview["secret_fields"] == [
+        {"section": "API", "key": "openai_api_key", "provider": "openai", "state": "submitted"}
+    ]
+
+
+def test_internal_provision_preview_can_include_submitted_hosted_provider_secret():
+    preview = preview_readiness_selection(
+        {
+            "profile_id": "advanced_custom",
+            "lanes": {
+                "chat": {
+                    "mode": "hosted",
+                    "provider": "openai",
+                    "api_key": "sk-sensitive",
+                    "model": "gpt-4.1-mini",
+                }
+            },
+        },
+        include_secret_config_updates=True,
+    )
+
+    assert preview["config_updates"]["API"]["openai_api_key"] == "sk-sensitive"
+    assert preview["secret_fields"] == [
+        {"section": "API", "key": "openai_api_key", "provider": "openai", "state": "submitted"}
+    ]
+
+
+def test_preview_rejects_unknown_hosted_chat_provider_before_config_updates():
+    preview = preview_readiness_selection(
+        {
+            "lanes": {
+                "chat": {
+                    "mode": "hosted",
+                    "provider": "unknown-hosted",
+                    "api_key": "sk-sensitive",
+                    "model": "model-name",
+                }
+            }
+        },
+        include_secret_config_updates=True,
+    )
+
+    assert preview["lanes"]["chat"]["status"] == "blocked"
+    assert preview["lanes"]["chat"]["blockers"] == ["Unsupported chat provider: unknown-hosted"]
+    assert preview["config_updates"] == {}
+    assert preview["secret_fields"] == []
+    assert "sk-sensitive" not in str(preview)
+
+
+def test_preview_rejects_unknown_local_chat_provider_before_config_updates():
+    preview = preview_readiness_selection(
+        {
+            "lanes": {
+                "chat": {
+                    "mode": "local",
+                    "provider": "unknown-local",
+                    "endpoint": "http://127.0.0.1:1234/v1",
+                    "model": "local-model",
+                }
+            }
+        }
+    )
+
+    assert preview["lanes"]["chat"]["status"] == "blocked"
+    assert preview["lanes"]["chat"]["blockers"] == ["Unsupported chat provider: unknown-local"]
+    assert preview["config_updates"] == {}
+
+
+def test_preview_speech_bundle_errors_do_not_expose_raw_exception(monkeypatch):
+    def raise_raw_path(*args, **kwargs):
+        raise ValueError("invalid bundle at /Users/example/private.py:12")
+
+    monkeypatch.setattr(readiness_service.install_manager, "build_install_plan_from_bundle", raise_raw_path)
+
+    preview = preview_readiness_selection(
+        {"lanes": {"speech": {"bundle_id": "bad_bundle", "resource_profile": "balanced"}}}
+    )
+
+    assert preview["lanes"]["speech"]["status"] == "blocked"
+    assert preview["lanes"]["speech"]["blockers"] == ["Speech bundle selection is invalid."]
+    assert "/Users/example" not in str(preview["lanes"]["speech"]["blockers"])
+
+
+def test_trusted_custom_hf_requires_acknowledgement():
+    preview = preview_readiness_selection(
+        {
+            "profile_id": "advanced_custom",
+            "lanes": {
+                "embeddings_rag": {
+                    "provider": "huggingface",
+                    "model": "custom/requires-trust",
+                    "trusted_custom_model": True,
+                    "trusted_custom_model_acknowledged": False,
+                }
+            },
+        }
+    )
+
+    assert preview["lanes"]["embeddings_rag"]["status"] == "blocked"
+    assert "trusted custom Hugging Face model acknowledgement is required" in preview["lanes"][
+        "embeddings_rag"
+    ]["blockers"]
+    assert "custom/requires-trust" not in preview["install_plan"]["embeddings"]["custom"]
+
+
+def test_acknowledged_trusted_custom_hf_enters_custom_install_plan():
+    preview = preview_readiness_selection(
+        {
+            "profile_id": "advanced_custom",
+            "lanes": {
+                "embeddings_rag": {
+                    "provider": "huggingface",
+                    "model": "custom/allowed-with-ack",
+                    "trusted_custom_model": True,
+                    "trusted_custom_model_acknowledged": True,
+                }
+            },
+        }
+    )
+
+    assert preview["lanes"]["embeddings_rag"]["status"] == "previewed"
+    assert "custom/allowed-with-ack" in preview["install_plan"]["embeddings"]["custom"]
+
+
+def test_local_chat_preview_only_emits_existing_config_keys():
+    preview = preview_readiness_selection(
+        {
+            "profile_id": "advanced_custom",
+            "lanes": {
+                "chat": {
+                    "mode": "local",
+                    "provider": "llama",
+                    "endpoint": "http://127.0.0.1:8080/completion",
+                    "model": "local-model-name",
+                }
+            },
+        }
+    )
+
+    assert preview["config_updates"]["API"]["default_api"] == "llama"
+    assert preview["config_updates"]["Local-API"] == {
+        "llama_api_IP": "http://127.0.0.1:8080/completion"
+    }
+
+
+@pytest.mark.asyncio
+async def test_verify_skip_does_not_call_hosted_provider(monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("skip verification must not call provider verification")
+
+    monkeypatch.setattr(readiness_service.install_manager, "verify_audio_bundle_async", fail_if_called)
+
+    result = await verify_readiness_lanes({"lanes": {"chat": {"mode": "skip"}}})
+
+    assert result["lanes"]["chat"]["status"] == "skipped"
+    assert result["lanes"]["chat"]["consequences"]
+
+
+@pytest.mark.asyncio
+async def test_verify_hosted_chat_does_not_call_provider_network(monkeypatch):
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("hosted chat verification must not make provider calls")
+
+    monkeypatch.setattr(readiness_service.install_manager, "verify_audio_bundle_async", fail_if_called)
+
+    result = await verify_readiness_lanes(
+        {
+            "lanes": {
+                "chat": {
+                    "mode": "hosted",
+                    "provider": "openai",
+                    "api_key": "sk-sensitive",
+                    "model": "gpt-4.1-mini",
+                }
+            }
+        }
+    )
+
+    assert result["lanes"]["chat"]["status"] == "ready_with_warnings"
+    assert "Hosted chat provider was not contacted" in result["lanes"]["chat"]["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_verify_speech_reuses_audio_bundle_verification(monkeypatch):
+    calls: list[tuple[str, str, str | None]] = []
+
+    async def fake_verify(bundle_id, *, resource_profile, tts_choice=None):
+        calls.append((bundle_id, resource_profile, tts_choice))
+        return {
+            "status": "ready",
+            "stt_health": {"status": "ready"},
+            "tts_health": {"status": "failed"},
+        }
+
+    monkeypatch.setattr(readiness_service.install_manager, "verify_audio_bundle_async", fake_verify)
+
+    result = await verify_readiness_lanes(
+        {
+            "lanes": {
+                "speech": {
+                    "bundle_id": "cpu_local",
+                    "resource_profile": "balanced",
+                    "tts_choice": "kitten_tts",
+                }
+            }
+        }
+    )
+
+    assert calls == [("cpu_local", "balanced", "kitten_tts")]
+    assert result["lanes"]["speech"]["status"] == "ready_with_warnings"
+
+
+@pytest.mark.asyncio
+async def test_verify_speech_errors_return_blocked_lane_without_raw_exception(monkeypatch):
+    async def fake_verify(*args, **kwargs):
+        raise ValueError("/Users/example/private/model is invalid")
+
+    monkeypatch.setattr(readiness_service.install_manager, "verify_audio_bundle_async", fake_verify)
+
+    result = await verify_readiness_lanes(
+        {
+            "lanes": {
+                "speech": {
+                    "bundle_id": "broken_bundle",
+                    "resource_profile": "balanced",
+                }
+            }
+        }
+    )
+
+    speech = result["lanes"]["speech"]
+    assert speech["status"] == "blocked"
+    assert speech["blockers"] == ["Speech bundle verification failed."]
+    assert "/Users/example" not in str(speech)

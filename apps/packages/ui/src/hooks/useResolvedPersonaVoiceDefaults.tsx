@@ -13,12 +13,18 @@ export type PersonaConfirmationMode =
   | "destructive_only"
   | "never"
 
+export type PersonaWakeBehavior =
+  | "one_shot"
+  | "continuous"
+  | "push_to_talk_after_wake"
+
 export type PersonaVoiceDefaults = {
   stt_language?: string | null
   stt_model?: string | null
   tts_provider?: string | null
   tts_voice?: string | null
   confirmation_mode?: PersonaConfirmationMode | null
+  wake_behavior?: PersonaWakeBehavior | null
   voice_chat_trigger_phrases?: string[]
   auto_resume?: boolean | null
   barge_in?: boolean | null
@@ -35,6 +41,7 @@ export type ResolvedPersonaVoiceDefaults = {
   ttsProvider: string
   ttsVoice: string
   confirmationMode: PersonaConfirmationMode
+  wakeBehavior: PersonaWakeBehavior
   voiceChatTriggerPhrases: string[]
   autoResume: boolean
   bargeIn: boolean
@@ -48,6 +55,7 @@ export type ResolvedPersonaVoiceDefaults = {
 const DEFAULT_STT_LANGUAGE = "en-US"
 const DEFAULT_OPENAI_VOICE = "alloy"
 const DEFAULT_CONFIRMATION_MODE: PersonaConfirmationMode = "destructive_only"
+const DEFAULT_WAKE_BEHAVIOR: PersonaWakeBehavior = "one_shot"
 export const PERSONA_TURN_DETECTION_BALANCED_DEFAULTS = {
   autoCommitEnabled: true,
   vadThreshold: 0.5,
@@ -72,6 +80,15 @@ const normalizePhrases = (value: string[] | null | undefined): string[] => {
   }
   return next
 }
+
+const normalizeWakeBehavior = (
+  value: PersonaWakeBehavior | null | undefined
+): PersonaWakeBehavior =>
+  value === "continuous" ||
+  value === "push_to_talk_after_wake" ||
+  value === "one_shot"
+    ? value
+    : DEFAULT_WAKE_BEHAVIOR
 
 const resolveDefaultTtsVoice = (
   provider: string,
@@ -137,6 +154,7 @@ export const useResolvedPersonaVoiceDefaults = (
         ),
       confirmationMode:
         personaVoiceDefaults?.confirmation_mode || DEFAULT_CONFIRMATION_MODE,
+      wakeBehavior: normalizeWakeBehavior(personaVoiceDefaults?.wake_behavior),
       voiceChatTriggerPhrases:
         personaTriggerPhrases.length > 0
           ? personaTriggerPhrases

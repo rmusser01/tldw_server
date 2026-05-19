@@ -100,7 +100,7 @@ The `model` string for `/api/v1/audio/transcriptions` is parsed via the same log
   - `whisper-1`, `whisper` (aliases for the default faster-whisper Whisper model)
   - Raw faster-whisper ids such as `large-v3`, `distil-whisper-large-v3`, or full HF ids (e.g. `openai/whisper-large-v3`).
 - **NVIDIA NeMo Parakeet**
-  - `parakeet`, `parakeet-standard`, `parakeet-onnx`, `parakeet-mlx`
+  - `parakeet`, `parakeet-standard`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx` (legacy alias), `parakeet-mlx`
   - Any string that `parse_transcription_model` resolves to provider `"parakeet"` (e.g., some `nemo-parakeet-*` ids).
 - **NVIDIA NeMo Canary**
   - `canary` (and related aliases whose provider resolves to `"canary"`).
@@ -132,7 +132,7 @@ Transcribe audio into text.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | file | file | Yes | The audio file to transcribe (default max 25MB; actual limit may vary by quota tier) |
-| model | string | No | Model to use. Supported examples: `whisper-1` (`whisper` alias), raw faster-whisper ids like `large-v3` or `distil-whisper-large-v3`; NVIDIA variants such as `parakeet`, `parakeet-onnx`, `parakeet-mlx`; Canary via `canary`; Qwen via `qwen2audio` or `qwen2audio-*`; Qwen3-ASR via `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, or `qwen3-asr`; VibeVoice via `vibevoice-asr` (default when omitted: `[STT-Settings].default_batch_transcription_model`, shipping default `parakeet-onnx`). |
+| model | string | No | Model to use. Supported examples: `whisper-1` (`whisper` alias), raw faster-whisper ids like `large-v3` or `distil-whisper-large-v3`; NVIDIA variants such as `parakeet`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx` (legacy alias), `parakeet-mlx`; Canary via `canary`; Qwen via `qwen2audio` or `qwen2audio-*`; Qwen3-ASR via `qwen3-asr-1.7b`, `qwen3-asr-0.6b`, or `qwen3-asr`; VibeVoice via `vibevoice-asr` (default when omitted: `[STT-Settings].default_batch_transcription_model`, shipping default `parakeet-tdt-0.6b-v3-onnx`). |
 | language | string | No | Language hint. ISO-639-1 codes are always accepted (for example `en`, `es`). BCP-47 locale hints (for example `en-US`, `pt-BR`) are accepted and normalized per provider: providers that require ISO-style hints receive base codes, providers with locale-capable routing keep locale hints. When omitted, Whisper models auto-detect the language and the detected code is included in the JSON response. |
 | prompt | string | No | Optional text to guide the model's style |
 | response_format | string | No | Output format: `json`, `text`, `srt`, `vtt`, `verbose_json` (default: `json`) |
@@ -290,11 +290,11 @@ Add the following section to your `config.txt`:
 ```ini
 [STT-Settings]
 # Explicit defaults when the client omits `model`
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
 
 # Nemo model variant (for Parakeet)
-nemo_model_variant = standard
+nemo_model_variant = onnx
 # Options: standard, onnx, mlx
 
 # Parakeet ONNX model source
@@ -369,7 +369,7 @@ failopen_cap_minutes = 5.0
   - Client may send config after auth: `{ "type": "config", "sample_rate": 16000, "language": "en", "model_variant": "standard|onnx|mlx" }`
   - Send audio chunks: `{ "type": "audio", "data": "<base64 float32 little-endian mono>" }`
   - Optional finalize: `{ "type": "commit" }`
-- If no client `model` is provided, the server uses `[STT-Settings].default_streaming_transcription_model` (default: `parakeet-onnx`).
+- If no client `model` is provided, the server uses `[STT-Settings].default_streaming_transcription_model` (default: `parakeet-tdt-0.6b-v3-onnx`; legacy alias `parakeet-onnx` remains accepted).
 - Streaming model-init fallback to Whisper is opt-in via `[STT-Settings].streaming_fallback_to_whisper=true`; default is fail-fast.
 - Server messages include:
     - `{ "type": "status", "message": "Authenticated" }` or `"Authenticated (JWT)"`
@@ -422,7 +422,7 @@ Send an `insights` object inside the initial `{ "type": "config" }` message to e
 ```json
 {
   "type": "config",
-  "model": "parakeet-onnx",
+  "model": "parakeet-tdt-0.6b-v3-onnx",
   "sample_rate": 16000,
   "insights": {
     "enabled": true,

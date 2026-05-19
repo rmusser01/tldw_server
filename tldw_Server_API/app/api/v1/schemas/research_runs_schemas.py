@@ -134,6 +134,12 @@ class ResearchRunListItemResponse(ResearchRunResponse):
     updated_at: str
 
 
+class ResearchRunDeleteResponse(BaseModel):
+    """Envelope returned after deleting a deep research run."""
+
+    deleted: bool
+
+
 class ResearchCheckpointSummary(BaseModel):
     """Current checkpoint summary included in research stream snapshots."""
 

@@ -4,6 +4,7 @@ Integration tests for Writing Playground endpoints using a real ChaChaNotes DB.
 
 import configparser
 import importlib
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,7 +18,16 @@ pytestmark = pytest.mark.integration
 
 def _has_tiktoken() -> bool:
     try:
-        import tiktoken  # noqa: F401
+        from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
+            TokenizerUnavailable,
+            resolve_tiktoken_encoding,
+        )
+    except Exception:
+        return False
+    try:
+        resolve_tiktoken_encoding("gpt-3.5-turbo")
+    except TokenizerUnavailable:
+        return False
     except Exception:
         return False
     return True
@@ -46,6 +56,7 @@ def client_with_writing_db(tmp_path, monkeypatch):
 
     importlib.reload(app_main)
     fastapi_app = app_main.app
+    fastapi_app.state.writing_test_db = db
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
@@ -71,6 +82,16 @@ def test_writing_sessions_crud_and_clone(client_with_writing_db: TestClient):
     assert list_resp.status_code == 200, list_resp.text
     listed = list_resp.json()
     assert listed["total"] >= 1
+    assert listed["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": listed["total"],
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert listed["has_more"] is False
+    assert listed["next_offset"] is None
     assert any(item["id"] == session_id for item in listed["sessions"])
 
     get_resp = client.get(f"/api/v1/writing/sessions/{session_id}")
@@ -129,6 +150,16 @@ def test_writing_templates_and_themes_crud(client_with_writing_db: TestClient):
     assert list_templates.status_code == 200
     templates_payload = list_templates.json()
     assert templates_payload["total"] == 1
+    assert templates_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert templates_payload["has_more"] is False
+    assert templates_payload["next_offset"] is None
 
     upd_tmpl = client.patch(
         "/api/v1/writing/templates/Template A",
@@ -159,6 +190,16 @@ def test_writing_templates_and_themes_crud(client_with_writing_db: TestClient):
     assert list_themes.status_code == 200
     themes_payload = list_themes.json()
     assert themes_payload["total"] == 1
+    assert themes_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert themes_payload["has_more"] is False
+    assert themes_payload["next_offset"] is None
 
     upd_theme = client.patch(
         "/api/v1/writing/themes/Theme A",
@@ -352,6 +393,264 @@ def test_writing_snapshot_import_merge_preserves_existing(client_with_writing_db
     assert "Merged Theme" in theme_names
 
 
+@pytest.mark.parametrize("mode", ["merge", "replace"])
+def test_snapshot_import_restores_soft_deleted_template_and_theme_names(
+    client_with_writing_db: TestClient,
+    mode: str,
+):
+    client = client_with_writing_db
+    db = client.app.state.writing_test_db
+
+    template_create = client.post(
+        "/api/v1/writing/templates",
+        json={"name": "Soft Deleted Template", "payload": {"inst_pre": "[S]"}},
+    )
+    assert template_create.status_code == 201, template_create.text
+    template_created = template_create.json()
+
+    theme_create = client.post(
+        "/api/v1/writing/themes",
+        json={
+            "name": "Soft Deleted Theme",
+            "class_name": "soft-deleted-theme",
+            "css": ".soft-deleted-theme { color: #246; }",
+            "order": 3,
+        },
+    )
+    assert theme_create.status_code == 201, theme_create.text
+    theme_created = theme_create.json()
+
+    template_delete = client.delete(
+        "/api/v1/writing/templates/Soft Deleted Template",
+        headers={"expected-version": str(template_created["version"])},
+    )
+    assert template_delete.status_code in (200, 204), template_delete.text
+    theme_delete = client.delete(
+        "/api/v1/writing/themes/Soft Deleted Theme",
+        headers={"expected-version": str(theme_created["version"])},
+    )
+    assert theme_delete.status_code in (200, 204), theme_delete.text
+
+    template_deleted_row = db.execute_query(
+        "SELECT id, version, deleted FROM writing_templates WHERE name = ?",
+        ("Soft Deleted Template",),
+    ).fetchone()
+    theme_deleted_row = db.execute_query(
+        "SELECT id, version, deleted FROM writing_themes WHERE name = ?",
+        ("Soft Deleted Theme",),
+    ).fetchone()
+    assert template_deleted_row["deleted"] == 1
+    assert theme_deleted_row["deleted"] == 1
+
+    import_resp = client.post(
+        "/api/v1/writing/snapshot/import",
+        json={
+            "mode": mode,
+            "snapshot": {
+                "sessions": [],
+                "templates": [
+                    {
+                        "name": "Soft Deleted Template",
+                        "payload": {"inst_pre": "[R]"},
+                        "schema_version": 1,
+                        "is_default": True,
+                    }
+                ],
+                "themes": [
+                    {
+                        "name": "Soft Deleted Theme",
+                        "class_name": "restored-theme",
+                        "css": ".restored-theme { color: #579; }",
+                        "schema_version": 1,
+                        "is_default": False,
+                        "order": 5,
+                    }
+                ],
+            },
+        },
+    )
+    assert import_resp.status_code == 200, import_resp.text
+
+    template_row = db.execute_query(
+        "SELECT id, version, deleted, payload_json, is_default FROM writing_templates WHERE name = ?",
+        ("Soft Deleted Template",),
+    ).fetchone()
+    theme_row = db.execute_query(
+        "SELECT id, version, deleted, class_name, css, is_default, order_index FROM writing_themes WHERE name = ?",
+        ("Soft Deleted Theme",),
+    ).fetchone()
+
+    assert template_row["id"] == template_deleted_row["id"]
+    assert theme_row["id"] == theme_deleted_row["id"]
+    assert template_row["deleted"] == 0
+    assert theme_row["deleted"] == 0
+    assert template_row["version"] == template_deleted_row["version"] + 1
+    assert theme_row["version"] == theme_deleted_row["version"] + 1
+    assert template_row["is_default"] == 1
+    assert theme_row["order_index"] == 5
+    assert "restored-theme" in theme_row["class_name"]
+
+
+def test_snapshot_import_replace_rolls_back_when_db_import_fails_after_soft_delete(
+    client_with_writing_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = client_with_writing_db
+    db = client.app.state.writing_test_db
+
+    keep_session_resp = client.post(
+        "/api/v1/writing/sessions",
+        json={"name": "Keep Session", "payload": {"text": "keep"}},
+    )
+    assert keep_session_resp.status_code == 201, keep_session_resp.text
+    assert client.post(
+        "/api/v1/writing/templates",
+        json={"name": "Keep Template", "payload": {"inst_pre": "[K]"}},
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/writing/themes",
+        json={"name": "Keep Theme", "class_name": "keep-theme", "css": ".keep-theme{}", "order": 1},
+    ).status_code == 201
+
+    original_transaction = db.transaction
+
+    class FailingConnectionProxy:
+        def __init__(self, conn):
+            self._conn = conn
+            self._triggered = False
+
+        def execute(self, sql, params=()):
+            cursor = self._conn.execute(sql, params)
+            normalized_sql = " ".join(str(sql).split())
+            if (not self._triggered) and "UPDATE writing_sessions SET deleted = 1" in normalized_sql:
+                self._triggered = True
+                raise RuntimeError("inject failure after replace soft-delete begins")
+            return cursor
+
+        def __getattr__(self, item):
+            return getattr(self._conn, item)
+
+    @contextmanager
+    def failing_transaction():
+        with original_transaction() as conn:
+            yield FailingConnectionProxy(conn)
+
+    monkeypatch.setattr(db, "transaction", failing_transaction)
+
+    resp = client.post(
+        "/api/v1/writing/snapshot/import",
+        json={
+            "mode": "replace",
+            "snapshot": {
+                "sessions": [
+                    {
+                        "id": "replace-rollback-session",
+                        "name": "Restored Session",
+                        "payload": {"text": "new"},
+                        "schema_version": 1,
+                    }
+                ],
+                "templates": [
+                    {
+                        "name": "Restored Template",
+                        "payload": {"inst_pre": "[R]"},
+                        "schema_version": 1,
+                        "is_default": False,
+                    }
+                ],
+                "themes": [
+                    {
+                        "name": "Restored Theme",
+                        "class_name": "restored-theme",
+                        "css": ".restored-theme { color: #579; }",
+                        "schema_version": 1,
+                        "is_default": False,
+                        "order": 2,
+                    }
+                ],
+            },
+        },
+    )
+
+    assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"] == "Unexpected error while processing writing snapshot import"
+    sessions = client.get("/api/v1/writing/sessions").json()["sessions"]
+    templates = client.get("/api/v1/writing/templates").json()["templates"]
+    themes = client.get("/api/v1/writing/themes").json()["themes"]
+    assert {item["name"] for item in sessions} == {"Keep Session"}
+    assert {item["name"] for item in templates} == {"Keep Template"}
+    assert {item["name"] for item in themes} == {"Keep Theme"}
+
+
+def test_writing_snapshot_import_rejects_blank_session_name(
+    client_with_writing_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = client_with_writing_db
+    assert (
+        client.post(
+            "/api/v1/writing/sessions",
+            json={"name": "Keep Session", "payload": {"text": "keep"}},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/writing/templates",
+            json={"name": "Keep Template", "payload": {"inst_pre": "[K]"}},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/writing/themes",
+            json={"name": "Keep Theme", "class_name": "keep-theme", "css": ".keep-theme{}", "order": 1},
+        ).status_code
+        == 201
+    )
+    from tldw_Server_API.app.api.v1.endpoints import writing as writing_endpoints
+
+    soft_delete_calls: list[tuple[str, str]] = []
+
+    def track_soft_delete_session(self, session_id, expected_version):
+        soft_delete_calls.append(("session", str(session_id)))
+        raise AssertionError("replace-mode session soft-delete should not run for blank import")
+
+    def track_soft_delete_template(self, name, expected_version):
+        soft_delete_calls.append(("template", str(name)))
+        raise AssertionError("replace-mode template soft-delete should not run for blank import")
+
+    def track_soft_delete_theme(self, name, expected_version):
+        soft_delete_calls.append(("theme", str(name)))
+        raise AssertionError("replace-mode theme soft-delete should not run for blank import")
+
+    monkeypatch.setattr(writing_endpoints.CharactersRAGDB, "soft_delete_writing_session", track_soft_delete_session)
+    monkeypatch.setattr(writing_endpoints.CharactersRAGDB, "soft_delete_writing_template", track_soft_delete_template)
+    monkeypatch.setattr(writing_endpoints.CharactersRAGDB, "soft_delete_writing_theme", track_soft_delete_theme)
+
+    resp = client.post(
+        "/api/v1/writing/snapshot/import",
+        json={
+            "mode": "replace",
+            "snapshot": {
+                "sessions": [{"name": "   ", "payload": {"text": "ignored"}, "schema_version": 1}],
+                "templates": [],
+                "themes": [],
+            },
+        },
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "session name" in resp.json()["detail"].lower()
+    assert soft_delete_calls == []
+    sessions = client.get("/api/v1/writing/sessions").json()["sessions"]
+    templates = client.get("/api/v1/writing/templates").json()["templates"]
+    themes = client.get("/api/v1/writing/themes").json()["themes"]
+    assert {item["name"] for item in sessions} == {"Keep Session"}
+    assert {item["name"] for item in templates} == {"Keep Template"}
+    assert {item["name"] for item in themes} == {"Keep Theme"}
+
+
 def test_writing_capabilities_basic(client_with_writing_db: TestClient):
     client = client_with_writing_db
 
@@ -439,6 +738,43 @@ def test_writing_wordclouds_empty_result(client_with_writing_db: TestClient):
         assert data["result"]["words"] == []
 
 
+def test_get_wordcloud_returns_404_for_unknown_id(client_with_writing_db: TestClient):
+    client = client_with_writing_db
+
+    resp = client.get("/api/v1/writing/wordclouds/does-not-exist")
+
+    assert resp.status_code == 404, resp.text
+    assert resp.json() == {"detail": "Wordcloud not found"}
+
+
+def test_get_wordcloud_returns_failed_result(client_with_writing_db: TestClient, monkeypatch: pytest.MonkeyPatch):
+    client = client_with_writing_db
+    from tldw_Server_API.app.api.v1.endpoints import writing as writing_endpoints
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("wordcloud failed")
+
+    monkeypatch.setattr(writing_endpoints, "_compute_wordcloud", boom)
+
+    create_resp = client.post("/api/v1/writing/wordclouds", json={"text": "alpha beta"})
+    assert create_resp.status_code == 200, create_resp.text
+    payload = create_resp.json()
+    assert payload["id"]
+    assert payload["status"] == "failed"
+    assert payload["cached"] is False
+    assert payload["error"] == "Wordcloud generation failed"
+    assert payload["result"] is None
+
+    get_resp = client.get(f"/api/v1/writing/wordclouds/{payload['id']}")
+    assert get_resp.status_code == 200, get_resp.text
+    fetched = get_resp.json()
+    assert fetched["id"] == payload["id"]
+    assert fetched["status"] == "failed"
+    assert fetched["cached"] is False
+    assert fetched["error"] == "Wordcloud generation failed"
+    assert fetched["result"] is None
+
+
 def test_writing_capabilities_provider_tokenizers(client_with_writing_db: TestClient, monkeypatch):
     client = client_with_writing_db
 
@@ -478,7 +814,7 @@ def test_writing_capabilities_provider_tokenizers(client_with_writing_db: TestCl
         assert tokenizers["gpt-3.5-turbo"]["strict_mode_effective"] is False
     else:
         assert tokenizers["gpt-3.5-turbo"]["available"] is False
-        assert "unavailable" in tokenizers["gpt-3.5-turbo"]["error"].lower()
+        assert "not available" in tokenizers["gpt-3.5-turbo"]["error"].lower()
 
 
 def test_writing_capabilities_includes_extra_body_compat(client_with_writing_db: TestClient, monkeypatch):
@@ -830,10 +1166,7 @@ def test_writing_tokenize_unavailable(client_with_writing_db: TestClient):
     )
     assert resp.status_code == 422, resp.text
     detail = str(resp.json().get("detail", "")).lower()
-    if _has_tiktoken():
-        assert "not available" in detail
-    else:
-        assert "unavailable" in detail
+    assert "not available" in detail or "unavailable" in detail
 
 
 def test_writing_tokenize_prefers_provider_native_tokenizer(

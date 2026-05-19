@@ -23,7 +23,8 @@ import { usePrivilegedActionDialog } from '@/components/ui/privileged-action-dia
 import { useToast } from '@/components/ui/toast';
 import { Form, FormField } from '@/components/ui/form';
 import { ExportMenu } from '@/components/ui/export-menu';
-import { exportData, type ExportFormat } from '@/lib/export';
+import { exportOrganizations, ExportFormat } from '@/lib/export';
+import { exportData } from '@/lib/export';
 import { Plus, Eye, Search, BookmarkPlus, BookmarkX, Pencil, Trash2 } from 'lucide-react';
 import type { Organization, PlanTier, Subscription } from '@/types';
 import { api } from '@/lib/api-client';
@@ -36,6 +37,8 @@ import { PlanBadge } from '@/components/PlanBadge';
 import { TableSkeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
 import { useUrlPagination, useUrlState } from '@/lib/use-url-state';
+import { getScopedItem, setScopedItem } from '@/lib/scoped-storage';
+import { logger } from '@/lib/logger';
 
 type SavedOrgView = {
   id: string;
@@ -56,7 +59,7 @@ type OrganizationFormData = z.infer<typeof organizationSchema>;
 
 function OrganizationsPageContent() {
   const confirm = useConfirm();
-  const privilegedAction = usePrivilegedActionDialog();
+  const promptPrivilegedAction = usePrivilegedActionDialog();
   const { success, error: showError } = useToast();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -71,6 +74,7 @@ function OrganizationsPageContent() {
   const [updatingOrganization, setUpdatingOrganization] = useState(false);
   const [deletingOrganizationId, setDeletingOrganizationId] = useState<number | null>(null);
   const [selectedOrgIds, setSelectedOrgIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [totalItems, setTotalItems] = useState(0);
   const [orgPlans, setOrgPlans] = useState<OrganizationPlanMap>({});
   const [slugTouched, setSlugTouched] = useState(false);
@@ -99,26 +103,24 @@ function OrganizationsPageContent() {
   } = useUrlPagination();
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     try {
-      const stored = window.localStorage.getItem(SAVED_VIEWS_STORAGE_KEY);
+      const stored = getScopedItem(SAVED_VIEWS_STORAGE_KEY);
       if (!stored) return;
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed)) {
         setSavedViews(parsed as SavedOrgView[]);
       }
     } catch (err) {
-      console.warn('Failed to load saved organization views:', err);
+      logger.warn('Failed to load saved organization views', { component: 'OrganizationsPage', error: err instanceof Error ? err.message : String(err) });
     }
   }, []);
 
   const persistSavedViews = useCallback((views: SavedOrgView[]) => {
     setSavedViews(views);
-    if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(views));
+      setScopedItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(views));
     } catch (err) {
-      console.warn('Failed to persist saved organization views:', err);
+      logger.warn('Failed to persist saved organization views', { component: 'OrganizationsPage', error: err instanceof Error ? err.message : String(err) });
     }
   }, []);
 
@@ -159,7 +161,7 @@ function OrganizationsPageContent() {
           }
           setOrgPlans(planMap);
         } catch (err) {
-          console.warn('Failed to load subscription data for organizations:', err);
+          logger.warn('Failed to load subscription data for organizations', { component: 'OrganizationsPage', error: err instanceof Error ? err.message : String(err) });
         }
       }
     } catch (error: unknown) {
@@ -205,7 +207,7 @@ function OrganizationsPageContent() {
       setSlugTouched(false);
       loadOrganizations();
     } catch (error: unknown) {
-      console.error('Failed to create organization:', error);
+      logger.error('Failed to create organization', { component: 'OrganizationsPage', error: error instanceof Error ? error.message : String(error) });
       const message =
         error instanceof Error && error.message
           ? error.message
@@ -344,13 +346,13 @@ function OrganizationsPageContent() {
     try {
       const members = await api.getOrgMembers(String(organization.id));
       const memberCount = Array.isArray(members) ? members.length : 0;
-      const result = await privilegedAction({
+      const approval = await promptPrivilegedAction({
         title: 'Delete organization',
         message: `Delete "${organization.name}"? This organization has ${memberCount} member${memberCount === 1 ? '' : 's'}.`,
         confirmText: 'Delete',
         requirePassword: true,
       });
-      if (!result) return;
+      if (!approval) return;
 
       setDeletingOrganizationId(organization.id);
       await api.deleteOrganization(String(organization.id));
@@ -364,6 +366,89 @@ function OrganizationsPageContent() {
     }
   };
 
+  // Clear selection when org list changes
+  useEffect(() => {
+    setSelectedOrgIds((prev) => {
+      if (prev.size === 0) return prev;
+      const available = new Set(organizations.map((org) => org.id));
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (available.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [organizations]);
+
+  const handleToggleSelectOrg = (orgId: number, checked: boolean) => {
+    setSelectedOrgIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(orgId);
+      } else {
+        next.delete(orgId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisible = (checked: boolean) => {
+    setSelectedOrgIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        organizations.forEach((org) => next.add(org.id));
+      } else {
+        organizations.forEach((org) => next.delete(org.id));
+      }
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedOrgIds(new Set());
+  };
+
+  const handleBulkDeleteOrganizations = async () => {
+    const ids = Array.from(selectedOrgIds);
+    if (ids.length === 0) return;
+    const approval = await promptPrivilegedAction({
+      title: 'Delete selected organizations',
+      message: `Delete ${ids.length} organization${ids.length !== 1 ? 's' : ''}? This cannot be undone.`,
+      confirmText: 'Delete',
+      requirePassword: false,
+    });
+    if (!approval) return;
+
+    try {
+      setBulkDeleting(true);
+      const results = await Promise.allSettled(
+        ids.map((id) => api.deleteOrganization(String(id)))
+      );
+      const failures = results.filter((r) => r.status === 'rejected').length;
+      if (failures > 0) {
+        showError(
+          'Bulk delete incomplete',
+          `${ids.length - failures} deleted, ${failures} failed.`
+        );
+      } else {
+        success(
+          'Organizations deleted',
+          `${ids.length} organization${ids.length !== 1 ? 's' : ''} removed.`
+        );
+      }
+      handleClearSelection();
+      await loadOrganizations();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to delete organizations';
+      showError('Bulk delete failed', message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const selectedOrgCount = selectedOrgIds.size;
+  const allVisibleSelected = organizations.length > 0
+    && organizations.every((org) => selectedOrgIds.has(org.id));
+
   const totalPages = Math.ceil(totalItems / pageSize);
   const paginatedOrganizations = organizations;
 
@@ -376,15 +461,9 @@ function OrganizationsPageContent() {
                 <h1 className="text-3xl font-bold">Organizations</h1>
                 <p className="text-muted-foreground">Manage organizations and their members</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap gap-2">
                 <ExportMenu
-                  onExport={(format: ExportFormat) => {
-                    exportData({
-                      data: organizations as unknown as Record<string, unknown>[],
-                      filename: 'organizations',
-                      format,
-                    });
-                  }}
+                  onExport={(format: ExportFormat) => exportOrganizations(organizations, format)}
                   disabled={organizations.length === 0}
                 />
                 <Button onClick={() => setShowCreateForm(!showCreateForm)}>
@@ -558,9 +637,40 @@ function OrganizationsPageContent() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                {selectedOrgCount > 0 && (
+                  <div className="mb-4 flex flex-col gap-3 rounded-md border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{selectedOrgCount} selected</Badge>
+                      <span className="text-sm text-muted-foreground">
+                        Bulk actions apply to selected organizations.
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleBulkDeleteOrganizations}
+                        loading={bulkDeleting}
+                        loadingText="Deleting..."
+                        disabled={bulkDeleting}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                        Delete
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleClearSelection}
+                        disabled={bulkDeleting}
+                      >
+                        Clear selection
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {loading ? (
                   <div className="py-4">
-                    <TableSkeleton rows={3} columns={isBillingEnabled() ? 7 : 5} />
+                    <TableSkeleton rows={3} columns={isBillingEnabled() ? 8 : 6} />
                   </div>
                 ) : organizations.length === 0 ? (
                   <EmptyState
@@ -595,7 +705,7 @@ function OrganizationsPageContent() {
                           variant="destructive"
                           size="sm"
                           onClick={async () => {
-                            const result = await privilegedAction({
+                            const result = await promptPrivilegedAction({
                               title: 'Bulk Delete Organizations',
                               message: `Delete ${selectedOrgIds.size} organization(s)? This cannot be undone.`,
                               confirmText: 'Delete All',
@@ -624,15 +734,9 @@ function OrganizationsPageContent() {
                         <TableRow>
                           <TableHead className="w-10">
                             <Checkbox
-                              checked={selectedOrgIds.size > 0 && selectedOrgIds.size === organizations.length}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setSelectedOrgIds(new Set(organizations.map(o => o.id)));
-                                } else {
-                                  setSelectedOrgIds(new Set());
-                                }
-                              }}
-                              aria-label="Select all organizations"
+                              checked={allVisibleSelected}
+                              onCheckedChange={handleToggleSelectAllVisible}
+                              aria-label="Select all visible organizations"
                             />
                           </TableHead>
                           <TableHead>ID</TableHead>
@@ -650,14 +754,8 @@ function OrganizationsPageContent() {
                             <TableCell>
                               <Checkbox
                                 checked={selectedOrgIds.has(org.id)}
-                                onCheckedChange={(checked) => {
-                                  setSelectedOrgIds(prev => {
-                                    const next = new Set(prev);
-                                    if (checked) next.add(org.id); else next.delete(org.id);
-                                    return next;
-                                  });
-                                }}
-                                aria-label={`Select ${org.name}`}
+                                onCheckedChange={(checked) => handleToggleSelectOrg(org.id, checked)}
+                                aria-label={`Select organization ${org.name}`}
                               />
                             </TableCell>
                             <TableCell className="font-mono text-sm">{org.id}</TableCell>

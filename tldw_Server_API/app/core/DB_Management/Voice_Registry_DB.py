@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from loguru import logger
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.db_path_utils import (
+    DatabasePaths,
+    resolve_trusted_database_path,
+)
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
@@ -75,11 +78,8 @@ class VoiceRegistryDB:
     """SQLite-backed registry for user voice records."""
 
     def __init__(self, db_path: str | Path):
-        # Resolve the database path and ensure it is contained within the configured
-        # user database base directory to avoid writing outside the intended root.
-        resolved_db_path = Path(db_path).resolve()
-        # DatabasePaths.get_user_db_base_dir() already normalizes and validates the base.
-        user_db_base = DatabasePaths.get_user_db_base_dir().resolve()
+        resolved_db_path = resolve_trusted_database_path(db_path, label="voice registry db")
+        user_db_base = DatabasePaths.get_user_db_base_dir().resolve(strict=False)
         try:
             resolved_db_path.relative_to(user_db_base)
         except ValueError as exc:

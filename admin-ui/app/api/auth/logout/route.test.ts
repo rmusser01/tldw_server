@@ -2,17 +2,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const buildApiUrl = vi.fn((path: string) => `https://example.test${path}`);
+const buildApiUrlForRequest = vi.fn((_req: unknown, path: string) => `https://example.test${path}`);
 const getBackendAuthHeaders = vi.fn(() => new Headers({ Authorization: 'Bearer test-token' }));
 const clearAdminSessionCookies = vi.fn();
+const invalidateAuthCache = vi.fn().mockResolvedValue(undefined);
+const loggerWarn = vi.fn();
 
 vi.mock('@/lib/api-config', () => ({
-  buildApiUrl,
+  buildApiUrlForRequest,
 }));
 
 vi.mock('@/lib/server-auth', () => ({
   clearAdminSessionCookies,
   getBackendAuthHeaders,
+  ACCESS_TOKEN_COOKIE: 'access_token',
+  API_KEY_COOKIE: 'x_api_key',
+  LEGACY_API_KEY_COOKIE: 'x-api-key',
+}));
+
+vi.mock('@/middleware', () => ({
+  invalidateAuthCache,
+}));
+
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    warn: loggerWarn,
+  },
 }));
 
 describe('POST /api/auth/logout', () => {
@@ -23,11 +38,13 @@ describe('POST /api/auth/logout', () => {
 
   it('logs backend logout failures and still clears local session cookies', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('backend unavailable'));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetchMock);
 
     const { POST } = await import('./route');
-    const request = new NextRequest('http://localhost/api/auth/logout', { method: 'POST' });
+    const request = new NextRequest('http://localhost/api/auth/logout', {
+      method: 'POST',
+      headers: { cookie: 'access_token=test-jwt-token' },
+    });
     const response = await POST(request);
 
     expect(response.status).toBe(200);
@@ -38,12 +55,18 @@ describe('POST /api/auth/logout', () => {
       headers: new Headers({ Authorization: 'Bearer test-token' }),
       cache: 'no-store',
     });
-    expect(warnSpy).toHaveBeenCalledWith('Admin UI backend logout failed', {
-      error: 'backend unavailable',
-    });
+    expect(loggerWarn).toHaveBeenCalledTimes(1);
+    expect(loggerWarn).toHaveBeenCalledWith(
+      'Backend logout failed',
+      expect.objectContaining({
+        component: 'auth/logout',
+        error: 'backend unavailable',
+      }),
+    );
     expect(clearAdminSessionCookies).toHaveBeenCalledTimes(1);
     expect(clearAdminSessionCookies).toHaveBeenCalledWith(expect.objectContaining({
       cookies: expect.anything(),
     }));
+    expect(invalidateAuthCache).toHaveBeenCalled();
   });
 });

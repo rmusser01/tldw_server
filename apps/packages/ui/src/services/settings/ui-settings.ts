@@ -14,6 +14,7 @@ import {
   normalizeWatchlistChatHandoffPayload,
   type WatchlistChatHandoffPayload
 } from "@/services/tldw/watchlist-chat-handoff"
+import { migrateThemeUserPreferences } from "@/themes/user-preference-migration"
 import type { ThemeDefinition } from "@/themes/types"
 import { validateThemeDefinition } from "@/themes/validation"
 
@@ -46,6 +47,7 @@ export const THEME_PRESET_SETTING = defineSetting(
   (value) => coerceString(value, "default"),
   {
     area: "local",
+    beforeGet: migrateThemeUserPreferences,
     localStorageKey: "tldw:themePreset",
     mirrorToLocalStorage: true
   }
@@ -227,6 +229,69 @@ export const MCP_TOOL_CATALOG_SETTING = defineSetting(
   }
 )
 
+export type McpDisabledToolScopePreference = {
+  disabledToolNames: string[]
+  updatedAt?: string
+}
+
+export type McpDisabledToolPreferences = {
+  version: 1
+  scopes: Record<string, McpDisabledToolScopePreference>
+}
+
+const DEFAULT_MCP_DISABLED_TOOL_PREFERENCES: McpDisabledToolPreferences = {
+  version: 1,
+  scopes: {}
+}
+
+const coerceMcpDisabledToolPreferences = (
+  value: unknown
+): McpDisabledToolPreferences => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_MCP_DISABLED_TOOL_PREFERENCES
+  }
+  const data = value as Record<string, unknown>
+  if (data.version !== 1 || !data.scopes || typeof data.scopes !== "object") {
+    return DEFAULT_MCP_DISABLED_TOOL_PREFERENCES
+  }
+  const scopes: Record<string, McpDisabledToolScopePreference> = {}
+  for (const [scope, rawPreference] of Object.entries(
+    data.scopes as Record<string, unknown>
+  )) {
+    const normalizedScope = scope.trim()
+    if (!normalizedScope) continue
+    if (!rawPreference || typeof rawPreference !== "object") continue
+    const preference = rawPreference as Record<string, unknown>
+    const disabledToolNames = coerceStringArray(
+      preference.disabledToolNames,
+      []
+    )
+    const updatedAt =
+      typeof preference.updatedAt === "string" && preference.updatedAt.trim()
+        ? preference.updatedAt.trim()
+        : undefined
+    scopes[normalizedScope] = {
+      disabledToolNames,
+      ...(updatedAt ? { updatedAt } : {})
+    }
+  }
+  return {
+    version: 1,
+    scopes
+  }
+}
+
+export const MCP_DISABLED_TOOLS_SETTING = defineSetting(
+  "tldw:mcp:disabledTools:v1",
+  DEFAULT_MCP_DISABLED_TOOL_PREFERENCES,
+  coerceMcpDisabledToolPreferences,
+  {
+    area: "local",
+    localStorageKey: "tldw:mcp:disabledTools:v1",
+    mirrorToLocalStorage: true
+  }
+)
+
 export const MCP_TOOL_CATALOG_ID_SETTING = defineSetting(
   "tldw:mcp:catalogId",
   null as number | null,
@@ -327,10 +392,22 @@ export const SIDEBAR_SHORTCUTS_COLLAPSED_SETTING = defineSetting(
   }
 )
 
-export const SIDEBAR_SHORTCUT_MAX_COUNT = 11
+export const PERSONA_BUDDY_SHELL_ENABLED_SETTING = defineSetting(
+  "tldw:personaBuddyShellEnabled",
+  true,
+  (value) => coerceBoolean(value, true),
+  {
+    area: "local",
+    localStorageKey: "tldw:personaBuddyShellEnabled",
+    mirrorToLocalStorage: true
+  }
+)
+
+export const SIDEBAR_SHORTCUT_MAX_COUNT = 15
 
 export const HEADER_SHORTCUT_IDS = [
   "chat",
+  "chat-workspace",
   "prompts",
   "prompt-studio",
   "characters",
@@ -339,6 +416,7 @@ export const HEADER_SHORTCUT_IDS = [
   "deep-research",
   "knowledge-qa",
   "media",
+  "sources",
   "document-workspace",
   "repo2txt",
   "multi-item-review",
@@ -346,6 +424,7 @@ export const HEADER_SHORTCUT_IDS = [
   "notes",
   "watchlists",
   "integrations",
+  "mcp-hub",
   "scheduled-tasks",
   "collections",
   "skills",
@@ -367,9 +446,13 @@ export const HEADER_SHORTCUT_IDS = [
   "admin-integrations",
   "documentation",
   "chatbooks-playground",
-  "moderation-playground",
+  "moderation-review",
+  "moderation-rules",
+  "family-guardrails",
+  "guardian",
   "admin-llamacpp",
   "admin-mlx",
+  "admin-monitoring",
   "settings",
   "account",
   "billing"
@@ -388,6 +471,15 @@ const REQUIRED_HEADER_SHORTCUT_IDS: HeaderShortcutId[] = [
   "admin-integrations"
 ]
 
+const HEADER_SHORTCUT_IDS_WITHOUT_SOURCES = HEADER_SHORTCUT_IDS.filter(
+  (id) => id !== "sources"
+)
+
+const hasExactHeaderShortcutIds = (
+  ids: Set<HeaderShortcutId>,
+  expected: readonly HeaderShortcutId[]
+) => ids.size === expected.length && expected.every((id) => ids.has(id))
+
 const coerceHeaderShortcutSelection = (
   value: unknown,
   fallback: HeaderShortcutId[]
@@ -395,12 +487,21 @@ const coerceHeaderShortcutSelection = (
   if (!Array.isArray(value)) return fallback
   const allowed = new Set<HeaderShortcutId>(HEADER_SHORTCUT_IDS)
   const required = new Set<HeaderShortcutId>(REQUIRED_HEADER_SHORTCUT_IDS)
+  const legacyMap: Record<string, HeaderShortcutId[]> = {
+    "moderation-playground": ["moderation-review", "moderation-rules"]
+  }
   const unique = new Set<HeaderShortcutId>()
   for (const entry of value) {
     if (typeof entry !== "string") continue
-    if (allowed.has(entry as HeaderShortcutId)) {
-      unique.add(entry as HeaderShortcutId)
+    const mappedEntries = legacyMap[entry] ?? [entry as HeaderShortcutId]
+    for (const mapped of mappedEntries) {
+      if (allowed.has(mapped)) {
+        unique.add(mapped)
+      }
     }
+  }
+  if (hasExactHeaderShortcutIds(unique, HEADER_SHORTCUT_IDS_WITHOUT_SOURCES)) {
+    unique.add("sources")
   }
   for (const requiredId of required) {
     unique.add(requiredId)
@@ -440,6 +541,7 @@ const LEGACY_DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
 export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
   "quick-ingest",
   "chat",
+  "chat-workspace",
   "prompts",
   "characters",
   "deep-research",
@@ -448,7 +550,10 @@ export const DEFAULT_SIDEBAR_SHORTCUT_SELECTION: SidebarShortcutId[] = [
   "media",
   "watchlists",
   "document-workspace",
-  "moderation-playground"
+  "flashcards",
+  "moderation-review",
+  "tts-playground",
+  "stt-playground"
 ]
 
 const areShortcutSelectionsEqual = (
@@ -466,7 +571,8 @@ const coerceSidebarShortcutSelection = (
   const allowed = new Set<SidebarShortcutId>(SIDEBAR_SHORTCUT_IDS)
   const legacyMap: Record<string, SidebarShortcutId> = {
     knowledge: "knowledge-qa",
-    "multi-item": "multi-item-review"
+    "multi-item": "multi-item-review",
+    "moderation-playground": "moderation-rules"
   }
   const unique = new Set<SidebarShortcutId>()
   for (const entry of value) {

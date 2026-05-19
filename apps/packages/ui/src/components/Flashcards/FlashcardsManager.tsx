@@ -2,11 +2,13 @@ import React from "react"
 import { Button, Space, Tabs, Tooltip } from "antd"
 import { HelpCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { useNavigate } from "react-router-dom"
-import { ReviewTab, ManageTab, ImportExportTab, SchedulerTab } from "./tabs"
+import { useLocation, useNavigate } from "react-router-dom"
+import { ReviewTab, ManageTab, ImportExportTab, SchedulerTab, TemplatesTab } from "./tabs"
 import { KeyboardShortcutsModal } from "./components"
+import { useDecksQuery } from "./hooks"
 import type { Flashcard } from "@/services/flashcards"
 import { parseFlashcardsGenerateIntentFromLocation } from "@/services/tldw/flashcards-generate-handoff"
+import { parseStudyPackIntentFromLocation } from "@/services/tldw/study-pack-handoff"
 import {
   buildQuizAssessmentRouteFromFlashcards,
   parseFlashcardsStudyIntentFromLocation
@@ -28,6 +30,9 @@ const parseInitialFlashcardsTab = (locationLike: { search?: string; hash?: strin
     case "transfer":
     case "importexport":
       return "importExport"
+    case "template":
+    case "templates":
+      return "templates"
     case "scheduler":
       return "scheduler"
     default:
@@ -39,41 +44,53 @@ const parseInitialFlashcardsTab = (locationLike: { search?: string; hash?: strin
  * FlashcardsManager contains all the tabs and core flashcard logic.
  * Connection state is handled by FlashcardsWorkspace.
  *
- * Structure: Study | Manage | Transfer
+ * Structure: Study | Manage | Import / Export
  * - Study: Spaced repetition review and cram loops
  * - Manage: Browse, filter, create, edit, bulk operations
- * - Transfer: CSV/APKG import and export workflows
+ * - Import / Export: CSV/APKG import and export workflows
  * - Scheduler: Deck-level scheduler policy editing and queue visibility
  */
 export const FlashcardsManager: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
+  const location = useLocation()
   const navigate = useNavigate()
-  const initialGenerateIntent = React.useMemo(
-    () =>
-      typeof window !== "undefined"
-        ? parseFlashcardsGenerateIntentFromLocation(window.location)
-        : null,
-    []
+  const currentGenerateIntent = React.useMemo(
+    () => parseFlashcardsGenerateIntentFromLocation(location),
+    [location]
   )
-  const initialStudyIntent = React.useMemo(
-    () =>
-      typeof window !== "undefined"
-        ? parseFlashcardsStudyIntentFromLocation(window.location)
-        : null,
-    []
+  const currentStudyPackIntent = React.useMemo(
+    () => parseStudyPackIntentFromLocation(location),
+    [location]
   )
-  const initialTab = React.useMemo(
-    () =>
-      typeof window !== "undefined"
-        ? parseInitialFlashcardsTab(window.location)
-        : null,
-    []
+  const currentStudyIntent = React.useMemo(
+    () => parseFlashcardsStudyIntentFromLocation(location),
+    [location]
   )
+  const currentTab = React.useMemo(() => parseInitialFlashcardsTab(location), [location])
   const [activeTab, setActiveTab] = React.useState<string>(() =>
-    initialTab ?? (initialGenerateIntent ? "importExport" : "review")
+    currentTab ?? (currentGenerateIntent || currentStudyPackIntent ? "importExport" : "review")
   )
+  const { data: initialDecks } = useDecksQuery({
+    includeWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
+  })
+  const showSchedulerTab = !(initialDecks !== undefined && initialDecks.length === 0)
+  const hasCheckedInitialTab = React.useRef(false)
+  React.useEffect(() => {
+    if (!hasCheckedInitialTab.current && initialDecks !== undefined && !currentTab) {
+      hasCheckedInitialTab.current = true
+      if (initialDecks.length === 0) {
+        setActiveTab("importExport")
+      }
+    }
+  }, [initialDecks, currentTab])
+  // Reset activeTab if Scheduler tab is hidden (e.g., arrived via ?tab=scheduler with zero decks)
+  React.useEffect(() => {
+    if (activeTab === "scheduler" && initialDecks !== undefined && initialDecks.length === 0) {
+      setActiveTab("review")
+    }
+  }, [activeTab, initialDecks])
   const [reviewDeckId, setReviewDeckId] = React.useState<number | null | undefined>(
-    initialStudyIntent?.deckId ?? undefined
+    currentStudyIntent?.deckId ?? undefined
   )
   const [reviewOverrideCard, setReviewOverrideCard] = React.useState<Flashcard | null>(null)
   const [openCreateSignal, setOpenCreateSignal] = React.useState(0)
@@ -104,6 +121,23 @@ export const FlashcardsManager: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [])
 
+  React.useEffect(() => {
+    const nextTab =
+      currentTab ?? (currentGenerateIntent || currentStudyPackIntent ? "importExport" : null)
+    if (nextTab) {
+      setActiveTab(nextTab)
+    }
+    if (currentStudyIntent?.deckId !== undefined) {
+      setReviewDeckId(currentStudyIntent.deckId ?? undefined)
+    }
+  }, [currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
+
+  React.useEffect(() => {
+    if (!showSchedulerTab && activeTab === "scheduler") {
+      setActiveTab("importExport")
+    }
+  }, [activeTab, showSchedulerTab])
+
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
       setReviewDeckId(card.deck_id ?? undefined)
@@ -119,15 +153,15 @@ export const FlashcardsManager: React.FC = () => {
   }, [])
 
   const quizCtaRoute = React.useMemo(() => {
-    const startQuizId = initialStudyIntent?.quizId
+    const startQuizId = currentStudyIntent?.quizId
     return buildQuizAssessmentRouteFromFlashcards({
       startQuizId,
       highlightQuizId: startQuizId,
-      deckId: reviewDeckId ?? initialStudyIntent?.deckId,
-      sourceAttemptId: initialStudyIntent?.attemptId,
-      forceShowWorkspaceItems: initialStudyIntent?.forceShowWorkspaceItems ?? false
+      deckId: reviewDeckId ?? currentStudyIntent?.deckId,
+      sourceAttemptId: currentStudyIntent?.attemptId,
+      forceShowWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
     })
-  }, [initialStudyIntent?.attemptId, initialStudyIntent?.deckId, initialStudyIntent?.forceShowWorkspaceItems, initialStudyIntent?.quizId, reviewDeckId])
+  }, [currentStudyIntent?.attemptId, currentStudyIntent?.deckId, currentStudyIntent?.forceShowWorkspaceItems, currentStudyIntent?.quizId, reviewDeckId])
 
   const handleTabChange = React.useCallback(
     (nextTab: string) => {
@@ -194,7 +228,7 @@ export const FlashcardsManager: React.FC = () => {
                 reviewOverrideCard={reviewOverrideCard}
                 onClearOverride={() => setReviewOverrideCard(null)}
                 isActive={activeTab === "review"}
-                forceShowWorkspaceItems={initialStudyIntent?.forceShowWorkspaceItems ?? false}
+                forceShowWorkspaceItems={currentStudyIntent?.forceShowWorkspaceItems ?? false}
               />
             )
           },
@@ -207,33 +241,57 @@ export const FlashcardsManager: React.FC = () => {
                 onReviewCard={handleReviewCard}
                 openCreateSignal={openCreateSignal}
                 isActive={activeTab === "cards"}
-                initialDeckId={initialTab === "cards" ? initialStudyIntent?.deckId : undefined}
+                initialDeckId={currentTab === "cards" ? currentStudyIntent?.deckId : undefined}
                 initialShowWorkspaceDecks={
-                  initialTab === "cards" ? (initialStudyIntent?.forceShowWorkspaceItems ?? false) : false
+                  currentTab === "cards" ? (currentStudyIntent?.forceShowWorkspaceItems ?? false) : false
                 }
               />
             )
           },
           {
             key: "importExport",
-            label: t("option:flashcards.tabTransfer", {
-              defaultValue: "Transfer"
-            }),
-            children: <ImportExportTab generateIntent={initialGenerateIntent} />
-          },
-          {
-            key: "scheduler",
-            label: t("option:flashcards.tabScheduler", {
-              defaultValue: "Scheduler"
-            }),
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                {t("option:flashcards.tabImportExport", { defaultValue: "Import / Export" })}
+                <Tooltip title={t("option:flashcards.llmBadgeTooltip", {
+                  defaultValue: "Some features in this tab require an LLM provider"
+                })}>
+                  <span className="rounded bg-surface2 px-1 py-px text-[10px] font-medium text-text-muted">
+                    LLM
+                  </span>
+                </Tooltip>
+              </span>
+            ),
             children: (
-              <SchedulerTab
-                isActive={activeTab === "scheduler"}
-                onDirtyChange={setSchedulerDirty}
-                discardSignal={schedulerDiscardSignal}
+              <ImportExportTab
+                generateIntent={currentGenerateIntent}
+                studyPackIntent={currentStudyPackIntent}
               />
             )
-          }
+          },
+          {
+            key: "templates",
+            label: t("option:flashcards.tabTemplates", { defaultValue: "Templates" }),
+            children: <TemplatesTab />
+          },
+          // Hide Scheduler tab when there are zero decks
+          ...(showSchedulerTab
+            ? [
+                {
+                  key: "scheduler",
+                  label: t("option:flashcards.tabScheduler", {
+                    defaultValue: "Scheduler"
+                  }),
+                  children: (
+                    <SchedulerTab
+                      isActive={activeTab === "scheduler"}
+                      onDirtyChange={setSchedulerDirty}
+                      discardSignal={schedulerDiscardSignal}
+                    />
+                  )
+                }
+              ]
+            : [])
         ]}
       />
 
@@ -245,6 +303,8 @@ export const FlashcardsManager: React.FC = () => {
             ? "import"
             : activeTab === "scheduler"
               ? "scheduler"
+              : activeTab === "templates"
+                ? "templates"
               : (activeTab as "review" | "cards")
         }
       />

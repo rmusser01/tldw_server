@@ -1,0 +1,8 @@
+export { ChatWorkspaceConsole } from "./ChatWorkspaceConsole"
+export { ChatWorkspacePage } from "./ChatWorkspacePage"
+export { ContextStagingCard } from "./ContextStagingCard"
+export { InspectorRail } from "./InspectorRail"
+export { WorkspaceChatPanel } from "./WorkspaceChatPanel"
+export { WorkspaceRail } from "./WorkspaceRail"
+export { WorkspaceStatusStrip } from "./WorkspaceStatusStrip"
+export type { StagedWorkspaceSource } from "./types"

@@ -159,4 +159,4 @@ async def profile_rate_limits(
             }
         return {"status": "success", "results": profile_results}
     except Exception as exc:  # pragma: no cover - defensive catch
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": "Rate limit profiling failed."}

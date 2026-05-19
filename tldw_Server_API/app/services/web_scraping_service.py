@@ -8,11 +8,13 @@ import asyncio
 import contextlib
 import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Optional
 
 #
 # Third-party Libraries
 from fastapi import HTTPException
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ScrapeMethod
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
@@ -22,6 +24,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
 )
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
+from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
+    attach_chunking_plan_to_result,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
@@ -89,9 +95,7 @@ def _collect_fallback_unsupported_controls(
     if custom_headers:
         unsupported.append("custom_headers")
 
-    score_threshold_active = (
-        score_threshold is not None and float(score_threshold) > 0.0
-    )
+    score_threshold_active = score_threshold is not None and float(score_threshold) > 0.0
 
     if scrape_method == "Recursive Scraping":
         if normalized_strategy and normalized_strategy != "default":
@@ -109,6 +113,36 @@ def _collect_fallback_unsupported_controls(
             unsupported.append("score_threshold")
 
     return sorted(set(unsupported))
+
+
+def _web_chunking_form(
+    *,
+    perform_chunking: bool,
+    chunking_mode: str | None,
+    auto_chunking_goal: str,
+    auto_chunking_use_llm: bool,
+    api_name: str | None = None,
+    api_provider: str | None = None,
+    model_name: str | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        media_type="web",
+        perform_chunking=perform_chunking,
+        chunking_mode=chunking_mode,
+        auto_chunking_goal=auto_chunking_goal,
+        auto_chunking_use_llm=auto_chunking_use_llm,
+        api_name=api_name,
+        api_provider=api_provider,
+        model_name=model_name,
+        chunk_method=None,
+        chunk_size=500,
+        chunk_overlap=200,
+        chunk_language=None,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        hierarchical_chunking=False,
+        hierarchical_template=None,
+    )
 
 
 def _build_fallback_context(
@@ -129,6 +163,7 @@ def _build_fallback_context(
 
 def _legacy_web_scraping_fallback_enabled() -> bool:
     return env_flag_enabled("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK")
+
 
 async def process_web_scraping_task(
     scrape_method: str,
@@ -153,6 +188,10 @@ async def process_web_scraping_task(
     crawl_strategy: Optional[str] = None,
     include_external: Optional[bool] = None,
     score_threshold: Optional[float] = None,
+    perform_chunking: bool = True,
+    chunking_mode: Optional[str] = None,
+    auto_chunking_goal: str = "balanced",
+    auto_chunking_use_llm: bool = False,
 ) -> dict[str, Any]:
     """
     Enhanced web scraping with production features:
@@ -208,18 +247,12 @@ async def process_web_scraping_task(
         except (TypeError, ValueError):
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    f"score_threshold must be a float between 0.0 and 1.0; "
-                    f"got {score_threshold!r}."
-                ),
+                detail=(f"score_threshold must be a float between 0.0 and 1.0; " f"got {score_threshold!r}."),
             ) from None
         if not 0.0 <= normalized_score_threshold <= 1.0:
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "score_threshold must be between 0.0 and 1.0 inclusive; "
-                    f"got {normalized_score_threshold}."
-                ),
+                detail=("score_threshold must be between 0.0 and 1.0 inclusive; " f"got {normalized_score_threshold}."),
             )
 
     if normalized_crawl_strategy is not None:
@@ -234,7 +267,7 @@ async def process_web_scraping_task(
         # Determine priority based on number of URLs or max_pages
         priority = "normal"
         if scrape_method == "Individual URLs":
-            url_count = len([u for u in url_input.split('\n') if u.strip()])
+            url_count = len([u for u in url_input.split("\n") if u.strip()])
             if url_count > 10:
                 priority = "high"
         elif (max_pages or 0) > 50:
@@ -264,22 +297,19 @@ async def process_web_scraping_task(
             crawl_strategy=crawl_strategy,
             include_external=include_external,
             score_threshold=score_threshold,
+            perform_chunking=perform_chunking,
+            chunking_mode=chunking_mode,
+            auto_chunking_goal=auto_chunking_goal,
+            auto_chunking_use_llm=auto_chunking_use_llm,
         )
 
         return result
 
     except Exception as e:
-        # Log error with full details
-        import logging
-        import traceback
-        logging.exception(f"Enhanced scraping service failed: {str(e)}")
-        logging.exception(f"Full traceback: {traceback.format_exc()}")
+        logger.exception("Enhanced scraping service failed: {}", e)
         log_runtime_deprecation(
             "web_scraping_legacy_fallback",
-            message=(
-                "Enhanced web scraping service failed; using deprecated "
-                "runtime compatibility fallback."
-            ),
+            message=("Enhanced web scraping service failed; using deprecated " "runtime compatibility fallback."),
         )
         if not _legacy_web_scraping_fallback_enabled():
             raise HTTPException(
@@ -330,7 +360,7 @@ async def process_web_scraping_task(
                     system_prompt=system_prompt,
                     summarize_checkbox=summarize_checkbox,
                     custom_cookies=custom_cookies,
-                    temperature=temperature
+                    temperature=temperature,
                 )
             elif scrape_method == "Sitemap":
                 # Synchronous approach in your code, might need `asyncio.to_thread`
@@ -364,11 +394,7 @@ async def process_web_scraping_task(
 
             # 1b) Apply predictable max_pages cap for fallback methods that do not
             # natively support page-count control.
-            if (
-                max_pages is not None
-                and scrape_method in {"Sitemap", "URL Level"}
-                and isinstance(result_list, list)
-            ):
+            if max_pages is not None and scrape_method in {"Sitemap", "URL Level"} and isinstance(result_list, list):
                 before_count = len(result_list)
                 result_list = result_list[:max_pages]
                 if before_count != len(result_list):
@@ -382,6 +408,13 @@ async def process_web_scraping_task(
                 )
 
             fallback_context["degraded_controls_applied"] = degraded_controls
+            chunking_form = _web_chunking_form(
+                perform_chunking=perform_chunking,
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                api_name=api_name,
+            )
 
             # 2) Summarize after the fact, if the method doesn't handle it
             #    (For "Individual URLs," you already did so inside scrape_and_summarize_multiple.)
@@ -397,7 +430,7 @@ async def process_web_scraping_task(
                             api_name=api_name,
                             api_key=api_key,
                             temp=temperature,
-                            system_message=system_prompt or ""
+                            system_message=system_prompt or "",
                         )
                         article["summary"] = summary
                     else:
@@ -406,6 +439,18 @@ async def process_web_scraping_task(
             # 3) If "persist" mode, insert into DB; if ephemeral, store ephemeral
             #    (We can store all articles in the DB or ephemeral. Typically you'd store each as a new "media" row.)
             if mode == "ephemeral":
+                if perform_chunking:
+                    for article in result_list:
+                        if not isinstance(article, dict):
+                            continue
+                        content_text = article.get("content")
+                        chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
+                            chunking_form,
+                            media_type="web",
+                            source_name=str(article.get("url") or ""),
+                            extracted_text=content_text if isinstance(content_text, str) else None,
+                        )
+                        attach_chunking_plan_to_result(article, chunking_plan)
                 # Just store the entire "result_list" in ephemeral, returning the ephemeral ID.
                 # Or store each article individually. Up to you. We'll do one ephemeral object:
                 ephemeral_id = ephemeral_storage.store_data({"articles": result_list})
@@ -438,6 +483,16 @@ async def process_web_scraping_task(
                         # We'll treat article['content'] as the main text
                         # Combine content and metadata
                         content_text = article.get("content", "")
+                        chunk_options = None
+                        chunking_plan = None
+                        if perform_chunking:
+                            chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
+                                chunking_form,
+                                media_type="web",
+                                source_name=str(article.get("url") or ""),
+                                extracted_text=content_text if isinstance(content_text, str) else None,
+                            )
+                            attach_chunking_plan_to_result(article, chunking_plan)
 
                         # Fix the function call to match the actual signature
                         # Build safe metadata
@@ -447,40 +502,64 @@ async def process_web_scraping_task(
                             "url": article.get("url"),
                             "source": "web",
                         }
-                        safe_metadata_json = json.dumps({k: v for k, v in safe_meta.items() if v is not None}, ensure_ascii=False)
+                        if chunking_plan:
+                            safe_meta["chunking_plan"] = chunking_plan
+                        safe_metadata_json = json.dumps(
+                            {k: v for k, v in safe_meta.items() if v is not None}, ensure_ascii=False
+                        )
 
                         # Build plaintext chunks for FTS-first retrieval
-                        try:
-                            ck = Chunker()
-                            # Use sane defaults in fallback path
-                            flat = ck.chunk_text_hierarchical_flat(content_text, method='sentences')
-                            kind_map = {
-                                'paragraph': 'text',
-                                'list_unordered': 'list',
-                                'list_ordered': 'list',
-                                'code_fence': 'code',
-                                'table_md': 'table',
-                                'header_line': 'heading',
-                                'header_atx': 'heading',
-                            }
+                        if not perform_chunking:
                             chunks_for_sql = []
-                            for it in flat:
-                                md = it.get('metadata') or {}
-                                ctype = kind_map.get(str(md.get('paragraph_kind') or '').lower(), 'text')
-                                small = {}
-                                if md.get('ancestry_titles'):
-                                    small['ancestry_titles'] = md.get('ancestry_titles')
-                                if md.get('section_path'):
-                                    small['section_path'] = md.get('section_path')
-                                chunks_for_sql.append({
-                                    'text': it.get('text',''),
-                                    'start_char': md.get('start_offset'),
-                                    'end_char': md.get('end_offset'),
-                                    'chunk_type': ctype,
-                                    'metadata': small,
-                                })
-                        except Exception:
-                            chunks_for_sql = []
+                        else:
+                            try:
+                                ck = Chunker()
+                                options = chunk_options or {
+                                    "method": "sentences",
+                                    "max_size": 500,
+                                    "overlap": 200,
+                                }
+                                flat = ck.chunk_text_hierarchical_flat(
+                                    content_text,
+                                    method=options.get("method") or "sentences",
+                                    max_size=options.get("max_size") or 500,
+                                    overlap=options.get("overlap") or 200,
+                                    language=options.get("language"),
+                                )
+                                kind_map = {
+                                    "paragraph": "text",
+                                    "list_unordered": "list",
+                                    "list_ordered": "list",
+                                    "code_fence": "code",
+                                    "table_md": "table",
+                                    "header_line": "heading",
+                                    "header_atx": "heading",
+                                }
+                                chunks_for_sql = []
+                                for it in flat:
+                                    md = it.get("metadata") or {}
+                                    ctype = kind_map.get(str(md.get("paragraph_kind") or "").lower(), "text")
+                                    small = {}
+                                    if md.get("ancestry_titles"):
+                                        small["ancestry_titles"] = md.get("ancestry_titles")
+                                    if md.get("section_path"):
+                                        small["section_path"] = md.get("section_path")
+                                    chunks_for_sql.append(
+                                        {
+                                            "text": it.get("text", ""),
+                                            "start_char": md.get("start_offset"),
+                                            "end_char": md.get("end_offset"),
+                                            "chunk_type": ctype,
+                                            "metadata": small,
+                                        }
+                                    )
+                            except Exception as chunk_err:
+                                logger.debug(
+                                    "Chunking failed for scraped article {}; using empty chunks: {}",
+                                    article.get("url", ""),
+                                    chunk_err,
+                                )
+                                chunks_for_sql = []
 
                         media_id, media_uuid, message = get_media_repository(db).add_media_with_keywords(
                             url=article.get("url", ""),
@@ -488,14 +567,18 @@ async def process_web_scraping_task(
                             media_type="web_document",
                             content=content_text,
                             keywords=keywords.split(",") if keywords else [],
-                            prompt=(system_prompt or "") + "\n\n" + (custom_prompt or "") if (system_prompt or custom_prompt) else None,
+                            prompt=(
+                                (system_prompt or "") + "\n\n" + (custom_prompt or "")
+                                if (system_prompt or custom_prompt)
+                                else None
+                            ),
                             analysis_content=article.get("summary", None),
                             safe_metadata=safe_metadata_json,
                             transcription_model="web-scraping-import",
                             author=article.get("author", None),
                             ingestion_date=None,
                             overwrite=False,
-                            chunks=chunks_for_sql
+                            chunks=chunks_for_sql,
                         )
                         if media_id:
                             media_ids.append(media_id)
@@ -511,7 +594,10 @@ async def process_web_scraping_task(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(
+                status_code=500,
+                detail="Legacy web scraping fallback failed",
+            ) from e
 
 
 async def ingest_web_content_orchestrate(
@@ -533,9 +619,7 @@ async def ingest_web_content_orchestrate(
             tags=[str(getattr(request, "scrape_method", "") or "")],
             metadata={
                 "url_count": len(getattr(request, "urls", []) or []),
-                "perform_analysis": bool(
-                    getattr(request, "perform_analysis", False)
-                ),
+                "perform_analysis": bool(getattr(request, "perform_analysis", False)),
             },
         )
 
@@ -587,12 +671,10 @@ async def ingest_web_content_orchestrate(
 
         analysis_results = analyze(
             input_data=content,
-            custom_prompt_arg=getattr(request, "custom_prompt", None)
-            or "Summarize this article.",
+            custom_prompt_arg=getattr(request, "custom_prompt", None) or "Summarize this article.",
             api_name=getattr(request, "api_name", None),
             temp=0.7,
-            system_message=getattr(request, "system_prompt", None)
-            or "Act as a professional summarizer.",
+            system_message=getattr(request, "system_prompt", None) or "Act as a professional summarizer.",
         )
         article["analysis"] = analysis_results
 
@@ -611,44 +693,32 @@ async def ingest_web_content_orchestrate(
         of bubbling up as a 500 error.
         """
         custom_cookies_list: Optional[list[dict[str, Any]]] = None
-        if getattr(request, "use_cookies", False) and getattr(
-            request, "cookies", None
-        ):
+        if getattr(request, "use_cookies", False) and getattr(request, "cookies", None):
             raw_cookies = request.cookies
             if isinstance(raw_cookies, (bytes, bytearray)):
                 try:
                     raw_cookies = raw_cookies.decode("utf-8")
                 except UnicodeDecodeError:
-                    raise HTTPException(
-                        status_code=400, detail="Invalid cookies format"
-                    ) from None
+                    raise HTTPException(status_code=400, detail="Invalid cookies format") from None
 
             if isinstance(raw_cookies, str):
                 try:
                     parsed = json.loads(raw_cookies)
                 except json.JSONDecodeError:
-                    raise HTTPException(
-                        status_code=400, detail="Invalid JSON format for cookies"
-                    ) from None
+                    raise HTTPException(status_code=400, detail="Invalid JSON format for cookies") from None
             elif isinstance(raw_cookies, (dict, list)):
                 parsed = raw_cookies
             else:
-                raise HTTPException(
-                    status_code=400, detail="Invalid cookies format"
-                )
+                raise HTTPException(status_code=400, detail="Invalid cookies format")
 
             if isinstance(parsed, dict):
                 custom_cookies_list = [parsed]
             elif isinstance(parsed, list):
                 if not all(isinstance(item, dict) for item in parsed):
-                    raise HTTPException(
-                        status_code=400, detail="Invalid cookies format"
-                    )
+                    raise HTTPException(status_code=400, detail="Invalid cookies format")
                 custom_cookies_list = parsed
             else:
-                raise HTTPException(
-                    status_code=400, detail="Invalid cookies format"
-                )
+                raise HTTPException(status_code=400, detail="Invalid cookies format")
 
         return custom_cookies_list
 
@@ -735,9 +805,7 @@ async def ingest_web_content_orchestrate(
         try:
             from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 
-            scrape_task = getattr(
-                media_mod, "process_web_scraping_task", process_web_scraping_task
-            )
+            scrape_task = getattr(media_mod, "process_web_scraping_task", process_web_scraping_task)
         except Exception:  # pragma: no cover - defensive fallback
             scrape_task = process_web_scraping_task
 
@@ -748,27 +816,29 @@ async def ingest_web_content_orchestrate(
                 url_level=level,
                 max_pages=requested_max_pages,
                 max_depth=level,
-                summarize_checkbox=bool(
-                    getattr(request, "perform_analysis", False)
-                ),
+                summarize_checkbox=bool(getattr(request, "perform_analysis", False)),
                 custom_prompt=getattr(request, "custom_prompt", None),
                 api_name=getattr(request, "api_name", None),
                 api_key=None,
-                keywords=",".join(request.keywords or [])
-                if isinstance(getattr(request, "keywords", None), list)
-                else (getattr(request, "keywords", None) or ""),
+                keywords=(
+                    ",".join(request.keywords or [])
+                    if isinstance(getattr(request, "keywords", None), list)
+                    else (getattr(request, "keywords", None) or "")
+                ),
                 custom_titles=None,
                 system_prompt=getattr(request, "system_prompt", None),
                 temperature=0.7,
                 custom_cookies=custom_cookies_list,
                 mode="ephemeral",
-                user_agent=getattr(request, "user_agent", None)
-                if hasattr(request, "user_agent")
-                else None,
+                user_agent=getattr(request, "user_agent", None) if hasattr(request, "user_agent") else None,
                 custom_headers=None,
                 crawl_strategy=getattr(request, "crawl_strategy", None),
                 include_external=getattr(request, "include_external", None),
                 score_threshold=getattr(request, "score_threshold", None),
+                perform_chunking=bool(getattr(request, "perform_chunking", True)),
+                chunking_mode=getattr(request, "chunking_mode", None),
+                auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
+                auto_chunking_use_llm=bool(getattr(request, "auto_chunking_use_llm", False)),
             )
             articles: list[dict[str, Any]] = []
             if isinstance(service_result, dict):
@@ -778,11 +848,7 @@ async def ingest_web_content_orchestrate(
                     articles = service_result["results"]
 
             for r in articles:
-                if (
-                    isinstance(r, dict)
-                    and "summary" in r
-                    and "analysis" not in r
-                ):
+                if isinstance(r, dict) and "summary" in r and "analysis" not in r:
                     r["analysis"] = r.get("summary")
 
             return articles
@@ -805,9 +871,7 @@ async def ingest_web_content_orchestrate(
         try:
             from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 
-            scrape_task = getattr(
-                media_mod, "process_web_scraping_task", process_web_scraping_task
-            )
+            scrape_task = getattr(media_mod, "process_web_scraping_task", process_web_scraping_task)
         except Exception:  # pragma: no cover - defensive fallback
             scrape_task = process_web_scraping_task
 
@@ -818,27 +882,29 @@ async def ingest_web_content_orchestrate(
                 url_level=None,
                 max_pages=max_pages,
                 max_depth=max_depth,
-                summarize_checkbox=bool(
-                    getattr(request, "perform_analysis", False)
-                ),
+                summarize_checkbox=bool(getattr(request, "perform_analysis", False)),
                 custom_prompt=getattr(request, "custom_prompt", None),
                 api_name=getattr(request, "api_name", None),
                 api_key=None,
-                keywords=",".join(request.keywords or [])
-                if isinstance(getattr(request, "keywords", None), list)
-                else (getattr(request, "keywords", None) or ""),
+                keywords=(
+                    ",".join(request.keywords or [])
+                    if isinstance(getattr(request, "keywords", None), list)
+                    else (getattr(request, "keywords", None) or "")
+                ),
                 custom_titles=None,
                 system_prompt=getattr(request, "system_prompt", None),
                 temperature=0.7,
                 custom_cookies=custom_cookies_list,
                 mode="ephemeral",
-                user_agent=getattr(request, "user_agent", None)
-                if hasattr(request, "user_agent")
-                else None,
+                user_agent=getattr(request, "user_agent", None) if hasattr(request, "user_agent") else None,
                 custom_headers=None,
                 crawl_strategy=getattr(request, "crawl_strategy", None),
                 include_external=getattr(request, "include_external", None),
                 score_threshold=getattr(request, "score_threshold", None),
+                perform_chunking=bool(getattr(request, "perform_chunking", True)),
+                chunking_mode=getattr(request, "chunking_mode", None),
+                auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
+                auto_chunking_use_llm=bool(getattr(request, "auto_chunking_use_llm", False)),
             )
             articles: list[dict[str, Any]] = []
             if isinstance(service_result, list):
@@ -850,11 +916,7 @@ async def ingest_web_content_orchestrate(
                     articles = service_result.get("results") or []
 
             for r in articles:
-                if (
-                    isinstance(r, dict)
-                    and "summary" in r
-                    and "analysis" not in r
-                ):
+                if isinstance(r, dict) and "summary" in r and "analysis" not in r:
                     r["analysis"] = r.get("summary")
 
             return articles

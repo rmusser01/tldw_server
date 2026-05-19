@@ -106,6 +106,7 @@ describe("P0/P1 tutorial selector contracts", () => {
     expect(reviewContent).toContain('data-testid="media-search-submit"')
     expect(resultsContent).toContain('data-testid="media-results-list"')
     expect(viewerContent).toContain('data-testid="content-scroll-container"')
+    expect(viewerContent).toContain('data-testid="content-viewer-empty"')
     expect(reviewContent).toContain('data-testid="media-library-tools-toggle"')
   })
 
@@ -180,21 +181,32 @@ describe("P0/P1 tutorial selector contracts", () => {
   })
 
   it("keeps required notes tutorial anchors in source", () => {
-    const managerContent = readSource("components/Notes/NotesManagerPage.tsx")
     const headerContent = readSource("components/Notes/NotesEditorHeader.tsx")
-    const managerAnchors = [
+    const editorPaneContent = readSource("components/Notes/NotesEditorPane.tsx")
+    const sidebarContent = readSource("components/Notes/NotesSidebar.tsx")
+
+    // Sidebar anchors
+    const sidebarAnchors = [
       'data-testid="notes-list-region"',
       'data-testid="notes-mode-active"',
       'data-testid="notes-mode-trash"',
       'data-testid="notes-sort-select"',
-      'data-testid="notes-notebook-select"',
-      'data-testid="notes-editor-region"'
+      'data-testid="notes-notebook-select"'
     ]
-
-    for (const anchor of managerAnchors) {
-      expect(managerContent).toContain(anchor)
+    for (const anchor of sidebarAnchors) {
+      expect(sidebarContent).toContain(anchor)
     }
+
+    // Editor pane anchors
+    expect(editorPaneContent).toContain('data-testid="notes-editor-region"')
+    expect(editorPaneContent).toContain('data-testid="notes-keywords-editor"')
+    expect(editorPaneContent).toContain('testId="notes-section-connections"')
+
+    // Header anchors
     expect(headerContent).toContain('data-testid="notes-save-button"')
+
+    // Organize section anchor
+    expect(sidebarContent).toContain('testId="notes-section-organize"')
   })
 
   it("keeps required flashcards tutorial anchors in source", () => {

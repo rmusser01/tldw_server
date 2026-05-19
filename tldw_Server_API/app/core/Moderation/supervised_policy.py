@@ -31,6 +31,9 @@ from tldw_Server_API.app.core.DB_Management.Guardian_DB import (
     GuardianDB,
     SupervisedPolicy,
 )
+from tldw_Server_API.app.core.DB_Management.guardian_db_resolver import (
+    resolve_guardian_db_for_user_id,
+)
 from tldw_Server_API.app.core.Moderation.governance_utils import (
     chat_type_matches,
     is_schedule_active,
@@ -68,6 +71,16 @@ class SupervisedCheckResult:
     rule_name_visible: str | None = None  # set when governance policy is transparent
 
 
+@dataclass(frozen=True)
+class GuardianModerationRuntime:
+    """Resolved guardian moderation services for a dependent-user chat context."""
+
+    dependent_user_id: str
+    chat_type: str = "regular"
+    guardian_db: GuardianDB | None = None
+    supervised_engine: "SupervisedPolicyEngine | None" = None
+
+
 class SupervisedPolicyEngine:
     """Evaluates supervised policies for a dependent user.
 
@@ -84,8 +97,8 @@ class SupervisedPolicyEngine:
     def __init__(self, guardian_db: GuardianDB) -> None:
         self._db = guardian_db
         self._lock = threading.RLock()
-        # Cache: dependent_user_id -> list of (policy, compiled_regex)
-        self._compiled_cache: dict[str, list[tuple[SupervisedPolicy, re.Pattern]]] = {}
+        # Cache: "<dependent_user_id>:<chat_type>" -> list of (policy, compiled_regex, governance_policy)
+        self._compiled_cache: dict[str, list[tuple[SupervisedPolicy, re.Pattern, GovernancePolicy | None]]] = {}
         self._cache_timestamps: dict[str, float] = {}
         self._cache_ttl_seconds = 60.0  # refresh every minute
 
@@ -143,14 +156,14 @@ class SupervisedPolicyEngine:
                 if pol.pattern_type == "regex":
                     is_safe, reason = validate_regex_safety(pol.pattern)
                     if not is_safe:
-                        logger.warning(f"Unsafe supervised policy regex '{pol.pattern}': {reason}")
+                        logger.warning("Unsafe supervised policy regex skipped")
                         continue
                     regex = re.compile(pol.pattern, re.IGNORECASE)
                 else:
                     regex = re.compile(re.escape(pol.pattern), re.IGNORECASE)
                 compiled.append((pol, regex, gp))
-            except re.error as e:
-                logger.warning(f"Invalid supervised policy pattern '{pol.pattern}': {e}")
+            except re.error:
+                logger.warning("Invalid supervised policy pattern skipped")
                 continue
 
         with self._lock:
@@ -352,25 +365,37 @@ def dispatch_guardian_notification(
             payload["rule_name"] = result.rule_name_visible
         svc = get_notification_service()
         return svc.notify_or_batch(payload)
-    except _SUPERVISED_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Guardian notification dispatch failed: {e}")
+    except _SUPERVISED_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Guardian notification dispatch failed")
         return "failed"
 
 
 class GuardianModerationProxy:
     """Wraps ModerationService to overlay guardian policies on get_effective_policy()."""
 
-    def __init__(self, base: Any, engine: SupervisedPolicyEngine, dependent_user_id: str) -> None:
+    def __init__(
+        self,
+        base: Any,
+        engine: SupervisedPolicyEngine,
+        dependent_user_id: str,
+        *,
+        chat_type: str | None = None,
+    ) -> None:
         self._base = base
         self._engine = engine
         self._dep_uid = dependent_user_id
+        self._chat_type = str(chat_type or "regular").strip().lower() or "regular"
 
     def get_effective_policy(self, user_id: str | None = None) -> ModerationPolicy:
         base_policy = self._base.get_effective_policy(user_id)
         try:
-            return self._engine.build_moderation_policy_overlay(self._dep_uid, base_policy)
-        except _SUPERVISED_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Guardian policy overlay skipped in proxy: {e}")
+            return self._engine.build_moderation_policy_overlay(
+                self._dep_uid,
+                base_policy,
+                chat_type=self._chat_type,
+            )
+        except _SUPERVISED_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Guardian policy overlay skipped in proxy")
             return base_policy
 
     def __getattr__(self, name: str) -> Any:
@@ -387,3 +412,24 @@ def get_supervised_policy_engine(guardian_db: GuardianDB) -> SupervisedPolicyEng
     always query the correct per-user database.
     """
     return SupervisedPolicyEngine(guardian_db)
+
+
+def bootstrap_guardian_moderation_runtime(
+    *,
+    user_id: object,
+    dependent_user_id: str,
+    chat_type: str = "regular",
+) -> GuardianModerationRuntime:
+    """Resolve guardian DB/services for a dependent-user moderation context."""
+    normalized_chat_type = str(chat_type or "regular").strip().lower() or "regular"
+    guardian_db = resolve_guardian_db_for_user_id(user_id)
+    return GuardianModerationRuntime(
+        dependent_user_id=str(dependent_user_id),
+        chat_type=normalized_chat_type,
+        guardian_db=guardian_db,
+        supervised_engine=(
+            get_supervised_policy_engine(guardian_db)
+            if guardian_db is not None
+            else None
+        ),
+    )

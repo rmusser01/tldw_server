@@ -55,9 +55,20 @@ export const container = {
 
 /**
  * Sidebar widths
+ *
+ * The "themed" entry reads from the --sidebar-width CSS variable set by the
+ * theme system (default 260 px).  Because Tailwind utility classes cannot
+ * reference arbitrary CSS custom properties, components that need the themed
+ * sidebar width should apply it via an inline `style` attribute:
+ *
+ *   style={{ width: "var(--sidebar-width)" }}
+ *
+ * The static entries below are kept for non-themed / fixed-width sidebars.
  */
 export const sidebarWidth = {
-  /** 256px - Compact sidebar */
+  /** Theme-aware sidebar width – use via inline style, not className */
+  themed: "var(--sidebar-width)",
+  /** 256px - Compact sidebar (static) */
   compact: "w-64",
   /** 320px - Standard sidebar */
   standard: "w-80",

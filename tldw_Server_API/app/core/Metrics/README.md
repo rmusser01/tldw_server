@@ -185,6 +185,11 @@ export METRICS_SAMPLE_RATE=1.0
 Labels guidance
 - Keep labels low-cardinality. Recommended: `component` (chat, audio, mcp, embeddings) and `endpoint` (route name).
 - Avoid per-user or per-connection labels; rely on aggregates.
+- Conflicting label keys that normalize to the same Prometheus label name but carry different values are rejected at record time.
+
+Reset behavior
+- `MetricsRegistry.reset()` clears runtime values, instruments, callbacks, and cumulative aggregates, then replays persistent metric definitions already registered in the running process.
+- Auto-bridged logger metrics are not part of that persistent reset set; they are rebuilt on demand after reset if code emits them again.
 
 Sample PromQL
 - 95th percentile WS send latency by component:
@@ -320,10 +325,15 @@ async def call_llm(prompt: str):
 Monitor cache performance:
 
 ```python
+class CachedEmbedding:
+    def __init__(self, vector, from_cache: bool):
+        self.vector = vector
+        self.from_cache = from_cache
+
+
 @cache_metrics(cache_name="embedding_cache")
 async def get_cached_embedding(text: str):
-    # Should return (result, cache_hit: bool)
-    pass
+    return CachedEmbedding(vector=[...], from_cache=True)
 ```
 
 ### Tracing

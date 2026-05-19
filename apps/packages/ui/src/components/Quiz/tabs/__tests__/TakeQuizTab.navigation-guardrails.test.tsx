@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
@@ -9,6 +10,10 @@ import {
   useSubmitAttemptMutation
 } from "../../hooks"
 import { useQuizTimer } from "../../hooks/useQuizTimer"
+
+vi.mock("react-router-dom", () => ({
+  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+}))
 
 const interpolate = (template: string, values: Record<string, unknown> | undefined) => {
   return template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_, key: string) => {
@@ -216,10 +221,12 @@ describe("TakeQuizTab navigation and submit guardrails", () => {
 
   it("shows fill-blank guidance and supports navigator jump-to-question", async () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     await startQuizFlow()
@@ -248,10 +255,12 @@ describe("TakeQuizTab navigation and submit guardrails", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     await startQuizFlow()
@@ -287,10 +296,12 @@ describe("TakeQuizTab navigation and submit guardrails", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     await startQuizFlow()
@@ -332,10 +343,12 @@ describe("TakeQuizTab navigation and submit guardrails", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     await startQuizFlow()
@@ -377,10 +390,12 @@ describe("TakeQuizTab navigation and submit guardrails", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     await startQuizFlow()
@@ -393,10 +408,12 @@ describe("TakeQuizTab navigation and submit guardrails", () => {
 
   it("applies 44px touch-target sizing to key quiz actions", async () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     expect(screen.getByRole("button", { name: /Start Quiz/i }).className).toContain("min-h-11")

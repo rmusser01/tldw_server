@@ -45,6 +45,11 @@ _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 
+def _cache_result_from_cache(result: Any) -> bool:
+    """Read explicit cache-hit state from a result object."""
+    return bool(getattr(result, "from_cache", False))
+
+
 @dataclass
 class MetricConfig:
     """Configuration for metric decorators."""
@@ -335,8 +340,8 @@ def count_calls(
                         extracted = label_extractor(*args, **kwargs)
                         if isinstance(extracted, dict):
                             metric_labels.update(extracted)
-                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"label_extractor failed (async): error={e}")
+                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("label_extractor failed (async)")
 
                 increment_counter(counter_name, labels=metric_labels)
                 return await func(*args, **kwargs)
@@ -351,8 +356,8 @@ def count_calls(
                         extracted = label_extractor(*args, **kwargs)
                         if isinstance(extracted, dict):
                             metric_labels.update(extracted)
-                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"label_extractor failed (sync): error={e}")
+                    except _METRIC_DECORATOR_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("label_extractor failed (sync)")
 
                 increment_counter(counter_name, labels=metric_labels)
                 return func(*args, **kwargs)
@@ -699,8 +704,8 @@ def cache_metrics(
         Decorated function
     """
     def decorator(func: F) -> F:
-        # Assume function returns tuple (result, cache_hit: bool)
-        # or has a way to determine cache hit
+        # Cache-hit state is only derived from an explicit `result.from_cache`
+        # attribute. Tuple second values are treated as payload data.
 
         # Ensure cache metrics exist
         try:
@@ -733,15 +738,7 @@ def cache_metrics(
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
                 result = await func(*args, **kwargs)
-
-                # Check if result indicates cache hit
-                cache_hit = False
-                actual_result = result
-
-                if isinstance(result, tuple) and len(result) == 2:
-                    actual_result, cache_hit = result
-                elif hasattr(result, "from_cache"):
-                    cache_hit = result.from_cache
+                cache_hit = _cache_result_from_cache(result)
 
                 # Track metrics
                 if cache_hit:
@@ -758,22 +755,14 @@ def cache_metrics(
                     ratio = hits / total if total > 0 else 0
                     set_gauge("cache_hit_ratio", ratio, labels={"cache": cache_name})
 
-                return actual_result
+                return result
 
             return async_wrapper
         else:
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
                 result = func(*args, **kwargs)
-
-                # Check if result indicates cache hit
-                cache_hit = False
-                actual_result = result
-
-                if isinstance(result, tuple) and len(result) == 2:
-                    actual_result, cache_hit = result
-                elif hasattr(result, "from_cache"):
-                    cache_hit = result.from_cache
+                cache_hit = _cache_result_from_cache(result)
 
                 # Track metrics
                 if cache_hit:
@@ -790,7 +779,7 @@ def cache_metrics(
                     ratio = hits / total if total > 0 else 0
                     set_gauge("cache_hit_ratio", ratio, labels={"cache": cache_name})
 
-                return actual_result
+                return result
 
             return sync_wrapper
 

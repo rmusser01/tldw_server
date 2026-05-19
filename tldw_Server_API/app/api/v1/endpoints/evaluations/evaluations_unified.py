@@ -12,10 +12,12 @@ import time
 from typing import Annotated, Any, Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, rbac_rate_limit, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_roles
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Import unified schemas
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
@@ -42,7 +44,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -96,13 +97,13 @@ _wm_lock = None
 
 import contextlib
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 from .evaluations_auth import (
     _apply_rate_limit_headers,
     check_evaluation_rate_limit,
     enforce_heavy_evaluations_admin,
+    get_evaluation_identity,
     get_eval_request_user,
     require_eval_permissions,
     sanitize_error_message,
@@ -405,8 +406,24 @@ from .evaluations_embeddings_abtest import abtest_router
 
 router.include_router(abtest_router)
 
+from tldw_Server_API.app.core.Evaluations.run_state import (
+    TERMINAL_RUN_STATUSES,
+    normalize_run_status,
+)
 
-@router.get("/embeddings/abtest/{test_id}/events")
+
+@router.get(
+    "/embeddings/abtest/{test_id}/events",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events for A/B test progress.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
+)
 async def stream_embeddings_abtest_events(
     test_id: str,
     user_ctx: str = Depends(verify_api_key),
@@ -417,11 +434,10 @@ async def stream_embeddings_abtest_events(
     import asyncio as _aio
     import json as _json
 
-    from fastapi.responses import StreamingResponse
-
     from tldw_Server_API.app.core.Streaming.streams import SSEStream
 
-    svc = get_unified_evaluation_service_for_user(current_user.id)
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
 
     stream = SSEStream(
         # Use env-driven heartbeat defaults; standard labels for dashboards
@@ -433,11 +449,11 @@ async def stream_embeddings_abtest_events(
     async def _produce() -> None:
         last_payload = None
         while True:
-            row = svc.db.get_abtest(test_id, created_by=user_ctx)
+            row = svc.db.get_abtest(test_id, created_by=identity.created_by)
             if not row:
                 await stream.error("not_found", "A/B test not found")
                 return
-            status = row.get("status", "pending")
+            status = normalize_run_status(row.get("status"))
             stats = row.get("stats_json")
             payload = {"type": "status", "status": status}
             try:
@@ -449,7 +465,7 @@ async def stream_embeddings_abtest_events(
                 await stream.send_json(payload)
                 last_payload = payload
 
-            if status in ("completed", "failed", "canceled"):
+            if status in TERMINAL_RUN_STATUSES:
                 await stream.done()
                 return
             await _aio.sleep(1.0)
@@ -489,13 +505,14 @@ async def delete_embeddings_abtest(
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
     """Cancel/cleanup an embeddings A/B test."""
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    if not svc.db.get_abtest(test_id, created_by=user_ctx):
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    if not svc.db.get_abtest(test_id, created_by=identity.created_by):
         raise HTTPException(status_code=404, detail="A/B test not found")
     # Idempotency: if prior mapping exists, return canonical response without side effects
     try:
         if idempotency_key:
-            prior = svc.db.lookup_idempotency("emb_abtest_delete", idempotency_key, user_ctx)
+            prior = svc.db.lookup_idempotency("emb_abtest_delete", idempotency_key, identity.created_by)
             if prior:
                 logger.info(f"A/B test delete idempotent hit: {test_id}")
                 return Response(content=json.dumps({"status": "deleted", "test_id": test_id}), media_type='application/json', headers={"X-Idempotent-Replay": "true", "Idempotency-Key": idempotency_key})
@@ -506,20 +523,20 @@ async def delete_embeddings_abtest(
         from tldw_Server_API.app.core.Evaluations.embeddings_abtest_service import cleanup_abtest_resources
         cleanup_abtest_resources(
             svc.db,
-            str(current_user.id),
+            identity.user_scope,
             test_id,
             delete_db=True,
             delete_idempotency=True,
-            created_by=user_ctx,
+            created_by=identity.created_by,
         )
-        logger.info(f"A/B test deleted: {test_id} by {user_ctx}")
+        logger.info(f"A/B test deleted: {test_id} by {identity.created_by}")
     except _EVALS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"A/B test cleanup failed for {test_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete A/B test") from exc
-    log_evaluation_deleted(user_id=str(current_user.id), eval_id=test_id)
+    log_evaluation_deleted(user_id=identity.user_scope, eval_id=test_id)
     try:
         if idempotency_key:
-            svc.db.record_idempotency("emb_abtest_delete", idempotency_key, test_id, user_ctx)
+            svc.db.record_idempotency("emb_abtest_delete", idempotency_key, test_id, identity.created_by)
     except _EVALS_NONCRITICAL_EXCEPTIONS:
         pass
     return {"status": "deleted", "test_id": test_id}
@@ -527,8 +544,17 @@ async def delete_embeddings_abtest(
 
 @router.get(
     "/embeddings/abtest/{test_id}/export",
+    responses={
+        200: {
+            "description": "A/B test export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
     dependencies=[
-        Depends(require_roles("admin")),
+        Depends(RequireRole("admin")),
         Depends(rbac_rate_limit("evals.abtest.export")),
     ],
 )
@@ -543,10 +569,11 @@ async def export_embeddings_abtest(
 ):
     """Export AB test results (JSON or CSV). Admin-only."""
     enforce_heavy_evaluations_admin(principal)
-    svc = get_unified_evaluation_service_for_user(current_user.id)
-    if not svc.db.get_abtest(test_id, created_by=user_ctx):
+    identity = get_evaluation_identity(current_user)
+    svc = get_unified_evaluation_service_for_user(identity.user_scope)
+    if not svc.db.get_abtest(test_id, created_by=identity.created_by):
         raise HTTPException(status_code=404, detail="A/B test not found")
-    rows, total = svc.db.list_abtest_results(test_id, limit=100000, offset=0, created_by=user_ctx)
+    rows, total = svc.db.list_abtest_results(test_id, limit=100000, offset=0, created_by=identity.created_by)
     def _parse_json(value, default):
         if value is None:
             return default
@@ -588,11 +615,11 @@ async def export_embeddings_abtest(
         # Idempotency: record export mapping (best-effort)
         try:
             if idempotency_key:
-                svc.db.record_idempotency("emb_abtest_export_json", idempotency_key, f"{test_id}:json", user_ctx)
+                svc.db.record_idempotency("emb_abtest_export_json", idempotency_key, f"{test_id}:json", identity.created_by)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         log_evaluation_exported(
-            user_id=str(current_user.id),
+            user_id=identity.user_scope,
             eval_id=test_id,
             eval_type="embeddings_abtest",
             export_format="json",
@@ -612,11 +639,11 @@ async def export_embeddings_abtest(
         writer.writerow([r.get('result_id'), r.get('arm_id'), r.get('query_id'), r.get('ranked_ids'), r.get('latency_ms'), r.get('metrics_json')])
     try:
         if idempotency_key:
-            svc.db.record_idempotency("emb_abtest_export_csv", idempotency_key, f"{test_id}:csv", user_ctx)
+            svc.db.record_idempotency("emb_abtest_export_csv", idempotency_key, f"{test_id}:csv", identity.created_by)
     except _EVALS_NONCRITICAL_EXCEPTIONS:
         pass
     log_evaluation_exported(
-        user_id=str(current_user.id),
+        user_id=identity.user_scope,
         eval_id=test_id,
         eval_type="embeddings_abtest",
         export_format="csv",
@@ -715,7 +742,19 @@ async def health_check():
         )
 
 
-@router.get("/metrics", dependencies=[Depends(require_eval_permissions(EVALS_READ))])
+@router.get(
+    "/metrics",
+    responses={
+        200: {
+            "description": "Evaluation metrics as JSON or Prometheus text.",
+            "content": {
+                "application/json": {},
+                "text/plain; version=0.0.4; charset=utf-8": {},
+            },
+        },
+    },
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
 async def get_metrics(
     request: Request,
     user_id: str = Depends(verify_api_key),
@@ -1337,12 +1376,13 @@ async def evaluate_propositions_endpoint(
             )
 
         svc = get_unified_evaluation_service_for_user(current_user.id)
+        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         result = await svc.evaluate_propositions(
             extracted=request.extracted,
             reference=request.reference,
             method=request.method or 'semantic',
             threshold=request.threshold or 0.7,
-            user_id=user_id
+            user_id=stable_user_id
         )
 
         metrics = result["results"].get("metrics", {})
@@ -1515,6 +1555,9 @@ async def batch_evaluate(
                 headers={"Retry-After": str(retry_after)},
             )
 
+        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
+        batch_webhook_user_id = webhook_user_id_from_user(current_user)
+
         results = []
         failed_count = 0
         eval_type = request.evaluation_type
@@ -1539,7 +1582,8 @@ async def batch_evaluate(
                         metrics=eval_request.get("metrics", ["coherence"]),
                         api_name=provider_name,
                         api_key=provider_api_key,
-                        user_id=user_id,
+                        user_id=stable_user_id,
+                        webhook_user_id=batch_webhook_user_id,
                     )
                 if eval_type == "rag":
                     return service.evaluate_rag(
@@ -1550,7 +1594,8 @@ async def batch_evaluate(
                         metrics=eval_request.get("metrics", ["relevance", "faithfulness"]),
                         api_name=provider_name,
                         api_key=provider_api_key,
-                        user_id=user_id,
+                        user_id=stable_user_id,
+                        webhook_user_id=batch_webhook_user_id,
                     )
                 if eval_type == "response_quality":
                     return service.evaluate_response_quality(
@@ -1560,7 +1605,8 @@ async def batch_evaluate(
                         custom_criteria=eval_request.get("evaluation_criteria"),
                         api_name=provider_name,
                         api_key=provider_api_key,
-                        user_id=user_id,
+                        user_id=stable_user_id,
+                        webhook_user_id=batch_webhook_user_id,
                     )
                 if eval_type == "ocr":
                     return service.evaluate_ocr(
@@ -1568,7 +1614,7 @@ async def batch_evaluate(
                         metrics=eval_request.get("metrics"),
                         ocr_options=eval_request.get("ocr_options"),
                         thresholds=eval_request.get("thresholds"),
-                        user_id=user_id,
+                        user_id=stable_user_id,
                     )
                 if eval_type == "propositions":
                     return service.evaluate_propositions(
@@ -1576,7 +1622,7 @@ async def batch_evaluate(
                         reference=eval_request.get("reference", []),
                         method=eval_request.get("method", "semantic"),
                         threshold=eval_request.get("threshold", 0.7),
-                        user_id=user_id,
+                        user_id=stable_user_id,
                     )
                 return None
 
@@ -1657,19 +1703,21 @@ async def batch_evaluate(
                                 }
                                 failed_count += 1
                         except _EVALS_NONCRITICAL_EXCEPTIONS as e:
+                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
-                                "error": str(e),
+                                "error": "Evaluation item failed",
                             }
                             failed_count += 1
                             if not request.continue_on_error:
                                 fail_fast_cancelled = True
                         except Exception as e:
+                            logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                             results_by_index[item_index] = {
                                 "evaluation_id": None,
                                 "status": "failed",
-                                "error": str(e),
+                                "error": "Evaluation item failed",
                             }
                             failed_count += 1
                             if not request.continue_on_error:
@@ -1755,7 +1803,8 @@ async def batch_evaluate(
                             metrics=eval_request.get("metrics", ["coherence"]),
                             api_name=provider_name,
                             api_key=provider_api_key,
-                            user_id=user_id
+                            user_id=stable_user_id,
+                            webhook_user_id=batch_webhook_user_id,
                         )
                     elif eval_type == "rag":
                         result = await service.evaluate_rag(
@@ -1766,7 +1815,8 @@ async def batch_evaluate(
                             metrics=eval_request.get("metrics", ["relevance", "faithfulness"]),
                             api_name=provider_name,
                             api_key=provider_api_key,
-                            user_id=user_id
+                            user_id=stable_user_id,
+                            webhook_user_id=batch_webhook_user_id,
                         )
                     elif eval_type == "response_quality":
                         result = await service.evaluate_response_quality(
@@ -1776,7 +1826,8 @@ async def batch_evaluate(
                             custom_criteria=eval_request.get("evaluation_criteria"),
                             api_name=provider_name,
                             api_key=provider_api_key,
-                            user_id=user_id
+                            user_id=stable_user_id,
+                            webhook_user_id=batch_webhook_user_id,
                         )
                     elif eval_type == "ocr":
                         result = await service.evaluate_ocr(
@@ -1784,7 +1835,7 @@ async def batch_evaluate(
                             metrics=eval_request.get("metrics"),
                             ocr_options=eval_request.get("ocr_options"),
                             thresholds=eval_request.get("thresholds"),
-                            user_id=user_id,
+                            user_id=stable_user_id,
                         )
                     elif eval_type == "propositions":
                         result = await service.evaluate_propositions(
@@ -1792,7 +1843,7 @@ async def batch_evaluate(
                             reference=eval_request.get("reference", []),
                             method=eval_request.get("method", "semantic"),
                             threshold=eval_request.get("threshold", 0.7),
-                            user_id=user_id,
+                            user_id=stable_user_id,
                         )
                     else:
                         results.append({
@@ -1812,10 +1863,11 @@ async def batch_evaluate(
                     })
 
                 except _EVALS_NONCRITICAL_EXCEPTIONS as e:
+                    logger.error(f"Batch evaluation item failed: {e}", exc_info=True)
                     results.append({
                         "evaluation_id": None,
                         "status": "failed",
-                        "error": str(e)
+                        "error": "Evaluation item failed"
                     })
                     failed_count += 1
 
@@ -1887,12 +1939,13 @@ async def evaluate_ocr_endpoint(
             raise HTTPException(status_code=429, detail=meta.get("error", "Rate limit exceeded"), headers={"Retry-After": str(retry_after)})
 
         service = get_unified_evaluation_service_for_user(current_user.id)
+        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         result = await service.evaluate_ocr(
             items=[i.model_dump() for i in request.items],
             metrics=request.metrics,
             ocr_options=request.ocr_options,
             thresholds=request.thresholds,
-            user_id=user_id,
+            user_id=stable_user_id,
         )
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
@@ -2004,6 +2057,7 @@ async def evaluate_ocr_pdf_endpoint(
         }
 
         service = get_unified_evaluation_service_for_user(current_user.id)
+        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
         thresholds = None
         if thresholds_json:
             try:
@@ -2018,7 +2072,7 @@ async def evaluate_ocr_pdf_endpoint(
             metrics=metrics,
             ocr_options=ocr_options,
             thresholds=thresholds,
-            user_id=user_id,
+            user_id=stable_user_id,
         )
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
@@ -2129,7 +2183,13 @@ async def get_evaluation_history(
                         "end": request.end_date.isoformat() if request.end_date else None
                     }
                 }
-            }
+            },
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=request.limit or 100,
+                offset=request.offset or 0,
+                count=len(evaluations),
+            ),
         )
 
     except _EVALS_NONCRITICAL_EXCEPTIONS as e:

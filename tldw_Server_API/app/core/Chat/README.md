@@ -112,7 +112,8 @@ FastAPI endpoint (app/api/v1/endpoints/chat.py)
 ---
 
 ## Metrics & Logging
-- Metrics enumerated in `chat_metrics.ChatMetricsCollector` feed OpenTelemetry meters (`chat_requests_total`, streaming stats, tokens, DB operations, moderation outcomes).
+- `chat_metrics.ChatMetricsCollector` continues to emit OpenTelemetry meters (`chat_requests_total`, streaming stats, tokens, DB operations, moderation outcomes).
+- `/api/v1/metrics/chat` serves a small in-process summary maintained alongside those emissions so registry-style fields such as `sum` remain available.
 - Loguru is used throughout for structured logging; metrics and audit hooks provide provider/model labels for downstream dashboards.
 - Usage tracking integrates with `Usage.usage_tracker` to record per-call token/cost estimates.
 
@@ -127,10 +128,12 @@ FastAPI endpoint (app/api/v1/endpoints/chat.py)
 
 ---
 
-## Phase 2a Run-First Rollout
-- Chat and ACP now share a phase-2a rollout contract for `run(command)`:
-  - `run` is preferred only when the rollout gate is enabled and the resolved effective tool set still contains `run`
-  - typed tools remain visible and executable as fallback
+## Phase 2c Run-First Posture
+- Chat and ACP now share a phase-2c rollout posture for `run(command)`:
+  - `default_on` is the normal presentation for the stable `provider:model` cohort shipped in config
+  - the current phase 2c stable cohort is `openai:gpt-4o-mini`, `anthropic:claude-3-7-sonnet`, `openai:gpt-4o`, and `google:gemini-2.5-flash`
+  - `gated` remains available for controlled experiments on narrower cohorts
+  - `off` is the rollback posture; typed tools stay visible and executable as fallback in all three modes
   - `tool_choice` stays unset or `auto`; the surface is biased, not forced
 - Effective-tool-set invariant:
   - chat resolves one effective tool set before the provider call
@@ -139,6 +142,7 @@ FastAPI endpoint (app/api/v1/endpoints/chat.py)
 - Rollout labels:
   - chat emits `presentation_variant`, `cohort`, `eligible`, `ineligible_reason`, `first_tool`, `fallback_tool`, and `outcome`
   - ACP emits the same run-first labels, plus `agent_type`
+  - `cohort` remains the label name in phase 2b; current values include `default_on`, `out_of_cohort`, `override_off`, and `gated`
   - use `presentation_variant` to separate prompt/tool-surface experiments over time
 - Completion proxy:
   - rollout metrics use a completion proxy, not judged task success

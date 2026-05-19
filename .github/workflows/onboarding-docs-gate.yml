@@ -49,11 +49,6 @@ jobs:
         with:
           install-portaudio: 'true'
 
-      - name: Install FFmpeg and PortAudio (Linux)
-        uses: ./.github/actions/setup-ffmpeg
-        with:
-          install-portaudio: 'true'
-
       - name: Setup Python and dependencies
         uses: ./.github/actions/setup-python-deps
         with:
@@ -83,6 +78,8 @@ jobs:
           python Helper_Scripts/docs/check_onboarding_endpoint_drift.py
 
       - name: Docs test suite
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           python -m pytest -q -p pytest_asyncio.plugin tldw_Server_API/tests/Docs
 

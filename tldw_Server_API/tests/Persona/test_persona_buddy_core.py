@@ -1,5 +1,7 @@
 """Core deterministic derivation tests for persona buddy helpers."""
 
+import pytest
+
 from tldw_Server_API.app.core.Persona.buddy import (
     PERSONA_BUDDY_DERIVATION_VERSION,
     build_persona_buddy_source_fingerprint,
@@ -7,6 +9,8 @@ from tldw_Server_API.app.core.Persona.buddy import (
     normalize_persona_buddy_overlay_preferences,
     resolve_persona_buddy_profile,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_build_persona_buddy_core_ignores_system_prompt_voice_defaults_and_setup():

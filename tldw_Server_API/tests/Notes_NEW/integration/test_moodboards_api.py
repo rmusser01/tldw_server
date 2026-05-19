@@ -85,8 +85,23 @@ def test_moodboard_crud_and_membership_flow(moodboard_client: TestClient):
 
     list_resp = client.get("/api/v1/notes/moodboards")
     assert list_resp.status_code == 200
-    boards = list_resp.json()["moodboards"]
+    list_payload = list_resp.json()
+    boards = list_payload["moodboards"]
     assert any(int(item["id"]) == int(moodboard_id) for item in boards)
+    assert list_payload["count"] == 1
+    assert list_payload["total"] == 1
+    assert list_payload["limit"] == 100
+    assert list_payload["offset"] == 0
+    assert list_payload["pagination"] == {
+        "mode": "offset",
+        "limit": 100,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert list_payload["has_more"] is False
+    assert list_payload["next_offset"] is None
 
     pin_manual = client.post(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_manual['id']}")
     pin_both = client.post(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_both['id']}")
@@ -108,6 +123,16 @@ def test_moodboard_crud_and_membership_flow(moodboard_client: TestClient):
     paged_body = paged.json()
     assert paged_body["count"] == 1
     assert paged_body["total"] == 2
+    assert paged_body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert paged_body["has_more"] is True
+    assert paged_body["next_offset"] == 1
 
     unpin_both = client.delete(f"/api/v1/notes/moodboards/{moodboard_id}/notes/{note_both['id']}")
     assert unpin_both.status_code == 200

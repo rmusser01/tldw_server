@@ -1,7 +1,5 @@
 import "../styles/globals.css"
-// react-pdf text/annotation layer styles for Document Workspace
-import "react-pdf/dist/esm/Page/AnnotationLayer.css"
-import "react-pdf/dist/esm/Page/TextLayer.css"
+import "@/assets/react-pdf.css"
 import "@web/extension/shims/runtime-bootstrap"
 // Use web-specific i18n that works with SSR/static generation
 import "@web/lib/i18n-web"
@@ -10,10 +8,19 @@ import dynamic from "next/dynamic"
 import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
+import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
 import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuard"
+import { ServerReadinessGate } from "@web/components/networking/ServerReadinessGate"
+import { hasEnvApiAuth } from "@web/lib/authStorage"
 import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
+import {
+  buildFirstRunOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  getOnboardingReturnToFromSearch,
+  resolveOnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
 
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
@@ -46,16 +53,49 @@ const PREFETCH_IDLE_TIMEOUT_MS = 2000
 const PREFETCH_FALLBACK_DELAY_MS = 1200
 const SLOW_EFFECTIVE_TYPES = new Set(["slow-2g", "2g"])
 
-const hasEnvAuth = () => {
-  const envApiKey = (process.env.NEXT_PUBLIC_X_API_KEY || "").trim()
-  const envBearer = (process.env.NEXT_PUBLIC_API_BEARER || "").trim()
-  return envApiKey.length > 0 || envBearer.length > 0
-}
-
 type ConfiguredAuthState = {
   hasConfig: boolean
   authMode?: "single-user" | "multi-user"
   isAuthenticated: boolean
+}
+
+const splitRouteAsPath = (asPath: string) => {
+  const fallback = asPath || "/"
+  const hashIndex = fallback.indexOf("#")
+  const withoutHash = hashIndex >= 0 ? fallback.slice(0, hashIndex) : fallback
+  const hash = hashIndex >= 0 ? fallback.slice(hashIndex) : ""
+  const searchIndex = withoutHash.indexOf("?")
+  const pathname =
+    searchIndex >= 0 ? withoutHash.slice(0, searchIndex) || "/" : withoutHash || "/"
+  const search = searchIndex >= 0 ? withoutHash.slice(searchIndex) : ""
+
+  return {
+    pathname,
+    search,
+    hash
+  }
+}
+
+const buildFirstRunSetupRoute = (asPath: string): string => {
+  const routeParts = splitRouteAsPath(asPath)
+  const entryIntent = resolveOnboardingEntryIntent(routeParts)
+
+  if (entryIntent !== CHARACTER_CHAT_ONBOARDING_INTENT) {
+    return "/persona"
+  }
+
+  if (routeParts.pathname === "/") {
+    const returnTo = getOnboardingReturnToFromSearch(routeParts.search)
+    if (returnTo) {
+      const params = new URLSearchParams({
+        intent: CHARACTER_CHAT_ONBOARDING_INTENT
+      })
+      params.set("returnTo", returnTo)
+      return `/?${params.toString()}`
+    }
+  }
+
+  return buildFirstRunOnboardingRoute(routeParts)
 }
 
 const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
@@ -120,6 +160,7 @@ export default function App({ Component, pageProps }: AppProps) {
       ? pathname.slice(0, -1)
       : pathname
   const isPublicAuthRoute = routePath === "/login"
+  const isSetupRoute = routePath === "/setup"
   const isSettingsRoute =
     routePath === "/settings" || routePath.startsWith("/settings/")
   const [isAuthenticated, setIsAuthenticated] = React.useState(false)
@@ -131,7 +172,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
     let cancelled = false
     const refreshAuthState = async () => {
-      const envAuthed = hasEnvAuth()
+      const envAuthed = hasEnvApiAuth()
       const configuredAuth = await getConfiguredAuthState()
       const authed = configuredAuth.hasConfig
         ? configuredAuth.authMode === "multi-user"
@@ -254,23 +295,56 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [authResolved, isAuthenticated, isPublicAuthRoute, routePath, router])
 
   const hideShellNav = !authResolved || !isAuthenticated
+  const shouldBypassGates = isPublicAuthRoute || isSettingsRoute || isSetupRoute
+  const shouldAllowDegradedReadiness = routePath === "/chat"
+  const firstRunSetupRoute = React.useMemo(
+    () => buildFirstRunSetupRoute(router.asPath || routePath || "/"),
+    [routePath, router.asPath]
+  )
+  const shouldBypassFirstRunOverlay =
+    firstRunSetupRoute !== "/persona" && !shouldBypassGates
+
+  const handleStartSetup = React.useCallback(() => {
+    void router.push(firstRunSetupRoute)
+  }, [firstRunSetupRoute, router])
+
+  const layoutProps = React.useMemo(
+    () => ({
+      hideHeader: hideShellNav || isSetupRoute,
+      hideSidebar: hideShellNav || isSettingsRoute || isSetupRoute,
+      allowNestedHideHeader: !isSettingsRoute
+    }),
+    [hideShellNav, isSettingsRoute, isSetupRoute]
+  )
+
+  const layoutContent = (
+    <OptionLayout {...layoutProps}>
+      <Component {...pageProps} />
+    </OptionLayout>
+  )
+
+  const gatedContent = isPublicAuthRoute ? (
+    <Component {...pageProps} />
+  ) : shouldBypassGates ? (
+    layoutContent
+  ) : (
+    <FirstRunGate
+      onStartSetup={handleStartSetup}
+      bypass={shouldBypassFirstRunOverlay}>
+      {layoutContent}
+    </FirstRunGate>
+  )
 
   return (
     <AppProviders>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           <ErrorBoundary>
-            {isPublicAuthRoute ? (
-              <Component {...pageProps} />
-            ) : (
-              <OptionLayout
-                hideHeader={hideShellNav}
-                hideSidebar={hideShellNav || isSettingsRoute}
-                allowNestedHideHeader={!isSettingsRoute}
-              >
-                <Component {...pageProps} />
-              </OptionLayout>
-            )}
+            <ServerReadinessGate
+              bypass={shouldBypassGates}
+              allowDegraded={shouldAllowDegradedReadiness}>
+              {gatedContent}
+            </ServerReadinessGate>
           </ErrorBoundary>
         </BackendRecoveryUiProvider>
       </ConfigurationGuard>

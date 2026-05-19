@@ -7,6 +7,7 @@ import { hasStoredAuth, subscribeAuthChange } from '@/lib/auth';
 import { resolveUnauthenticatedRouteState } from '@/lib/auth-navigation';
 import { User } from '@/types';
 import { getRoleRank, hasRoleAccess, isAdminRole, isMemberRole, isSuperAdminRole } from '@/lib/roles';
+import { logger } from '@/lib/logger';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { CardSkeleton } from '@/components/ui/skeleton';
@@ -134,11 +135,11 @@ export function PermissionProvider({ children }: PermissionProviderProps) {
         const serverPermissions = Array.isArray(effective?.permissions) ? effective.permissions : [];
         setPermissions(serverPermissions);
       } catch (error) {
-        console.error('Failed to load server permissions:', error);
+        logger.error('Failed to load server permissions', { component: 'PermissionProvider', error: error instanceof Error ? error.message : String(error) });
         setPermissions([]);
       }
     } catch (error) {
-      console.error('Failed to load user permissions:', error);
+      logger.error('Failed to load user permissions', { component: 'PermissionProvider', error: error instanceof Error ? error.message : String(error) });
       // Only set authError for 401/403 to trigger login redirect.
       // Other errors (network, 5xx, etc.) should show loading state, not redirect.
       const status = error instanceof ApiError

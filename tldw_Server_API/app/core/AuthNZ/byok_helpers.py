@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import (
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import get_byok_credential_policy
 
 DEFAULT_BYOK_ALLOWED_PROVIDERS: set[str] = {
@@ -35,6 +36,7 @@ DEFAULT_BYOK_ALLOWED_PROVIDERS: set[str] = {
     "voyage",
     "zai",
 }
+DEFAULT_BYOK_ALLOWED_PROVIDERS.update(iter_custom_openai_provider_names(start=3))
 _PLATFORM_ADMIN_ROLES = frozenset({"admin", "owner", "super_admin"})
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 

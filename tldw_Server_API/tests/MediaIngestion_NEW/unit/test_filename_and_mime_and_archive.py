@@ -96,6 +96,26 @@ def test_validate_file_python_magic_fallback(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.unit
+def test_file_validator_skips_python_magic_import_on_windows(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import Upload_Sink as sink
+
+    monkeypatch.setattr(sink, "puremagic", None, raising=False)
+    monkeypatch.setattr(sink, "_python_magic", None, raising=False)
+    monkeypatch.setattr(sink, "_python_magic_loaded", False, raising=False)
+    monkeypatch.setattr(sink.os, "name", "nt", raising=False)
+
+    def _unexpected_import(_name: str):
+        raise AssertionError("python-magic should not be imported on Windows")
+
+    monkeypatch.setattr(sink.importlib, "import_module", _unexpected_import, raising=True)
+
+    validator = sink.FileValidator()
+
+    assert validator.python_magic_available is False
+    assert validator._python_magic_mime is None
+
+
+@pytest.mark.unit
 def test_validate_archive_scanning_unavailable_returns_warning(tmp_path: Path):
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 

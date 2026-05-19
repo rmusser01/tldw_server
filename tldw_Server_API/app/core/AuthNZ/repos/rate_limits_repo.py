@@ -25,6 +25,93 @@ class AuthnzRateLimitsRepo:
         """Return True when the underlying DatabasePool is using PostgreSQL."""
         return bool(getattr(self.db_pool, "pool", None))
 
+    async def _ensure_sqlite_account_lockouts_schema(self, conn: Any) -> None:
+        """Upgrade legacy identifier-only lockout tables to attempt-type scope (SQLite)."""
+        lockout_ddl = """
+            CREATE TABLE IF NOT EXISTS account_lockouts (
+                identifier TEXT NOT NULL,
+                attempt_type TEXT NOT NULL,
+                locked_until TEXT NOT NULL,
+                reason TEXT,
+                PRIMARY KEY (identifier, attempt_type)
+            )
+            """
+        cursor = await conn.execute("PRAGMA table_info(account_lockouts)")
+        rows = await cursor.fetchall()
+        if not rows:
+            # Table does not exist yet; create it fresh.
+            await conn.execute(lockout_ddl)
+            return
+
+        column_names = {row[1] if not isinstance(row, dict) else row["name"] for row in rows}
+        if "attempt_type" in column_names:
+            return
+
+        # Legacy table lacks attempt_type -- rebuild with the new schema.
+        await conn.execute("ALTER TABLE account_lockouts RENAME TO account_lockouts_legacy")
+        await conn.execute(lockout_ddl)
+        await conn.execute(
+            """
+            INSERT INTO account_lockouts (identifier, attempt_type, locked_until, reason)
+            SELECT identifier, 'login', locked_until, reason
+            FROM account_lockouts_legacy
+            """
+        )
+        await conn.execute("DROP TABLE IF EXISTS account_lockouts_legacy")
+
+
+    async def _ensure_postgres_account_lockouts_schema(self, conn: Any) -> None:
+        """Upgrade legacy identifier-only lockout tables to attempt-type scope."""
+        lockout_ddl = """
+            CREATE TABLE IF NOT EXISTS account_lockouts (
+                identifier TEXT NOT NULL,
+                attempt_type TEXT NOT NULL,
+                locked_until TIMESTAMPTZ NOT NULL,
+                reason TEXT,
+                PRIMARY KEY (identifier, attempt_type)
+            )
+            """
+        columns = await conn.fetch(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'account_lockouts'
+            """
+        )
+        if not columns:
+            await conn.execute(lockout_ddl)
+            return
+
+        column_names = {row["column_name"] for row in columns}
+        if "attempt_type" in column_names:
+            return
+
+        await conn.execute("LOCK TABLE account_lockouts IN ACCESS EXCLUSIVE MODE")
+        columns = await conn.fetch(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'account_lockouts'
+            """
+        )
+        column_names = {row["column_name"] for row in columns}
+        if "attempt_type" in column_names:
+            return
+
+        await conn.execute("ALTER TABLE account_lockouts RENAME TO account_lockouts_legacy")
+        await conn.execute(lockout_ddl)
+        await conn.execute(
+            """
+            INSERT INTO account_lockouts (identifier, attempt_type, locked_until, reason)
+            SELECT identifier, 'login', locked_until, reason
+            FROM account_lockouts_legacy
+            ON CONFLICT (identifier, attempt_type) DO NOTHING
+            """
+        )
+        await conn.execute("DROP TABLE IF EXISTS account_lockouts_legacy")
+
     async def ensure_schema(self) -> None:
         """
         Ensure the AuthNZ rate-limiter tables exist for the configured backend.
@@ -56,9 +143,11 @@ class AuthnzRateLimitsRepo:
             # Account lockouts
             """
             CREATE TABLE IF NOT EXISTS account_lockouts (
-                identifier TEXT PRIMARY KEY,
+                identifier TEXT NOT NULL,
+                attempt_type TEXT NOT NULL,
                 locked_until TEXT NOT NULL,
-                reason TEXT
+                reason TEXT,
+                PRIMARY KEY (identifier, attempt_type)
             )
             """,
             # Helpful index for queries by identifier
@@ -86,9 +175,11 @@ class AuthnzRateLimitsRepo:
             """,
             """
             CREATE TABLE IF NOT EXISTS account_lockouts (
-                identifier TEXT PRIMARY KEY,
+                identifier TEXT NOT NULL,
+                attempt_type TEXT NOT NULL,
                 locked_until TIMESTAMPTZ NOT NULL,
-                reason TEXT
+                reason TEXT,
+                PRIMARY KEY (identifier, attempt_type)
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_rate_limits_identifier ON rate_limits(identifier)",
@@ -97,16 +188,27 @@ class AuthnzRateLimitsRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
-                    for sql in ddl_postgres:
+                    for sql in ddl_postgres[:-1]:
+                        await conn.execute(sql)
+                    await self._ensure_postgres_account_lockouts_schema(conn)
+                    for sql in ddl_postgres[-1:]:
                         await conn.execute(sql)
                 else:
-                    for sql in ddl_sqlite:
+                    # Run rate_limits and failed_attempts DDL, then
+                    # handle account_lockouts with legacy upgrade logic.
+                    for sql in ddl_sqlite[:2]:
+                        await conn.execute(sql)
+                    await self._ensure_sqlite_account_lockouts_schema(conn)
+                    # Create the index
+                    for sql in ddl_sqlite[3:]:
                         await conn.execute(sql)
                     try:
                         await conn.commit()
                     except Exception as commit_error:
                         # aiosqlite transaction manager may commit outside; ignore
-                        logger.debug("Rate limits repo explicit commit failed; transaction manager likely committed", exc_info=commit_error)
+                        logger.bind(error_type=type(commit_error).__name__).debug(
+                            "Rate limits repo explicit commit failed; transaction manager likely committed"
+                        )
         except Exception as exc:
             logger.error(f"AuthnzRateLimitsRepo.ensure_schema failed: {exc}")
             raise
@@ -538,26 +640,27 @@ class AuthnzRateLimitsRepo:
                     if self._is_postgres_backend():
                         await conn.execute(
                             """
-                            INSERT INTO account_lockouts (identifier, locked_until, reason)
-                            VALUES ($1, $2, $3)
-                            ON CONFLICT (identifier) DO UPDATE SET
-                                locked_until = $2,
-                                reason = $3
+                            INSERT INTO account_lockouts (identifier, attempt_type, locked_until, reason)
+                            VALUES ($1, $2, $3, $4)
+                            ON CONFLICT (identifier, attempt_type) DO UPDATE SET
+                                locked_until = $3,
+                                reason = $4
                             """,
                             identifier,
+                            attempt_type,
                             lockout_expires,
                             reason,
                         )
                     else:
                         await conn.execute(
                             """
-                            INSERT INTO account_lockouts (identifier, locked_until, reason)
-                            VALUES (?, ?, ?)
-                            ON CONFLICT(identifier) DO UPDATE SET
+                            INSERT INTO account_lockouts (identifier, attempt_type, locked_until, reason)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(identifier, attempt_type) DO UPDATE SET
                                 locked_until = excluded.locked_until,
                                 reason = excluded.reason
                             """,
-                            (identifier, lockout_expires.isoformat(), reason),
+                            (identifier, attempt_type, lockout_expires.isoformat(), reason),
                         )
                 return {
                     "attempt_count": int(attempt_count),
@@ -572,6 +675,7 @@ class AuthnzRateLimitsRepo:
         self,
         *,
         identifier: str,
+        attempt_type: str = "login",
         now: datetime,
     ) -> datetime | None:
         """
@@ -584,16 +688,18 @@ class AuthnzRateLimitsRepo:
                         """
                         SELECT locked_until
                         FROM account_lockouts
-                        WHERE identifier = $1 AND locked_until > $2
+                        WHERE identifier = $1 AND attempt_type = $2 AND locked_until > $3
                         """,
                         identifier,
+                        attempt_type,
                         now,
                     )
                     if row:
                         return row["locked_until"]
                     await conn.execute(
-                        "DELETE FROM account_lockouts WHERE identifier = $1 AND locked_until <= $2",
+                        "DELETE FROM account_lockouts WHERE identifier = $1 AND attempt_type = $2 AND locked_until <= $3",
                         identifier,
+                        attempt_type,
                         now,
                     )
                     return None
@@ -602,16 +708,16 @@ class AuthnzRateLimitsRepo:
                     """
                     SELECT locked_until
                     FROM account_lockouts
-                    WHERE identifier = ? AND locked_until > ?
+                    WHERE identifier = ? AND attempt_type = ? AND locked_until > ?
                     """,
-                    (identifier, now.isoformat()),
+                    (identifier, attempt_type, now.isoformat()),
                 )
                 row = await cursor.fetchone()
                 if row:
                     return datetime.fromisoformat(row[0])
                 await conn.execute(
-                    "DELETE FROM account_lockouts WHERE identifier = ? AND locked_until <= ?",
-                    (identifier, now.isoformat()),
+                    "DELETE FROM account_lockouts WHERE identifier = ? AND attempt_type = ? AND locked_until <= ?",
+                    (identifier, attempt_type, now.isoformat()),
                 )
                 try:
                     await conn.commit()
@@ -645,8 +751,9 @@ class AuthnzRateLimitsRepo:
                         attempt_type,
                     )
                     await conn.execute(
-                        "DELETE FROM account_lockouts WHERE identifier = $1",
+                        "DELETE FROM account_lockouts WHERE identifier = $1 AND attempt_type = $2",
                         identifier,
+                        attempt_type,
                     )
                 else:
                     await conn.execute(
@@ -654,8 +761,8 @@ class AuthnzRateLimitsRepo:
                         (identifier, attempt_type),
                     )
                     await conn.execute(
-                        "DELETE FROM account_lockouts WHERE identifier = ?",
-                        (identifier,),
+                        "DELETE FROM account_lockouts WHERE identifier = ? AND attempt_type = ?",
+                        (identifier, attempt_type),
                     )
                     try:
                         await conn.commit()

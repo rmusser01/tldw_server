@@ -11,6 +11,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     maxWorkers: 2,
+    restoreMocks: true,
     setupFiles: ["./vitest.setup.ts"],
     include: [
       "src/**/__tests__/**/*.test.{ts,tsx}",

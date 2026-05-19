@@ -30,6 +30,7 @@ from .base import (
     FTSQuery,
     QueryResult,
 )
+from .fts_translator import FTSQueryTranslator
 
 logger = _loguru_logger
 
@@ -240,6 +241,11 @@ class SQLiteConnectionPool(ConnectionPool):
 class SQLiteBackend(DatabaseBackend):
     """SQLite implementation of the database backend."""
 
+    def __init__(self, config: DatabaseConfig):
+        super().__init__(config)
+        self._pool_lock = threading.Lock()
+        self._retired = False
+
     @property
     def backend_type(self) -> BackendType:
         """Get the backend type."""
@@ -331,10 +337,16 @@ class SQLiteBackend(DatabaseBackend):
 
     def get_pool(self) -> ConnectionPool:
         """Get or create the connection pool."""
+        if self._retired:
+            raise DatabaseError("SQLite backend has been retired")
         if self._pool is None:
-            if not self.config.sqlite_path:
-                raise DatabaseError("SQLite path not configured")
-            self._pool = SQLiteConnectionPool(self.config.sqlite_path, self.config)
+            with self._pool_lock:
+                if self._retired:
+                    raise DatabaseError("SQLite backend has been retired")
+                if self._pool is None:
+                    if not self.config.sqlite_path:
+                        raise DatabaseError("SQLite path not configured")
+                    self._pool = SQLiteConnectionPool(self.config.sqlite_path, self.config)
         return self._pool
 
     def execute(
@@ -557,7 +569,11 @@ class SQLiteBackend(DatabaseBackend):
 
         # Add MATCH clause
         query_parts.append(f"WHERE {self.escape_identifier(fts_query.table)} MATCH ?")
-        params.append(fts_query.query_text)
+        normalized_query = (
+            FTSQueryTranslator.normalize_query(fts_query.query_text, "sqlite")
+            or fts_query.query_text
+        )
+        params.append(normalized_query)
 
         # Add additional filters
         for key, value in fts_query.filters.items():

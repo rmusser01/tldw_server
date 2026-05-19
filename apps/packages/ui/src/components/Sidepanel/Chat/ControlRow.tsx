@@ -15,16 +15,23 @@ import { useTranslation } from "react-i18next"
 import { ModelSelect } from "@/components/Common/ModelSelect"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { FeatureHint, useFeatureHintSeen } from "@/components/Common/FeatureHint"
-import { CharacterSelect } from "./CharacterSelect"
+import { McpToolSelector } from "@/components/Common/McpToolSelector"
+import { ConversationContextPopover } from "./ConversationContextPopover"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useMcpTools } from "@/hooks/useMcpTools"
 import { browser } from "wxt/browser"
 import { useStorage } from "@plasmohq/storage/hook"
 import { fetchChatModels } from "@/services/tldw-server"
-import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import {
+  buildQuickIngestOpenDetailFromUrl,
+  requestQuickIngestOpen,
+  type QuickIngestOpenDetail
+} from "@/utils/quick-ingest-open"
 import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
+import type { ConversationContextComposition } from "@/types/conversation-context"
+import type { ConversationContextCompositionStatus } from "@/hooks/chat/useConversationContextComposition"
 
 interface ControlRowProps {
   // Prompt selection
@@ -34,6 +41,16 @@ interface ControlRowProps {
   // Character selection
   selectedCharacterId: string | null
   setSelectedCharacterId: (id: string | null) => void
+  // Conversation context
+  serverChatId?: string | null
+  conversationContextComposition?: ConversationContextComposition | null
+  conversationContextStatus?: ConversationContextCompositionStatus
+  conversationContextSaveSelection?: (
+    selection: {
+      worldBookIds: number[]
+      dictionaryIds: number[]
+    }
+  ) => Promise<unknown> | unknown
   // Toggles
   webSearch: boolean
   setWebSearch: (value: boolean) => void
@@ -58,6 +75,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   setSelectedQuickPrompt,
   selectedCharacterId,
   setSelectedCharacterId,
+  serverChatId,
+  conversationContextComposition,
+  conversationContextStatus = "idle",
+  conversationContextSaveSelection,
   webSearch,
   setWebSearch,
   chatMode,
@@ -73,12 +94,19 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
   const [moreOpen, setMoreOpen] = React.useState(false)
+  const [systemPromptOverride, setSystemPromptOverride] = React.useState<
+    string | undefined
+  >(undefined)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
   const { capabilities } = useServerCapabilities()
+  const [activePlaylistDetail, setActivePlaylistDetail] =
+    React.useState<QuickIngestOpenDetail | null>(null)
   const {
     hasMcp,
     healthState: mcpHealthState,
-    tools: mcpTools,
+    discoveredTools: discoveredMcpTools,
+    chatTools: chatMcpTools,
+    toolCounts: mcpToolCounts,
     toolsLoading: mcpToolsLoading,
     catalogs: mcpCatalogs,
     catalogsLoading: mcpCatalogsLoading,
@@ -91,8 +119,16 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     setToolCatalog,
     setToolCatalogId,
     setToolModules,
-    setToolCatalogStrict
+    setToolCatalogStrict,
+    setToolEnabled: setMcpToolEnabled,
+    resetToolFilter: resetMcpToolFilter
   } = useMcpTools()
+  const chatMcpToolCount = chatMcpTools.length
+  const translateMcpToolSelector = React.useCallback(
+    (key: string, fallback?: string, options?: Record<string, unknown>) =>
+      t(key, fallback ?? key, options),
+    [t]
+  )
 
   const [catalogDraft, setCatalogDraft] = React.useState(toolCatalog)
   const [advancedToolsExpanded, setAdvancedToolsExpanded] = React.useState(false)
@@ -213,8 +249,60 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const knowledgeHintSeen = useFeatureHintSeen("knowledge-search")
   const moreToolsHintSeen = useFeatureHintSeen("more-tools")
 
-  const openQuickIngest = () => {
-    requestQuickIngestOpen()
+  React.useEffect(() => {
+    setSystemPromptOverride(undefined)
+  }, [selectedSystemPrompt])
+
+  const playlistImportEnabled =
+    Boolean(isConnected) && Boolean(capabilities?.hasMediaPlaylistPreflight)
+
+  const resolveActivePlaylistDetail =
+    React.useCallback(async (): Promise<QuickIngestOpenDetail | null> => {
+      if (!playlistImportEnabled) return null
+      try {
+        const tabs = await browser.tabs?.query({
+          active: true,
+          currentWindow: true
+        })
+        const activeTab = tabs?.find(
+          (tab) => typeof tab.url === "string" && tab.url.trim().length > 0
+        )
+        return activeTab?.url ? buildQuickIngestOpenDetailFromUrl(activeTab.url) : null
+      } catch {
+        return null
+      }
+    }, [playlistImportEnabled])
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    if (!moreOpen || !playlistImportEnabled) {
+      setActivePlaylistDetail(null)
+      return
+    }
+
+    void resolveActivePlaylistDetail().then((detail) => {
+      if (!cancelled) {
+        setActivePlaylistDetail(detail)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [moreOpen, playlistImportEnabled, resolveActivePlaylistDetail])
+
+  const quickIngestLabel =
+    playlistImportEnabled && activePlaylistDetail
+      ? t("sidepanel:controlRow.importPlaylist", "Import playlist to tldw")
+      : t("sidepanel:controlRow.quickIngest", "Quick Ingest")
+
+  const openQuickIngest = async () => {
+    const detail =
+      playlistImportEnabled
+        ? (await resolveActivePlaylistDetail()) ?? activePlaylistDetail
+        : null
+    requestQuickIngestOpen(detail ?? undefined)
     setMoreOpen(false)
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
@@ -302,7 +390,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
               ? t("sidepanel:controlRow.mcpToolsUnhealthy", "MCP tools are offline")
               : mcpToolsLoading
                 ? t("sidepanel:controlRow.mcpToolsLoading", "Loading tools...")
-                : mcpTools.length === 0
+                : chatMcpToolCount === 0
                   ? t("sidepanel:controlRow.mcpToolsEmpty", "No MCP tools available")
                   : ""
         }
@@ -310,7 +398,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
           !hasMcp ||
           mcpHealthState === "unhealthy" ||
           mcpToolsLoading ||
-          mcpTools.length === 0
+          chatMcpToolCount === 0
             ? undefined
             : false
         }
@@ -325,7 +413,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             !hasMcp ||
             mcpHealthState === "unhealthy" ||
             mcpToolsLoading ||
-            mcpTools.length === 0
+            chatMcpToolCount === 0
           }
         >
           <Radio.Button value="auto">
@@ -345,48 +433,17 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       <div className="text-caption text-text-muted font-medium">
         {t("sidepanel:controlRow.mcpToolsLabel", "MCP tools")}
       </div>
-      {mcpToolsLoading ? (
-        <div className="text-xs text-text-muted">
-          {t("sidepanel:controlRow.mcpToolsLoading", "Loading tools...")}
-        </div>
-      ) : mcpTools.length === 0 ? (
-        <div className="text-xs text-text-muted">
-          {!hasMcp
-            ? t("sidepanel:controlRow.mcpToolsUnavailable", "MCP tools unavailable")
-            : mcpHealthState === "unhealthy"
-              ? t("sidepanel:controlRow.mcpToolsUnhealthy", "MCP tools are offline")
-              : t("sidepanel:controlRow.mcpToolsEmpty", "No MCP tools available")}
-        </div>
-      ) : (
-        <div className="flex flex-wrap gap-1">
-          {mcpTools.slice(0, 6).map((tool, index) => {
-            const toolFn = (tool as any)?.function
-            const name =
-              (typeof tool?.name === "string" && tool.name) ||
-              (typeof toolFn?.name === "string" && toolFn.name) ||
-              (typeof (tool as any)?.id === "string" && (tool as any).id) ||
-              `tool-${index + 1}`
-            const description =
-              (typeof tool?.description === "string" && tool.description) ||
-              (typeof toolFn?.description === "string" && toolFn.description) ||
-              ""
-            return (
-              <span
-                key={`${name}-${index}`}
-                title={description || name}
-                className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text"
-              >
-                {name}
-              </span>
-            )
-          })}
-          {mcpTools.length > 6 && (
-            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-text-muted">
-              +{mcpTools.length - 6}
-            </span>
-          )}
-        </div>
-      )}
+      <McpToolSelector
+        discoveredTools={discoveredMcpTools}
+        toolCounts={mcpToolCounts}
+        toolsLoading={mcpToolsLoading}
+        hasMcp={hasMcp}
+        healthState={mcpHealthState}
+        onToolEnabledChange={setMcpToolEnabled}
+        onReset={resetMcpToolFilter}
+        compact
+        t={translateMcpToolSelector}
+      />
 
       <div className="panel-divider my-1" />
       <div className="text-caption text-text-muted font-medium">
@@ -635,13 +692,15 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       </div>
       <button
         type="button"
-        onClick={openQuickIngest}
+        onClick={() => {
+          void openQuickIngest()
+        }}
         data-testid="chat-quick-ingest"
         className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={t("sidepanel:controlRow.quickIngest", "Quick Ingest")}
+        title={quickIngestLabel}
       >
         <UploadCloud className="size-4 text-text-subtle" />
-        {t("sidepanel:controlRow.quickIngest", "Quick Ingest")}
+        {quickIngestLabel}
       </button>
       <button
         type="button"
@@ -662,15 +721,21 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         {/* Prompt, Model & Character selectors */}
         <PromptSelect
           selectedSystemPrompt={selectedSystemPrompt}
+          systemPrompt={systemPromptOverride}
           setSelectedSystemPrompt={setSelectedSystemPrompt}
+          setSystemPrompt={setSystemPromptOverride}
           setSelectedQuickPrompt={setSelectedQuickPrompt}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />
         <ModelSelect iconClassName="size-4" showSelectedName />
-        <CharacterSelect
+        <ConversationContextPopover
+          chatId={serverChatId}
           selectedCharacterId={selectedCharacterId}
           setSelectedCharacterId={setSelectedCharacterId}
+          composition={conversationContextComposition}
+          compositionStatus={conversationContextStatus}
+          saveSelection={conversationContextSaveSelection}
           iconClassName="size-4"
           className="px-2 text-text-muted hover:text-text"
         />
@@ -720,6 +785,28 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             <span className="hidden sm:inline">{t("sidepanel:controlRow.web", "Web")}</span>
           </button>
         )}
+
+        <Upload
+          accept="image/*"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            onImageUpload(file)
+            return false
+          }}
+        >
+          <button
+            type="button"
+            data-testid="chat-attach-image"
+            className="flex items-center gap-2 px-3 py-2 sm:px-2 sm:py-1 rounded text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors min-h-[44px] sm:min-h-0 text-text-muted hover:bg-surface2 hover:text-text"
+            aria-label={t("sidepanel:controlRow.attachImage", "Attach image")}
+            title={t("sidepanel:controlRow.attachImage", "Attach image")}
+          >
+            <ImageIcon className="size-3.5" />
+            <span className="hidden sm:inline">
+              {t("sidepanel:controlRow.attach", "Attach")}
+            </span>
+          </button>
+        </Upload>
 
         {/* More Tools Menu */}
         <div className="relative">

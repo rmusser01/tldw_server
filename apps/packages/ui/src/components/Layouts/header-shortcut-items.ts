@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import {
+  Activity,
   BrainCircuit,
   BookMarked,
   BookOpen,
@@ -8,6 +9,7 @@ import {
   ClipboardList,
   CogIcon,
   CombineIcon,
+  Eye,
   FileSearch,
   FileText,
   FlaskConical,
@@ -25,17 +27,30 @@ import {
   NotebookPen,
   Rss,
   Scissors,
+  Server,
   ShieldCheck,
+  SquareTerminal,
   SquarePen,
   StickyNote,
   UserCircle2,
+  Users,
   Volume2,
   Table2,
   Workflow,
   Zap
 } from "lucide-react"
 import type { HeaderShortcutId } from "@/services/settings/ui-settings"
-import { DOCUMENT_WORKSPACE_PATH, REPO2TXT_PATH } from "@/routes/route-paths"
+import { HEADER_SHORTCUT_IDS } from "@/services/settings/ui-settings"
+export { HEADER_SHORTCUT_IDS }
+import type { UserPersona } from "@/types/connection"
+import {
+  CHAT_WORKSPACE_PATH,
+  DOCUMENT_WORKSPACE_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH,
+  REPO2TXT_PATH,
+  SOURCES_PATH
+} from "@/routes/route-paths"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 
 export type HeaderShortcutItem = {
@@ -46,6 +61,9 @@ export type HeaderShortcutItem = {
   labelDefault: string
   /** Optional 1-9 index for ⌘+number shortcut when the launcher is open */
   shortcutIndex?: number
+  /** Optional plain-language description for non-technical users */
+  descriptionKey?: string
+  descriptionDefault?: string
 }
 
 export type HeaderShortcutGroup = {
@@ -70,12 +88,22 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         shortcutIndex: 1
       },
       {
+        id: "chat-workspace",
+        to: CHAT_WORKSPACE_PATH,
+        icon: SquareTerminal,
+        labelKey: "option:header.chatWorkspace",
+        labelDefault: "Chat Workspace",
+        shortcutIndex: 2,
+        descriptionKey: "option:header.chatWorkspaceDesc",
+        descriptionDefault:
+          "Chat-first workspace with staged sources and runtime context"
+      },
+      {
         id: "prompts",
         to: "/prompts",
         icon: NotebookPen,
         labelKey: "option:header.modePromptsPlayground",
-        labelDefault: "Prompts",
-        shortcutIndex: 2
+        labelDefault: "Prompts"
       },
       {
         id: "characters",
@@ -91,7 +119,9 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         icon: BookMarked,
         labelKey: "option:header.modeDictionaries",
         labelDefault: "Chat Dictionaries",
-        shortcutIndex: 5
+        shortcutIndex: 5,
+        descriptionKey: "option:header.modeDictionariesDesc",
+        descriptionDefault: "Custom word lists for pronunciation and spelling"
       },
       {
         id: "world-books",
@@ -99,14 +129,18 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         icon: BookOpen,
         labelKey: "option:header.modeWorldBooks",
         labelDefault: "World Books",
-        shortcutIndex: 6
+        shortcutIndex: 6,
+        descriptionKey: "option:header.modeWorldBooksDesc",
+        descriptionDefault: "Shared lore and context injected into character chats"
       },
       {
         id: "model-playground",
         to: "/model-playground",
         icon: FlaskConical,
         labelKey: "settings:modelPlaygroundNav",
-        labelDefault: "Model Playground"
+        labelDefault: "Model Playground",
+        descriptionKey: "settings:modelPlaygroundDesc",
+        descriptionDefault: "Compare model outputs side by side"
       }
     ]
   },
@@ -121,22 +155,28 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         icon: NotebookPen,
         labelKey: "option:header.modePromptStudio",
         labelDefault: "Prompt Studio",
-        shortcutIndex: 3
+        shortcutIndex: 3,
+        descriptionKey: "option:header.modePromptStudioDesc",
+        descriptionDefault: "Design, test, and optimize prompts across models"
       },
       {
         id: "deep-research",
         to: "/research",
         icon: BrainCircuit,
         labelKey: "option:header.deepResearch",
-        labelDefault: "Deep Research"
+        labelDefault: "Deep Research",
+        descriptionKey: "option:header.deepResearchDesc",
+        descriptionDefault: "Long-running research with citations and checkpoints"
       },
       {
         id: "workspace-playground",
-        to: "/workspace-playground",
+        to: "/research-studio",
         icon: GitCompare,
         labelKey: "settings:researchStudioNav",
         labelDefault: "Research Studio",
-        shortcutIndex: 7
+        shortcutIndex: 7,
+        descriptionKey: "settings:researchStudioDesc",
+        descriptionDefault: "Three-pane workspace: sources, chat, and generated outputs"
       },
       {
         id: "knowledge-qa",
@@ -144,7 +184,9 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         icon: CombineIcon,
         labelKey: "option:header.modeKnowledge",
         labelDefault: "Knowledge QA",
-        shortcutIndex: 8
+        shortcutIndex: 8,
+        descriptionKey: "option:header.modeKnowledgeDesc",
+        descriptionDefault: "Search your ingested documents and get cited answers"
       },
       {
         id: "document-workspace",
@@ -158,14 +200,18 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: REPO2TXT_PATH,
         icon: FileText,
         labelKey: "option:repo2txt.nav",
-        labelDefault: "Repo2Txt"
+        labelDefault: "Repo2Txt",
+        descriptionKey: "option:repo2txt.desc",
+        descriptionDefault: "Convert code repositories into text for ingestion"
       },
       {
         id: "evaluations",
         to: "/evaluations",
         icon: Microscope,
         labelKey: "option:header.evaluations",
-        labelDefault: "Evaluations"
+        labelDefault: "Evaluations",
+        descriptionKey: "option:header.evaluationsDesc",
+        descriptionDefault: "Score and benchmark model quality with automated tests"
       }
     ]
   },
@@ -181,6 +227,16 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelKey: "option:header.media",
         labelDefault: "Media",
         shortcutIndex: 9
+      },
+      {
+        id: "sources",
+        to: SOURCES_PATH,
+        icon: Layers,
+        labelKey: "option:header.sources",
+        labelDefault: "Sources",
+        descriptionKey: "option:header.sourcesDesc",
+        descriptionDefault:
+          "Manage server folders and archive snapshots that sync into notes or media"
       },
       {
         id: "multi-item-review",
@@ -213,6 +269,49 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
     ]
   },
   {
+    id: "safety",
+    titleKey: "option:header.groupSafety",
+    titleDefault: "Safety",
+    items: [
+      {
+        id: "family-guardrails",
+        to: "/settings/family-guardrails",
+        icon: Users,
+        labelKey: "settings:familyGuardrailsWizardNav",
+        labelDefault: "Family Guardrails",
+        descriptionKey: "settings:familyGuardrailsWizardDesc",
+        descriptionDefault: "Set up family profiles, safety templates, and invite guardians"
+      },
+      {
+        id: "moderation-review",
+        to: MODERATION_REVIEW_PATH,
+        icon: ClipboardList,
+        labelKey: "option:moderationReview.nav",
+        labelDefault: "Moderation Review",
+        descriptionKey: "option:moderationReview.desc",
+        descriptionDefault: "Review flagged items, escalations, and decisions"
+      },
+      {
+        id: "moderation-rules",
+        to: MODERATION_RULES_PATH,
+        icon: ShieldCheck,
+        labelKey: "option:moderationRules.nav",
+        labelDefault: "Content Rules",
+        descriptionKey: "option:moderationRules.desc",
+        descriptionDefault: "Configure moderation policies, blocklists, and testing"
+      },
+      {
+        id: "guardian",
+        to: "/settings/guardian",
+        icon: Eye,
+        labelKey: "settings:guardianNav",
+        labelDefault: "Guardian",
+        descriptionKey: "settings:guardianDesc",
+        descriptionDefault: "Monitor and manage dependent account activity"
+      }
+    ]
+  },
+  {
     id: "creation",
     titleKey: "option:header.groupCreationWorkspace",
     titleDefault: "Creation",
@@ -236,14 +335,18 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: "/stt",
         icon: Mic,
         labelKey: "option:header.modeStt",
-        labelDefault: "STT Playground"
+        labelDefault: "STT Playground",
+        descriptionKey: "option:header.modeSttDesc",
+        descriptionDefault: "Speech to Text \u2014 transcribe audio and video"
       },
       {
         id: "tts-playground",
         to: "/tts",
         icon: Volume2,
         labelKey: "option:tts.playground",
-        labelDefault: "TTS Playground"
+        labelDefault: "TTS Playground",
+        descriptionKey: "option:header.modeTtsDesc",
+        descriptionDefault: "Text to Speech \u2014 generate spoken audio from text"
       },
       {
         id: "audiobook-studio",
@@ -309,6 +412,15 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelDefault: "Integrations"
       },
       {
+        id: "mcp-hub",
+        to: "/mcp-hub",
+        icon: Server,
+        labelKey: "settings:mcpHubNav",
+        labelDefault: "MCP Hub",
+        descriptionDefault:
+          "Manage MCP servers, tool catalogs, approvals, and ACP profiles"
+      },
+      {
         id: "scheduled-tasks",
         to: "/scheduled-tasks",
         icon: ListTodo,
@@ -320,7 +432,9 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: "/acp-playground",
         icon: Bot,
         labelKey: "option:header.acpPlayground",
-        labelDefault: "ACP Playground"
+        labelDefault: "ACP Playground",
+        descriptionKey: "option:header.acpPlaygroundDesc",
+        descriptionDefault: "Agent Client Protocol \u2014 run and manage AI agents"
       },
       {
         id: "skills",
@@ -341,21 +455,18 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         to: "/chatbooks",
         icon: BookOpen,
         labelKey: "option:header.chatbooksPlayground",
-        labelDefault: "Chatbooks Playground"
+        labelDefault: "Chatbooks Playground",
+        descriptionKey: "option:header.chatbooksPlaygroundDesc",
+        descriptionDefault: "Export and import chat sessions as portable bundles"
       },
       {
         id: "chunking-playground",
         to: "/chunking-playground",
         icon: Scissors,
         labelKey: "settings:chunkingPlayground.nav",
-        labelDefault: "Chunking Playground"
-      },
-      {
-        id: "moderation-playground",
-        to: "/moderation-playground",
-        icon: ShieldCheck,
-        labelKey: "option:moderationPlayground.nav",
-        labelDefault: "Moderation Playground"
+        labelDefault: "Chunking Playground",
+        descriptionKey: "settings:chunkingPlayground.desc",
+        descriptionDefault: "Split documents into searchable segments"
       }
     ]
   },
@@ -393,6 +504,13 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
         labelDefault: "MLX LM Admin"
       },
       {
+        id: "admin-monitoring",
+        to: "/admin/monitoring",
+        icon: Activity,
+        labelKey: "option:header.adminMonitoring",
+        labelDefault: "Monitoring"
+      },
+      {
         id: "settings",
         to: "/settings",
         icon: CogIcon,
@@ -412,15 +530,46 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
 
 const HOSTED_VISIBLE_SHORTCUT_PATHS = new Set([
   "/chat",
+  CHAT_WORKSPACE_PATH,
   "/knowledge",
   "/media",
-  "/collections"
+  "/collections",
+  "/stt",
+  "/tts"
 ])
+
+const HOSTED_AUDIO_SHORTCUT_DESCRIPTIONS: Partial<
+  Record<
+    HeaderShortcutId,
+    Pick<HeaderShortcutItem, "descriptionKey" | "descriptionDefault">
+  >
+> = {
+  "stt-playground": {
+    descriptionKey: "option:header.modeSttHostedDesc",
+    descriptionDefault:
+      "Requires a self-hosted tldw server for speech transcription."
+  },
+  "tts-playground": {
+    descriptionKey: "option:header.modeTtsHostedDesc",
+    descriptionDefault:
+      "Requires a self-hosted tldw server for speech generation."
+  }
+}
 
 const getHostedHeaderShortcutGroups = (): HeaderShortcutGroup[] => {
   const filteredGroups = BASE_HEADER_SHORTCUT_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => HOSTED_VISIBLE_SHORTCUT_PATHS.has(item.to))
+    items: group.items
+      .filter((item) => HOSTED_VISIBLE_SHORTCUT_PATHS.has(item.to))
+      .map((item) => {
+        const hostedDescription = HOSTED_AUDIO_SHORTCUT_DESCRIPTIONS[item.id]
+        return hostedDescription
+          ? {
+              ...item,
+              ...hostedDescription
+            }
+          : item
+      })
   })).filter((group) => group.items.length > 0)
 
   filteredGroups.push({
@@ -461,4 +610,55 @@ export const normalizeHeaderShortcutSelection = (
 ): HeaderShortcutItem[] => {
   const selected = new Set(selection)
   return getHeaderShortcutItems().filter((item) => selected.has(item.id))
+}
+
+// ---------------------------------------------------------------------------
+// Persona-specific shortcut defaults
+// ---------------------------------------------------------------------------
+
+/** Default shortcut selections per persona. Explorer/null = all items. */
+export const PERSONA_SHORTCUT_DEFAULTS: Record<
+  NonNullable<UserPersona> | "default",
+  HeaderShortcutId[]
+> = {
+  family: [
+    "chat",
+    "media",
+    "family-guardrails",
+    "moderation-review",
+    "moderation-rules",
+    "guardian",
+    "settings"
+  ],
+  researcher: [
+    "chat",
+    "prompts",
+    "deep-research",
+    "knowledge-qa",
+    "media",
+    "workspace-playground",
+    "collections",
+    "notes",
+    "evaluations",
+    "flashcards",
+    "quizzes",
+    "settings",
+    // required items
+    "workflows",
+    "acp-playground",
+    "integrations",
+    "scheduled-tasks",
+    "admin-integrations"
+  ],
+  explorer: [...HEADER_SHORTCUT_IDS],
+  default: [...HEADER_SHORTCUT_IDS]
+}
+
+/** Get default shortcut selection for a persona. */
+export const getDefaultShortcutsForPersona = (
+  persona: UserPersona
+): HeaderShortcutId[] => {
+  if (!persona || persona === "explorer") return [...HEADER_SHORTCUT_IDS]
+  const defaults = PERSONA_SHORTCUT_DEFAULTS[persona] ?? HEADER_SHORTCUT_IDS
+  return [...defaults]
 }

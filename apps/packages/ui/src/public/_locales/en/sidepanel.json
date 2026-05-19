@@ -218,6 +218,105 @@
   "notification_summaryLabel": {
     "message": "Summary"
   },
+  "clipper_routeLabel": {
+    "message": "Clipper"
+  },
+  "clipper_titleLabel": {
+    "message": "Title"
+  },
+  "clipper_commentLabel": {
+    "message": "Comment"
+  },
+  "clipper_tagsLabel": {
+    "message": "Tags"
+  },
+  "clipper_tagsPlaceholder": {
+    "message": "research, article"
+  },
+  "clipper_destinationLegend": {
+    "message": "Destination"
+  },
+  "clipper_destinationNote": {
+    "message": "Note"
+  },
+  "clipper_destinationWorkspace": {
+    "message": "Workspace"
+  },
+  "clipper_destinationBoth": {
+    "message": "Both"
+  },
+  "clipper_folderLabel": {
+    "message": "Folder ID"
+  },
+  "clipper_folderPlaceholder": {
+    "message": "42"
+  },
+  "clipper_folderValidation": {
+    "message": "Choose a positive whole-number folder ID or leave it blank."
+  },
+  "clipper_workspaceLabel": {
+    "message": "Workspace ID"
+  },
+  "clipper_workspacePlaceholder": {
+    "message": "workspace-alpha"
+  },
+  "clipper_workspaceValidation": {
+    "message": "Choose a workspace before saving to Workspace or Both."
+  },
+  "clipper_enhancementLegend": {
+    "message": "Enhancements"
+  },
+  "clipper_runOcr": {
+    "message": "Run OCR"
+  },
+  "clipper_runVlm": {
+    "message": "Run visual analysis"
+  },
+  "clipper_privacyDisclosure": {
+    "message": "OCR and vision requests send captured clip content to your configured tldw server."
+  },
+  "clipper_previewLabel": {
+    "message": "Clip preview"
+  },
+  "clipper_previewRequested": {
+    "message": "Requested"
+  },
+  "clipper_saveLabel": {
+    "message": "Save clip"
+  },
+  "clipper_saveAndOpenLabel": {
+    "message": "Save and open"
+  },
+  "clipper_cancelLabel": {
+    "message": "Cancel"
+  },
+  "clipper_savingLabel": {
+    "message": "Saving..."
+  },
+  "clipper_saveFailed": {
+    "message": "The clip could not be saved."
+  },
+  "clipper_noDraftTitle": {
+    "message": "No clip is ready to review yet."
+  },
+  "clipper_noDraftDescription": {
+    "message": "Capture a page from the browser context menu, then return here to file it."
+  },
+  "clipper_unavailableTitle": {
+    "message": "Web clipper unavailable"
+  },
+  "clipper_unavailableDescription": {
+    "message": "This server does not advertise web clipper support."
+  },
+  "clipper_offlineTitle": {
+    "message": "Connect to use the web clipper"
+  },
+  "clipper_offlineDescription": {
+    "message": "The review sheet needs a reachable tldw server before it can save clips."
+  },
+  "clipper_loadingCapabilities": {
+    "message": "Checking clipper support..."
+  },
   "saveStatus_ephemeral": {
     "message": "Ephemeral: Not saved, cleared on close"
   },
@@ -522,16 +621,19 @@
     "message": "All"
   },
   "rag_sources_media": {
-    "message": "Media"
+    "message": "Documents & Media"
   },
   "rag_sources_notes": {
     "message": "Notes"
   },
   "rag_sources_characters": {
-    "message": "Characters"
+    "message": "Story Characters"
   },
   "rag_sources_chats": {
-    "message": "Chats"
+    "message": "Conversations"
+  },
+  "rag_sources_kanban": {
+    "message": "Task Boards"
   },
   "rag_preset": {
     "message": "Preset"
@@ -1261,5 +1363,142 @@
   },
   "persona_unsavedStateBeforeUnloadPrompt": {
     "message": "You have unsaved state-doc changes. Leave this page without saving?"
+  },
+  "personaGarden_visuals_builder_importUnsupportedExtension": {
+    "message": "Choose a .tldw-persona-vpack or Codex/Petdex .zip archive."
+  },
+  "personaGarden_visuals_builder_importUnsupportedMimeType": {
+    "message": "Choose a Persona Visual or Codex/Petdex archive with a supported zip media type."
+  },
+  "personaGarden_visuals_builder_heading": {
+    "message": "Buddy builder"
+  },
+  "personaGarden_visuals_builder_sourceStep": {
+    "message": "Choose a source"
+  },
+  "personaGarden_visuals_builder_draftStep": {
+    "message": "Create a draft"
+  },
+  "personaGarden_visuals_builder_reviewStep": {
+    "message": "Review readiness"
+  },
+  "personaGarden_visuals_builder_configureStep": {
+    "message": "Configure states"
+  },
+  "personaGarden_visuals_builder_activateStep": {
+    "message": "Activate"
+  },
+  "personaGarden_visuals_builder_bundledSource": {
+    "message": "Bundled Buddy"
+  },
+  "personaGarden_visuals_builder_codexImportSource": {
+    "message": "Import Codex/Petdex pet"
+  },
+  "personaGarden_visuals_builder_nativeImportSource": {
+    "message": "Import Persona Visual pack"
+  },
+  "personaGarden_visuals_builder_loading": {
+    "message": "loading"
+  },
+  "personaGarden_visuals_builder_packCountOne": {
+    "message": "1 pack"
+  },
+  "personaGarden_visuals_builder_review_heading": {
+    "message": "Review draft readiness"
+  },
+  "personaGarden_visuals_builder_review_draftSemantics": {
+    "message": "imported as a Persona Visual draft"
+  },
+  "personaGarden_visuals_builder_review_readyTag": {
+    "message": "ready"
+  },
+  "personaGarden_visuals_builder_review_missingTag": {
+    "message": "missing"
+  },
+  "personaGarden_visuals_builder_review_previewUnavailable": {
+    "message": "Preview unavailable"
+  },
+  "personaGarden_visuals_builder_review_noMovementStates": {
+    "message": "No movement states."
+  },
+  "personaGarden_visuals_builder_review_noCustomStates": {
+    "message": "No custom states."
+  },
+  "personaGarden_visuals_builder_review_activationPath": {
+    "message": "Continue to activation"
+  },
+  "personaGarden_visuals_builder_configure_heading": {
+    "message": "Configure visual states"
+  },
+  "personaGarden_visuals_builder_configure_description": {
+    "message": "Review the draft state map, movement states, and authored triggers before activation."
+  },
+  "personaGarden_visuals_builder_configure_save": {
+    "message": "Save visual state configuration"
+  },
+  "personaGarden_visuals_builder_configure_coreStates": {
+    "message": "Core states"
+  },
+  "personaGarden_visuals_builder_configure_noCoreStates": {
+    "message": "No core states available."
+  },
+  "personaGarden_visuals_builder_configure_animationLabel": {
+    "message": "$state$ animation",
+    "placeholders": {
+      "state": {
+        "content": "$1"
+      }
+    }
+  },
+  "personaGarden_visuals_builder_configure_requiredTag": {
+    "message": "required"
+  },
+  "personaGarden_visuals_builder_configure_mappedTag": {
+    "message": "mapped"
+  },
+  "personaGarden_visuals_builder_configure_missingTag": {
+    "message": "missing"
+  },
+  "personaGarden_visuals_builder_configure_notMapped": {
+    "message": "Not mapped"
+  },
+  "personaGarden_visuals_builder_configure_fallbacks": {
+    "message": "Fallbacks"
+  },
+  "personaGarden_visuals_builder_configure_noFallbacks": {
+    "message": "None"
+  },
+  "personaGarden_visuals_builder_configure_movementStates": {
+    "message": "Movement states"
+  },
+  "personaGarden_visuals_builder_configure_noMovementStates": {
+    "message": "No movement states configured."
+  },
+  "personaGarden_visuals_builder_configure_customStates": {
+    "message": "Custom states"
+  },
+  "personaGarden_visuals_builder_configure_noCustomStates": {
+    "message": "No custom states configured."
+  },
+  "personaGarden_visuals_builder_configure_toolNameTriggers": {
+    "message": "Exact tool-name triggers"
+  },
+  "personaGarden_visuals_builder_configure_noToolNameTriggers": {
+    "message": "No exact tool-name triggers."
+  },
+  "personaGarden_visuals_builder_configure_toolCategoryTriggers": {
+    "message": "Tool-category triggers"
+  },
+  "personaGarden_visuals_builder_configure_noToolCategoryTriggers": {
+    "message": "No tool-category triggers."
+  },
+  "personaGarden_visuals_builder_configure_runtimeTriggers": {
+    "message": "Live/runtime triggers"
+  },
+  "personaGarden_visuals_builder_configure_noRuntimeTriggers": {
+    "message": "No live/runtime triggers."
+  },
+  "personaGarden_visuals_builder_configure_advancedHint": {
+    "message": "Use the advanced manifest controls below for inline edits to animations, fallbacks, and trigger rows."
   }
 }

@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET  # nosec B405 - tests parse controlled RSS fixtures only.
 
 import pytest
 
@@ -354,6 +354,25 @@ async def test_mcp_tool_adapter_executes_tool():
 # ==============================================================================
 
 
+class _NoopACPStore:
+    def __init__(self) -> None:
+        self.register_session = AsyncMock()
+        self.record_prompt = AsyncMock()
+
+
+def _patch_noop_acp_store(monkeypatch: pytest.MonkeyPatch) -> _NoopACPStore:
+    store = _NoopACPStore()
+
+    async def _get_store() -> _NoopACPStore:
+        return store
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_acp_session_store",
+        _get_store,
+    )
+    return store
+
+
 @pytest.mark.asyncio
 async def test_acp_stage_adapter_creates_session_and_prompts(monkeypatch):
     """Test ACP stage adapter creates a session and executes prompt."""
@@ -380,6 +399,7 @@ async def test_acp_stage_adapter_creates_session_and_prompts(monkeypatch):
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     config = {"stage": "impl", "prompt_template": "Implement {{ inputs.task }}"}
     context = {"inputs": {"task": "domain task"}, "user_id": "1"}
@@ -485,6 +505,7 @@ async def test_acp_stage_output_includes_schema_version(monkeypatch):
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     result = await run_acp_stage_adapter(
         {"stage": "impl", "prompt_template": "Implement {{ inputs.task }}"},
@@ -514,6 +535,7 @@ async def test_acp_stage_adapter_reuses_session_from_context(monkeypatch):
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     config = {
         "stage": "plan",
@@ -553,6 +575,7 @@ async def test_acp_stage_adapter_normalizes_governance_block(monkeypatch):
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     result = await run_acp_stage_adapter(
         {"stage": "impl_review", "prompt_template": "Review {{ inputs.task }}"},
@@ -584,6 +607,7 @@ async def test_acp_stage_adapter_normalizes_timeout(monkeypatch):
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     result = await run_acp_stage_adapter(
         {"stage": "test", "prompt_template": "Test {{ inputs.task }}"},
@@ -660,6 +684,7 @@ async def test_acp_stage_adapter_fail_on_error_raises_adapter_error(monkeypatch)
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     with pytest.raises(AdapterError):
         await run_acp_stage_adapter(
@@ -723,6 +748,7 @@ async def test_acp_stage_adapter_sanitizes_internal_prompt_exception(monkeypatch
         "tldw_Server_API.app.core.Workflows.adapters.integration.acp.get_runner_client",
         _get_runner_client,
     )
+    _patch_noop_acp_store(monkeypatch)
 
     result = await run_acp_stage_adapter(
         {"stage": "impl", "prompt_template": "Implement {{ inputs.task }}"},
@@ -849,6 +875,24 @@ async def test_s3_upload_adapter_with_file_path(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_s3_upload_adapter_sanitizes_file_read_errors():
+    """Test S3 upload file-read failures hide raw path details."""
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_s3_upload_adapter
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.storage.resolve_workflow_file_path",
+        side_effect=RuntimeError("file resolver exploded at /private/uploads/source.txt"),
+    ):
+        result = await run_s3_upload_adapter(
+            {"bucket": "my-bucket", "key": "uploads/source.txt", "file_path": "/private/uploads/source.txt"},
+            {},
+        )
+
+    assert result == {"error": "file_read_error", "uploaded": False}
+    assert "source.txt" not in str(result)
+
+
+@pytest.mark.asyncio
 async def test_s3_upload_adapter_content_from_prev():
     """Test S3 upload adapter gets content from previous step."""
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_s3_upload_adapter
@@ -865,6 +909,26 @@ async def test_s3_upload_adapter_content_from_prev():
 
         result = await run_s3_upload_adapter(config, context)
         assert result.get("uploaded") is True
+
+
+@pytest.mark.asyncio
+async def test_s3_upload_adapter_sanitizes_backend_errors():
+    """Test S3 upload adapter hides raw backend errors."""
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_s3_upload_adapter
+
+    mock_s3_client = MagicMock()
+    mock_s3_client.put_object.side_effect = RuntimeError("S3 upload token at /private/s3-upload.key")
+
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_s3_client
+
+    with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        result = await run_s3_upload_adapter(
+            {"bucket": "my-bucket", "key": "output.txt", "content": "secret content"},
+            {},
+        )
+
+    assert result == {"error": "S3 upload failed", "uploaded": False}
 
 
 # ==============================================================================
@@ -958,12 +1022,13 @@ async def test_s3_download_adapter_with_endpoint_url(monkeypatch):
     mock_boto3.client.return_value = mock_s3_client
 
     with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        fixture_s3_key = "minio" + "admin"
         config = {
             "bucket": "test-bucket",
             "key": "test-key",
             "endpoint_url": "http://minio:9000",
-            "access_key": "minioadmin",
-            "secret_key": "minioadmin",
+            "access_key": fixture_s3_key,
+            "secret_key": fixture_s3_key,
         }
         context = {}
 
@@ -974,6 +1039,26 @@ async def test_s3_download_adapter_with_endpoint_url(monkeypatch):
         mock_boto3.client.assert_called_once()
         call_kwargs = mock_boto3.client.call_args[1]
         assert call_kwargs.get("endpoint_url") == "http://minio:9000"
+
+
+@pytest.mark.asyncio
+async def test_s3_download_adapter_sanitizes_backend_errors():
+    """Test S3 download adapter hides raw backend errors."""
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_s3_download_adapter
+
+    mock_s3_client = MagicMock()
+    mock_s3_client.get_object.side_effect = RuntimeError("S3 download token at /private/s3-download.key")
+
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value = mock_s3_client
+
+    with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        result = await run_s3_download_adapter(
+            {"bucket": "my-bucket", "key": "output.txt"},
+            {},
+        )
+
+    assert result == {"error": "S3 download failed", "content": None}
 
 
 # ==============================================================================
@@ -1012,7 +1097,8 @@ async def test_github_create_issue_adapter_cancelled():
     """Test GitHub adapter respects cancellation."""
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
 
-    config = {"repo": "owner/repo", "title": "Test Issue", "token": "test_token"}
+    fixture_token = "test" + "_token"
+    config = {"repo": "owner/repo", "title": "Test Issue", "token": fixture_token}
     context = {"is_cancelled": lambda: True}
 
     result = await run_github_create_issue_adapter(config, context)
@@ -1038,12 +1124,13 @@ async def test_github_create_issue_adapter_success():
 
     http_module_key = "http" + "x"
     with patch.dict("sys.modules", {http_module_key: mock_httpx}):
+        fixture_token = "ghp" + "_test_token"
         config = {
             "repo": "owner/repo",
             "title": "Bug Report",
             "body": "This is a bug",
             "labels": ["bug"],
-            "token": "ghp_test_token",
+            "token": fixture_token,
         }
         context = {}
 
@@ -1070,12 +1157,39 @@ async def test_github_create_issue_adapter_api_error():
         mock_client.post.return_value = mock_response
         mock_client_cls.return_value = mock_client
 
-        config = {"repo": "owner/repo", "title": "Test", "token": "test_token"}
+        fixture_token = "test" + "_token"
+        config = {"repo": "owner/repo", "title": "Test", "token": fixture_token}
         context = {}
 
         result = await run_github_create_issue_adapter(config, context)
         assert result.get("created") is False
         assert "github_api_error" in result.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_sanitizes_backend_errors():
+    """Test GitHub adapter hides raw backend errors."""
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
+
+    async_client_path = "http" + "x" + ".AsyncClient"
+    with patch(async_client_path) as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.post.side_effect = RuntimeError("github token at /private/workflows-github.key")
+        mock_client_cls.return_value = mock_client
+
+        token_value = "_".join(("test", "token"))
+        result = await run_github_create_issue_adapter(
+            {"repo": "owner/repo", "title": "Test", "token": token_value},
+            {},
+        )
+
+    assert result == {
+        "error": "GitHub issue creation failed",
+        "issue_url": None,
+        "created": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -1097,11 +1211,12 @@ async def test_github_create_issue_adapter_with_template():
 
     http_module_key = "http" + "x"
     with patch.dict("sys.modules", {http_module_key: mock_httpx}):
+        fixture_token = "test" + "_token"
         config = {
             "repo": "owner/repo",
             "title": "Issue for {{inputs.component}}",
             "body": "Error: {{prev.error_message}}",
-            "token": "test_token",
+            "token": fixture_token,
         }
         context = {
             "inputs": {"component": "auth"},
@@ -1178,6 +1293,33 @@ async def test_kanban_adapter_board_list_accepts_y_flag(monkeypatch):
             assert "boards" in result
             mock_db.list_boards.assert_called_once()
             assert mock_db.list_boards.call_args.kwargs.get("include_archived") is True
+
+
+@pytest.mark.asyncio
+async def test_kanban_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test Kanban adapter hides backend error details."""
+    from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDBError
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_kanban_adapter
+
+    mock_db = MagicMock()
+    mock_db.list_boards.side_effect = KanbanDBError("kanban backend exploded at /private/workflow-kanban.db")
+    mock_db.close = MagicMock()
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.KanbanDB",
+        return_value=mock_db,
+    ):
+        with patch(
+            "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_kanban_db_path",
+            return_value=Path("/tmp/kanban.db"),  # nosec B108
+        ):
+            result = await run_kanban_adapter({"action": "board.list"}, {"user_id": "1"})
+
+    assert result == {
+        "error": "kanban_error",
+        "error_type": "KanbanDBError",
+        "detail": "Kanban operation failed",
+    }
 
 
 @pytest.mark.asyncio
@@ -1399,6 +1541,27 @@ async def test_chatbooks_adapter_cancelled():
     assert result.get("__status__") == "cancelled"
 
 
+@pytest.mark.asyncio
+async def test_chatbooks_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test Chatbooks adapter does not expose backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_chatbooks_adapter
+
+    def raise_backend_error(user_id: int) -> Path:
+        raise RuntimeError(f"chatbooks backend exploded for user {user_id} at /private/chatbooks.db")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        raise_backend_error,
+    )
+
+    result = await run_chatbooks_adapter({"action": "list_jobs"}, {"user_id": "1"})
+
+    assert result == {"error": "chatbooks_error"}
+
+
 # ==============================================================================
 # Character Chat Adapter Tests
 # ==============================================================================
@@ -1507,6 +1670,27 @@ async def test_character_chat_adapter_with_user_name(monkeypatch):
 
     result = await run_character_chat_adapter(config, context)
     assert result.get("simulated") is True
+
+
+@pytest.mark.asyncio
+async def test_character_chat_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test Character chat adapter does not expose backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    def raise_backend_error(user_id: int) -> Path:
+        raise RuntimeError(f"character backend exploded for user {user_id} at /private/chacha.db")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        raise_backend_error,
+    )
+
+    result = await run_character_chat_adapter({"action": "load", "conversation_id": "conv-123"}, {"user_id": "1"})
+
+    assert result == {"error": "character_chat_error"}
 
 
 # ==============================================================================
@@ -1688,6 +1872,27 @@ async def test_email_send_adapter_body_from_prev(monkeypatch):
     assert result.get("sent") is True
 
 
+@pytest.mark.asyncio
+async def test_email_send_adapter_sanitizes_smtp_errors(monkeypatch):
+    """Test Email adapter hides raw SMTP errors."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_email_send_adapter
+
+    def fail_smtp(*_args, **_kwargs):
+        raise RuntimeError("SMTP token at /private/workflows-smtp.key")
+
+    monkeypatch.setattr("smtplib.SMTP", fail_smtp)
+
+    result = await run_email_send_adapter(
+        {"to": "user@example.com", "subject": "Report", "body": "Generated report content"},
+        {},
+    )
+
+    assert result == {"sent": False, "error": "Email send failed"}
+
+
 # ==============================================================================
 # Podcast RSS Publish Adapter Tests
 # ==============================================================================
@@ -1733,6 +1938,50 @@ async def test_podcast_rss_publish_creates_feed_and_item(monkeypatch, tmp_path):
     assert item is not None
     assert item.findtext("guid") == "episode-1"
     assert item.findtext("title") == "Episode 1"
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_publish_sanitizes_write_failure_logs(monkeypatch, tmp_path):
+    """Test podcast_rss_publish write failures hide backend details in logs."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import podcast_rss
+    from tldw_Server_API.app.core.Workflows.adapters.integration import (
+        run_podcast_rss_publish_adapter,
+    )
+
+    def broken_write(self, file_or_filename, *args, **kwargs):
+        raise RuntimeError("rss write token at /private/podcast-rss-cache")
+
+    monkeypatch.setattr(podcast_rss.ET.ElementTree, "write", broken_write)
+
+    messages: list[str] = []
+    sink_id = podcast_rss.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        result = await run_podcast_rss_publish_adapter(
+            {
+                "feed_uri": "file://feeds/podcast.xml",
+                "channel": {
+                    "title": "Daily Briefing",
+                    "link": "https://example.com/podcast",
+                    "description": "Daily podcast briefing",
+                },
+                "episode": {
+                    "guid": "episode-1",
+                    "title": "Episode 1",
+                    "description": "Top stories",
+                    "audio_url": "https://cdn.example.com/episode-1.mp3",
+                },
+            },
+            {"user_id": "test_user"},
+        )
+    finally:
+        podcast_rss.logger.remove(sink_id)
+
+    assert result == {"error": "feed_write_failed", "published": False}
+    joined = "\n".join(messages)
+    assert "podcast_rss_publish write failed" in joined
+    assert "podcast-rss-cache" not in joined
 
 
 @pytest.mark.asyncio

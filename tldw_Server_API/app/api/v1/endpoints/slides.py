@@ -18,12 +18,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, R
 from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from pydantic import ValidationError
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user, get_chacha_db_for_user_id
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import get_slides_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     ExportFormat,
@@ -57,7 +58,7 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
     VisualStylePatchRequest,
     VisualStyleResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_DELETE, MEDIA_READ, MEDIA_UPDATE
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -192,6 +193,14 @@ def _parse_etag(raw: str | None) -> int:
 
 def _format_etag(version: int) -> str:
     return f'W/"v{version}"'
+
+
+def _map_precondition_conflict(exc: ConflictError) -> HTTPException:
+    return map_db_error_to_http(
+        exc,
+        conflict_status_code=status.HTTP_412_PRECONDITION_FAILED,
+        conflict_detail="precondition_failed",
+    )
 
 
 def _slides_jobs_manager() -> JobManager:
@@ -476,7 +485,7 @@ def _resolve_template(template_id: str | None) -> SlidesTemplate | None:
     except SlidesTemplateNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_not_found") from exc
     except SlidesTemplateInvalidError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to resolve slide template") from exc
 
 
 def _compact_visual_style_appearance_defaults(appearance_defaults: dict[str, Any]) -> dict[str, Any]:
@@ -938,8 +947,8 @@ def _resolve_media_source_text(
             version_number=None,
             include_content=True,
         )
-    except Exception as exc:
-        logger.debug("Failed to resolve latest document content for media {}: {}", media_id, exc)
+    except Exception:
+        logger.debug("Failed to resolve latest document content for slides source media")
         latest_document = None
 
     if isinstance(latest_document, dict):
@@ -1043,8 +1052,8 @@ def _generate_presentation(
                 "slides_generation_errors_total",
                 labels={"source_type": source_type, "error": error_type},
             )
-        except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to record generation error metric: {}", exc)
+        except _SLIDES_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to record slides generation error metric")
 
     try:
         generated = generator.generate_from_text(
@@ -1081,7 +1090,7 @@ def _generate_presentation(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SlidesGenerationError as exc:
         _record_generation_error("generation_error")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to generate presentation") from exc
 
     try:
         slides = _normalize_slides([_slide_from_obj(s) for s in generated["slides"]])
@@ -1118,8 +1127,8 @@ def _generate_presentation(
                 time.perf_counter() - started_at,
                 labels={"source_type": source_type},
             )
-        except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to record generation latency metric: {}", exc)
+        except _SLIDES_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to record slides generation latency metric")
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1130,7 +1139,7 @@ def _generate_presentation(
     response_model=PresentationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a presentation",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.create"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.create"))],
 )
 async def create_presentation(
     request: PresentationCreateRequest,
@@ -1190,7 +1199,7 @@ async def create_presentation(
     "/presentations",
     response_model=PresentationListResponse,
     summary="List presentations",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.list"))],
 )
 async def list_presentations(
     limit: int = Query(50, ge=1, le=200),
@@ -1212,6 +1221,12 @@ async def list_presentations(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(rows),
+        ),
     )
 
 
@@ -1219,7 +1234,7 @@ async def list_presentations(
     "/presentations/search",
     response_model=PresentationSearchResponse,
     summary="Search presentations",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.search"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.search"))],
 )
 async def search_presentations(
     q: str = Query(..., min_length=1),
@@ -1234,6 +1249,12 @@ async def search_presentations(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(rows),
+        ),
     )
 
 
@@ -1241,7 +1262,7 @@ async def search_presentations(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Get presentation",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.get"))],
 )
 async def get_presentation(
     presentation_id: str,
@@ -1262,7 +1283,7 @@ async def get_presentation(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Update presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
 )
 async def update_presentation(
     presentation_id: str,
@@ -1320,9 +1341,9 @@ async def update_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to update presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1332,7 +1353,7 @@ async def update_presentation(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Patch presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
 )
 async def patch_presentation(
     presentation_id: str,
@@ -1426,9 +1447,9 @@ async def patch_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to patch presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1438,7 +1459,7 @@ async def patch_presentation(
     "/presentations/{presentation_id}/reorder",
     response_model=PresentationResponse,
     summary="Reorder slides in a presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.update"))],
 )
 async def reorder_presentation(
     presentation_id: str,
@@ -1479,9 +1500,9 @@ async def reorder_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to reorder presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
 
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
@@ -1492,7 +1513,7 @@ async def reorder_presentation(
     "/presentations/{presentation_id}",
     response_model=PresentationResponse,
     summary="Soft delete presentation",
-    dependencies=[Depends(require_permissions(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.delete"))],
+    dependencies=[Depends(RequirePermission(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.delete"))],
 )
 async def delete_presentation(
     presentation_id: str,
@@ -1506,9 +1527,9 @@ async def delete_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to delete presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1518,7 +1539,7 @@ async def delete_presentation(
     "/presentations/{presentation_id}/restore",
     response_model=PresentationResponse,
     summary="Restore soft-deleted presentation",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.restore"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.restore"))],
 )
 async def restore_presentation(
     presentation_id: str,
@@ -1532,9 +1553,9 @@ async def restore_presentation(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to restore presentation") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1544,13 +1565,13 @@ async def restore_presentation(
     "/templates",
     response_model=SlidesTemplateListResponse,
     summary="List slide templates",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.list"))],
 )
 async def list_templates() -> SlidesTemplateListResponse:
     try:
         templates = list_slide_templates()
     except SlidesTemplateInvalidError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to list slide templates") from exc
     return SlidesTemplateListResponse(templates=[_template_to_response(t) for t in templates])
 
 
@@ -1558,7 +1579,7 @@ async def list_templates() -> SlidesTemplateListResponse:
     "/templates/{template_id}",
     response_model=SlidesTemplateResponse,
     summary="Get slide template",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.templates.get"))],
 )
 async def get_template(template_id: str) -> SlidesTemplateResponse:
     try:
@@ -1566,7 +1587,7 @@ async def get_template(template_id: str) -> SlidesTemplateResponse:
     except SlidesTemplateNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_not_found") from exc
     except SlidesTemplateInvalidError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to get slide template") from exc
     return _template_to_response(template)
 
 
@@ -1574,7 +1595,7 @@ async def get_template(template_id: str) -> SlidesTemplateResponse:
     "/styles",
     response_model=VisualStyleListResponse,
     summary="List visual styles",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.list"))],
 )
 async def list_visual_styles(
     limit: int = Query(50, ge=1, le=500),
@@ -1601,14 +1622,25 @@ async def list_visual_styles(
         ),
         *(_visual_style_response_from_row(row) for row in user_rows),
     ]
-    return VisualStyleListResponse(styles=styles, total_count=total_count, limit=limit, offset=offset)
+    return VisualStyleListResponse(
+        styles=styles,
+        total_count=total_count,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total_count,
+            count=len(styles),
+        ),
+    )
 
 
 @router.get(
     "/styles/{style_id}",
     response_model=VisualStyleResponse,
     summary="Get visual style",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.styles.get"))],
 )
 async def get_visual_style(
     style_id: str,
@@ -1622,7 +1654,7 @@ async def get_visual_style(
     response_model=VisualStyleResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create visual style",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.styles.create"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.styles.create"))],
 )
 async def create_visual_style(
     request: VisualStyleCreateRequest,
@@ -1649,7 +1681,7 @@ async def create_visual_style(
     "/styles/{style_id}",
     response_model=VisualStyleResponse,
     summary="Patch visual style",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.styles.update"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.styles.update"))],
 )
 async def patch_visual_style(
     style_id: str,
@@ -1728,8 +1760,11 @@ async def patch_visual_style(
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="visual_style_not_found") from None
-    except ConflictError:
-        raise HTTPException(status_code=409, detail="visual_style_version_conflict") from None
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="visual_style_version_conflict",
+        ) from exc
     return _visual_style_response_from_row(row)
 
 
@@ -1737,7 +1772,7 @@ async def patch_visual_style(
     "/styles/{style_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete visual style",
-    dependencies=[Depends(require_permissions(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.styles.delete"))],
+    dependencies=[Depends(RequirePermission(MEDIA_DELETE)), Depends(rbac_rate_limit("slides.styles.delete"))],
 )
 async def delete_visual_style(
     style_id: str,
@@ -1747,8 +1782,11 @@ async def delete_visual_style(
         raise HTTPException(status_code=403, detail="builtin_visual_style_read_only")
     try:
         deleted = db.delete_visual_style(style_id)
-    except ConflictError:
-        raise HTTPException(status_code=409, detail="visual_style_in_use") from None
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="visual_style_in_use",
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="visual_style_not_found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1758,7 +1796,7 @@ async def delete_visual_style(
     "/presentations/{presentation_id}/versions",
     response_model=PresentationVersionListResponse,
     summary="List presentation versions",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.list"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.list"))],
 )
 async def list_presentation_versions(
     presentation_id: str,
@@ -1782,14 +1820,25 @@ async def list_presentation_versions(
                 payload=payload,
             )
         )
-    return PresentationVersionListResponse(versions=versions, total=total, limit=limit, offset=offset)
+    return PresentationVersionListResponse(
+        versions=versions,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(versions),
+        ),
+    )
 
 
 @router.get(
     "/presentations/{presentation_id}/versions/{version}",
     response_model=PresentationResponse,
     summary="Get presentation version",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.get"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.versions.get"))],
 )
 async def get_presentation_version(
     presentation_id: str,
@@ -1808,7 +1857,7 @@ async def get_presentation_version(
     "/presentations/{presentation_id}/versions/{version}/restore",
     response_model=PresentationResponse,
     summary="Restore presentation to a previous version",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.versions.restore"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.versions.restore"))],
 )
 async def restore_presentation_version(
     presentation_id: str,
@@ -1866,9 +1915,9 @@ async def restore_presentation_version(
     except KeyError:
         raise HTTPException(status_code=404, detail="presentation_not_found") from None
     except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError:
-        raise HTTPException(status_code=412, detail="precondition_failed") from None
+        raise map_db_error_to_http(exc, default_detail="Failed to restore presentation version") from exc
+    except ConflictError as exc:
+        raise _map_precondition_conflict(exc) from exc
     response.headers["ETag"] = _format_etag(row.version)
     response.headers["Last-Modified"] = row.last_modified
     return _build_presentation_response(row)
@@ -1879,7 +1928,7 @@ async def restore_presentation_version(
     response_model=PresentationRenderJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="Submit a presentation render job",
-    dependencies=[Depends(require_permissions(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.render.submit"))],
+    dependencies=[Depends(RequirePermission(MEDIA_UPDATE)), Depends(rbac_rate_limit("slides.render.submit"))],
 )
 async def submit_presentation_render_job(
     presentation_id: str,
@@ -1932,7 +1981,7 @@ async def submit_presentation_render_job(
     "/render-jobs/{job_id}",
     response_model=PresentationRenderJobStatusResponse,
     summary="Get presentation render job status",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.status"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.status"))],
 )
 async def get_presentation_render_job_status(
     job_id: int,
@@ -1972,7 +2021,7 @@ async def get_presentation_render_job_status(
     "/presentations/{presentation_id}/render-artifacts",
     response_model=PresentationRenderArtifactListResponse,
     summary="List presentation render artifacts",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.artifacts"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.render.artifacts"))],
 )
 async def list_presentation_render_artifacts(
     presentation_id: str,
@@ -2018,7 +2067,7 @@ async def list_presentation_render_artifacts(
     "/generate",
     response_model=PresentationResponse,
     summary="Generate slides from prompt",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_prompt(
     request: GenerateFromPromptRequest,
@@ -2043,7 +2092,7 @@ async def generate_from_prompt(
     "/generate/from-chat",
     response_model=PresentationResponse,
     summary="Generate slides from chat conversation",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_chat(
     request: GenerateFromChatRequest,
@@ -2078,7 +2127,7 @@ async def generate_from_chat(
     "/generate/from-media",
     response_model=PresentationResponse,
     summary="Generate slides from media transcript",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_media(
     request: GenerateFromMediaRequest,
@@ -2121,7 +2170,7 @@ async def generate_from_media(
     "/generate/from-notes",
     response_model=PresentationResponse,
     summary="Generate slides from notes",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_notes(
     request: GenerateFromNotesRequest,
@@ -2161,7 +2210,7 @@ async def generate_from_notes(
     "/generate/from-rag",
     response_model=PresentationResponse,
     summary="Generate slides from RAG results",
-    dependencies=[Depends(require_permissions(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
+    dependencies=[Depends(RequirePermission(MEDIA_CREATE)), Depends(rbac_rate_limit("slides.generate"))],
 )
 async def generate_from_rag(
     request: GenerateFromRagRequest,
@@ -2202,8 +2251,20 @@ async def generate_from_rag(
 
 @router.get(
     "/presentations/{presentation_id}/export",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Presentation export download.",
+            "content": {
+                "application/json": {},
+                "application/pdf": {},
+                "application/zip": {},
+                "text/markdown": {},
+            },
+        },
+    },
     summary="Export presentation",
-    dependencies=[Depends(require_permissions(MEDIA_READ)), Depends(rbac_rate_limit("slides.export"))],
+    dependencies=[Depends(RequirePermission(MEDIA_READ)), Depends(rbac_rate_limit("slides.export"))],
 )
 async def export_presentation(
     presentation_id: str,
@@ -2279,7 +2340,10 @@ async def export_presentation(
                         "slides_export_errors_total",
                         labels={"format": format.value, "error": "export_error"},
                     )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to export presentation as markdown",
+            ) from exc
         filename = f"presentation_{presentation_id}.md"
         media_type = "text/markdown"
     elif format == ExportFormat.PDF:
@@ -2322,7 +2386,10 @@ async def export_presentation(
                         "slides_export_errors_total",
                         labels={"format": format.value, "error": "export_error"},
                     )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to export presentation as pdf",
+            ) from exc
         filename = f"presentation_{presentation_id}.pdf"
         media_type = "application/pdf"
     elif format == ExportFormat.REVEAL:
@@ -2360,7 +2427,10 @@ async def export_presentation(
                         "slides_export_errors_total",
                         labels={"format": format.value, "error": "export_error"},
                     )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to export presentation as revealjs",
+            ) from exc
         filename = f"presentation_{presentation_id}.zip"
         media_type = "application/zip"
     else:
@@ -2394,6 +2464,6 @@ async def slides_health(db: SlidesDatabase = Depends(get_slides_db_for_user)) ->
     try:
         _ = db.list_presentations(limit=1, offset=0, include_deleted=True, sort_column="created_at", sort_direction="DESC")
     except _SLIDES_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("slides health check failed: {}", exc)
+        logger.warning("slides health check failed")
         raise HTTPException(status_code=500, detail="slides_db_unavailable") from exc
     return SlidesHealthResponse(service="slides", status="ok")

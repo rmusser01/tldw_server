@@ -569,6 +569,59 @@ class TestV2Chunker:
         methods = {row["metadata"].get("chunk_method") for row in rows}
         assert methods == {"code_ast"}
 
+    def test_process_text_string_false_does_not_enable_hierarchical(self):
+        """Loose string booleans should not accidentally enable hierarchical mode."""
+        chunker = Chunker()
+        text = "# Title\n\nPara one.\n\nPara two."
+
+        rows = chunker.process_text(
+            text,
+            options={"method": "words", "max_size": 50, "overlap": 0, "hierarchical": "false"},
+        )
+
+        assert rows
+        assert all("paragraph_kind" not in row["metadata"] for row in rows)
+        assert all("ancestry_titles" not in row["metadata"] for row in rows)
+
+    def test_process_text_uses_tracing_helper_api_correctly(self, monkeypatch):
+        """process_text should use the current-span helper API without recording TypeErrors."""
+        import tldw_Server_API.app.core.Chunking.chunker as chunker_module
+
+        span_attributes = []
+        span_events = []
+        recorded_exceptions = []
+
+        class _DummySpanContext:
+            def __enter__(self):
+                return object()
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+        def fake_start_span(name, **kwargs):
+            return _DummySpanContext()
+
+        def fake_set_span_attribute(key, value):
+            span_attributes.append((key, value))
+
+        def fake_add_span_event(name, attributes=None):
+            span_events.append((name, attributes))
+
+        def fake_record_span_exception(exception, escaped=True):
+            recorded_exceptions.append((exception, escaped))
+
+        monkeypatch.setattr(chunker_module, "start_span", fake_start_span)
+        monkeypatch.setattr(chunker_module, "set_span_attribute", fake_set_span_attribute)
+        monkeypatch.setattr(chunker_module, "add_span_event", fake_add_span_event)
+        monkeypatch.setattr(chunker_module, "record_span_exception", fake_record_span_exception)
+
+        rows = Chunker().process_text("One sentence. Another sentence.")
+
+        assert rows
+        assert ("chunk.method", "words") in span_attributes
+        assert any(event_name == "chunker.completed" for event_name, _attrs in span_events)
+        assert recorded_exceptions == []
+
     def test_chunk_file_stream_avoids_partial_tokens(self, tmp_path):
         """Streaming chunking should not emit truncated word fragments."""
         text = " ".join(f"word{i}" for i in range(1, 21))

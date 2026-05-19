@@ -25,6 +25,13 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport impor
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 from tldw_Server_API.app.core.Agent_Client_Protocol.tool_gate import ToolGate
 
+_RUN_FIRST_METRIC_EXCEPTIONS: tuple[type[Exception], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
 
 def _extract_text_content(result: dict[str, Any]) -> str:
     """Pull text from an MCP content array.
@@ -287,7 +294,7 @@ class LLMDrivenRunner:
             return
         try:
             acp_metrics.record_run_first_rollout(**self._run_first_metrics_context)
-        except Exception as exc:
+        except _RUN_FIRST_METRIC_EXCEPTIONS as exc:
             logger.warning(
                 "ACP run-first metric emission failed for rollout on session {}: {}",
                 self._session_id,
@@ -302,7 +309,7 @@ class LLMDrivenRunner:
                 **self._run_first_metrics_context,
                 first_tool=first_tool,
             )
-        except Exception as exc:
+        except _RUN_FIRST_METRIC_EXCEPTIONS as exc:
             logger.warning(
                 "ACP run-first metric emission failed for first_tool on session {}: {}",
                 self._session_id,
@@ -317,7 +324,7 @@ class LLMDrivenRunner:
                 **self._run_first_metrics_context,
                 fallback_tool=fallback_tool,
             )
-        except Exception as exc:
+        except _RUN_FIRST_METRIC_EXCEPTIONS as exc:
             logger.warning(
                 "ACP run-first metric emission failed for fallback_after_run on session {}: {}",
                 self._session_id,
@@ -332,7 +339,7 @@ class LLMDrivenRunner:
                 **self._run_first_metrics_context,
                 outcome=outcome,
             )
-        except Exception as exc:
+        except _RUN_FIRST_METRIC_EXCEPTIONS as exc:
             logger.warning(
                 "ACP run-first metric emission failed for completion_proxy on session {}: {}",
                 self._session_id,

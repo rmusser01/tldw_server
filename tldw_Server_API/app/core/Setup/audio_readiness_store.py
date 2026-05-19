@@ -150,7 +150,7 @@ def _resolve_readiness_file() -> Path | None:
                 probe.unlink()
             return path
         except Exception:  # noqa: BLE001
-            logger.debug("Audio readiness path {} not writable", path, exc_info=True)
+            logger.debug("Audio readiness candidate path not writable")
 
     logger.warning("No writable location found for audio readiness persistence.")
     return None
@@ -171,7 +171,7 @@ class AudioReadinessStore:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             return AudioReadinessRecord.model_validate(data).model_dump()
         except Exception:  # noqa: BLE001
-            logger.warning("Failed to read audio readiness from {}", self.path, exc_info=True)
+            logger.warning("Failed to read audio readiness")
             return default_record.model_dump()
 
     def save(self, readiness: dict[str, Any]) -> dict[str, Any]:

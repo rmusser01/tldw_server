@@ -133,3 +133,23 @@ def test_jobs_stats_filters_sqlite(monkeypatch, tmp_path):
         assert only["domain"] == "chatbooks"
         assert only["queue"] == "high"
         assert only["job_type"] == "export"
+
+
+def test_jobs_stats_sanitizes_generic_failure(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _set_env(monkeypatch)
+
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self, **_kwargs):
+        raise RuntimeError("jobs stats backend exploded")
+
+    monkeypatch.setattr(JobManager, "get_queue_stats", boom)
+
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    with TestClient(app, headers=headers) as client:
+        r = client.get("/api/v1/jobs/stats")
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Stats failed"

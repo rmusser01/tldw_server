@@ -11,13 +11,10 @@ from __future__ import annotations
 
 import contextlib
 
-from loguru import logger
-
 try:
-    from .base import BackendType, DatabaseBackend, DatabaseError
+    from .base import DatabaseBackend, DatabaseError
 except Exception:  # pragma: no cover
     DatabaseBackend = object  # type: ignore
-    BackendType = None  # type: ignore
     class DatabaseError(Exception): ...  # type: ignore
 
 
@@ -215,49 +212,46 @@ def build_chacha_rls_sql() -> list[str]:
     return stmts
 
 
+def _ensure_rls_policy_set(
+    backend: DatabaseBackend,
+    *,
+    name: str,
+    statements: list[str],
+) -> bool:
+    try:
+        if not hasattr(backend, "backend_type") or backend.backend_type.name != "POSTGRESQL":
+            return False
+    except Exception:
+        return False
+
+    with backend.transaction() as conn:
+        cur = conn.cursor()
+        try:
+            for index, statement in enumerate(statements, start=1):
+                cur.execute(statement)
+            conn.commit()
+            return True
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                conn.rollback()
+            raise DatabaseError(f"{name} RLS statement {index} failed: {exc}") from exc
+
+
 def ensure_prompt_studio_rls(backend: DatabaseBackend) -> bool:
     """Apply Prompt Studio RLS statements if running against PostgreSQL.
 
-    Returns True if statements were applied (or attempted), False otherwise.
+    Returns True when the full policy set succeeds; False only for explicit no-op cases.
     """
-    try:
-        if not hasattr(backend, 'backend_type') or backend.backend_type.name != 'POSTGRESQL':
-            return False
-    except Exception:
-        # Best-effort detection; if not clearly PostgreSQL, do nothing
-        return False
-
-    stmts = build_prompt_studio_rls_sql()
-    applied = False
-    with backend.transaction() as conn:
-        cur = conn.cursor()
-        for s in stmts:
-            try:
-                cur.execute(s)
-                applied = True
-            except Exception as e:
-                logger.debug(f"RLS apply skipped/failed for statement: {e}")
-        with contextlib.suppress(Exception):
-            conn.commit()
-    return applied
+    return _ensure_rls_policy_set(
+        backend,
+        name="prompt_studio",
+        statements=build_prompt_studio_rls_sql(),
+    )
 
 
 def ensure_chacha_rls(backend: DatabaseBackend) -> bool:
-    try:
-        if not hasattr(backend, 'backend_type') or backend.backend_type.name != 'POSTGRESQL':
-            return False
-    except Exception:
-        return False
-    stmts = build_chacha_rls_sql()
-    applied = False
-    with backend.transaction() as conn:
-        cur = conn.cursor()
-        for s in stmts:
-            try:
-                cur.execute(s)
-                applied = True
-            except Exception as e:
-                logger.debug(f"RLS apply skipped/failed for statement: {e}")
-        with contextlib.suppress(Exception):
-            conn.commit()
-    return applied
+    return _ensure_rls_policy_set(
+        backend,
+        name="chacha",
+        statements=build_chacha_rls_sql(),
+    )

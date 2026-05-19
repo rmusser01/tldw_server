@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { MenuProps } from 'antd'
+import type { TFunction } from 'i18next'
 import {
   Send,
   Copy,
@@ -163,7 +164,7 @@ export interface UseContentMetadataDeps {
   onOpenInMultiReview?: () => void
   handleCopyContent: () => void
   handleCopyMetadata: () => void
-  t: (key: string, opts?: Record<string, any>) => string
+  t: TFunction
 }
 
 export function useContentMetadata(deps: UseContentMetadataDeps) {

@@ -14,6 +14,7 @@ import type {
   WizardProcessingState,
   WizardResultItem,
   ItemProgress,
+  ConferenceBatchMetadata,
 } from "./types"
 import {
   DEFAULT_PRESETS,
@@ -21,6 +22,7 @@ import {
   mergePresetConfig,
   configMatchesPreset,
 } from "./presets"
+import type { QuickIngestOpenDetail } from "@/utils/quick-ingest-open"
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -35,6 +37,8 @@ export type IngestWizardState = {
   customBasePreset: Exclude<IngestPreset, "custom">
   presetConfig: PresetConfig
   customOptions: Partial<PresetConfig>
+  playlistPreflightSeed: QuickIngestOpenDetail | null
+  conferenceBatchMetadata: ConferenceBatchMetadata | null
   processingState: WizardProcessingState
   results: WizardResultItem[]
   isMinimized: boolean
@@ -51,6 +55,8 @@ type Action =
   | { type: "SET_QUEUE_ITEMS"; items: WizardQueueItem[] }
   | { type: "SET_PRESET"; preset: IngestPreset }
   | { type: "SET_CUSTOM_OPTIONS"; options: Partial<PresetConfig> }
+  | { type: "SET_PLAYLIST_PREFLIGHT_SEED"; seed: QuickIngestOpenDetail | null }
+  | { type: "SET_CONFERENCE_BATCH_METADATA"; metadata: ConferenceBatchMetadata | null }
   | { type: "START_PROCESSING" }
   | { type: "CANCEL_PROCESSING" }
   | { type: "CANCEL_ITEM"; id: string }
@@ -119,6 +125,20 @@ const mergeCustomOptions = (
   return next
 }
 
+const buildInitialProgress = (items: WizardQueueItem[]): ItemProgress[] =>
+  items
+    .filter(
+      (item) =>
+        item.validation.valid && item.conferenceOverride?.selected !== false
+    )
+    .map((item) => ({
+      id: item.id,
+      status: "queued" as const,
+      progressPercent: 0,
+      currentStage: "",
+      estimatedRemaining: 0,
+    }))
+
 const findMatchingPreset = (
   config: PresetConfig
 ): Exclude<IngestPreset, "custom"> | null => {
@@ -145,6 +165,8 @@ const createInitialState = (): IngestWizardState => ({
   customBasePreset: DEFAULT_PRESET,
   presetConfig: DEFAULT_PRESETS[DEFAULT_PRESET],
   customOptions: {},
+  playlistPreflightSeed: null,
+  conferenceBatchMetadata: null,
   processingState: { ...INITIAL_PROCESSING_STATE },
   results: [],
   isMinimized: false,
@@ -164,6 +186,10 @@ const createInitialStateFromSeed = (
     customBasePreset: seed.customBasePreset ?? base.customBasePreset,
     presetConfig: seed.presetConfig ?? base.presetConfig,
     customOptions: seed.customOptions ?? base.customOptions,
+    playlistPreflightSeed:
+      seed.playlistPreflightSeed ?? base.playlistPreflightSeed,
+    conferenceBatchMetadata:
+      seed.conferenceBatchMetadata ?? base.conferenceBatchMetadata,
     processingState: seed.processingState
       ? {
           ...INITIAL_PROCESSING_STATE,
@@ -259,14 +285,15 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
       }
     }
 
+    case "SET_CONFERENCE_BATCH_METADATA":
+      return { ...state, conferenceBatchMetadata: action.metadata }
+
+    case "SET_PLAYLIST_PREFLIGHT_SEED":
+      return { ...state, playlistPreflightSeed: action.seed }
+
     case "START_PROCESSING": {
-      const perItemProgress: ItemProgress[] = state.queueItems.map((item) => ({
-        id: item.id,
-        status: "queued",
-        progressPercent: 0,
-        currentStage: "",
-        estimatedRemaining: 0,
-      }))
+      const perItemProgress = buildInitialProgress(state.queueItems)
+      if (perItemProgress.length === 0) return state
       return {
         ...state,
         processingState: {
@@ -331,13 +358,8 @@ const reducer = (state: IngestWizardState, action: Action): IngestWizardState =>
 
     case "SKIP_TO_PROCESSING": {
       // Quick Mode: skip Steps 2-3, jump directly to Step 4 with default preset
-      const perItemProgress: ItemProgress[] = state.queueItems.map((item) => ({
-        id: item.id,
-        status: "queued" as const,
-        progressPercent: 0,
-        currentStage: "",
-        estimatedRemaining: 0,
-      }))
+      const perItemProgress = buildInitialProgress(state.queueItems)
+      if (perItemProgress.length === 0) return state
       return {
         ...state,
         currentStep: 4 as WizardStep,
@@ -381,6 +403,8 @@ type IngestWizardContextValue = {
   // Presets & options
   setPreset: (preset: IngestPreset) => void
   setCustomOptions: (options: Partial<PresetConfig>) => void
+  setPlaylistPreflightSeed: (seed: QuickIngestOpenDetail | null) => void
+  setConferenceBatchMetadata: (metadata: ConferenceBatchMetadata | null) => void
   // Processing
   startProcessing: () => void
   skipToProcessing: () => void
@@ -446,6 +470,16 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       dispatch({ type: "SET_CUSTOM_OPTIONS", options }),
     []
   )
+  const setPlaylistPreflightSeed = useCallback(
+    (seed: QuickIngestOpenDetail | null) =>
+      dispatch({ type: "SET_PLAYLIST_PREFLIGHT_SEED", seed }),
+    []
+  )
+  const setConferenceBatchMetadata = useCallback(
+    (metadata: ConferenceBatchMetadata | null) =>
+      dispatch({ type: "SET_CONFERENCE_BATCH_METADATA", metadata }),
+    []
+  )
   const startProcessing = useCallback(
     () => dispatch({ type: "START_PROCESSING" }),
     []
@@ -489,6 +523,8 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       setQueueItems,
       setPreset,
       setCustomOptions,
+      setPlaylistPreflightSeed,
+      setConferenceBatchMetadata,
       startProcessing,
       skipToProcessing,
       cancelProcessing,
@@ -508,6 +544,8 @@ export const IngestWizardProvider: React.FC<IngestWizardProviderProps> = ({
       setQueueItems,
       setPreset,
       setCustomOptions,
+      setPlaylistPreflightSeed,
+      setConferenceBatchMetadata,
       startProcessing,
       skipToProcessing,
       cancelProcessing,

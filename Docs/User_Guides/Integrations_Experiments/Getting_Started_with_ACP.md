@@ -49,7 +49,20 @@ Before starting, ensure you have:
 
 ### Step 1: Enable ACP in tldw_server
 
-Edit `tldw_Server_API/Config_Files/config.txt` and ensure ACP is enabled:
+Edit `tldw_Server_API/Config_Files/config.txt` and ensure ACP is enabled.
+
+**Minimal config (required settings only):**
+
+```ini
+[API-Routes]
+stable_only = false
+
+[ACP]
+runner_command = /path/to/tldw-agent-acp
+runner_cwd = /path/to/tldw-agent
+```
+
+**Full config (with all options):**
 
 ```ini
 [API-Routes]
@@ -60,9 +73,11 @@ enable = tools, jobs, acp
 runner_command = go
 runner_args = ["run", "./cmd/tldw-agent-acp"]
 runner_cwd = ../tldw-agent
-runner_env = HOME=/absolute/path/to/.tldw-agent-home,PYTHONUNBUFFERED=1
+runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1
 startup_timeout_ms = 10000
 ```
+
+Relative `HOME` values in `runner_env` are resolved against `tldw_Server_API/Config_Files`.
 
 Install ACP dependencies:
 
@@ -96,7 +111,7 @@ agent_command = claude
 agent_args = ["code"]
 ```
 
-`agent_command` must point to the downstream coding agent binary (`claude`, `codex`, `opencode`, etc.).  
+`agent_command` must point to the downstream coding agent binary (`claude`, `codex`, `opencode`, etc.).
 Do not set `agent_command` to `tldw-agent-acp` because that recursively launches the runner and will fail with `resource temporarily unavailable`.
 
 3. Set required env vars:
@@ -137,6 +152,57 @@ runner_args = []
 runner_cwd = /opt/tldw-agent
 ```
 
+### Docker Networking for ACP
+
+If you run tldw_server or tldw-agent inside Docker, the two processes need to reach each other over the network. Below are the two most common setups.
+
+**Scenario 1: Server in Docker, Runner on Host**
+
+The runner (tldw-agent) runs on the host and listens on a local port. Add `extra_hosts` so the container can reach the host network:
+
+```yaml
+# docker-compose.yml
+services:
+  tldw-server:
+    image: tldw/server:latest
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ACP_RUNNER_COMMAND: "http://host.docker.internal:9090"
+```
+
+Then start tldw-agent on the host normally. The server container will reach it via `host.docker.internal`.
+
+**Scenario 2: Both in Docker**
+
+Run tldw-agent as a sibling service in the same Compose project so they share a Docker network:
+
+```yaml
+# docker-compose.yml
+services:
+  tldw-server:
+    image: tldw/server:latest
+    ports:
+      - "8000:8000"
+    environment:
+      ACP_RUNNER_COMMAND: "http://tldw-agent:9090"
+    depends_on:
+      - tldw-agent
+
+  tldw-agent:
+    build:
+      context: ../tldw-agent
+      dockerfile: Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    expose:
+      - "9090"
+```
+
+Both services join the default Compose network, so the server can reach the runner at `http://tldw-agent:9090`.
+
 ### Step 2: Set Up tldw-agent (the Runner)
 
 Clone and build the tldw-agent repository:
@@ -144,8 +210,10 @@ Clone and build the tldw-agent repository:
 ```bash
 # Clone the repository (sibling to tldw_server2)
 cd ..
-git clone https://github.com/your-org/tldw-agent.git
+git clone https://github.com/rmusser01/tldw-agent.git
 cd tldw-agent
+# Note: This repository may not yet be public. If the clone fails,
+# contact the maintainer or check for build-from-source instructions below.
 
 # Build the binary
 go build -o bin/tldw-agent-acp ./cmd/tldw-agent-acp
@@ -315,6 +383,48 @@ agent:
 
 ## Troubleshooting
 
+### Quick Troubleshooting Checklist
+
+Work through these steps in order. Stop at the first failure and apply the fix.
+
+**1. Can you reach the server?**
+
+- Test: `curl http://127.0.0.1:8000/docs`
+- If no: Start tldw_server (`python -m uvicorn tldw_Server_API.app.main:app --reload`) and check for startup errors in the console.
+
+**2. Are ACP routes enabled?**
+
+- Test: `curl -s http://127.0.0.1:8000/api/v1/acp/health -H "X-API-KEY: <YOUR_API_KEY>"`
+- If no (404): Set `stable_only = false` in `[API-Routes]` in `config.txt` and restart the server.
+
+**3. Is the runner configured?**
+
+- Test: Check the health response from step 2 — it should show runner status.
+- If no: Verify `[ACP] runner_command` and `runner_cwd` are set correctly in `config.txt`. See the config examples above.
+
+**4. Is the downstream agent installed?**
+
+- Test: `claude --version` (or `codex --version`, `opencode --version`)
+- If no: Install your chosen agent. For Claude Code see [claude.ai/download](https://claude.ai/download).
+
+**5. Is the API key set?**
+
+- Test: `echo $ANTHROPIC_API_KEY`
+- If no: `export ANTHROPIC_API_KEY=sk-ant-...` and add it to `~/.tldw-agent/config.yaml` under `agent.env`.
+
+**6. Can you create a session?**
+
+- Test:
+  ```bash
+  curl -X POST http://127.0.0.1:8000/api/v1/acp/sessions/new \
+    -H "X-API-KEY: <YOUR_API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{"agent_type": "claude_code", "cwd": "/tmp"}'
+  ```
+- If no: Check server logs for the specific error. Common causes include incorrect `runner_command` path or missing Go installation.
+
+---
+
 ### "ACP endpoints not found" (404)
 
 **Cause:** ACP routes are not enabled.
@@ -356,7 +466,7 @@ Then restart tldw_server.
    ```bash
    echo $ANTHROPIC_API_KEY
    ```
-4. Check the HOME environment in `runner_env` points to the config directory
+4. Check the HOME environment in `runner_env` points to the config directory. Relative values resolve from `tldw_Server_API/Config_Files`.
 
 ### WebSocket Connection Fails
 

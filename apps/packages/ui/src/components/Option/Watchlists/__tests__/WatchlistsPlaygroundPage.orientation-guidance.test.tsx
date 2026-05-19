@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
       | "jobs"
       | "runs"
       | "items"
+      | "alerts"
       | "outputs"
       | "templates"
       | "settings",
@@ -21,7 +22,22 @@ const mocks = vi.hoisted(() => {
     })
   }
   return {
+    watchlistContainer: {
+      id: 42,
+      name: "Healthcare ransomware",
+      description: "Track hospital impact",
+      objective: "Find new ransomware affecting hospitals",
+      domain: "cti_osint",
+      status: "active",
+      priority: "high",
+      tags: ["ransomware", "hospitals"],
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    },
+    createWatchlistMock: vi.fn(),
     fetchWatchlistRunsMock: vi.fn(),
+    fetchWatchlistsMock: vi.fn(),
+    updateWatchlistMock: vi.fn(),
     recordWatchlistsIaExperimentTelemetryMock: vi.fn(),
     trackWatchlistsOnboardingTelemetryMock: vi.fn(),
     notificationDestroyMock: vi.fn(),
@@ -105,8 +121,31 @@ vi.mock("antd", async () => {
       {...rest}
     />
   )
-  return { ...actual, Alert, Tabs, Empty, Button, Modal, Drawer, Tooltip, Switch }
+  const Select = ({ value, options = [], onChange, "aria-label": ariaLabel, ...rest }: any) => (
+    <select
+      aria-label={ariaLabel}
+      value={value == null ? "" : String(value)}
+      onChange={(event) => {
+        const rawValue = event.currentTarget.value
+        const numeric = Number(rawValue)
+        onChange?.(Number.isFinite(numeric) && rawValue.trim() !== "" ? numeric : rawValue)
+      }}
+      {...rest}
+    >
+      {options.map((option: any) => (
+        <option key={String(option.value)} value={String(option.value)}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+  const Tag = ({ children }: any) => <span>{children}</span>
+  return { ...actual, Alert, Tabs, Empty, Button, Modal, Drawer, Tooltip, Switch, Select, Tag }
 })
+
+vi.mock("@/components/Common/WorkspaceConnectionGate", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
@@ -136,7 +175,10 @@ vi.mock("react-router-dom", async () => {
 })
 
 vi.mock("@/services/watchlists", () => ({
+  createWatchlist: (...args: any[]) => mocks.createWatchlistMock(...args),
   fetchWatchlistRuns: (...args: any[]) => mocks.fetchWatchlistRunsMock(...args),
+  fetchWatchlists: (...args: any[]) => mocks.fetchWatchlistsMock(...args),
+  updateWatchlist: (...args: any[]) => mocks.updateWatchlistMock(...args),
   recordWatchlistsIaExperimentTelemetry: (...args: any[]) =>
     mocks.recordWatchlistsIaExperimentTelemetryMock(...args)
 }))
@@ -150,7 +192,17 @@ vi.mock("@/store/watchlists", () => ({
   useWatchlistsStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       activeTab: mocks.state.activeTab,
+      watchlists: [mocks.watchlistContainer],
+      watchlistsLoading: false,
+      watchlistsError: null,
+      selectedWatchlistId: 42,
       setActiveTab: mocks.state.setActiveTab,
+      setWatchlists: vi.fn(),
+      setWatchlistsLoading: vi.fn(),
+      setWatchlistsError: vi.fn(),
+      setSelectedWatchlistId: vi.fn(),
+      addWatchlist: vi.fn(),
+      updateWatchlistInList: vi.fn(),
       openRunDetail: vi.fn(),
       resetStore: vi.fn()
     })
@@ -190,6 +242,11 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     connectionMocks.useConnectionUxState.mockReturnValue({
       uxState: "connected_ok",
       hasCompletedFirstRun: true
+    })
+    mocks.fetchWatchlistsMock.mockResolvedValue({
+      items: [mocks.watchlistContainer],
+      total: 1,
+      has_more: false
     })
     mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: [], total: 0, has_more: false })
     mocks.recordWatchlistsIaExperimentTelemetryMock.mockResolvedValue({ accepted: true })
@@ -259,5 +316,13 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-restore"))
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
+  })
+
+  it("exposes an accessible label on the watchlists docs help icon", () => {
+    render(<WatchlistsPlaygroundPage />)
+
+    expect(
+      screen.getByRole("link", { name: "Open watchlists documentation" })
+    ).toHaveAttribute("data-testid", "watchlists-help-icon")
   })
 })

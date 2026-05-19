@@ -20,6 +20,7 @@ export type NotificationItem = {
   created_at: string
   read_at?: string | null
   dismissed_at?: string | null
+  snooze_until?: string | null
 }
 
 export type NotificationsListResponse = {
@@ -34,6 +35,25 @@ export type NotificationsUnreadCountResponse = {
 export type NotificationSnoozeResponse = {
   task_id: string
   run_at: string
+}
+
+export type NotificationCancelSnoozeResponse = {
+  cancelled: boolean
+  deleted_tasks: number
+}
+
+export type NotificationPreferences = {
+  user_id: string
+  reminder_enabled: boolean
+  job_completed_enabled: boolean
+  job_failed_enabled: boolean
+  updated_at: string
+}
+
+export type NotificationPreferencesUpdate = {
+  reminder_enabled?: boolean
+  job_completed_enabled?: boolean
+  job_failed_enabled?: boolean
 }
 
 export type NotificationStreamEvent = {
@@ -237,6 +257,7 @@ export async function listNotifications(params?: {
   limit?: number
   offset?: number
   include_archived?: boolean
+  only_snoozed?: boolean
 }): Promise<NotificationsListResponse> {
   return bgRequest<NotificationsListResponse>({
     path: `/api/v1/notifications${buildNotificationsQuery(params || {})}` as any,
@@ -268,6 +289,15 @@ export async function dismissNotification(notificationId: number): Promise<{ dis
   })
 }
 
+export async function cancelNotificationSnooze(
+  notificationId: number
+): Promise<NotificationCancelSnoozeResponse> {
+  return bgRequest<NotificationCancelSnoozeResponse>({
+    path: `/api/v1/notifications/${notificationId}/snooze` as any,
+    method: "DELETE"
+  })
+}
+
 export async function snoozeNotification(
   notificationId: number,
   minutes: number
@@ -277,6 +307,24 @@ export async function snoozeNotification(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: { minutes }
+  })
+}
+
+export async function getNotificationPreferences(): Promise<NotificationPreferences> {
+  return bgRequest<NotificationPreferences>({
+    path: "/api/v1/notifications/preferences" as any,
+    method: "GET"
+  })
+}
+
+export async function updateNotificationPreferences(
+  update: NotificationPreferencesUpdate
+): Promise<NotificationPreferences> {
+  return bgRequest<NotificationPreferences>({
+    path: "/api/v1/notifications/preferences" as any,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: update
   })
 }
 

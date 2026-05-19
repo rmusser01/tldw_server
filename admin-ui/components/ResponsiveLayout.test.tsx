@@ -66,6 +66,7 @@ vi.mock('@/components/ThemeToggle', () => ({
 
 vi.mock('@/components/OrgContextSwitcher', () => ({
   OrgContextSwitcher: () => <div data-testid="org-switcher" />,
+  OrgContextBanner: () => null,
 }));
 
 afterEach(() => {

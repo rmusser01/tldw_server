@@ -6,14 +6,15 @@ import pytest
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_webhooks as webhooks, \
-    evaluations_auth as eval_auth
+from tldw_Server_API.app.api.v1.endpoints.evaluations import (
+    evaluations_webhooks as webhooks,
+    evaluations_auth as eval_auth,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Evaluations import unified_evaluation_service as service_module
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookManager
-
 
 pytestmark = [pytest.mark.integration]
 
@@ -172,3 +173,54 @@ def test_webhook_delete_is_url_based_and_scoped(multi_user_webhook_client):
             ("user_2", "https://example.com/u2"),
         ).fetchone()[0]
         assert active == 1
+
+
+def test_webhook_list_uses_canonical_string_scope_for_manager_binding(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.delenv("EVALUATIONS_TEST_DB_PATH", raising=False)
+    base_dir = tmp_path / "user_dbs"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
+
+    service_module._service_instance = None
+    try:
+        service_module._service_instances_by_user.clear()
+    except Exception:
+        service_module._service_instances_by_user = {}  # type: ignore[assignment]
+
+    app = FastAPI()
+    app.include_router(webhooks.webhooks_router, prefix="/api/v1/evaluations")
+
+    async def _verify_api_key() -> str:
+        return "tenant-user"
+
+    class _EvalUser:
+        id = 1
+        id_str = "tenant-user"
+
+    async def _get_eval_request_user(
+        _user_ctx: str = Depends(_verify_api_key),
+    ) -> _EvalUser:
+        return _EvalUser()
+
+    app.dependency_overrides[eval_auth.verify_api_key] = _verify_api_key
+    app.dependency_overrides[eval_auth.get_eval_request_user] = _get_eval_request_user
+
+    db_path_tenant = DatabasePaths.get_evaluations_db_path("tenant-user")
+    db_path_numeric = DatabasePaths.get_evaluations_db_path(1)
+    _seed_webhook(db_path_tenant, user_id="tenant-user", url="https://example.com/tenant")
+    _seed_webhook(db_path_numeric, user_id="1", url="https://example.com/numeric")
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/evaluations/webhooks", headers={"X-API-KEY": "test"})
+        assert resp.status_code == 200, resp.text
+        payload = resp.json()
+        assert len(payload) == 1
+        assert payload[0]["url"] == "https://example.com/tenant"
+
+    app.dependency_overrides.clear()
+    service_module._service_instance = None
+    try:
+        service_module._service_instances_by_user.clear()
+    except Exception:
+        service_module._service_instances_by_user = {}  # type: ignore[assignment]

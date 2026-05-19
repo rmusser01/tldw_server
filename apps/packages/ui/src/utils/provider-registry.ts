@@ -63,6 +63,7 @@ export type ProviderCapability = "llm" | "tts" | "tts-engine"
 
 export type ProviderMeta = {
   label: string
+  description?: string
   baseUrl?: string
   iconKey?: ProviderIconKey
   order?: number
@@ -73,12 +74,14 @@ export type ProviderMeta = {
 export const PROVIDER_REGISTRY: Record<string, ProviderMeta> = {
   browser: {
     label: "Browser",
-    ttsLabel: "Browser TTS",
+    description: "Uses your system's built-in speech synthesis",
+    ttsLabel: "Browser TTS (no setup needed)",
     order: 1,
     capabilities: ["tts"]
   },
   elevenlabs: {
     label: "ElevenLabs",
+    description: "ElevenLabs cloud TTS (requires API key)",
     order: 2,
     capabilities: ["tts"]
   },
@@ -108,6 +111,7 @@ export const PROVIDER_REGISTRY: Record<string, ProviderMeta> = {
   },
   openai: {
     label: "OpenAI",
+    description: "OpenAI cloud TTS (requires API key)",
     baseUrl: "https://api.openai.com/v1",
     iconKey: "openai",
     order: 5,
@@ -234,6 +238,7 @@ export const PROVIDER_REGISTRY: Record<string, ProviderMeta> = {
   },
   tldw: {
     label: "tldw Server",
+    description: "Local TTS engines on your tldw server",
     iconKey: "tldw",
     order: 6,
     capabilities: ["llm", "tts"],

@@ -69,6 +69,15 @@ export interface UseDocumentTTSReturn {
 const DEFAULT_VOICE = DEFAULT_TLDW_TTS_VOICE
 const DEFAULT_SPEED = 1.0
 
+const readStoredVoicePreference = (): string => {
+  if (typeof window === "undefined") return ""
+  try {
+    return localStorage.getItem("tts-voice") || ""
+  } catch {
+    return ""
+  }
+}
+
 /**
  * Hook for text-to-speech playback using the TTS API.
  *
@@ -80,12 +89,7 @@ const DEFAULT_SPEED = 1.0
  * - Multiple provider support
  */
 export function useDocumentTTS(): UseDocumentTTSReturn {
-  const [voice, setVoice] = useState(() => {
-    if (typeof window === "undefined") return DEFAULT_VOICE
-    try {
-      return localStorage.getItem("tts-voice") || DEFAULT_VOICE
-    } catch { return DEFAULT_VOICE }
-  })
+  const [voice, setVoiceState] = useState(() => readStoredVoicePreference())
 
   const [speed, setSpeedState] = useState(() => {
     if (typeof window === "undefined") return DEFAULT_SPEED
@@ -171,12 +175,23 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
       if (typeof window === "undefined") return
 
       try {
-        const hasLocalVoice = Boolean(localStorage.getItem("tts-voice"))
-        if (hasLocalVoice) return
+        const storedVoiceBefore = readStoredVoicePreference()
+        if (storedVoiceBefore) {
+          setVoiceState(storedVoiceBefore)
+          return
+        }
 
         const configuredVoice = await getTldwTTSVoice()
-        if (!cancelled && configuredVoice) {
-          setVoice(configuredVoice)
+        if (cancelled) return
+
+        const storedVoiceAfter = readStoredVoicePreference()
+        if (storedVoiceAfter) {
+          setVoiceState(storedVoiceAfter)
+          return
+        }
+
+        if (configuredVoice) {
+          setVoiceState(configuredVoice)
         }
       } catch {
         // Ignore storage/config lookup errors and keep the local fallback.
@@ -216,7 +231,8 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
     try {
       const model = await getTldwTTSModel()
       const fallbackVoice = await getTldwTTSVoice()
-      const resolvedVoice = voice || fallbackVoice || DEFAULT_VOICE
+      const resolvedVoice =
+        readStoredVoicePreference() || voice || fallbackVoice || DEFAULT_VOICE
 
       // Call TTS API
       const response = await fetch("/api/v1/audio/speech", {
@@ -344,7 +360,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
   // Set voice with persistence
   const handleSetVoice = useCallback((voiceId: string) => {
-    setVoice(voiceId)
+    setVoiceState(voiceId)
     try {
       localStorage.setItem("tts-voice", voiceId)
     } catch (e) {
@@ -377,7 +393,7 @@ export function useDocumentTTS(): UseDocumentTTSReturn {
 
   return {
     state,
-    voice,
+    voice: voice || DEFAULT_VOICE,
     speed,
     volume,
     progress,

@@ -1,5 +1,5 @@
 import { Search, X, FilterX } from 'lucide-react'
-import { Tooltip } from 'antd'
+import { Popover, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { Ref } from 'react'
 
@@ -84,21 +84,36 @@ export function SearchBar({
       </div>
 
       <div className="mt-1 flex justify-end">
-        <Tooltip
-          title={t(
-            'mediaPage.searchSyntaxHelpText',
-            'Advanced syntax: use quotes for exact phrases, AND/OR/NOT, and -term to exclude.'
-          )}
+        <Popover
+          trigger="click"
+          placement="bottomRight"
+          title={t('mediaPage.searchSyntaxHelp', 'Search syntax help')}
+          content={
+            <div className="max-w-xs space-y-2 text-sm">
+              <p>
+                {t(
+                  'mediaPage.searchSyntaxHelpText',
+                  'Advanced syntax: use quotes for exact phrases, AND/OR/NOT, and -term to exclude.'
+                )}
+              </p>
+              <ul className="list-none space-y-1 text-xs text-text-muted">
+                <li><code className="bg-surface2 px-1 rounded">&quot;exact phrase&quot;</code> — {t('mediaPage.searchSyntaxExact', 'match exact phrase')}</li>
+                <li><code className="bg-surface2 px-1 rounded">term1 AND term2</code> — {t('mediaPage.searchSyntaxAnd', 'both terms required')}</li>
+                <li><code className="bg-surface2 px-1 rounded">term1 OR term2</code> — {t('mediaPage.searchSyntaxOr', 'either term matches')}</li>
+                <li><code className="bg-surface2 px-1 rounded">NOT term</code> / <code className="bg-surface2 px-1 rounded">-term</code> — {t('mediaPage.searchSyntaxNot', 'exclude term')}</li>
+              </ul>
+            </div>
+          }
         >
           <button
             type="button"
-            className="h-5 w-5 rounded-full border border-border text-[11px] font-semibold text-text-muted hover:text-text hover:border-text-muted transition-colors"
+            className="h-5 w-5 rounded-full border border-border text-[11px] font-semibold text-text-muted hover:text-text hover:border-text-muted transition-colors cursor-pointer"
             aria-label={t('mediaPage.searchSyntaxHelp', 'Search syntax help')}
             title={t('mediaPage.searchSyntaxHelp', 'Search syntax help')}
           >
             ?
           </button>
-        </Tooltip>
+        </Popover>
       </div>
     </div>
   )

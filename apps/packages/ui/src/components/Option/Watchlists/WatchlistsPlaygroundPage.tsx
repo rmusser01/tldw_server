@@ -1,8 +1,9 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
-import { Alert, Button, Drawer, Modal, Select, Switch, Tabs, Tooltip } from "antd"
+import { Alert, Button, Drawer, Input, Modal, Select, Switch, Tabs, Tag, Tooltip } from "antd"
 import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
 import type { TabsProps } from "antd"
 import {
+  BellRing,
   CalendarClock,
   ChevronDown,
   ChevronUp,
@@ -12,6 +13,8 @@ import {
   HelpCircle,
   LayoutDashboard,
   Newspaper,
+  Pencil,
+  Plus,
   Play,
   Rss,
   Settings
@@ -21,16 +24,42 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
-import { fetchWatchlistRuns, triggerWatchlistRun } from "@/services/watchlists"
+import {
+  bulkCreateSources,
+  createWatchlist,
+  createWatchlistJob,
+  createWatchlistSource,
+  fetchWatchlistRuns,
+  fetchWatchlists,
+  triggerWatchlistRun,
+  updateWatchlist
+} from "@/services/watchlists"
 import { useWatchlistsStore } from "@/store/watchlists"
-import type { WatchlistRun } from "@/types/watchlists"
+import type {
+  WatchlistContainer,
+  WatchlistDomain,
+  WatchlistJobCreate,
+  WatchlistPriority,
+  WatchlistRun,
+  WatchlistSourceCreate,
+  WatchlistStatus
+} from "@/types/watchlists"
 import type { WatchlistTab } from "@/types/watchlists"
+import {
+  WatchlistSetupWizard,
+  type WatchlistSetupCompleteResult
+} from "./SetupWizard"
 import {
   WATCHLISTS_ISSUE_REPORT_URL,
   WATCHLISTS_MAIN_DOCS_URL,
   WATCHLISTS_TAB_HELP_DOCS
 } from "./shared/help-docs"
 import { WatchlistsHealthBar } from "./shared/WatchlistsHealthBar"
+import {
+  WatchlistsMobileNavigation,
+  type WatchlistsMobileNavigationGroup
+} from "./shared/WatchlistsMobileNavigation"
+import { useWatchlistsViewport } from "./shared/useWatchlistsViewport"
 import { WatchlistsCommandPalette, useWatchlistsCommands } from "./shared/WatchlistsCommandPalette"
 import { useWatchlistsKeyboardShortcuts } from "./shared/useWatchlistsKeyboardShortcuts"
 import {
@@ -88,34 +117,18 @@ const TemplatesTab = React.lazy(() =>
 const SettingsTab = React.lazy(() =>
   import("./SettingsTab/SettingsTab").then((module) => ({ default: module.SettingsTab }))
 )
+const AlertsTab = React.lazy(() =>
+  import("./AlertsTab/AlertsTab").then((module) => ({ default: module.AlertsTab }))
+)
 
 /** Primary tabs in the progressive disclosure layout */
-const PROGRESSIVE_PRIMARY_TABS = ["sources", "items", "outputs"] as const
+const PROGRESSIVE_PRIMARY_TABS = ["sources", "alerts", "items", "outputs"] as const
 
 /** Which secondary section lives inside which primary tab */
 const SECONDARY_IN_PRIMARY: Record<string, string> = {
   jobs: "sources",    // Monitors section inside Feeds tab
-  runs: "items",      // Activity section inside Articles tab
+  runs: "items",      // Activity section inside Updates tab
   templates: "outputs" // Templates section inside Reports tab
-}
-
-const MOBILE_BREAKPOINT = 768
-
-const useIsMobile = (): boolean => {
-  const [isMobile, setIsMobile] = React.useState(() => {
-    if (typeof window === "undefined") return false
-    return window.innerWidth < MOBILE_BREAKPOINT
-  })
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") return
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    mql.addEventListener("change", handler)
-    return () => mql.removeEventListener("change", handler)
-  }, [])
-
-  return isMobile
 }
 
 const readShowAllViews = (): boolean => {
@@ -168,6 +181,7 @@ type WatchlistsTabKey =
   | "jobs"
   | "runs"
   | "items"
+  | "alerts"
   | "outputs"
   | "templates"
   | "settings"
@@ -188,12 +202,22 @@ interface GuidedTourState {
   step: number
 }
 type TeachPointKey = "jobsCronFilters" | "templatesAuthoring"
+type WatchlistFormMode = "create" | "edit"
 
 interface TeachPointState {
   jobsCronFilters: boolean
   templatesAuthoring: boolean
 }
 type OrientationDismissState = Partial<Record<WatchlistsTabKey, boolean>>
+interface WatchlistFormState {
+  name: string
+  description: string
+  objective: string
+  domain: WatchlistDomain
+  status: WatchlistStatus
+  priority: WatchlistPriority
+  tagsText: string
+}
 
 const GUIDED_TOUR_TABS: GuidedTourTab[] = ["sources", "jobs", "runs", "items", "outputs"]
 const GUIDED_TOUR_LAST_STEP = GUIDED_TOUR_TABS.length - 1
@@ -203,9 +227,68 @@ const TASK_VIEW_PRIMARY_TAB: Record<TaskViewKey, "sources" | "items" | "outputs"
   briefings: "outputs"
 }
 
+const WATCHLIST_FORM_DEFAULTS: WatchlistFormState = {
+  name: "",
+  description: "",
+  objective: "",
+  domain: "general",
+  status: "active",
+  priority: "medium",
+  tagsText: ""
+}
+
+const WATCHLIST_DOMAIN_LABELS: Record<WatchlistDomain, string> = {
+  cti_osint: "CTI / OSINT",
+  news: "News",
+  general: "General"
+}
+
+const WATCHLIST_STATUS_LABELS: Record<WatchlistStatus, string> = {
+  active: "Active",
+  paused: "Paused",
+  archived: "Archived"
+}
+
+const WATCHLIST_PRIORITY_LABELS: Record<WatchlistPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  critical: "Critical"
+}
+
+const SETUP_DESTINATION_TAB: Record<WatchlistSetupCompleteResult["destination"], WatchlistsTabKey> = {
+  sources: "sources",
+  jobs: "jobs",
+  outputs: "outputs"
+}
+
+const toWatchlistFormState = (watchlist: WatchlistContainer | null): WatchlistFormState => {
+  if (!watchlist) return WATCHLIST_FORM_DEFAULTS
+  return {
+    name: watchlist.name || "",
+    description: watchlist.description || "",
+    objective: watchlist.objective || "",
+    domain: watchlist.domain || "general",
+    status: watchlist.status || "active",
+    priority: watchlist.priority || "medium",
+    tagsText: Array.isArray(watchlist.tags) ? watchlist.tags.join(", ") : ""
+  }
+}
+
+const toOptionalText = (value: string): string | undefined => {
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+const toTags = (value: string): string[] =>
+  value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0)
+
 const resolveTaskViewForTab = (tab: string): TaskViewKey | null => {
   if (tab === "sources" || tab === "jobs") return "collect"
-  if (tab === "runs" || tab === "items") return "review"
+  if (tab === "runs" || tab === "items" || tab === "alerts") return "review"
   if (tab === "outputs" || tab === "templates") return "briefings"
   return null
 }
@@ -364,10 +447,20 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const activeTab = useWatchlistsStore((s) => s.activeTab)
   const overviewHealth = useWatchlistsStore((s) => s.overviewHealth)
   const runsPollingActive = useWatchlistsStore((s) => s.pollingActive)
+  const watchlists = useWatchlistsStore((s) => s.watchlists)
+  const watchlistsLoading = useWatchlistsStore((s) => s.watchlistsLoading)
+  const watchlistsError = useWatchlistsStore((s) => s.watchlistsError)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
   const openRunDetail = useWatchlistsStore((s) => s.openRunDetail)
   const openSourceForm = useWatchlistsStore((s) => s.openSourceForm)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
+  const setWatchlists = useWatchlistsStore((s) => s.setWatchlists)
+  const setWatchlistsLoading = useWatchlistsStore((s) => s.setWatchlistsLoading)
+  const setWatchlistsError = useWatchlistsStore((s) => s.setWatchlistsError)
+  const setSelectedWatchlistId = useWatchlistsStore((s) => s.setSelectedWatchlistId)
+  const addWatchlist = useWatchlistsStore((s) => s.addWatchlist)
+  const updateWatchlistInList = useWatchlistsStore((s) => s.updateWatchlistInList)
   const resetStore = useWatchlistsStore((s) => s.resetStore)
   const runStatusRef = useRef<Map<number, string>>(new Map())
   const notifiedRunStatesRef = useRef<Set<string>>(new Set())
@@ -397,7 +490,180 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [settingsDrawerOpen, setSettingsDrawerOpen] = React.useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false)
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false)
-  const isMobile = useIsMobile()
+  const [setupWizardOpen, setSetupWizardOpen] = React.useState(false)
+  const [watchlistFormOpen, setWatchlistFormOpen] = React.useState(false)
+  const [watchlistFormMode, setWatchlistFormMode] = React.useState<WatchlistFormMode>("create")
+  const [watchlistFormSaving, setWatchlistFormSaving] = React.useState(false)
+  const [watchlistForm, setWatchlistForm] = React.useState<WatchlistFormState>(WATCHLIST_FORM_DEFAULTS)
+  const { isConstrained } = useWatchlistsViewport()
+  const selectedWatchlist = React.useMemo(
+    () =>
+      Array.isArray(watchlists)
+        ? watchlists.find((watchlist) => watchlist.id === selectedWatchlistId) || null
+        : null,
+    [selectedWatchlistId, watchlists]
+  )
+
+  const loadWatchlists = useCallback(async () => {
+    setWatchlistsLoading(true)
+    setWatchlistsError(null)
+    try {
+      const response = await fetchWatchlists({ page: 1, size: 100 })
+      const items = Array.isArray(response.items) ? response.items : []
+      setWatchlists(items)
+      const hasValidSelection =
+        selectedWatchlistId != null && items.some((watchlist) => watchlist.id === selectedWatchlistId)
+      const nextSelectedWatchlistId =
+        items.length === 0 ? null : hasValidSelection ? selectedWatchlistId : items[0]?.id ?? null
+      if (nextSelectedWatchlistId !== selectedWatchlistId) {
+        setSelectedWatchlistId(nextSelectedWatchlistId)
+      }
+    } catch (err) {
+      console.error("Failed to load Watchlists:", err)
+      setWatchlistsError(t("watchlists:containers.fetchError", "Failed to load Watchlists"))
+    } finally {
+      setWatchlistsLoading(false)
+    }
+  }, [
+    selectedWatchlistId,
+    setSelectedWatchlistId,
+    setWatchlists,
+    setWatchlistsError,
+    setWatchlistsLoading,
+    t
+  ])
+
+  useEffect(() => {
+    void loadWatchlists()
+  }, [loadWatchlists])
+
+  const openCreateWatchlistForm = useCallback(() => {
+    setSetupWizardOpen(true)
+  }, [])
+
+  const openEditWatchlistForm = useCallback(() => {
+    setWatchlistFormMode("edit")
+    setWatchlistForm(toWatchlistFormState(selectedWatchlist))
+    setWatchlistFormOpen(true)
+  }, [selectedWatchlist])
+
+  const closeWatchlistForm = useCallback(() => {
+    if (watchlistFormSaving) return
+    setWatchlistFormOpen(false)
+  }, [watchlistFormSaving])
+
+  const saveWatchlistForm = useCallback(async () => {
+    const name = watchlistForm.name.trim()
+    if (!name) {
+      notification.error({
+        message: t("watchlists:containers.nameRequired", "Enter a Watchlist name"),
+        placement: "bottomRight",
+        duration: 5
+      })
+      return
+    }
+
+    const payload = {
+      name,
+      description: toOptionalText(watchlistForm.description),
+      objective: toOptionalText(watchlistForm.objective),
+      domain: watchlistForm.domain,
+      status: watchlistForm.status,
+      priority: watchlistForm.priority,
+      tags: toTags(watchlistForm.tagsText)
+    }
+
+    setWatchlistFormSaving(true)
+    try {
+      if (watchlistFormMode === "edit" && selectedWatchlist) {
+        const updated = await updateWatchlist(selectedWatchlist.id, payload)
+        updateWatchlistInList(updated.id, updated)
+        setSelectedWatchlistId(updated.id)
+        notification.success({
+          message: t("watchlists:containers.updated", "Watchlist updated"),
+          placement: "bottomRight",
+          duration: 5
+        })
+      } else {
+        const created = await createWatchlist(payload)
+        addWatchlist(created)
+        setSelectedWatchlistId(created.id)
+        notification.success({
+          message: t("watchlists:containers.created", "Watchlist created"),
+          placement: "bottomRight",
+          duration: 5
+        })
+      }
+      setWatchlistFormOpen(false)
+    } catch (err) {
+      console.error("Failed to save Watchlist:", err)
+      notification.error({
+        message: t("watchlists:containers.saveError", "Failed to save Watchlist"),
+        placement: "bottomRight",
+        duration: 5
+      })
+    } finally {
+      setWatchlistFormSaving(false)
+    }
+  }, [
+    addWatchlist,
+    notification,
+    selectedWatchlist,
+    setSelectedWatchlistId,
+    t,
+    updateWatchlistInList,
+    watchlistForm,
+    watchlistFormMode
+  ])
+
+  const createSetupSources = useCallback(async (
+    watchlistId: number,
+    sources: WatchlistSourceCreate[]
+  ): Promise<number[]> => {
+    const scopedSources = sources.map((source) => ({
+      ...source,
+      watchlist_id: watchlistId
+    }))
+
+    if (scopedSources.length === 0) return []
+    if (scopedSources.length === 1) {
+      const created = await createWatchlistSource(scopedSources[0])
+      return [created.id]
+    }
+
+    const response = await bulkCreateSources(scopedSources)
+    const createdIds = response.items
+      .filter((item) => item.status === "created" && typeof item.id === "number")
+      .map((item) => item.id as number)
+
+    if (createdIds.length !== scopedSources.length) {
+      throw new Error(t("watchlists:setupWizard.errors.sources", "Failed to create all Watchlist sources"))
+    }
+
+    return createdIds
+  }, [t])
+
+  const createSetupJob = useCallback(async (
+    watchlistId: number,
+    job: WatchlistJobCreate
+  ) => {
+    return createWatchlistJob({
+      ...job,
+      watchlist_id: watchlistId
+    })
+  }, [])
+
+  const completeSetupWizard = useCallback((result: WatchlistSetupCompleteResult) => {
+    addWatchlist(result.watchlist)
+    setSelectedWatchlistId(result.watchlist.id)
+    setActiveTab(SETUP_DESTINATION_TAB[result.destination])
+    setSetupWizardOpen(false)
+    notification.success({
+      message: t("watchlists:containers.created", "Watchlist created"),
+      placement: "bottomRight",
+      duration: 5
+    })
+  }, [addWatchlist, notification, setActiveTab, setSelectedWatchlistId, t])
 
   const toggleShowAllViews = useCallback(() => {
     setShowAllViews((prev) => {
@@ -417,7 +683,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
   // Navigate to a tab, auto-expanding inline secondary sections in progressive mode
   const navigateToTab = useCallback((key: string) => {
-    const isProgressive = !showAllViews && !iaExperimentEnabled
+    const isProgressive = !isConstrained && !showAllViews && !iaExperimentEnabled
     if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
@@ -430,7 +696,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       return
     }
     setActiveTab(key as typeof activeTab)
-  }, [setActiveTab, showAllViews, iaExperimentEnabled])
+  }, [isConstrained, setActiveTab, showAllViews, iaExperimentEnabled])
 
   // Refresh key — incrementing forces tab components to remount and refetch
   const [refreshKey, setRefreshKey] = React.useState(0)
@@ -441,7 +707,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     sources: t("watchlists:help.tabs.sources", "Feeds setup"),
     jobs: t("watchlists:help.tabs.jobs", "Monitor scheduling"),
     runs: t("watchlists:help.tabs.runs", "Activity guidance"),
-    items: t("watchlists:help.tabs.items", "Article review"),
+    items: t("watchlists:help.tabs.items", "Updates review"),
+    alerts: t("watchlists:help.tabs.alerts", "Alert guidance"),
     outputs: t("watchlists:help.tabs.outputs", "Reports guidance"),
     templates: t("watchlists:help.tabs.templates", "Template authoring"),
     settings: t("watchlists:help.tabs.settings", "Workspace settings")
@@ -462,7 +729,11 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     },
     {
       key: "items" as const,
-      label: t("watchlists:quickActions.items", "Review articles")
+      label: t("watchlists:quickActions.items", "Review updates")
+    },
+    {
+      key: "alerts" as const,
+      label: t("watchlists:quickActions.alerts", "Review alerts")
     },
     {
       key: "outputs" as const,
@@ -478,7 +749,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     {
       key: "review" as const,
       label: t("watchlists:taskViews.review", "Review"),
-      hint: t("watchlists:taskViews.reviewHint", "Activity and articles")
+      hint: t("watchlists:taskViews.reviewHint", "Activity and updates")
     },
     {
       key: "briefings" as const,
@@ -540,7 +811,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         },
         {
           key: "open-articles",
-          label: t("watchlists:orientation.actions.openArticles", "Open Articles"),
+          label: t("watchlists:orientation.actions.openArticles", "Open Updates"),
           target: "items"
         }
       ]
@@ -559,16 +830,16 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         },
         {
           key: "open-articles",
-          label: t("watchlists:orientation.actions.openArticles", "Open Articles"),
+          label: t("watchlists:orientation.actions.openArticles", "Open Updates"),
           target: "items"
         }
       ]
     },
     items: {
-      title: t("watchlists:orientation.items.title", "Articles: triage captured content"),
+      title: t("watchlists:orientation.items.title", "Updates: triage captured content"),
       description: t(
         "watchlists:orientation.items.description",
-        "Review and prioritize captured items. Next, tune monitor scope or open reports."
+        "Review and prioritize captured updates. Next, tune monitor scope or open reports."
       ),
       actions: [
         {
@@ -580,6 +851,25 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           key: "open-reports",
           label: t("watchlists:orientation.actions.openReports", "Open Reports"),
           target: "outputs"
+        }
+      ]
+    },
+    alerts: {
+      title: t("watchlists:orientation.alerts.title", "Alerts: review matched content"),
+      description: t(
+        "watchlists:orientation.alerts.description",
+        "Create content alert rules and triage item matches here. Run failures stay in Activity as health issues."
+      ),
+      actions: [
+        {
+          key: "open-articles",
+          label: t("watchlists:orientation.actions.openArticles", "Open Updates"),
+          target: "items"
+        },
+        {
+          key: "open-activity",
+          label: t("watchlists:orientation.actions.openActivity", "Open Activity"),
+          target: "runs"
         }
       ]
     },
@@ -675,10 +965,10 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     },
     {
       tab: "items" as const,
-      title: t("watchlists:guide.steps.items.title", "4. Review articles"),
+      title: t("watchlists:guide.steps.items.title", "4. Review updates"),
       description: t(
         "watchlists:guide.steps.items.description",
-        "Articles are captured content from successful monitor checks, ready for triage."
+        "Updates are captured content from successful monitor checks, ready for triage."
       )
     },
     {
@@ -1070,10 +1360,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   )
 
   const pollRunNotifications = useCallback(async () => {
+    if (selectedWatchlistId == null) return
     if (runNotificationsPollingInFlightRef.current) return
     runNotificationsPollingInFlightRef.current = true
     try {
       const response = await fetchWatchlistRuns({
+        watchlist_id: selectedWatchlistId ?? undefined,
         page: 1,
         size: runNotificationsPollPlan.pageSize
       })
@@ -1169,7 +1461,14 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     } finally {
       runNotificationsPollingInFlightRef.current = false
     }
-  }, [runNotificationsPollPlan.pageSize, runNotificationsPollPlan.suppressCompleted, showGroupedRunNotification, showRunNotification, t])
+  }, [
+    runNotificationsPollPlan.pageSize,
+    runNotificationsPollPlan.suppressCompleted,
+    selectedWatchlistId,
+    showGroupedRunNotification,
+    showRunNotification,
+    t
+  ])
 
   useEffect(() => {
     if (!runNotificationsPollPlan.enabled) {
@@ -1242,6 +1541,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         return (
           <Suspense fallback={tabPanelFallback}>
             <ItemsTab />
+          </Suspense>
+        )
+      case "alerts":
+        return (
+          <Suspense fallback={tabPanelFallback}>
+            <AlertsTab />
           </Suspense>
         )
       case "outputs":
@@ -1320,14 +1625,26 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     {
       key: "items",
       label: (
-        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Articles and posts collected from your sources")}>
+        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
           <span className="flex items-center gap-2">
             <Newspaper className="h-4 w-4" />
-            {t("watchlists:tabs.items", "Articles")}
+            {t("watchlists:tabs.items", "Updates")}
           </span>
         </Tooltip>
       ),
       children: renderWatchlistsTab("items")
+    },
+    {
+      key: "alerts",
+      label: (
+        <Tooltip title={t("watchlists:tabs.alertsTooltip", "Content matches from your Watchlist alert rules")}>
+          <span className="flex items-center gap-2">
+            <BellRing className="h-4 w-4" />
+            {t("watchlists:tabs.alerts", "Alerts")}
+          </span>
+        </Tooltip>
+      ),
+      children: renderWatchlistsTab("alerts")
     },
     {
       key: "outputs",
@@ -1390,12 +1707,24 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       )
     },
     {
+      key: "alerts",
+      label: (
+        <Tooltip title={t("watchlists:tabs.alertsTooltip", "Content matches from your Watchlist alert rules")}>
+          <span className="flex items-center gap-2">
+            <BellRing className="h-4 w-4" />
+            {t("watchlists:tabs.alerts", "Alerts")}
+          </span>
+        </Tooltip>
+      ),
+      children: renderWatchlistsTab("alerts")
+    },
+    {
       key: "items",
       label: (
-        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Articles and posts collected from your sources")}>
+        <Tooltip title={t("watchlists:tabs.itemsTooltip", "Updates collected from your sources")}>
           <span className="flex items-center gap-2">
             <Newspaper className="h-4 w-4" />
-            {t("watchlists:tabs.items", "Articles")}
+            {t("watchlists:tabs.items", "Updates")}
           </span>
         </Tooltip>
       ),
@@ -1447,7 +1776,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     ? progressiveTabItems
     : iaExperimentEnabled
       ? (() => {
-          const reducedIaPrimaryTabKeys = ["overview", "sources", "items", "outputs", "settings"] as const
+          const reducedIaPrimaryTabKeys = ["overview", "sources", "alerts", "items", "outputs", "settings"] as const
           const primarySet = new Set<string>(reducedIaPrimaryTabKeys)
           const primaryItems = allTabItems.filter((item) => item?.key && primarySet.has(String(item.key)))
           if (primarySet.has(activeTab)) return primaryItems
@@ -1457,6 +1786,9 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         })()
       : allTabItems
 
+  const constrainedActiveTabItem =
+    allTabItems.find((item) => String(item?.key) === activeTab) ||
+    renderedTabItems?.find((item) => String(item?.key) === activeTab)
 
   // Resolve active tab for the tab bar (in progressive mode, secondary tabs map to their parent)
   const resolvedActiveTab = useProgressiveLayout && SECONDARY_IN_PRIMARY[activeTab]
@@ -1473,6 +1805,233 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           ? t("watchlists:tabs.runs", "Activity")
           : t("watchlists:tabs.templates", "Templates")
   }))
+  const constrainedNavigationGroups = useMemo<WatchlistsMobileNavigationGroup[]>(
+    () => [
+      {
+        key: "overview",
+        label: t("watchlists:mobileNav.overviewGroup", "Overview"),
+        items: [
+          {
+            key: "overview",
+            label: t("watchlists:tabs.overview", "Overview"),
+            description: t("watchlists:mobileNav.overviewDescription", "Intent, health, and next actions")
+          }
+        ]
+      },
+      {
+        key: "collect",
+        label: t("watchlists:mobileNav.collectGroup", "Collect"),
+        items: [
+          {
+            key: "sources",
+            label: t("watchlists:tabs.sources", "Feeds"),
+            description: t("watchlists:mobileNav.sourcesDescription", "Sources, groups, tags, and imports"),
+            count: overviewBadges.sources
+          },
+          {
+            key: "jobs",
+            label: t("watchlists:tabs.jobs", "Monitors"),
+            description: t("watchlists:mobileNav.jobsDescription", "Schedules, scope, filters, and run now")
+          }
+        ]
+      },
+      {
+        key: "review",
+        label: t("watchlists:mobileNav.reviewGroup", "Review"),
+        items: [
+          {
+            key: "alerts",
+            label: t("watchlists:tabs.alerts", "Alerts"),
+            description: t("watchlists:mobileNav.alertsDescription", "Content matches and alert rules")
+          },
+          {
+            key: "items",
+            label: t("watchlists:tabs.items", "Updates"),
+            description: t("watchlists:mobileNav.itemsDescription", "Triage, saved views, and report queue")
+          },
+          {
+            key: "runs",
+            label: t("watchlists:tabs.runs", "Activity"),
+            description: t("watchlists:mobileNav.runsDescription", "Run history, health, and details"),
+            count: overviewBadges.runs
+          }
+        ]
+      },
+      {
+        key: "reports",
+        label: t("watchlists:mobileNav.reportsGroup", "Reports"),
+        items: [
+          {
+            key: "outputs",
+            label: t("watchlists:tabs.outputs", "Reports"),
+            description: t("watchlists:mobileNav.outputsDescription", "Generated reports, evidence, and downloads"),
+            count: overviewBadges.outputs
+          },
+          {
+            key: "templates",
+            label: t("watchlists:tabs.templates", "Templates"),
+            description: t("watchlists:mobileNav.templatesDescription", "Report template authoring and preview")
+          }
+        ]
+      },
+      {
+        key: "settings",
+        label: t("watchlists:mobileNav.settingsGroup", "Settings"),
+        items: [
+          {
+            key: "settings",
+            label: t("watchlists:tabs.settings", "Settings"),
+            description: t("watchlists:mobileNav.settingsDescription", "Lifecycle, defaults, and subscriptions")
+          }
+        ]
+      }
+    ],
+    [overviewBadges.outputs, overviewBadges.runs, overviewBadges.sources, t]
+  )
+  const watchlistOptions = React.useMemo(
+    () =>
+      (Array.isArray(watchlists) ? watchlists : []).map((watchlist) => ({
+        value: watchlist.id,
+        label: watchlist.name
+      })),
+    [watchlists]
+  )
+  const watchlistViewsAvailable = Boolean(selectedWatchlist && selectedWatchlistId != null)
+  const renderWatchlistContainerShell = (): React.ReactNode => {
+    if (watchlistsLoading && (!Array.isArray(watchlists) || watchlists.length === 0)) {
+      return (
+        <Alert
+          type="info"
+          showIcon
+          className="mb-4"
+          data-testid="watchlists-container-loading"
+          title={t("watchlists:containers.loading", "Loading Watchlists")}
+          description={t(
+            "watchlists:containers.loadingDescription",
+            "Preparing your monitoring workspaces."
+          )}
+        />
+      )
+    }
+
+    if (watchlistsError && (!Array.isArray(watchlists) || watchlists.length === 0)) {
+      return (
+        <Alert
+          type="error"
+          showIcon
+          className="mb-4"
+          data-testid="watchlists-container-error"
+          title={t("watchlists:containers.errorTitle", "Watchlists unavailable")}
+          description={watchlistsError}
+          action={(
+            <Button size="small" onClick={() => void loadWatchlists()}>
+              {t("watchlists:errors.retry", "Retry")}
+            </Button>
+          )}
+        />
+      )
+    }
+
+    if (!selectedWatchlist) {
+      return (
+        <div
+          className="mb-4 rounded-lg border border-dashed border-border bg-surface p-5"
+          data-testid="watchlists-container-empty"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-base font-semibold text-text">
+                {t("watchlists:containers.emptyTitle", "Create a Watchlist")}
+              </div>
+              <div className="mt-1 text-sm text-text-muted">
+                {t(
+                  "watchlists:containers.emptyDescription",
+                  "Use a Watchlist as the workspace for feeds, monitors, activity, updates, and reports."
+                )}
+              </div>
+            </div>
+            <Button
+              type="primary"
+              icon={<Plus className="h-4 w-4" />}
+              data-testid="watchlists-create-container"
+              onClick={openCreateWatchlistForm}
+            >
+              {t("watchlists:containers.create", "Create Watchlist")}
+            </Button>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <section
+        className="mb-4 rounded-lg border border-border bg-surface p-4"
+        data-testid="watchlists-container-shell"
+        aria-label={t("watchlists:containers.shellAria", "Selected Watchlist")}
+      >
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                {t("watchlists:containers.selectorLabel", "Watchlist")}
+              </span>
+              <Select
+                aria-label={t("watchlists:containers.selectorLabel", "Watchlist")}
+                className="min-w-64 max-w-full sm:w-80"
+                value={selectedWatchlistId ?? undefined}
+                onChange={(value) => setSelectedWatchlistId(Number(value))}
+                options={watchlistOptions}
+                data-testid="watchlists-container-selector"
+              />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="m-0 text-lg font-semibold text-text">
+                  {selectedWatchlist.name}
+                </h2>
+                <Tag>{WATCHLIST_DOMAIN_LABELS[selectedWatchlist.domain] || selectedWatchlist.domain}</Tag>
+                <Tag>{WATCHLIST_PRIORITY_LABELS[selectedWatchlist.priority] || selectedWatchlist.priority}</Tag>
+                <Tag>{WATCHLIST_STATUS_LABELS[selectedWatchlist.status] || selectedWatchlist.status}</Tag>
+              </div>
+              {selectedWatchlist.objective && (
+                <p className="mt-1 max-w-4xl text-sm text-text-muted">
+                  {selectedWatchlist.objective}
+                </p>
+              )}
+              {selectedWatchlist.description && !selectedWatchlist.objective && (
+                <p className="mt-1 max-w-4xl text-sm text-text-muted">
+                  {selectedWatchlist.description}
+                </p>
+              )}
+              {Array.isArray(selectedWatchlist.tags) && selectedWatchlist.tags.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {selectedWatchlist.tags.slice(0, 6).map((tag) => (
+                    <Tag key={tag}>{tag}</Tag>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button
+              icon={<Plus className="h-4 w-4" />}
+              data-testid="watchlists-create-container"
+              onClick={openCreateWatchlistForm}
+            >
+              {t("watchlists:containers.create", "Create Watchlist")}
+            </Button>
+            <Button
+              icon={<Pencil className="h-4 w-4" />}
+              data-testid="watchlists-edit-container"
+              onClick={openEditWatchlistForm}
+            >
+              {t("common:edit", "Edit")}
+            </Button>
+          </div>
+        </div>
+      </section>
+    )
+  }
 
   useEffect(() => {
     trackWatchlistsIaExperimentTransition(
@@ -1503,7 +2062,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       )}
       maxWidthClassName="max-w-[1920px]"
     >
-      <PageShell className="py-6" maxWidthClassName="max-w-[1920px]">
+      <PageShell className="min-w-0 w-screen max-w-[100vw] overflow-x-hidden py-6" maxWidthClassName="max-w-[1920px]">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-text flex items-center gap-2">
           {t("watchlists:title", "Watchlists")}
@@ -1644,66 +2203,72 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         ) : null}
       </div>
 
-      {/* Persistent health bar — replaces Overview tab in progressive layout */}
-      <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
+      {renderWatchlistContainerShell()}
 
-      {orientationDismissed ? (
-        <div className="mb-4">
-          <Button
-            size="small"
-            type="link"
-            data-testid="watchlists-orientation-restore"
-            onClick={restoreOrientationForActiveTab}
-          >
-            {t("watchlists:orientation.showTabGuidance", "Show tab guidance")}
-          </Button>
-        </div>
-      ) : (
-        <Alert
-          type="info"
-          showIcon
-          className="mb-4"
-          title={<span data-testid="watchlists-orientation-title">{activeTabOrientation.title}</span>}
-          description={<span data-testid="watchlists-orientation-description">{activeTabOrientation.description}</span>}
-          action={(
-            <div className="flex flex-wrap gap-2">
-              {activeTabOrientation.actions.map((action) => (
-                <Button
-                  key={action.key}
-                  size="small"
-                  data-testid={`watchlists-orientation-action-${action.key}`}
-                  onClick={() => navigateToTab(action.target)}
-                >
-                  {action.label}
-                </Button>
-              ))}
+      {watchlistViewsAvailable && (
+        <>
+          {/* Persistent health bar — replaces Overview tab in progressive layout */}
+          <WatchlistsHealthBar onOpenSettings={() => setSettingsDrawerOpen(true)} onNavigate={navigateToTab} />
+
+          {orientationDismissed ? (
+            <div className="mb-4">
+              <Button
+                size="small"
+                type="link"
+                data-testid="watchlists-orientation-restore"
+                onClick={restoreOrientationForActiveTab}
+              >
+                {t("watchlists:orientation.showTabGuidance", "Show tab guidance")}
+              </Button>
             </div>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              className="mb-4"
+              title={<span data-testid="watchlists-orientation-title">{activeTabOrientation.title}</span>}
+              description={<span data-testid="watchlists-orientation-description">{activeTabOrientation.description}</span>}
+              action={(
+                <div className="flex flex-wrap gap-2">
+                  {activeTabOrientation.actions.map((action) => (
+                    <Button
+                      key={action.key}
+                      size="small"
+                      data-testid={`watchlists-orientation-action-${action.key}`}
+                      onClick={() => navigateToTab(action.target)}
+                    >
+                      {action.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              closable
+              onClose={dismissOrientationForActiveTab}
+            />
           )}
-          closable
-          onClose={dismissOrientationForActiveTab}
-        />
-      )}
 
-      {activeTeachPoint && (
-        <Alert
-          type="info"
-          showIcon
-          className="mb-4"
-          data-testid="watchlists-teach-point-alert"
-          title={<span data-testid="watchlists-teach-point-title">{activeTeachPoint.title}</span>}
-          description={<span data-testid="watchlists-teach-point-description">{activeTeachPoint.description}</span>}
-          action={(
-            <Button
-              size="small"
-              data-testid={`watchlists-teach-point-action-${activeTeachPoint.key}`}
-              onClick={() => navigateToTab(activeTeachPoint.actionTarget)}
-            >
-              {activeTeachPoint.actionLabel}
-            </Button>
+          {activeTeachPoint && (
+            <Alert
+              type="info"
+              showIcon
+              className="mb-4"
+              data-testid="watchlists-teach-point-alert"
+              title={<span data-testid="watchlists-teach-point-title">{activeTeachPoint.title}</span>}
+              description={<span data-testid="watchlists-teach-point-description">{activeTeachPoint.description}</span>}
+              action={(
+                <Button
+                  size="small"
+                  data-testid={`watchlists-teach-point-action-${activeTeachPoint.key}`}
+                  onClick={() => navigateToTab(activeTeachPoint.actionTarget)}
+                >
+                  {activeTeachPoint.actionLabel}
+                </Button>
+              )}
+              closable
+              onClose={() => dismissTeachPoint(activeTeachPoint.key)}
+            />
           )}
-          closable
-          onClose={() => dismissTeachPoint(activeTeachPoint.key)}
-        />
+        </>
       )}
 
       {showGuidedTourCompletion && (
@@ -1714,7 +2279,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           title={t("watchlists:guide.completedTitle", "Guided tour complete")}
           description={t(
             "watchlists:guide.completedDescription",
-            "Next: monitor Activity for monitor health, review Articles for captured content, and open Reports for generated briefings."
+            "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings."
           )}
           action={(
             <div className="flex flex-wrap gap-2">
@@ -1722,7 +2287,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                 {t("watchlists:guide.openActivity", "Open Activity")}
               </Button>
               <Button size="small" onClick={() => navigateToTab("items")}>
-                {t("watchlists:guide.openArticles", "Open Articles")}
+                {t("watchlists:guide.openArticles", "Open Updates")}
               </Button>
             </div>
           )}
@@ -1769,31 +2334,40 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         className="mb-6"
       />
 
-      {isMobile ? (
-        <>
-          <Select
-            value={resolvedActiveTab}
-            onChange={navigateToTab}
-            className="mb-4 w-full"
-            data-testid="watchlists-mobile-tab-select"
-            options={renderedTabItems?.map((item) => ({
-              value: String(item?.key),
-              label: item?.label
-            })) || []}
-          />
-          <div key={refreshKey}>
-            {renderedTabItems?.find((item) => String(item?.key) === resolvedActiveTab)?.children}
+      {watchlistViewsAvailable && (
+        isConstrained ? (
+          <>
+            <WatchlistsMobileNavigation
+              activeKey={activeTab}
+              fallbackLabel={t("watchlists:mobileNav.fallbackLabel", "Manage Watchlist")}
+              groups={constrainedNavigationGroups}
+              navigationLabel={t("watchlists:mobileNav.navigationLabel", "Watchlist management destinations")}
+              onNavigate={navigateToTab}
+              title={t("watchlists:mobileNav.title", "Manage Watchlist")}
+            />
+            <div
+              key={refreshKey}
+              className="min-w-0 max-w-full overflow-x-auto"
+              data-testid="watchlists-tab-content-shell"
+            >
+              {constrainedActiveTabItem?.children}
+            </div>
+          </>
+        ) : (
+          <div
+            className="min-w-0 max-w-full overflow-x-auto"
+            data-testid="watchlists-tab-content-shell"
+          >
+            <Tabs
+              key={refreshKey}
+              activeKey={resolvedActiveTab}
+              onChange={navigateToTab}
+              items={renderedTabItems}
+              className="watchlists-tabs"
+              destroyOnHidden
+            />
           </div>
-        </>
-      ) : (
-        <Tabs
-          key={refreshKey}
-          activeKey={resolvedActiveTab}
-          onChange={navigateToTab}
-          items={renderedTabItems}
-          className="watchlists-tabs"
-          destroyOnHidden
-        />
+        )
       )}
 
       {/* Settings drawer (accessible from health bar gear icon) */}
@@ -1801,7 +2375,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         title={t("watchlists:tabs.settings", "Settings")}
         open={settingsDrawerOpen}
         onClose={() => setSettingsDrawerOpen(false)}
-        size={isMobile ? "100%" : 520}
+        size={isConstrained ? "100%" : 520}
         data-testid="watchlists-settings-drawer"
       >
         {renderWatchlistsTab("settings")}
@@ -1844,6 +2418,164 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
           </div>
           <div className="text-base font-semibold">{guidedTourStep.title}</div>
           <div className="text-sm text-text-muted">{guidedTourStep.description}</div>
+        </div>
+      </Modal>
+
+      <WatchlistSetupWizard
+        open={setupWizardOpen}
+        onCancel={() => setSetupWizardOpen(false)}
+        onCreateWatchlist={createWatchlist}
+        onCreateSources={createSetupSources}
+        onCreateJob={createSetupJob}
+        onComplete={completeSetupWizard}
+      />
+
+      <Modal
+        open={watchlistFormOpen}
+        onCancel={closeWatchlistForm}
+        onOk={() => void saveWatchlistForm()}
+        title={
+          watchlistFormMode === "edit"
+            ? t("watchlists:containers.editTitle", "Edit Watchlist")
+            : t("watchlists:containers.createTitle", "Create Watchlist")
+        }
+        okText={
+          watchlistFormMode === "edit"
+            ? t("common:save", "Save")
+            : t("common:create", "Create")
+        }
+        cancelText={t("common:cancel", "Cancel")}
+        confirmLoading={watchlistFormSaving}
+        destroyOnHidden
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="watchlist-container-name" className="mb-1 block text-sm font-medium text-text">
+              {t("watchlists:containers.nameLabel", "Name")}
+            </label>
+            <Input
+              id="watchlist-container-name"
+              aria-label={t("watchlists:containers.nameLabel", "Name")}
+              value={watchlistForm.name}
+              onChange={(event) => setWatchlistForm((previous) => ({
+                ...previous,
+                name: event.target.value
+              }))}
+              placeholder={t("watchlists:containers.namePlaceholder", "Healthcare ransomware")}
+            />
+          </div>
+          <div>
+            <label htmlFor="watchlist-container-objective" className="mb-1 block text-sm font-medium text-text">
+              {t("watchlists:containers.objectiveLabel", "Objective")}
+            </label>
+            <Input.TextArea
+              id="watchlist-container-objective"
+              aria-label={t("watchlists:containers.objectiveLabel", "Objective")}
+              value={watchlistForm.objective}
+              rows={3}
+              onChange={(event) => setWatchlistForm((previous) => ({
+                ...previous,
+                objective: event.target.value
+              }))}
+              placeholder={t(
+                "watchlists:containers.objectivePlaceholder",
+                "Track new updates and alert-worthy changes for this investigation."
+              )}
+            />
+          </div>
+          <div>
+            <label htmlFor="watchlist-container-description" className="mb-1 block text-sm font-medium text-text">
+              {t("watchlists:containers.descriptionLabel", "Description")}
+            </label>
+            <Input.TextArea
+              id="watchlist-container-description"
+              aria-label={t("watchlists:containers.descriptionLabel", "Description")}
+              value={watchlistForm.description}
+              rows={2}
+              onChange={(event) => setWatchlistForm((previous) => ({
+                ...previous,
+                description: event.target.value
+              }))}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label htmlFor="watchlist-container-domain" className="mb-1 block text-sm font-medium text-text">
+                {t("watchlists:containers.domainLabel", "Domain")}
+              </label>
+              <Select
+                id="watchlist-container-domain"
+                aria-label={t("watchlists:containers.domainLabel", "Domain")}
+                className="w-full"
+                value={watchlistForm.domain}
+                onChange={(domain) => setWatchlistForm((previous) => ({
+                  ...previous,
+                  domain: domain as WatchlistDomain
+                }))}
+                options={[
+                  { value: "general", label: WATCHLIST_DOMAIN_LABELS.general },
+                  { value: "cti_osint", label: WATCHLIST_DOMAIN_LABELS.cti_osint },
+                  { value: "news", label: WATCHLIST_DOMAIN_LABELS.news }
+                ]}
+              />
+            </div>
+            <div>
+              <label htmlFor="watchlist-container-priority" className="mb-1 block text-sm font-medium text-text">
+                {t("watchlists:containers.priorityLabel", "Priority")}
+              </label>
+              <Select
+                id="watchlist-container-priority"
+                aria-label={t("watchlists:containers.priorityLabel", "Priority")}
+                className="w-full"
+                value={watchlistForm.priority}
+                onChange={(priority) => setWatchlistForm((previous) => ({
+                  ...previous,
+                  priority: priority as WatchlistPriority
+                }))}
+                options={[
+                  { value: "low", label: WATCHLIST_PRIORITY_LABELS.low },
+                  { value: "medium", label: WATCHLIST_PRIORITY_LABELS.medium },
+                  { value: "high", label: WATCHLIST_PRIORITY_LABELS.high },
+                  { value: "critical", label: WATCHLIST_PRIORITY_LABELS.critical }
+                ]}
+              />
+            </div>
+            <div>
+              <label htmlFor="watchlist-container-status" className="mb-1 block text-sm font-medium text-text">
+                {t("watchlists:containers.statusLabel", "Status")}
+              </label>
+              <Select
+                id="watchlist-container-status"
+                aria-label={t("watchlists:containers.statusLabel", "Status")}
+                className="w-full"
+                value={watchlistForm.status}
+                onChange={(status) => setWatchlistForm((previous) => ({
+                  ...previous,
+                  status: status as WatchlistStatus
+                }))}
+                options={[
+                  { value: "active", label: WATCHLIST_STATUS_LABELS.active },
+                  { value: "paused", label: WATCHLIST_STATUS_LABELS.paused },
+                  { value: "archived", label: WATCHLIST_STATUS_LABELS.archived }
+                ]}
+              />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="watchlist-container-tags" className="mb-1 block text-sm font-medium text-text">
+              {t("watchlists:containers.tagsLabel", "Tags")}
+            </label>
+            <Input
+              id="watchlist-container-tags"
+              aria-label={t("watchlists:containers.tagsLabel", "Tags")}
+              value={watchlistForm.tagsText}
+              onChange={(event) => setWatchlistForm((previous) => ({
+                ...previous,
+                tagsText: event.target.value
+              }))}
+              placeholder={t("watchlists:containers.tagsPlaceholder", "ransomware, hospitals")}
+            />
+          </div>
         </div>
       </Modal>
 

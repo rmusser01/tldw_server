@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from .telemetry import OTEL_AVAILABLE, get_telemetry_manager
+from .stt_metrics import iter_stt_metric_definitions
 
 if OTEL_AVAILABLE:
     from opentelemetry.metrics import CallbackOptions, Observation
@@ -82,6 +83,7 @@ class MetricsRegistry:
 
         self._lock = threading.RLock()
         self.metrics: dict[str, MetricDefinition] = {}
+        self._persistent_metric_definitions: dict[str, MetricDefinition] = {}
         self.instruments: dict[str, Any] = {}
         # Rolling window of metric samples; size configurable via METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED.
         self.values: dict[str, deque] = defaultdict(lambda: deque(maxlen=buffer_maxlen))
@@ -101,12 +103,19 @@ class MetricsRegistry:
             "circuit_breaker_timeouts_total",
         }
 
-        # Initialize with telemetry manager
-        self.telemetry = get_telemetry_manager()
-        self.meter = self.telemetry.get_meter("tldw_server.metrics")
-
         # Register standard metrics
         self._register_standard_metrics()
+
+    @property
+    def telemetry(self):
+        """Always return the *current* global telemetry manager so that a
+        shutdown/re-init cycle is picked up automatically."""
+        return get_telemetry_manager()
+
+    @property
+    def meter(self):
+        """Return a meter from the current telemetry manager."""
+        return self.telemetry.get_meter("tldw_server.metrics")
 
     @classmethod
     def _normalize_metric_name(cls, name: str) -> str:
@@ -141,8 +150,16 @@ class MetricsRegistry:
         return normalized
 
     @classmethod
-    def _normalize_labels(cls, labels: Optional[dict[str, Any]]) -> dict[str, str]:
-        """Normalize label keys and coerce values to strings."""
+    def _normalize_labels(
+        cls,
+        labels: Optional[dict[str, Any]],
+        reject_collisions: bool = False,
+    ) -> dict[str, str]:
+        """Normalize label keys and coerce values to strings.
+
+        If reject_collisions is True, raise ValueError when distinct original
+        keys normalize to the same label name but carry different values.
+        """
         if not labels:
             return {}
         normalized: dict[str, str] = {}
@@ -150,9 +167,17 @@ class MetricsRegistry:
             normalized_key = cls._normalize_label_name(str(key))
             normalized_value = "" if value is None else str(value)
             if normalized_key in normalized and normalized[normalized_key] != normalized_value:
+                if reject_collisions:
+                    raise ValueError(
+                        f"Conflicting labels normalize to the same key {normalized_key!r}"
+                    )
                 logger.debug(f"Label key collision after normalization: {key} -> {normalized_key}")
             normalized[normalized_key] = normalized_value
         return normalized
+
+    # Public alias so external modules (e.g. metrics_logger) need not reach
+    # into a private method.
+    normalize_labels = _normalize_labels
 
     @classmethod
     def _normalize_label_key(cls, labels: dict[str, Any]) -> tuple[tuple[str, str], ...]:
@@ -178,6 +203,18 @@ class MetricsRegistry:
             escaped = cls._escape_label_value(value)
             parts.append(f'{key}="{escaped}"')
         return ",".join(parts)
+
+    @staticmethod
+    def _clone_metric_definition(definition: MetricDefinition) -> MetricDefinition:
+        """Create a stable copy of a metric definition for persistence."""
+        return MetricDefinition(
+            name=definition.name,
+            type=definition.type,
+            description=definition.description,
+            unit=definition.unit,
+            labels=list(definition.labels),
+            buckets=list(definition.buckets) if definition.buckets is not None else None,
+        )
 
     def _register_standard_metrics(self):
         """Register standard application metrics."""
@@ -397,6 +434,8 @@ class MetricsRegistry:
                 labels=["component", "provider"],
             )
         )
+        for definition in iter_stt_metric_definitions(MetricDefinition, MetricType):
+            self.register_metric(definition)
         self.register_metric(
             MetricDefinition(
                 name="llm_cost_dollars_by_operation",
@@ -1687,12 +1726,13 @@ class MetricsRegistry:
             )
         )
 
-    def register_metric(self, definition: MetricDefinition) -> bool:
+    def register_metric(self, definition: MetricDefinition, persistent: bool = True) -> bool:
         """
         Register a new metric definition.
 
         Args:
             definition: MetricDefinition object
+            persistent: Whether the definition should survive reset()
 
         Returns:
             True if registered successfully
@@ -1707,14 +1747,19 @@ class MetricsRegistry:
                 return False
 
             if normalized_name != definition.name:
-                definition = MetricDefinition(
-                    name=normalized_name,
-                    type=definition.type,
-                    description=definition.description,
-                    unit=definition.unit,
-                    labels=definition.labels,
-                    buckets=definition.buckets,
+                definition = self._clone_metric_definition(
+                    MetricDefinition(
+                        name=normalized_name,
+                        type=definition.type,
+                        description=definition.description,
+                        unit=definition.unit,
+                        labels=definition.labels,
+                        buckets=definition.buckets,
+                    )
                 )
+
+            if persistent:
+                self._persistent_metric_definitions[normalized_name] = self._clone_metric_definition(definition)
 
             self.metrics[normalized_name] = definition
 
@@ -1805,6 +1850,7 @@ class MetricsRegistry:
         value: float,
         labels: Optional[dict[str, str]] = None,
         _emit_legacy_alias: bool = True,
+        _normalized: bool = False,
     ):
         """
         Record a metric value.
@@ -1813,10 +1859,16 @@ class MetricsRegistry:
             metric_name: Name of the metric
             value: Value to record
             labels: Optional labels/dimensions
+            _normalized: If True, skip label normalization (caller already normalized).
         """
         original_name = metric_name
         metric_name = self._normalize_metric_name(metric_name)
-        labels = self._normalize_labels(labels)
+        if not _normalized:
+            try:
+                labels = self._normalize_labels(labels, reject_collisions=True)
+            except ValueError as exc:
+                logger.warning("Rejecting metric {} due to conflicting normalized labels: {}", original_name, exc)
+                return
         instrument = None
         callbacks: list[Callable] = []
 
@@ -1826,15 +1878,9 @@ class MetricsRegistry:
                 return
 
             definition = self.metrics[metric_name]
-
-            # Store value for aggregation
-            metric_value = MetricValue(value=value, labels=labels)
-            self.values[metric_name].append(metric_value)
-            if original_name != metric_name:
-                # Keep a non-normalized alias for tests that read raw keys.
-                self.values[original_name].append(metric_value)
-
             label_key = self._normalize_label_key(labels)
+            store_sample = True
+
             if definition.type in (MetricType.COUNTER, MetricType.UP_DOWN_COUNTER):
                 series = self._cumulative_counters[metric_name]
                 if (
@@ -1850,30 +1896,42 @@ class MetricsRegistry:
                             self._cumulative_series_cap,
                         )
                         self._cumulative_series_warned.add(metric_name)
-                else:
-                    current = series.get(label_key, 0.0)
-                    series[label_key] = current + value
+                    store_sample = False
             elif definition.type == MetricType.HISTOGRAM:
                 series = self._cumulative_histograms[metric_name]
-                hist = series.get(label_key)
-                if hist is None:
-                    if (
-                        self._cumulative_series_cap is not None
-                        and len(series) >= self._cumulative_series_cap
-                    ):
-                        self._cumulative_series_dropped[metric_name] += 1
-                        if metric_name not in self._cumulative_series_warned:
-                            logger.warning(
-                                "Cumulative series cap reached for metric {} (cap={}); dropping new label sets",
-                                metric_name,
-                                self._cumulative_series_cap,
-                            )
-                            self._cumulative_series_warned.add(metric_name)
-                        hist = None
-                    else:
+                if (
+                    label_key not in series
+                    and self._cumulative_series_cap is not None
+                    and len(series) >= self._cumulative_series_cap
+                ):
+                    self._cumulative_series_dropped[metric_name] += 1
+                    if metric_name not in self._cumulative_series_warned:
+                        logger.warning(
+                            "Cumulative series cap reached for metric {} (cap={}); dropping new label sets",
+                            metric_name,
+                            self._cumulative_series_cap,
+                        )
+                        self._cumulative_series_warned.add(metric_name)
+                    store_sample = False
+
+            if store_sample:
+                # Store value for aggregation only when the series is admitted.
+                metric_value = MetricValue(value=value, labels=labels)
+                self.values[metric_name].append(metric_value)
+                if original_name != metric_name:
+                    # Keep a non-normalized alias for tests that read raw keys.
+                    self.values[original_name].append(metric_value)
+
+                if definition.type in (MetricType.COUNTER, MetricType.UP_DOWN_COUNTER):
+                    series = self._cumulative_counters[metric_name]
+                    current = series.get(label_key, 0.0)
+                    series[label_key] = current + value
+                elif definition.type == MetricType.HISTOGRAM:
+                    series = self._cumulative_histograms[metric_name]
+                    hist = series.get(label_key)
+                    if hist is None:
                         hist = {"count": 0, "sum": 0.0, "buckets": defaultdict(int)}
                         series[label_key] = hist
-                if hist is not None:
                     hist["count"] += 1
                     hist["sum"] += value
                     if definition.buckets:
@@ -2057,6 +2115,31 @@ class MetricsRegistry:
             "latest_timestamp": values[-1].timestamp
         }
 
+    def get_metric_sample_counts_by_label(
+        self,
+        metric_name: str,
+        label_name: str,
+        *,
+        missing_label: str,
+    ) -> dict[str, int]:
+        """Return sample counts grouped by a normalized label key."""
+        metric_name = self._normalize_metric_name(metric_name)
+        normalized_label = self._normalize_label_name(label_name)
+        totals: dict[str, int] = defaultdict(int)
+        with self._lock:
+            histogram_series = dict(self._cumulative_histograms.get(metric_name, {}))
+            if histogram_series:
+                for label_key, histogram in histogram_series.items():
+                    label_value = dict(label_key).get(normalized_label) or missing_label
+                    totals[str(label_value)] += int(histogram.get("count", 0))
+                return dict(sorted(totals.items()))
+            values = list(self.values.get(metric_name, ()))
+
+        for metric_value in values:
+            label_value = metric_value.labels.get(normalized_label) or missing_label
+            totals[str(label_value)] += 1
+        return dict(sorted(totals.items()))
+
     def get_all_metrics(self) -> dict[str, dict[str, Any]]:
         """
         Get all current metric values and statistics.
@@ -2190,13 +2273,24 @@ class MetricsRegistry:
         return "\n".join(lines) + "\n"
 
     def reset(self) -> None:
-        """Reset stored metric values and cumulative aggregates."""
+        """Reset runtime state and restore persistent registered definitions."""
+        persistent_definitions = []
         with self._lock:
+            persistent_definitions = [
+                self._clone_metric_definition(definition)
+                for definition in self._persistent_metric_definitions.values()
+            ]
+            self.metrics.clear()
+            self.instruments.clear()
+            self.callbacks.clear()
             self.values.clear()
             self._cumulative_counters.clear()
             self._cumulative_histograms.clear()
             self._cumulative_series_dropped.clear()
             self._cumulative_series_warned.clear()
+
+            for definition in persistent_definitions:
+                self.register_metric(definition, persistent=False)
 
 
 # Global metrics registry instance

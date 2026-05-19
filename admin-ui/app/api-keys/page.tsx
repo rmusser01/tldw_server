@@ -7,8 +7,10 @@ import { ResponsiveLayout } from '@/components/ResponsiveLayout';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { CardSkeleton, TableSkeleton } from '@/components/ui/skeleton';
@@ -19,16 +21,21 @@ import { UnifiedApiKeysTable } from '@/components/api-keys/UnifiedApiKeysTable';
 import {
   buildKeyHygieneSummary,
   buildUnifiedApiKeyRows,
+  filterByHygiene,
   filterUnifiedApiKeyRows,
+  getKeyExpiryIndicator,
   type ApiKeyMetadataLike,
+  type ApiKeyUsageLike,
+  type HygieneFilter,
   type UnifiedApiKeyStatus,
 } from '@/lib/api-keys-hub';
 import { api } from '@/lib/api-client';
 import { useUrlPagination, useUrlState } from '@/lib/use-url-state';
 import type { UserWithKeyCount } from '@/types';
+import { AlertTriangle, Copy, FileText, Key, Plus, RotateCw, Search, ShieldOff } from 'lucide-react';
 import { ExportMenu } from '@/components/ui/export-menu';
-import { exportData, type ExportFormat } from '@/lib/export';
-import { AlertTriangle, Key, RotateCw, Search, ShieldOff } from 'lucide-react';
+import { exportUnifiedApiKeys, ExportFormat } from '@/lib/export';
+import { logger } from '@/lib/logger';
 
 const USER_PAGE_LIMIT = 100;
 
@@ -37,6 +44,7 @@ function ApiKeysPageContent() {
   const confirm = useConfirm();
   const { success: toastSuccess, error: toastError } = useToast();
 
+  const [availableUsers, setAvailableUsers] = useState<UserWithKeyCount[]>([]);
   const [rows, setRows] = useState<ReturnType<typeof buildUnifiedApiKeyRows>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -46,10 +54,20 @@ function ApiKeysPageContent() {
   const [bulkRevoking, setBulkRevoking] = useState(false);
   const [bulkMutating, setBulkMutating] = useState(false);
 
+  // Create Key dialog state
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createUserId, setCreateUserId] = useState('');
+  const [createKeyName, setCreateKeyName] = useState('');
+  const [createKeyScope, setCreateKeyScope] = useState('read');
+  const [createKeyExpiresDays, setCreateKeyExpiresDays] = useState('90');
+  const [creatingKey, setCreatingKey] = useState(false);
+  const [newKeyValue, setNewKeyValue] = useState<string | null>(null);
+
   const [searchQuery, setSearchQuery] = useUrlState<string>('q', { defaultValue: '' });
   const [ownerFilter, setOwnerFilter] = useUrlState<string>('owner', { defaultValue: '' });
   const [statusFilter, setStatusFilter] = useUrlState<string>('status', { defaultValue: 'all' });
   const [createdBefore, setCreatedBefore] = useUrlState<string>('created_before', { defaultValue: '' });
+  const [hygieneFilter, setHygieneFilter] = useState<HygieneFilter>('none');
 
   const {
     page: currentPage,
@@ -65,7 +83,7 @@ function ApiKeysPageContent() {
       setError('');
       setPartialLoadWarning('');
 
-      const users: UserWithKeyCount[] = [];
+      const loadedUsers: UserWithKeyCount[] = [];
       const userQuery: Record<string, string> = {
         page: '1',
         limit: String(USER_PAGE_LIMIT),
@@ -79,7 +97,7 @@ function ApiKeysPageContent() {
       while (page <= pages) {
         userQuery.page = String(page);
         const usersPage = await api.getUsersPage(userQuery);
-        users.push(...usersPage.items);
+        loadedUsers.push(...usersPage.items);
 
         pages = usersPage.pages > 0
           ? usersPage.pages
@@ -93,7 +111,7 @@ function ApiKeysPageContent() {
       }
 
       const keyResults = await Promise.allSettled(
-        users.map(async (user) => ({
+        loadedUsers.map(async (user) => ({
           userId: user.id,
           username: user.username,
           keys: await api.getUserApiKeys(String(user.id), { include_revoked: true }) as ApiKeyMetadataLike[],
@@ -104,7 +122,7 @@ function ApiKeysPageContent() {
       const failedUsers: string[] = [];
 
       keyResults.forEach((result, index) => {
-        const fallbackUser = users[index];
+        const fallbackUser = loadedUsers[index];
         if (result.status === 'fulfilled') {
           keysByUserId[result.value.userId] = Array.isArray(result.value.keys)
             ? result.value.keys
@@ -118,7 +136,22 @@ function ApiKeysPageContent() {
         }
       });
 
-      setRows(buildUnifiedApiKeyRows(users, keysByUserId));
+      // Fetch per-key usage attribution (best-effort; does not block key listing)
+      let usageByKeyId: Record<string, ApiKeyUsageLike> | undefined;
+      try {
+        const topUsage = await api.getTopApiKeyUsage(200);
+        if (topUsage?.items?.length) {
+          usageByKeyId = {};
+          for (const item of topUsage.items) {
+            usageByKeyId[String(item.key_id)] = item;
+          }
+        }
+      } catch {
+        // Usage data is non-critical; proceed without it
+      }
+
+      setAvailableUsers(loadedUsers);
+      setRows(buildUnifiedApiKeyRows(loadedUsers, keysByUserId, usageByKeyId));
 
       if (failedUsers.length > 0) {
         setPartialLoadWarning(
@@ -126,9 +159,10 @@ function ApiKeysPageContent() {
         );
       }
     } catch (err: unknown) {
-      console.error('Failed to load unified API keys:', err);
+      logger.error('Failed to load unified API keys', { component: 'ApiKeysPage', error: err instanceof Error ? err.message : String(err) });
       const message = err instanceof Error && err.message ? err.message : 'Failed to load API keys';
       setError(message);
+      setAvailableUsers([]);
       setRows([]);
     } finally {
       setLoading(false);
@@ -141,13 +175,13 @@ function ApiKeysPageContent() {
 
   const ownerOptions = useMemo(() => {
     const byOwner = new Map<number, { id: number; username: string }>();
-    rows.forEach((row) => {
-      if (!byOwner.has(row.ownerUserId)) {
-        byOwner.set(row.ownerUserId, { id: row.ownerUserId, username: row.ownerUsername });
+    availableUsers.forEach((user) => {
+      if (!byOwner.has(user.id)) {
+        byOwner.set(user.id, { id: user.id, username: user.username });
       }
     });
     return [...byOwner.values()].sort((a, b) => a.username.localeCompare(b.username));
-  }, [rows]);
+  }, [availableUsers]);
 
   const normalizedStatusFilter: 'all' | UnifiedApiKeyStatus =
     statusFilter === 'active' || statusFilter === 'revoked' || statusFilter === 'expired'
@@ -155,16 +189,29 @@ function ApiKeysPageContent() {
       : 'all';
 
   const filteredRows = useMemo(
-    () =>
-      filterUnifiedApiKeyRows(rows, {
+    () => {
+      const baseFiltered = filterUnifiedApiKeyRows(rows, {
         search: searchQuery || '',
         ownerUserId: ownerFilter ? Number(ownerFilter) : null,
         status: normalizedStatusFilter,
         createdBefore: createdBefore || '',
-      }),
-    [rows, searchQuery, ownerFilter, normalizedStatusFilter, createdBefore]
+      });
+      return filterByHygiene(baseFiltered, hygieneFilter);
+    },
+    [rows, searchQuery, ownerFilter, normalizedStatusFilter, createdBefore, hygieneFilter]
   );
   const hygieneSummary = useMemo(() => buildKeyHygieneSummary(rows), [rows]);
+
+  // Count keys expiring within 7 days for the urgent warning banner
+  const keysExpiringIn7Days = useMemo(() => {
+    const now = new Date();
+    return rows.filter((row) => {
+      if (row.status !== 'active') return false;
+      const indicator = getKeyExpiryIndicator(row.expiresAt, now);
+      return indicator !== null && indicator.daysRemaining <= 7;
+    }).length;
+  }, [rows]);
+
   const rowById = useMemo(() => {
     return new Map(rows.map((row) => [`${row.ownerUserId}:${row.keyId}`, row]));
   }, [rows]);
@@ -184,10 +231,16 @@ function ApiKeysPageContent() {
     setOwnerFilter(undefined);
     setStatusFilter(undefined);
     setCreatedBefore(undefined);
+    setHygieneFilter('none');
     resetPagination();
   };
 
-  const hasActiveFilters = Boolean(searchQuery || ownerFilter || statusFilter !== 'all' || createdBefore);
+  const toggleHygieneFilter = (filter: HygieneFilter) => {
+    setHygieneFilter((prev) => (prev === filter ? 'none' : filter));
+    resetPagination();
+  };
+
+  const hasActiveFilters = Boolean(searchQuery || ownerFilter || statusFilter !== 'all' || createdBefore || hygieneFilter !== 'none');
   const selectedRows = [...selectedRowIds]
     .map((rowId) => rowById.get(rowId))
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
@@ -262,14 +315,15 @@ function ApiKeysPageContent() {
   };
 
   const handleRevokeSelected = async () => {
-    if (selectedRows.length === 0 || bulkMutating) return;
+    const revokeableRows = selectedRows.filter((row) => row.status === 'active');
+    if (revokeableRows.length === 0 || bulkRevoking) return;
 
     const confirmed = await confirm({
       title: 'Revoke selected keys',
-      message: `Revoke ${selectedRows.length} key(s)? These keys will be permanently deactivated.`,
+      message: `Permanently revoke ${revokeableRows.length} active key(s)? This action cannot be undone.`,
       confirmText: 'Revoke',
       variant: 'danger',
-      icon: 'delete',
+      icon: 'warning',
     });
     if (!confirmed) return;
 
@@ -277,16 +331,18 @@ function ApiKeysPageContent() {
       setBulkMutating(true);
       setBulkRevoking(true);
       const results = await Promise.allSettled(
-        selectedRows.map((row) => api.revokeApiKey(String(row.ownerUserId), row.keyId))
+        revokeableRows.map((row) => api.revokeApiKey(String(row.ownerUserId), row.keyId))
       );
-      const successCount = results.filter((r) => r.status === 'fulfilled').length;
+      const successCount = results.filter((result) => result.status === 'fulfilled').length;
       const failureCount = results.length - successCount;
+
       if (successCount > 0) {
-        toastSuccess('Keys Revoked', `${successCount} key(s) revoked successfully.`);
+        toastSuccess('Bulk revocation complete', `${successCount} key(s) revoked successfully.`);
       }
       if (failureCount > 0) {
         toastError('Some revocations failed', `${failureCount} key(s) failed to revoke.`);
       }
+
       clearSelection();
       await loadUnifiedApiKeys();
     } catch (err: unknown) {
@@ -298,12 +354,45 @@ function ApiKeysPageContent() {
     }
   };
 
-  // Compute expiring-soon count for banner
-  const expiringWithin7Days = rows.filter((row) => {
-    if (!row.expiresAt) return false;
-    const daysUntil = (new Date(row.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-    return daysUntil > 0 && daysUntil <= 7;
-  }).length;
+  const handleOpenCreateDialog = () => {
+    setCreateUserId('');
+    setCreateKeyName('');
+    setCreateKeyScope('read');
+    setCreateKeyExpiresDays('90');
+    setNewKeyValue(null);
+    setCreateDialogOpen(true);
+  };
+
+  const handleCreateKey = async () => {
+    if (!createUserId || !createKeyName.trim()) return;
+    try {
+      setCreatingKey(true);
+      const result = await api.createApiKey(createUserId, {
+        name: createKeyName.trim(),
+        scope: createKeyScope,
+        expires_in_days: parseInt(createKeyExpiresDays) || 90,
+      });
+      if (result.key) {
+        setNewKeyValue(result.key);
+      }
+      toastSuccess('API key created', `Key created for ${ownerOptions.find((o) => String(o.id) === createUserId)?.username || 'user'}.`);
+      await loadUnifiedApiKeys();
+    } catch (err: unknown) {
+      const message = err instanceof Error && err.message ? err.message : 'Failed to create API key';
+      toastError('Create key failed', message);
+    } finally {
+      setCreatingKey(false);
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toastSuccess('Copied', 'API key copied to clipboard.');
+    } catch {
+      toastError('Copy failed', 'Could not copy to clipboard.');
+    }
+  };
 
   return (
     <PermissionGuard variant="route" requireAuth role="admin">
@@ -315,24 +404,35 @@ function ApiKeysPageContent() {
               <p className="text-muted-foreground">Unified API key inventory across all users</p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href="/users">
-                <Button variant="outline">
-                  <Key className="mr-2 h-4 w-4" />
-                  Create Key
-                </Button>
-              </Link>
+              <Button onClick={handleOpenCreateDialog}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create Key
+              </Button>
               <ExportMenu
-                onExport={(format: ExportFormat) => {
-                  exportData({
-                    data: rows as unknown as Record<string, unknown>[],
-                    filename: 'api-keys',
-                    format,
-                  });
-                }}
-                disabled={rows.length === 0}
+                onExport={(format: ExportFormat) => exportUnifiedApiKeys(filteredRows, format)}
+                disabled={filteredRows.length === 0}
               />
             </div>
           </div>
+
+          {keysExpiringIn7Days > 0 && (
+            <Alert className="mb-6 border-yellow-300 bg-yellow-50">
+              <AlertTriangle className="h-4 w-4 text-yellow-600" />
+              <AlertDescription className="ml-2 flex items-center justify-between">
+                <span className="text-yellow-800">
+                  {keysExpiringIn7Days} key{keysExpiringIn7Days !== 1 ? 's' : ''} expire{keysExpiringIn7Days === 1 ? 's' : ''} within 7 days.
+                </span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="text-yellow-800 underline p-0 h-auto"
+                  onClick={() => toggleHygieneFilter('expiring-soon')}
+                >
+                  View expiring keys
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {error && (
             <Alert variant="destructive" className="mb-6">
@@ -353,7 +453,7 @@ function ApiKeysPageContent() {
                 <div>
                   <h3 className="font-semibold">Unified Key Management</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    24h request/error metrics are currently unavailable from backend key telemetry and are shown as N/A.
+                    Per-key token consumption and estimated cost appear automatically when usage data is available.
                   </p>
                 </div>
               </div>
@@ -361,8 +461,10 @@ function ApiKeysPageContent() {
           </Card>
 
           <div className="mb-6 grid gap-4 md:grid-cols-4">
-            <Card className="cursor-pointer hover:border-primary transition-colors"
-              onClick={() => updateFilter(setStatusFilter, 'active')}>
+            <Card
+              className={`cursor-pointer transition-colors hover:border-primary ${hygieneFilter === 'needs-rotation' ? 'border-primary ring-1 ring-primary' : ''}`}
+              onClick={() => toggleHygieneFilter('needs-rotation')}
+            >
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Keys Needing Rotation</CardTitle>
               </CardHeader>
@@ -371,8 +473,10 @@ function ApiKeysPageContent() {
                 <p className="text-xs text-muted-foreground">&gt;180 days old</p>
               </CardContent>
             </Card>
-            <Card className="cursor-pointer hover:border-primary transition-colors"
-              onClick={() => updateFilter(setStatusFilter, 'active')}>
+            <Card
+              className={`cursor-pointer transition-colors hover:border-primary ${hygieneFilter === 'expiring-soon' ? 'border-primary ring-1 ring-primary' : ''}`}
+              onClick={() => toggleHygieneFilter('expiring-soon')}
+            >
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Expiring Soon</CardTitle>
               </CardHeader>
@@ -381,8 +485,10 @@ function ApiKeysPageContent() {
                 <p className="text-xs text-muted-foreground">Within 30 days</p>
               </CardContent>
             </Card>
-            <Card className="cursor-pointer hover:border-primary transition-colors"
-              onClick={() => updateFilter(setStatusFilter, 'active')}>
+            <Card
+              className={`cursor-pointer transition-colors hover:border-primary ${hygieneFilter === 'inactive' ? 'border-primary ring-1 ring-primary' : ''}`}
+              onClick={() => toggleHygieneFilter('inactive')}
+            >
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Inactive Keys</CardTitle>
               </CardHeader>
@@ -402,21 +508,15 @@ function ApiKeysPageContent() {
             </Card>
           </div>
 
-          {expiringWithin7Days > 0 && (
-            <Alert className="mb-6 border-yellow-200 bg-yellow-50">
-              <AlertTriangle className="h-4 w-4 text-yellow-700" />
-              <AlertDescription className="text-yellow-900">
-                <strong>{expiringWithin7Days} key{expiringWithin7Days !== 1 ? 's' : ''}</strong> expiring within 7 days.{' '}
-                <Button
-                  variant="link"
-                  className="text-yellow-900 underline p-0 h-auto"
-                  onClick={() => updateFilter(setStatusFilter, 'active')}
-                >
-                  View expiring keys
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
+          <div className="mb-6 flex items-center gap-2 text-sm">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <Link
+              href="/audit?resource=api_key"
+              className="text-primary hover:underline"
+            >
+              View key activity in audit log
+            </Link>
+          </div>
 
           <Card className="mb-6">
             <CardHeader>
@@ -486,7 +586,7 @@ function ApiKeysPageContent() {
                   </Button>
                   <Button
                     onClick={handleRotateSelected}
-                    disabled={selectedRowIds.size === 0 || bulkMutating}
+                    disabled={selectedRowIds.size === 0 || bulkRotating || bulkRevoking || bulkMutating}
                     loading={bulkRotating}
                     loadingText="Rotating..."
                   >
@@ -496,7 +596,7 @@ function ApiKeysPageContent() {
                   <Button
                     variant="destructive"
                     onClick={handleRevokeSelected}
-                    disabled={selectedRowIds.size === 0 || bulkMutating}
+                    disabled={selectedRowIds.size === 0 || bulkRevoking || bulkRotating || bulkMutating}
                     loading={bulkRevoking}
                     loadingText="Revoking..."
                   >
@@ -509,7 +609,7 @@ function ApiKeysPageContent() {
             <CardContent>
               {loading ? (
                 <div className="py-4">
-                  <TableSkeleton rows={8} columns={11} />
+                  <TableSkeleton rows={8} columns={9} />
                 </div>
               ) : totalItems === 0 ? (
                 <EmptyState
@@ -559,6 +659,117 @@ function ApiKeysPageContent() {
               )}
             </CardContent>
           </Card>
+
+          {/* Create Key Dialog */}
+          <Dialog open={createDialogOpen} onOpenChange={(open) => {
+            if (!open && newKeyValue) {
+              // Don't allow silent dismissal when secret is displayed — force confirmation via Done button
+              return;
+            }
+            setCreateDialogOpen(open);
+          }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create API Key</DialogTitle>
+                <DialogDescription>Select a user and configure the new API key.</DialogDescription>
+              </DialogHeader>
+              {newKeyValue ? (
+                <div className="space-y-4 py-4">
+                  <Alert className="border-yellow-300 bg-yellow-50">
+                    <AlertDescription>
+                      <p className="mb-2 font-semibold text-yellow-800">
+                        Save this API key now — it will not be shown again.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 rounded bg-yellow-100 p-2 font-mono text-sm break-all">
+                          {newKeyValue}
+                        </code>
+                        <Button variant="outline" size="sm" onClick={() => copyToClipboard(newKeyValue)}>
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                  <div className="flex justify-end">
+                    <Button onClick={async () => {
+                      const confirmed = await confirm({
+                        title: 'Dismiss API key',
+                        message: 'Have you saved this API key? It will not be shown again.',
+                        confirmText: 'Yes, I saved it',
+                        variant: 'warning',
+                      });
+                      if (confirmed) {
+                        setCreateDialogOpen(false);
+                      }
+                    }}>Done</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="create-key-user">User</Label>
+                    <Select
+                      id="create-key-user"
+                      value={createUserId}
+                      onChange={(e) => setCreateUserId(e.target.value)}
+                    >
+                      <option value="">Select a user...</option>
+                      {ownerOptions.map((owner) => (
+                        <option key={owner.id} value={String(owner.id)}>
+                          {owner.username}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-key-name">Key Name</Label>
+                    <Input
+                      id="create-key-name"
+                      placeholder="e.g., Production API"
+                      value={createKeyName}
+                      onChange={(e) => setCreateKeyName(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-key-scope">Scope</Label>
+                      <Select
+                        id="create-key-scope"
+                        value={createKeyScope}
+                        onChange={(e) => setCreateKeyScope(e.target.value)}
+                      >
+                        <option value="read">Read Only</option>
+                        <option value="write">Read & Write</option>
+                        <option value="admin">Admin</option>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="create-key-expires">Expires In (days)</Label>
+                      <Input
+                        id="create-key-expires"
+                        type="number"
+                        min="1"
+                        max="365"
+                        value={createKeyExpiresDays}
+                        onChange={(e) => setCreateKeyExpiresDays(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
+                    <Button
+                      onClick={handleCreateKey}
+                      disabled={!createUserId || !createKeyName.trim() || creatingKey}
+                      loading={creatingKey}
+                      loadingText="Creating..."
+                    >
+                      Create Key
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
 
           {/* Recent Key Activity */}
           <Card>

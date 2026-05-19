@@ -30,6 +30,27 @@ describe("TldwApiClient chat mutations", () => {
     vi.clearAllMocks()
   })
 
+  it("creates chats through the backend-canonical trailing-slash endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      id: "chat-1",
+      title: "Role-play",
+      created_at: "2026-02-18T00:00:00Z",
+      updated_at: "2026-02-18T00:00:00Z",
+      character_id: 42
+    })
+
+    const client = new TldwApiClient()
+    await client.createChat({ character_id: 42 })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/",
+        method: "POST",
+        body: expect.objectContaining({ character_id: 42 })
+      })
+    )
+  })
+
   it("retries updateChat once with the latest version after conflict", async () => {
     mocks.bgRequest.mockImplementation(
       async (request: { path?: string; method?: string; body?: unknown }) => {

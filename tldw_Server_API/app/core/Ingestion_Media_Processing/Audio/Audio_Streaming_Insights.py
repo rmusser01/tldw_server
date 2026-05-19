@@ -430,7 +430,7 @@ class LiveMeetingInsights:
                 {
                     "type": "insight_error",
                     "stage": stage,
-                    "message": str(exc),
+                    "message": "Live insights request failed",
                 }
             )
             return

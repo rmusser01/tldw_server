@@ -82,9 +82,9 @@ For new FastAPI endpoints, use the unified `AuthPrincipal` dependency stack from
 ```python
 from fastapi import APIRouter, Depends
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
@@ -94,14 +94,14 @@ router = APIRouter()
 async def secure(principal: AuthPrincipal = Depends(get_auth_principal)):
     return {"principal_id": principal.principal_id, "roles": principal.roles}
 
-@router.post("/media/{media_id}", dependencies=[Depends(require_permissions("media.update"))])
+@router.post("/media/{media_id}", dependencies=[Depends(RequirePermission("media.update"))])
 async def update_media(
     media_id: int,
     principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     return {"ok": True, "media_id": media_id, "by": principal.principal_id}
 
-@router.get("/admin/dashboard", dependencies=[Depends(require_roles("admin"))])
+@router.get("/admin/dashboard", dependencies=[Depends(RequireRole("admin"))])
 async def admin_dashboard(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ):
@@ -110,7 +110,7 @@ async def admin_dashboard(
 
 ### Legacy Permission Decorators (Historical)
 
-Earlier versions exposed decorator-style FastAPI helpers (`PermissionChecker`, `RoleChecker`, `AnyPermissionChecker`, `AllPermissionsChecker`) from `permissions.py`. These have been removed in favor of the claim-first dependency pattern; new and existing routes should rely on `get_auth_principal` together with `require_permissions` / `require_roles` instead.
+Earlier versions exposed decorator-style FastAPI helpers (`PermissionChecker`, `RoleChecker`, `AnyPermissionChecker`, `AllPermissionsChecker`) from `permissions.py`. These have been removed in favor of the claim-first dependency pattern; new and existing routes should rely on `get_auth_principal` together with `RequirePermission` / `RequireRole` instead.
 
 ### Using Permission Functions
 

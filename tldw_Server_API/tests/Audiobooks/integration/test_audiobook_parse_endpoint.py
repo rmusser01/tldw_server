@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.audio import audiobooks as audiobooks_module
 from tldw_Server_API.app.api.v1.endpoints.audio.audiobooks import router as audiobooks_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -121,6 +122,30 @@ def test_parse_custom_chapter_pattern(client_user_only):
     data = resp.json()
     titles = [c["title"] for c in data["chapters"]]
     assert titles == ["Part I", "Part II"]
+
+
+def test_parse_chapter_detection_failure_sanitizes_warning_log(client_user_only, monkeypatch):
+    logged_warnings = []
+
+    class LoggerStub:
+        def warning(self, message, *args, **kwargs):
+            logged_warnings.append((message, args, kwargs))
+
+    def _fail_detect_chapters(*args, **kwargs):
+        raise RuntimeError("chapter detector exploded /private/chapter-cache")
+
+    monkeypatch.setattr(audiobooks_module, "logger", LoggerStub())
+    monkeypatch.setattr(audiobooks_module, "_detect_chapters", _fail_detect_chapters)
+
+    payload = {
+        "source": {"input_type": "txt", "raw_text": SIMPLE_TEXT},
+        "detect_chapters": True,
+    }
+    resp = _post_parse(client_user_only, payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "chapter_detection_failed"
+    assert logged_warnings == [("Chapter detection failed", (), {})]
 
 
 def test_parse_srt_strips_timestamps(client_user_only):

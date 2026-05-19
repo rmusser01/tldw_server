@@ -54,6 +54,8 @@ vi.mock('@/lib/api-client', () => ({
     updateIncident: vi.fn(),
     addIncidentEvent: vi.fn(),
     deleteIncident: vi.fn(),
+    notifyIncidentStakeholders: vi.fn(),
+    getIncidentSlaMetrics: vi.fn(),
   },
 }));
 
@@ -75,6 +77,19 @@ beforeEach(() => {
   apiMock.updateIncident.mockResolvedValue({});
   apiMock.addIncidentEvent.mockResolvedValue({});
   apiMock.deleteIncident.mockResolvedValue({});
+  apiMock.notifyIncidentStakeholders.mockResolvedValue({
+    incident_id: '',
+    notifications: [],
+  });
+  apiMock.getIncidentSlaMetrics.mockResolvedValue({
+    total_incidents: 0,
+    resolved_count: 0,
+    acknowledged_count: 0,
+    avg_mtta_minutes: null,
+    avg_mttr_minutes: null,
+    p95_mtta_minutes: null,
+    p95_mttr_minutes: null,
+  });
 });
 
 afterEach(() => {
@@ -383,5 +398,272 @@ describe('IncidentsPage Stage 3 workflows', () => {
     });
     expect(apiMock.addIncidentEvent).not.toHaveBeenCalled();
     expect(localStorage.getItem('admin.incidents.workflow.v1')).toBeNull();
+  });
+
+  it('opens notify dialog, sends notification, and displays delivery results', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-3',
+        title: 'API gateway timeout',
+        status: 'investigating',
+        severity: 'high',
+        summary: 'Gateway returning 504s',
+        tags: ['gateway'],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T08:00:00Z',
+        resolved_at: null,
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+    apiMock.notifyIncidentStakeholders.mockResolvedValue({
+      incident_id: 'inc-3',
+      notifications: [
+        { email: 'alice@example.com', status: 'sent' },
+        { email: 'bob@example.com', status: 'failed', error: 'SMTP timeout' },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    // Click the notify button
+    const notifyBtn = await screen.findByTestId('incident-notify-inc-3');
+    await user.click(notifyBtn);
+
+    // Dialog should be open
+    expect(screen.getByTestId('notify-dialog-overlay')).toBeInTheDocument();
+
+    // Fill in recipients and message
+    const recipientsInput = screen.getByTestId('notify-recipients-input');
+    const messageInput = screen.getByTestId('notify-message-input');
+    await user.type(recipientsInput, 'alice@example.com, bob@example.com');
+    await user.type(messageInput, 'Please investigate urgently');
+
+    // Send
+    await user.click(screen.getByTestId('notify-send-button'));
+
+    await waitFor(() => {
+      expect(apiMock.notifyIncidentStakeholders).toHaveBeenCalledWith('inc-3', {
+        recipients: ['alice@example.com', 'bob@example.com'],
+        message: 'Please investigate urgently',
+      });
+    });
+
+    // Delivery results should display
+    await waitFor(() => {
+      expect(screen.getByTestId('notify-results')).toBeInTheDocument();
+    });
+    expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    expect(screen.getByText('bob@example.com')).toBeInTheDocument();
+    expect(toastSuccessMock).toHaveBeenCalledWith('Notification sent to 1/2 recipient(s)');
+    expect(reloadMock).toHaveBeenCalled();
+  });
+
+  it('renders SLA metric cards with avg MTTA, avg MTTR, P95, and resolved count', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-sla',
+        title: 'SLA test incident',
+        status: 'resolved',
+        severity: 'medium',
+        summary: 'Testing SLA metrics',
+        tags: [],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T09:00:00Z',
+        resolved_at: '2026-03-27T09:00:00Z',
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+    apiMock.getIncidentSlaMetrics.mockResolvedValue({
+      total_incidents: 10,
+      resolved_count: 7,
+      acknowledged_count: 9,
+      avg_mtta_minutes: 5,
+      avg_mttr_minutes: 45,
+      p95_mtta_minutes: 12,
+      p95_mttr_minutes: 120,
+    });
+
+    render(<IncidentsPage />);
+
+    // SLA cards render the formatted values
+    expect(await screen.findByText('Avg. Time to Acknowledge')).toBeInTheDocument();
+    expect(screen.getByText('Avg. Time to Resolve')).toBeInTheDocument();
+    expect(screen.getByText('P95 Resolution Time')).toBeInTheDocument();
+
+    // Verify computed values
+    expect(screen.getByText('5m')).toBeInTheDocument();       // avg MTTA
+    expect(screen.getByText('45m')).toBeInTheDocument();      // avg MTTR
+    expect(screen.getByText('2h')).toBeInTheDocument();       // P95 MTTR = 120m = 2h
+    expect(screen.getByText('7 / 10')).toBeInTheDocument();   // resolved / total
+  });
+
+  it('renders runbook URL link when incident has runbook_url set', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-rb',
+        title: 'Runbook test',
+        status: 'investigating',
+        severity: 'high',
+        summary: 'Testing runbook link',
+        tags: ['infra'],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T08:00:00Z',
+        resolved_at: null,
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+        runbook_url: 'https://wiki.example.com/runbooks/infra-outage',
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+
+    render(<IncidentsPage />);
+
+    const runbookLink = await screen.findByRole('link', { name: 'Runbook' });
+    expect(runbookLink).toBeInTheDocument();
+    expect(runbookLink.getAttribute('href')).toBe('https://wiki.example.com/runbooks/infra-outage');
+    expect(runbookLink.getAttribute('target')).toBe('_blank');
+    expect(runbookLink.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('does not render runbook link when runbook_url is not set', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-no-rb',
+        title: 'No runbook test',
+        status: 'open',
+        severity: 'low',
+        summary: 'No runbook here',
+        tags: [],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T08:00:00Z',
+        resolved_at: null,
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+
+    render(<IncidentsPage />);
+
+    await screen.findByText('No runbook test');
+    expect(screen.queryByRole('link', { name: 'Runbook' })).not.toBeInTheDocument();
+  });
+
+  it('rejects unsafe runbook URLs before create and does not render unsafe links', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-unsafe',
+        title: 'Unsafe runbook test',
+        status: 'open',
+        severity: 'medium',
+        summary: 'Unsafe runbook should not render',
+        tags: [],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T08:00:00Z',
+        resolved_at: null,
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+        runbook_url: 'javascript:alert(1)',
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    await screen.findByText('Unsafe runbook test');
+    expect(screen.queryByRole('link', { name: 'Runbook' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Title'), 'Queue outage');
+    await user.type(screen.getByLabelText('Runbook URL (optional)'), 'javascript:alert(1)');
+    await user.click(screen.getByRole('button', { name: 'Create Incident' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith('Runbook URL must start with http:// or https://');
+    });
+    expect(apiMock.createIncident).not.toHaveBeenCalled();
+  });
+
+  it('notify button opens dialog overlay', async () => {
+    usePagedResourceMock.mockReturnValue({
+      items: [{
+        id: 'inc-notify',
+        title: 'Notify dialog test',
+        status: 'investigating',
+        severity: 'medium',
+        summary: 'Testing notify dialog open',
+        tags: [],
+        created_at: '2026-03-27T08:00:00Z',
+        updated_at: '2026-03-27T08:00:00Z',
+        resolved_at: null,
+        assigned_to_user_id: null,
+        assigned_to_label: null,
+        root_cause: null,
+        impact: null,
+        action_items: [],
+        timeline: [],
+      }],
+      total: 1,
+      loading: false,
+      error: '',
+      reload: reloadMock,
+    });
+
+    const user = userEvent.setup();
+    render(<IncidentsPage />);
+
+    // Dialog should not be open initially
+    expect(screen.queryByTestId('notify-dialog-overlay')).not.toBeInTheDocument();
+
+    // Click the notify button
+    const notifyBtn = await screen.findByTestId('incident-notify-inc-notify');
+    await user.click(notifyBtn);
+
+    // Dialog should now be visible with recipients and message inputs
+    expect(screen.getByTestId('notify-dialog-overlay')).toBeInTheDocument();
+    expect(screen.getByTestId('notify-recipients-input')).toBeInTheDocument();
+    expect(screen.getByTestId('notify-message-input')).toBeInTheDocument();
+    expect(screen.getByTestId('notify-send-button')).toBeInTheDocument();
+    expect(screen.getByText('Notify Stakeholders')).toBeInTheDocument();
   });
 });

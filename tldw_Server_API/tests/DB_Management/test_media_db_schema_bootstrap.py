@@ -1,6 +1,7 @@
 import importlib
 import sqlite3
 from types import SimpleNamespace
+import uuid
 
 import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import (
@@ -1985,5 +1986,607 @@ def test_ensure_media_schema_keeps_sqlite_schema_intact() -> None:
 
         assert table is not None
         assert version["version"] == db._CURRENT_SCHEMA_VERSION
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_indexes() -> None:
+    db = MediaDatabase(db_path=":memory:", client_id="schema-run-history-bootstrap")
+    try:
+        conn = db.get_connection()
+        media_columns = {row[1] for row in conn.execute("PRAGMA table_info(Media)").fetchall()}
+        transcript_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(Transcripts)").fetchall()
+        }
+        transcript_indexes = {
+            row[1] for row in conn.execute("PRAGMA index_list(Transcripts)").fetchall()
+        }
+        media_indexes = {row[1] for row in conn.execute("PRAGMA index_list(Media)").fetchall()}
+        transcript_table_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
+        ).fetchone()[0]
+
+        assert db._CURRENT_SCHEMA_VERSION == 23
+        assert {
+            "latest_transcription_run_id",
+            "next_transcription_run_id",
+        }.issubset(media_columns)
+        assert {
+            "transcription_run_id",
+            "supersedes_run_id",
+            "idempotency_key",
+        }.issubset(transcript_columns)
+        assert "UNIQUE (media_id, whisper_model)" not in transcript_table_sql
+        assert {
+            "idx_media_latest_transcription_run_id",
+            "idx_media_next_transcription_run_id",
+        }.issubset(media_indexes)
+        assert {
+            "idx_transcripts_media_run_id",
+            "idx_transcripts_supersedes_run_id",
+            "idx_transcripts_media_idempotency_key",
+        }.issubset(transcript_indexes)
+
+        now = db._get_current_utc_timestamp_str()
+        media_uuid = str(uuid.uuid4())
+        conn.execute(
+            """
+            INSERT INTO Media (uuid, title, type, content_hash, last_modified, version, client_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                media_uuid,
+                "Bootstrap uniqueness",
+                "audio",
+                f"hash-{media_uuid}",
+                now,
+                1,
+                db.client_id,
+            ),
+        )
+        media_id = conn.execute(
+            "SELECT id FROM Media WHERE uuid = ?",
+            (media_uuid,),
+        ).fetchone()[0]
+
+        conn.execute(
+            """
+            INSERT INTO Transcripts (
+                media_id,
+                whisper_model,
+                transcription,
+                created_at,
+                transcription_run_id,
+                idempotency_key,
+                uuid,
+                last_modified,
+                version,
+                client_id,
+                deleted
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                media_id,
+                "small",
+                "baseline transcript",
+                now,
+                1,
+                "job-1",
+                str(uuid.uuid4()),
+                now,
+                1,
+                db.client_id,
+                0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO Transcripts (
+                media_id,
+                whisper_model,
+                transcription,
+                created_at,
+                transcription_run_id,
+                idempotency_key,
+                uuid,
+                last_modified,
+                version,
+                client_id,
+                deleted
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                media_id,
+                "medium",
+                "null idempotency transcript",
+                now,
+                2,
+                None,
+                str(uuid.uuid4()),
+                now,
+                1,
+                db.client_id,
+                0,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO Transcripts (
+                media_id,
+                whisper_model,
+                transcription,
+                created_at,
+                transcription_run_id,
+                idempotency_key,
+                uuid,
+                last_modified,
+                version,
+                client_id,
+                deleted
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                media_id,
+                "large",
+                "second null idempotency transcript",
+                now,
+                3,
+                None,
+                str(uuid.uuid4()),
+                now,
+                1,
+                db.client_id,
+                0,
+            ),
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id,
+                    whisper_model,
+                    transcription,
+                    created_at,
+                    transcription_run_id,
+                    idempotency_key,
+                    uuid,
+                    last_modified,
+                    version,
+                    client_id,
+                    deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    media_id,
+                    "duplicate-run",
+                    "duplicate run transcript",
+                    now,
+                    1,
+                    "job-2",
+                    str(uuid.uuid4()),
+                    now,
+                    1,
+                    db.client_id,
+                    0,
+                ),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id,
+                    whisper_model,
+                    transcription,
+                    created_at,
+                    transcription_run_id,
+                    idempotency_key,
+                    uuid,
+                    last_modified,
+                    version,
+                    client_id,
+                    deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    media_id,
+                    "duplicate-key",
+                    "duplicate idempotency transcript",
+                    now,
+                    4,
+                    "job-1",
+                    str(uuid.uuid4()),
+                    now,
+                    1,
+                    db.client_id,
+                    0,
+                ),
+            )
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_path) -> None:
+    db_path = tmp_path / "media_v22.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE schema_version (
+                version INTEGER PRIMARY KEY NOT NULL
+            );
+            INSERT INTO schema_version(version) VALUES (22);
+
+            CREATE TABLE Media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT UNIQUE,
+                title TEXT NOT NULL,
+                type TEXT NOT NULL,
+                content TEXT,
+                author TEXT,
+                ingestion_date DATETIME,
+                transcription_model TEXT,
+                is_trash BOOLEAN DEFAULT 0 NOT NULL,
+                trash_date DATETIME,
+                vector_embedding BLOB,
+                chunking_status TEXT DEFAULT 'pending' NOT NULL,
+                vector_processing INTEGER DEFAULT 0 NOT NULL,
+                content_hash TEXT NOT NULL,
+                source_hash TEXT,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified DATETIME NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                org_id INTEGER,
+                team_id INTEGER,
+                visibility TEXT DEFAULT 'personal' CHECK (visibility IN ('personal', 'team', 'org')),
+                owner_user_id INTEGER,
+                client_id TEXT NOT NULL,
+                deleted BOOLEAN NOT NULL DEFAULT 0,
+                prev_version INTEGER,
+                merge_parent_uuid TEXT
+            );
+
+            CREATE TABLE Keywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                keyword TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified DATETIME NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                client_id TEXT NOT NULL,
+                deleted BOOLEAN NOT NULL DEFAULT 0,
+                prev_version INTEGER,
+                merge_parent_uuid TEXT
+            );
+
+            CREATE TABLE Transcripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                whisper_model TEXT,
+                transcription TEXT,
+                created_at DATETIME,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified DATETIME NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                client_id TEXT NOT NULL,
+                deleted BOOLEAN NOT NULL DEFAULT 0,
+                prev_version INTEGER,
+                merge_parent_uuid TEXT,
+                UNIQUE (media_id, whisper_model),
+                FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE Claims (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                claim_text TEXT NOT NULL,
+                claim_type TEXT,
+                confidence REAL,
+                source_excerpt TEXT,
+                source_start INTEGER,
+                source_end INTEGER,
+                normalized_value TEXT,
+                context_json TEXT,
+                extractor TEXT NOT NULL,
+                extractor_version TEXT,
+                chunk_hash TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME,
+                review_status TEXT NOT NULL DEFAULT 'pending',
+                reviewer_id INTEGER,
+                reviewed_at DATETIME,
+                review_notes TEXT,
+                review_group TEXT,
+                review_version INTEGER,
+                review_reason_code TEXT,
+                claim_cluster_id INTEGER,
+                uuid TEXT UNIQUE NOT NULL,
+                last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                version INTEGER NOT NULL DEFAULT 1,
+                client_id TEXT NOT NULL,
+                deleted BOOLEAN NOT NULL DEFAULT 0,
+                prev_version INTEGER,
+                merge_parent_uuid TEXT,
+                FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE,
+                UNIQUE (media_id, chunk_hash, extractor, extractor_version)
+            );
+
+            INSERT INTO Media (
+                id, title, type, content_hash, source_hash, uuid, last_modified, version, visibility, owner_user_id, client_id
+            ) VALUES
+                (1, 'Media One', 'audio', 'hash-1', 'source-1', 'media-uuid-1', '2024-01-01T00:00:00Z', 1, 'personal', 11, 'client-a'),
+                (2, 'Media Two', 'audio', 'hash-2', 'source-2', 'media-uuid-2', '2024-01-01T00:00:00Z', 1, 'personal', 12, 'client-a'),
+                (3, 'Media Three', 'audio', 'hash-3', 'source-3', 'media-uuid-3', '2024-01-01T00:00:00Z', 1, 'personal', 13, 'client-a');
+
+            INSERT INTO Keywords (id, keyword, uuid, last_modified, version, client_id)
+            VALUES (1, 'bootstrap', 'keyword-uuid-1', '2024-01-01T00:00:00Z', 1, 'client-a');
+
+            INSERT INTO Transcripts (
+                id, media_id, whisper_model, transcription, created_at, uuid, last_modified, version, client_id, deleted
+            ) VALUES
+                (1, 1, 'small', 'newer undeleted transcript', '2024-01-03T00:00:00Z', 'transcript-uuid-1', '2024-01-03T00:00:00Z', 1, 'client-a', 0),
+                (2, 1, 'large', 'older undeleted transcript', '2024-01-01T00:00:00Z', 'transcript-uuid-2', '2024-01-01T00:00:00Z', 1, 'client-a', 0),
+                (3, 1, 'xlarge', 'deleted newest transcript', '2024-01-04T00:00:00Z', 'transcript-uuid-4', '2024-01-04T00:00:00Z', 1, 'client-a', 1),
+                (4, 2, 'small', 'third transcript', '2024-01-02T00:00:00Z', 'transcript-uuid-3', '2024-01-02T00:00:00Z', 1, 'client-a', 0);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    db = MediaDatabase(str(db_path), client_id="schema-run-history-migration")
+    try:
+        db.close_connection()
+        db.backend.get_pool().close_all()
+        verification_db_path = tmp_path / "media_v23_verification.sqlite"
+        with sqlite3.connect(db_path) as source_conn, sqlite3.connect(verification_db_path) as dest_conn:
+            source_conn.backup(dest_conn)
+
+        with sqlite3.connect(verification_db_path) as raw_conn:
+            raw_conn.row_factory = sqlite3.Row
+            media_columns = {row[1] for row in raw_conn.execute("PRAGMA table_info(Media)").fetchall()}
+            transcript_columns = {
+                row[1] for row in raw_conn.execute("PRAGMA table_info(Transcripts)").fetchall()
+            }
+            transcript_indexes = {
+                row[1] for row in raw_conn.execute("PRAGMA index_list(Transcripts)").fetchall()
+            }
+            transcript_table_sql = raw_conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
+            ).fetchone()[0]
+            transcript_rows = [
+                dict(row)
+                for row in raw_conn.execute(
+                    """
+                    SELECT id, media_id, whisper_model, created_at, deleted, transcription_run_id, supersedes_run_id, idempotency_key
+                    FROM Transcripts
+                    ORDER BY media_id, id
+                    """
+                ).fetchall()
+            ]
+            media_rows = [
+                dict(row)
+                for row in raw_conn.execute(
+                    """
+                    SELECT id, latest_transcription_run_id, next_transcription_run_id
+                    FROM Media
+                    ORDER BY id
+                    """
+                ).fetchall()
+            ]
+            version_row = raw_conn.execute(
+                "SELECT version FROM schema_version LIMIT 1"
+            ).fetchone()
+            assert version_row["version"] == 23
+            assert {
+                "latest_transcription_run_id",
+                "next_transcription_run_id",
+            }.issubset(media_columns)
+            assert {
+                "transcription_run_id",
+                "supersedes_run_id",
+                "idempotency_key",
+            }.issubset(transcript_columns)
+            assert "UNIQUE (media_id, whisper_model)" not in transcript_table_sql
+            assert {
+                "idx_transcripts_media_run_id",
+                "idx_transcripts_supersedes_run_id",
+                "idx_transcripts_media_idempotency_key",
+            }.issubset(transcript_indexes)
+            assert transcript_rows == [
+                {
+                    "id": 1,
+                    "media_id": 1,
+                    "whisper_model": "small",
+                    "created_at": "2024-01-03T00:00:00Z",
+                    "deleted": 0,
+                    "transcription_run_id": 2,
+                    "supersedes_run_id": None,
+                    "idempotency_key": None,
+                },
+                {
+                    "id": 2,
+                    "media_id": 1,
+                    "whisper_model": "large",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "deleted": 0,
+                    "transcription_run_id": 1,
+                    "supersedes_run_id": None,
+                    "idempotency_key": None,
+                },
+                {
+                    "id": 3,
+                    "media_id": 1,
+                    "whisper_model": "xlarge",
+                    "created_at": "2024-01-04T00:00:00Z",
+                    "deleted": 1,
+                    "transcription_run_id": 3,
+                    "supersedes_run_id": None,
+                    "idempotency_key": None,
+                },
+                {
+                    "id": 4,
+                    "media_id": 2,
+                    "whisper_model": "small",
+                    "created_at": "2024-01-02T00:00:00Z",
+                    "deleted": 0,
+                    "transcription_run_id": 1,
+                    "supersedes_run_id": None,
+                    "idempotency_key": None,
+                },
+            ]
+            assert media_rows == [
+                {"id": 1, "latest_transcription_run_id": 2, "next_transcription_run_id": 4},
+                {"id": 2, "latest_transcription_run_id": 1, "next_transcription_run_id": 2},
+                {"id": 3, "latest_transcription_run_id": None, "next_transcription_run_id": 1},
+            ]
+
+            with pytest.raises(sqlite3.IntegrityError):
+                raw_conn.execute(
+                    """
+                    INSERT INTO Transcripts (
+                        media_id,
+                        whisper_model,
+                        transcription,
+                        created_at,
+                        transcription_run_id,
+                        idempotency_key,
+                        uuid,
+                        last_modified,
+                        version,
+                        client_id,
+                        deleted
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        1,
+                        "duplicate-run",
+                        "duplicate run transcript",
+                        "2024-01-05T00:00:00Z",
+                        2,
+                        "job-dup-run",
+                        str(uuid.uuid4()),
+                        "2024-01-05T00:00:00Z",
+                        1,
+                        "client-a",
+                        0,
+                    ),
+                )
+            raw_conn.rollback()
+
+            raw_conn.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id,
+                    whisper_model,
+                    transcription,
+                    created_at,
+                    transcription_run_id,
+                    idempotency_key,
+                    uuid,
+                    last_modified,
+                    version,
+                    client_id,
+                    deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    "nullable-key-one",
+                    "nullable key transcript",
+                    "2024-01-05T00:00:00Z",
+                    4,
+                    None,
+                    str(uuid.uuid4()),
+                    "2024-01-05T00:00:00Z",
+                    1,
+                    "client-a",
+                    0,
+                ),
+            )
+            raw_conn.execute(
+                """
+                INSERT INTO Transcripts (
+                    media_id,
+                    whisper_model,
+                    transcription,
+                    created_at,
+                    transcription_run_id,
+                    idempotency_key,
+                    uuid,
+                    last_modified,
+                    version,
+                    client_id,
+                    deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    "idempotency-anchor",
+                    "idempotency key anchor",
+                    "2024-01-06T00:00:00Z",
+                    5,
+                    "job-unique",
+                    str(uuid.uuid4()),
+                    "2024-01-06T00:00:00Z",
+                    1,
+                    "client-a",
+                    0,
+                ),
+            )
+            raw_conn.commit()
+
+            with pytest.raises(sqlite3.IntegrityError):
+                raw_conn.execute(
+                    """
+                    INSERT INTO Transcripts (
+                        media_id,
+                        whisper_model,
+                        transcription,
+                        created_at,
+                        transcription_run_id,
+                        idempotency_key,
+                        uuid,
+                        last_modified,
+                        version,
+                        client_id,
+                        deleted
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        1,
+                        "duplicate-key",
+                        "duplicate key transcript",
+                        "2024-01-07T00:00:00Z",
+                        6,
+                        "job-unique",
+                        str(uuid.uuid4()),
+                        "2024-01-07T00:00:00Z",
+                        1,
+                        "client-a",
+                        0,
+                    ),
+                )
+            raw_conn.rollback()
+
+            with pytest.raises(sqlite3.IntegrityError, match="Sync Error \\(Transcripts\\)"):
+                raw_conn.execute(
+                    "UPDATE Transcripts SET version = version, client_id = client_id WHERE id = 1"
+                )
+            raw_conn.rollback()
+
     finally:
         db.close_connection()

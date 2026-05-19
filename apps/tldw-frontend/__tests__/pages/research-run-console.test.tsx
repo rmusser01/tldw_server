@@ -412,8 +412,9 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.clear(screen.getByLabelText('Focus areas'));
-    await user.type(screen.getByLabelText('Focus areas'), 'background{enter}counterevidence{enter}primary sources');
+    const focusAreasField = await screen.findByLabelText('Focus areas');
+    await user.clear(focusAreasField);
+    await user.type(focusAreasField, 'background{enter}counterevidence{enter}primary sources');
     await user.clear(screen.getByLabelText('Minimum sources'));
     await user.type(screen.getByLabelText('Minimum sources'), '3');
     await user.click(screen.getByRole('button', { name: 'Approve checkpoint' }));
@@ -460,7 +461,7 @@ describe('ResearchRunsPage', () => {
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Pin Primary memo' }));
+    await user.click(await screen.findByRole('button', { name: 'Pin Primary memo' }));
     await user.click(screen.getByRole('button', { name: 'Drop Counter note' }));
     await user.click(screen.getByRole('button', { name: 'Prioritize Primary memo' }));
     await user.click(screen.getByLabelText('Recollect sources'));

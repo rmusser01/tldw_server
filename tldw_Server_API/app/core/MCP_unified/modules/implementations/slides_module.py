@@ -139,7 +139,6 @@ class SlidesModule(BaseModule):
                                 "marp_theme": {"type": "string", "maxLength": 64},
                                 "template_id": {"type": "string"},
                                 "slides": {"type": "string"},
-                                "slides_text": {"type": "string"},
                                 "custom_css": {"type": "string", "maxLength": 50000},
                                 "settings": {"type": "object"},
                             },
@@ -708,6 +707,22 @@ class SlidesModule(BaseModule):
         # Otherwise return as-is (markdown)
         return slides
 
+    def _normalize_presentation_updates(self, updates: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(updates)
+        normalized.pop("slides_text", None)
+        if "settings" in normalized and isinstance(normalized["settings"], dict):
+            normalized["settings"] = json.dumps(normalized["settings"])
+        if "studio_data" in normalized and isinstance(normalized["studio_data"], dict):
+            normalized["studio_data"] = json.dumps(normalized["studio_data"])
+        if "slides" in normalized:
+            normalized["slides_text"] = self._extract_slides_text(normalized["slides"])
+        return normalized
+
+    @staticmethod
+    def _validate_slide_order(slide_order: list[int], slide_count: int) -> None:
+        if any(isinstance(index, bool) or not isinstance(index, int) for index in slide_order) or sorted(slide_order) != list(range(slide_count)):
+            raise ValueError(f"slide_order must be a permutation of 0..{slide_count - 1}")
+
     async def _update_presentation(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._update_presentation_sync, context, args)
 
@@ -715,18 +730,8 @@ class SlidesModule(BaseModule):
         db = self._open_db(context)
         try:
             pid = args.get("presentation_id")
-            updates = args.get("updates", {})
+            updates = self._normalize_presentation_updates(args.get("updates", {}))
             expected_version = args.get("expected_version")
-
-            # Process settings if present
-            if "settings" in updates and isinstance(updates["settings"], dict):
-                updates["settings"] = json.dumps(updates["settings"])
-            if "studio_data" in updates and isinstance(updates["studio_data"], dict):
-                updates["studio_data"] = json.dumps(updates["studio_data"])
-
-            # Update slides_text if slides changed
-            if "slides" in updates and "slides_text" not in updates:
-                updates["slides_text"] = self._extract_slides_text(updates["slides"])
 
             row = db.update_presentation(
                 presentation_id=pid,
@@ -752,7 +757,7 @@ class SlidesModule(BaseModule):
         db = self._open_db(context)
         try:
             pid = args.get("presentation_id")
-            patch = args.get("patch", {})
+            patch = self._normalize_presentation_updates(args.get("patch", {}))
             expected_version = args.get("expected_version")
 
             db.update_presentation(
@@ -779,7 +784,7 @@ class SlidesModule(BaseModule):
         db = self._open_db(context)
         try:
             pid = args.get("presentation_id")
-            slide_order = args.get("slide_order", [])
+            slide_order = list(args.get("slide_order", []))
             expected_version = args.get("expected_version")
 
             # Get current presentation
@@ -791,8 +796,7 @@ class SlidesModule(BaseModule):
                 data = json.loads(slides_content)
                 if isinstance(data, dict) and "slides" in data:
                     old_slides = data["slides"]
-                    if len(slide_order) != len(old_slides):
-                        raise ValueError("slide_order length must match number of slides")
+                    self._validate_slide_order(slide_order, len(old_slides))
                     new_slides = [old_slides[i] for i in slide_order]
                     data["slides"] = new_slides
                     new_content = json.dumps(data)
@@ -1050,8 +1054,7 @@ class SlidesModule(BaseModule):
                 if key in payload:
                     restore_fields[key] = payload[key]
 
-            if "slides" in restore_fields:
-                restore_fields["slides_text"] = self._extract_slides_text(restore_fields["slides"])
+            restore_fields = self._normalize_presentation_updates(restore_fields)
 
             row = db.update_presentation(
                 presentation_id=pid,

@@ -170,6 +170,45 @@ class TestJWTServiceUnit:
         assert payload["sub"] == "1"  # JWT service stores user_id as string in 'sub'
         assert payload["type"] == "refresh"
 
+    def test_refresh_access_token_raises_when_rotation_blacklist_persistence_fails(self, monkeypatch):
+
+        class _FailingBlacklist:
+            async def is_blacklisted(self, *_args, **_kwargs):
+                return False
+
+            def hint_blacklisted(self, *_args, **_kwargs):
+                return None
+
+            async def revoke_token(self, **_kwargs):
+                raise RuntimeError("simulated blacklist persistence failure")
+
+        class _StubUserDB:
+            def get_user_roles(self, _user_id):
+                return ["user"]
+
+        settings = Settings(
+            AUTH_MODE="multi_user",
+            JWT_SECRET_KEY="test-key-that-is-at-least-32-characters-long",
+            JWT_ALGORITHM="HS256",
+            ACCESS_TOKEN_EXPIRE_MINUTES=5,
+            REFRESH_TOKEN_EXPIRE_DAYS=7,
+            ROTATE_REFRESH_TOKENS=True,
+        )
+        svc = JWTService(settings=settings)
+        refresh = svc.create_refresh_token(user_id=1, username="testuser")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist",
+            lambda: _FailingBlacklist(),
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.db_config.get_configured_user_database",
+            lambda client_id=None: _StubUserDB(),
+        )
+
+        with pytest.raises(InvalidTokenError, match="rotation"):
+            svc.refresh_access_token(refresh)
+
     def test_token_with_additional_claims(self, jwt_service):
 
         """Test creating tokens with additional claims."""

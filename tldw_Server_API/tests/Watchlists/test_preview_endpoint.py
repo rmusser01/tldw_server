@@ -138,3 +138,59 @@ def test_preview_site_without_include_only_gating(client_with_user: TestClient):
     # No enforced include-only; ensure some items can be 'ingest' even without include match
     assert any(it.get("decision") == "ingest" for it in data.get("items", []))
     # Some may be marked matched_action=None or include/flag depending on synthetic items
+
+
+def test_draft_source_test_returns_scrape_rule_diagnostics(client_with_user: TestClient):
+    c = client_with_user
+
+    r = c.post(
+        "/api/v1/watchlists/sources/test",
+        json={
+            "name": "Draft Site",
+            "url": "https://example.com/news",
+            "source_type": "site",
+            "settings": {
+                "scrape_rules": {
+                    "list_url": "https://example.com/news",
+                    "item_selector": "css:article",
+                    "link_xpath": "//*",
+                    "title_selector": "css:h2",
+                    "guid_xpath": ".//a/@href",
+                    "skip_article_fetch": True,
+                }
+            },
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    diagnostics = r.json().get("diagnostics") or {}
+    assert diagnostics.get("fetch_mode") == "scrape_rules"
+    assert diagnostics.get("dedupe_preview_key") == "guid_xpath"
+    assert any("link_xpath" in item for item in diagnostics.get("selector_errors", []))
+    assert "selector_warnings" in diagnostics
+
+
+def test_source_diagnostics_preserve_warning_detail_and_selector_identity():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import (
+        _format_selector_diagnostic,
+        _infer_source_dedupe_preview_key,
+    )
+
+    formatted = _format_selector_diagnostic(
+        {
+            "key": "title_selector",
+            "selector": "css:.xYz123abc",
+            "warning": "fragile_selector",
+            "detail": "fragile class 'xYz123abc'",
+        }
+    )
+
+    assert "fragile_selector" in formatted
+    assert "fragile class 'xYz123abc'" in formatted
+    assert _infer_source_dedupe_preview_key({"guid_selector": "css:.entry-id"}) == "guid_selector"
+    assert (
+        _infer_source_dedupe_preview_key(
+            {"alternates": [{"url_selector": "css:a::attr(href)"}]}
+        )
+        == "alternates.url_selector"
+    )

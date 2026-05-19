@@ -10,8 +10,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
@@ -74,6 +79,15 @@ class StorageQuotaSummaryResponse(BaseModel):
 
     total_quotas: int
     items: list[dict[str, Any]]
+    limit: int | None = Field(default=None, ge=1, description="Alias for pagination.limit")
+    offset: int | None = Field(default=None, ge=0, description="Alias for pagination.offset")
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return default_offset_pagination_aliases(self)
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +122,13 @@ async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
         repo = await _get_repo()
         # User-level quotas are on the users table; for org/team quotas
         # we would need the user's org_id. For now, return org-based status.
-        status = await repo.check_quota_status(org_id=user_id)
-        return StorageQuotaResponse(**status)
+        quota_status = await repo.check_quota_status(org_id=user_id)
+        return StorageQuotaResponse(**quota_status)
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to get storage quota for user {}: {}", user_id, exc)
+        logger.warning("Failed to get user storage quota")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve storage quota: {exc}",
+            detail="Failed to retrieve storage quota",
         ) from exc
 
 
@@ -141,10 +155,10 @@ async def update_user_storage_quota(
         )
         return result
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to update storage quota for user {}: {}", user_id, exc)
+        logger.warning("Failed to update user storage quota")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update storage quota: {exc}",
+            detail="Failed to update storage quota",
         ) from exc
 
 
@@ -165,10 +179,10 @@ async def get_org_storage_quota(org_id: int) -> StorageQuotaResponse:
         result = await repo.check_quota_status(org_id=org_id)
         return StorageQuotaResponse(**result)
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to get org storage quota for org {}: {}", org_id, exc)
+        logger.warning("Failed to get org storage quota")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve org storage quota: {exc}",
+            detail="Failed to retrieve org storage quota",
         ) from exc
 
 
@@ -192,10 +206,10 @@ async def update_org_storage_quota(
         )
         return result
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to update org storage quota for org {}: {}", org_id, exc)
+        logger.warning("Failed to update org storage quota")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update org storage quota: {exc}",
+            detail="Failed to update org storage quota",
         ) from exc
 
 
@@ -220,10 +234,11 @@ async def get_storage_quota_summary(
         return StorageQuotaSummaryResponse(
             total_quotas=len(items),
             items=items,
+            pagination=build_offset_pagination_meta(limit=limit, offset=offset, count=len(items)),
         )
     except _NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Failed to get storage quota summary: {}", exc)
+        logger.warning("Failed to get storage quota summary")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve storage quota summary: {exc}",
+            detail="Failed to retrieve storage quota summary",
         ) from exc

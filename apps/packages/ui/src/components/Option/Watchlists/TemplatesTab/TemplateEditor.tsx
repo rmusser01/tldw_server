@@ -14,6 +14,7 @@ import {
   message
 } from "antd"
 import { useTranslation } from "react-i18next"
+import { useWatchlistsStore } from "@/store/watchlists"
 import {
   composeWatchlistTemplateSection,
   createWatchlistTemplate,
@@ -28,7 +29,11 @@ import type {
   WatchlistTemplateCreate,
   WatchlistTemplateVersionSummary
 } from "@/types/watchlists"
-import { WatchlistsHelpTooltip } from "../shared"
+import {
+  buildWatchlistsModalChrome,
+  useWatchlistsViewport,
+  WatchlistsHelpTooltip
+} from "../shared"
 import { TemplateCodeEditor, type TemplateCodeEditorHandle } from "./TemplateCodeEditor"
 import { TemplateVariablesPanel } from "./TemplateVariablesPanel"
 import { TemplateSnippetPalette } from "./TemplateSnippetPalette"
@@ -74,6 +79,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
   const [loadingVersion, setLoadingVersion] = useState(false)
@@ -95,6 +101,11 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
   )
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 1200, {
+    maxHeight: "72vh",
+    overflowY: "auto"
+  })
 
   const isEditing = !!template
   const authoringContext = isEditing ? "edit" : "create"
@@ -245,8 +256,14 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       setAvailableRuns([])
       return
     }
-    fetchWatchlistRuns({ q: "completed", size: 20 })
+    let active = true
+    fetchWatchlistRuns({
+      watchlist_id: selectedWatchlistId ?? undefined,
+      q: "completed",
+      size: 20
+    })
       .then((res) => {
+        if (!active) return
         setAvailableRuns(
           (res.items || []).map((r) => ({
             id: r.id,
@@ -255,9 +272,14 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
         )
       })
       .catch(() => {
+        if (!active) return
         setAvailableRuns([])
       })
-  }, [open])
+
+    return () => {
+      active = false
+    }
+  }, [open, selectedWatchlistId])
 
   const handleLoadSelectedVersion = async () => {
     if (!template || !selectedVersion) return
@@ -693,7 +715,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       key: "docs",
       label: t("watchlists:templates.docs.tab", "Variables & Snippets"),
       children: (
-        <div className="grid grid-cols-2 gap-4" style={{ minHeight: 300 }}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2" style={{ minHeight: 300 }}>
           <div>
             <div className="text-xs font-semibold text-text-muted mb-2">{t("watchlists:templates.docs.variables", "Variables")}</div>
             <TemplateVariablesPanel onInsert={insertSnippet} />
@@ -719,9 +741,15 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
       }
       open={open}
       onCancel={() => onClose()}
-      width={1200}
+      data-testid="template-editor-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
       footer={
-        <Space>
+        <Space
+          wrap
+          className={isConstrained ? "w-full justify-end" : undefined}
+        >
           <Button onClick={() => onClose()}>
             {t("common:cancel", "Cancel")}
           </Button>
@@ -773,7 +801,7 @@ export const TemplateEditor: React.FC<TemplateEditorProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Form.Item
             name="name"
             label={t("watchlists:templates.fields.name", "Template Name")}

@@ -216,7 +216,15 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                         or "temp" in db_dir_lower
                         or "pytest" in db_dir_lower
                     ):
-                        migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
+                        migrations_dir = os.path.abspath(
+                            os.path.join(
+                                os.path.dirname(__file__),
+                                "..",
+                                "..",
+                                "..",
+                                "migrations",
+                            )
+                        )
                     migrator = DatabaseMigrator(db.db_path_str, migrations_dir=migrations_dir)
                     result = migrator.migrate_to_version(target_version)
 

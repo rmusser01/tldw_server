@@ -10,18 +10,23 @@ describe('MonitoringPageHeader', () => {
 
   it('renders heading content and refreshes on click', () => {
     const onRefresh = vi.fn();
+    const now = new Date();
 
     render(
       <MonitoringPageHeader
         lastUpdated={new Date('2026-03-01T10:15:00.000Z')}
         loading={false}
         onRefresh={onRefresh}
+        lastRefreshed={now}
+        autoRefreshEnabled
+        onAutoRefreshToggle={vi.fn()}
       />
     );
 
     expect(screen.getByRole('heading', { name: 'Monitoring' })).toBeInTheDocument();
     expect(screen.getByText('System health, metrics, and alerts')).toBeInTheDocument();
-    expect(screen.getByText(/Last updated:/)).toBeInTheDocument();
+    expect(screen.getByTestId('last-updated-label')).toBeInTheDocument();
+    expect(screen.getByTestId('auto-refresh-toggle')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledTimes(1);

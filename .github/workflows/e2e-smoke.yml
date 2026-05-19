@@ -31,6 +31,7 @@ jobs:
       EMBEDDINGS_REDIS_ALLOW_STUB: "1"
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
       SINGLE_USER_TEST_API_KEY: test-api-key-for-e2e-testing-12345
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
       # Avoid matplotlib cache permission issues during imports
       MPLCONFIGDIR: ${{ github.workspace }}/.mpl-cache
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -74,7 +75,14 @@ jobs:
 
       - name: Run critical e2e smoke tests (in-process)
         run: |
-          python -m pytest tldw_Server_API/tests/e2e/ --critical-only -q
+          python -m pytest \
+            -p pytest_asyncio.plugin \
+            -p tldw_Server_API.tests._plugins.e2e_fixtures \
+            -p tldw_Server_API.tests._plugins.e2e_state_fixtures \
+            -p tldw_Server_API.tests._plugins.media_fixtures \
+            -p tldw_Server_API.tests._plugins.postgres \
+            -p tldw_Server_API.tests.helpers.pgvector \
+            tldw_Server_API/tests/e2e/ --critical-only -q
 
       - name: Print server log (single-user)
         if: failure()
@@ -102,7 +110,16 @@ jobs:
           AUTH_MODE: multi_user
         shell: bash
         run: |
-          pytest -v -n 1 -m "multi_user and not jobs" --timeout=600 \
+          pytest -v -n 1 \
+            -p pytest_asyncio.plugin \
+            -p xdist.plugin \
+            -p pytest_timeout \
+            -p tldw_Server_API.tests._plugins.e2e_fixtures \
+            -p tldw_Server_API.tests._plugins.e2e_state_fixtures \
+            -p tldw_Server_API.tests._plugins.media_fixtures \
+            -p tldw_Server_API.tests._plugins.postgres \
+            -p tldw_Server_API.tests.helpers.pgvector \
+            -m "multi_user and not jobs" --timeout=600 \
             tldw_Server_API/tests/e2e/test_multi_user_onboarding.py
 
       - name: Stop server (multi-user)

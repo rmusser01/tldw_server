@@ -3,6 +3,9 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
+from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+    WebOutboundPolicyDecision,
+)
 
 
 def _allow_egress(monkeypatch):
@@ -125,4 +128,85 @@ async def test_best_first_path_depth_guard_is_relative_to_base_path(monkeypatch)
 
     assert base in urls
     assert allowed_child in urls
+    assert blocked_child not in urls
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_best_first_strict_policy_skips_candidate_on_robots_error(monkeypatch):
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scraper_mod
+
+    _allow_egress(monkeypatch)
+    scraper = EnhancedWebScraper(config={"web_scraper_respect_robots": True})
+
+    base = "http://example.com"
+    blocked_child = "http://example.com/blocked"
+
+    async def fake_scrape_multiple(urls, method="trafilatura", **kwargs):
+        return [
+            {
+                "url": u,
+                "content": "<html><body>ok</body></html>",
+                "extraction_successful": True,
+                "method": method,
+            }
+            for u in urls
+        ]
+
+    async def fake_extract_links(url, content):
+        if url == base:
+            return [blocked_child]
+        return []
+
+    def fake_sync_policy(*args, **kwargs):
+        return WebOutboundPolicyDecision(
+            allowed=True,
+            mode="strict",
+            reason="allowed",
+            stage=kwargs.get("stage", "pre_fetch"),
+            source=kwargs.get("source", "recursive_scrape"),
+        )
+
+    async def fake_policy(url, **kwargs):
+        if url == blocked_child:
+            return WebOutboundPolicyDecision(
+                allowed=False,
+                mode="strict",
+                reason="robots_unreachable",
+                stage=kwargs.get("stage", "discovery"),
+                source=kwargs.get("source", "recursive_scrape_candidate"),
+            )
+        return WebOutboundPolicyDecision(
+            allowed=True,
+            mode="strict",
+            reason="allowed",
+            stage=kwargs.get("stage", "discovery"),
+            source=kwargs.get("source", "recursive_scrape_candidate"),
+        )
+
+    monkeypatch.setattr(
+        scraper_mod,
+        "decide_web_outbound_policy_sync",
+        fake_sync_policy,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        scraper_mod,
+        "decide_web_outbound_policy",
+        fake_policy,
+        raising=False,
+    )
+    monkeypatch.setattr(scraper, "scrape_multiple", fake_scrape_multiple)
+    monkeypatch.setattr(scraper, "_extract_links", fake_extract_links)
+    monkeypatch.setattr(
+        scraper_mod.RobotsFilter,
+        "allowed",
+        lambda self, url: True,
+        raising=False,
+    )
+
+    res = await scraper.recursive_scrape(base_url=base, max_pages=5, max_depth=2)
+    urls = [r.get("url") for r in res]
+
+    assert base in urls
     assert blocked_child not in urls

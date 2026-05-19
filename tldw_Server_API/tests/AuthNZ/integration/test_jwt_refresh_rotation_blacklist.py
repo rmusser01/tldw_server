@@ -2,6 +2,7 @@ import asyncio
 import pytest
 from datetime import datetime, timedelta
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
@@ -47,3 +48,29 @@ async def test_refresh_rotates_and_blacklists_old_refresh(monkeypatch):
             break
         await asyncio.sleep(0.025)
     assert await bl.is_blacklisted(old_jti) is True
+
+
+@pytest.mark.asyncio
+async def test_refresh_rotation_raises_when_blacklist_persistence_fails(monkeypatch):
+    class _FailingBlacklist:
+        def hint_blacklisted(self, *_args, **_kwargs):
+            return None
+
+        async def is_blacklisted(self, *_args, **_kwargs):
+            return False
+
+        async def revoke_token(self, **_kwargs):
+            raise RuntimeError("simulated blacklist persistence failure")
+
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./Databases/users.db")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.token_blacklist.get_token_blacklist",
+        lambda: _FailingBlacklist(),
+    )
+
+    svc = _jwt()
+    refresh = svc.create_refresh_token(user_id=7, username="u7")
+
+    with pytest.raises(InvalidTokenError, match="rotation"):
+        await svc.refresh_access_token_async(refresh)

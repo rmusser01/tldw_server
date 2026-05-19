@@ -22,7 +22,6 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id_optional,
-    shutdown_all_audit_services,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
@@ -220,12 +219,14 @@ async def emit_memory_limit_exceeded_async(
     await _emit(None, UEvent.SYSTEM_ERROR, action="embeddings_memory_limit_exceeded", resource_type="embedding_model", resource_id=model_id, result="failure", metadata={"memory_usage_gb": memory_usage_gb, "current_usage_gb": current_usage_gb, "limit_gb": limit_gb})
 
 
+def shutdown_local_audit_adapter_loop() -> None:
+    """Shutdown the adapter-local sync loop."""
+    _stop_sync_loop()
+
+
 async def shutdown_audit_adapter_services() -> None:
-    """Shutdown shared audit services used by this adapter."""
-    try:
-        await shutdown_all_audit_services()
-    finally:
-        _stop_sync_loop()
+    """Backward-compatible async wrapper for adapter-local cleanup."""
+    shutdown_local_audit_adapter_loop()
 
 
 # Ensure services are shutdown at interpreter exit to avoid hanging tests
@@ -239,15 +240,7 @@ def _shutdown_on_exit() -> None:
                 logger.disable("tldw_Server_API.app.core.Embeddings.audit_adapter")
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             pass
-        # Prefer running in a fresh loop if no loop is running
-        try:
-            loop = asyncio.get_running_loop()
-            # Schedule but do not await; at exit there may be no time to run
-            with contextlib.suppress(RuntimeError, TypeError, ValueError):
-                loop.create_task(shutdown_audit_adapter_services())
-        except RuntimeError:
-            with contextlib.suppress(RuntimeError, TypeError, ValueError):
-                asyncio.run(shutdown_audit_adapter_services())
+        shutdown_local_audit_adapter_loop()
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
         pass
 

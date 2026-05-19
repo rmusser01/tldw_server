@@ -16,6 +16,11 @@ from loguru import logger
 from .base import BaseModule, HealthStatus, ModuleConfig, ModuleHealth
 
 
+def _exception_type_name(error: BaseException) -> str:
+    """Return safe exception metadata for logs without backend detail."""
+    return type(error).__name__
+
+
 class ModuleStatus(str, Enum):
     """Module registration status"""
     PENDING = "pending"
@@ -71,6 +76,34 @@ class ModuleRegistry:
 
         logger.info("Module registry initialized")
 
+    async def _snapshot_registrations(self) -> dict[str, ModuleRegistration]:
+        async with self._lock:
+            return dict(self._modules)
+
+    def _registration_status_payload(self, module_id: str, registration: ModuleRegistration) -> dict[str, Any]:
+        status = {
+            "module_id": module_id,
+            "status": registration.status.value,
+            "registered_at": registration.registered_at.isoformat(),
+            "last_health_check": registration.last_health_check.isoformat() if registration.last_health_check else None,
+            "error_message": registration.error_message,
+            "config": {
+                "name": registration.config.name,
+                "version": registration.config.version,
+                "enabled": registration.config.enabled,
+            },
+        }
+
+        if registration.module_instance:
+            metrics = registration.module_instance.get_metrics()
+            status["metrics"] = {
+                "total_requests": metrics.total_requests,
+                "error_rate": metrics.error_rate,
+                "avg_latency_ms": metrics.avg_latency_ms,
+            }
+
+        return status
+
     async def start_health_monitoring(self):
         """Start background health monitoring task"""
         # Allow restarting after shutdown/cancel
@@ -99,7 +132,7 @@ class ModuleRegistry:
                 await self.check_all_health()
                 await asyncio.sleep(self._health_check_interval)
             except Exception as e:
-                logger.error(f"Error in health monitor loop: {e}")
+                logger.error(f"Error in health monitor loop ({_exception_type_name(e)})")
                 await asyncio.sleep(10)  # Short delay on error
 
     async def register_module(
@@ -138,7 +171,7 @@ class ModuleRegistry:
             try:
                 await self._initialize_module(registration)
             except Exception as e:
-                logger.error(f"Failed to initialize module {module_id}: {e}")
+                logger.error(f"Failed to initialize module {module_id} ({_exception_type_name(e)})")
                 registration.status = ModuleStatus.ERROR
                 registration.error_message = str(e)
 
@@ -173,40 +206,59 @@ class ModuleRegistry:
             registration.last_health_check = datetime.now(timezone.utc)
 
         except Exception as e:
-            logger.error(f"Module initialization failed: {registration.module_id} - {e}")
+            logger.error(f"Module initialization failed: {registration.module_id} ({_exception_type_name(e)})")
             registration.status = ModuleStatus.ERROR
             registration.error_message = str(e)
             raise
 
-    async def _update_registries(self, module_id: str, module: BaseModule):
-        """Update tool/resource/prompt registries"""
+    async def _build_registry_mappings(
+        self,
+        module_id: str,
+        module: BaseModule,
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+        """Build tool/resource/prompt mappings for a module without mutating cache."""
+        tool_registry: dict[str, str] = {}
+        resource_registry: dict[str, str] = {}
+        prompt_registry: dict[str, str] = {}
+
+        tools = await module.get_tools()
+        for tool in tools:
+            tool_name = tool.get("name")
+            if tool_name:
+                tool_registry[tool_name] = module_id
+
+        resources = await module.get_resources()
+        for resource in resources:
+            resource_uri = resource.get("uri")
+            if resource_uri:
+                resource_registry[resource_uri] = module_id
+
+        prompts = await module.get_prompts()
+        for prompt in prompts:
+            prompt_name = prompt.get("name")
+            if prompt_name:
+                prompt_registry[prompt_name] = module_id
+
+        return tool_registry, resource_registry, prompt_registry
+
+    async def _update_registries(self, module_id: str, module: BaseModule) -> bool:
+        """Update tool/resource/prompt registries."""
         try:
-            # Register tools
-            tools = await module.get_tools()
-            for tool in tools:
-                tool_name = tool.get("name")
-                if tool_name:
-                    self._tool_registry[tool_name] = module_id
-                    logger.debug(f"Registered tool {tool_name} -> {module_id}")
-
-            # Register resources
-            resources = await module.get_resources()
-            for resource in resources:
-                resource_uri = resource.get("uri")
-                if resource_uri:
-                    self._resource_registry[resource_uri] = module_id
-                    logger.debug(f"Registered resource {resource_uri} -> {module_id}")
-
-            # Register prompts
-            prompts = await module.get_prompts()
-            for prompt in prompts:
-                prompt_name = prompt.get("name")
-                if prompt_name:
-                    self._prompt_registry[prompt_name] = module_id
-                    logger.debug(f"Registered prompt {prompt_name} -> {module_id}")
+            tools, resources, prompts = await self._build_registry_mappings(module_id, module)
+            self._tool_registry.update(tools)
+            self._resource_registry.update(resources)
+            self._prompt_registry.update(prompts)
+            for tool_name in tools:
+                logger.debug(f"Registered tool {tool_name} -> {module_id}")
+            for resource_uri in resources:
+                logger.debug(f"Registered resource {resource_uri} -> {module_id}")
+            for prompt_name in prompts:
+                logger.debug(f"Registered prompt {prompt_name} -> {module_id}")
+            return True
 
         except Exception as e:
-            logger.error(f"Failed to update registries for {module_id}: {e}")
+            logger.error(f"Failed to update registries for {module_id} ({_exception_type_name(e)})")
+            return False
 
     async def unregister_module(self, module_id: str) -> None:
         """Unregister a module"""
@@ -223,7 +275,7 @@ class ModuleRegistry:
                 try:
                     await registration.module_instance.shutdown()
                 except Exception as e:
-                    logger.error(f"Error shutting down module {module_id}: {e}")
+                    logger.error(f"Error shutting down module {module_id} ({_exception_type_name(e)})")
 
             # Remove from registries
             self._tool_registry = {k: v for k, v in self._tool_registry.items() if v != module_id}
@@ -250,9 +302,8 @@ class ModuleRegistry:
     async def get_all_modules(self) -> dict[str, BaseModule]:
         """Get all operational modules"""
         result = {}
-        async with self._lock:
-            registrations = list(self._modules.items())
-        for module_id, registration in registrations:
+        registrations = await self._snapshot_registrations()
+        for module_id, registration in registrations.items():
             if registration.is_operational() and registration.module_instance:
                 result[module_id] = registration.module_instance
         return result
@@ -263,7 +314,7 @@ class ModuleRegistry:
             module_id = self._tool_registry.get(tool_name)
         if module_id:
             module = await self.get_module(module_id)
-            if module is not None:
+            if module is not None and await module.has_tool(tool_name):
                 return module
             async with self._lock:
                 if self._tool_registry.get(tool_name) == module_id:
@@ -285,13 +336,44 @@ class ModuleRegistry:
         """Return module id mapped to a tool, if known."""
         return self._tool_registry.get(tool_name)
 
+    async def refresh_module_registries(self, module_id: str) -> bool:
+        """Rebuild cached tool/resource/prompt mappings for a registered module."""
+
+        async with self._lock:
+            registration = self._modules.get(module_id)
+            module = registration.module_instance if registration and registration.is_operational() else None
+            if module is None:
+                return False
+
+        try:
+            tools, resources, prompts = await self._build_registry_mappings(module_id, module)
+        except Exception as e:
+            logger.error(f"Failed to update registries for {module_id} ({_exception_type_name(e)})")
+            return False
+
+        async with self._lock:
+            current = self._modules.get(module_id)
+            if (
+                current is None
+                or not current.is_operational()
+                or current.module_instance is not module
+            ):
+                return False
+            self._tool_registry = {k: v for k, v in self._tool_registry.items() if v != module_id}
+            self._resource_registry = {k: v for k, v in self._resource_registry.items() if v != module_id}
+            self._prompt_registry = {k: v for k, v in self._prompt_registry.items() if v != module_id}
+            self._tool_registry.update(tools)
+            self._resource_registry.update(resources)
+            self._prompt_registry.update(prompts)
+        return True
+
     async def find_module_for_resource(self, uri: str) -> Optional[BaseModule]:
         """Find module that provides a specific resource"""
         async with self._lock:
             module_id = self._resource_registry.get(uri)
         if module_id:
             module = await self.get_module(module_id)
-            if module is not None:
+            if module is not None and await module.has_resource(uri):
                 return module
             async with self._lock:
                 if self._resource_registry.get(uri) == module_id:
@@ -319,7 +401,7 @@ class ModuleRegistry:
             module_id = self._prompt_registry.get(name)
         if module_id:
             module = await self.get_module(module_id)
-            if module is not None:
+            if module is not None and await module.has_prompt(name):
                 return module
             async with self._lock:
                 if self._prompt_registry.get(name) == module_id:
@@ -346,16 +428,26 @@ class ModuleRegistry:
         health_results = {}
 
         # Run health checks concurrently
-        tasks = {}
-        for module_id, registration in self._modules.items():
-            if registration.module_instance:
-                tasks[module_id] = registration.module_instance.health_check()
+        snapshot = await self._snapshot_registrations()
+        registrations = {
+            module_id: registration
+            for module_id, registration in snapshot.items()
+            if registration.module_instance is not None
+        }
+        tasks = {
+            module_id: registration.module_instance.health_check()
+            for module_id, registration in registrations.items()
+            if registration.module_instance is not None
+        }
 
         if tasks:
             results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
-            for module_id, result in zip(tasks.keys(), results):
-                registration = self._modules[module_id]
+            for module_id, result in zip(tasks.keys(), results, strict=True):
+                async with self._lock:
+                    registration = self._modules.get(module_id)
+                if registration is None:
+                    continue
 
                 if isinstance(result, Exception):
                     health_results[module_id] = ModuleHealth(
@@ -381,42 +473,19 @@ class ModuleRegistry:
 
     async def get_module_status(self, module_id: str) -> Optional[dict[str, Any]]:
         """Get detailed status for a module"""
-        registration = self._modules.get(module_id)
+        async with self._lock:
+            registration = self._modules.get(module_id)
         if not registration:
             return None
-
-        status = {
-            "module_id": module_id,
-            "status": registration.status.value,
-            "registered_at": registration.registered_at.isoformat(),
-            "last_health_check": registration.last_health_check.isoformat() if registration.last_health_check else None,
-            "error_message": registration.error_message,
-            "config": {
-                "name": registration.config.name,
-                "version": registration.config.version,
-                "enabled": registration.config.enabled
-            }
-        }
-
-        # Add metrics if available
-        if registration.module_instance:
-            metrics = registration.module_instance.get_metrics()
-            status["metrics"] = {
-                "total_requests": metrics.total_requests,
-                "error_rate": metrics.error_rate,
-                "avg_latency_ms": metrics.avg_latency_ms
-            }
-
-        return status
+        return self._registration_status_payload(module_id, registration)
 
     async def list_registrations(self) -> list[dict[str, Any]]:
         """List all module registrations"""
-        registrations = []
-
-        for module_id, _registration in self._modules.items():
-            registrations.append(await self.get_module_status(module_id))
-
-        return registrations
+        snapshot = await self._snapshot_registrations()
+        return [
+            self._registration_status_payload(module_id, registration)
+            for module_id, registration in snapshot.items()
+        ]
 
     async def shutdown_all(self) -> None:
         """Shutdown all modules gracefully"""
@@ -426,24 +495,28 @@ class ModuleRegistry:
         await self.stop_health_monitoring()
 
         # Shutdown modules concurrently
-        tasks = []
-        for _module_id, registration in self._modules.items():
-            if registration.module_instance:
-                tasks.append(registration.module_instance.shutdown())
+        snapshot = await self._snapshot_registrations()
+        shutdown_work = [
+            (module_id, registration.module_instance.shutdown())
+            for module_id, registration in snapshot.items()
+            if registration.module_instance
+        ]
+        tasks = [task for _module_id, task in shutdown_work]
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for module_id, result in zip(self._modules.keys(), results):
+            for (module_id, _task), result in zip(shutdown_work, results, strict=True):
                 if isinstance(result, Exception):
-                    logger.error(f"Error shutting down module {module_id}: {result}")
+                    logger.error(f"Error shutting down module {module_id} ({_exception_type_name(result)})")
 
         # Clear all registrations
-        self._modules.clear()
-        self._module_instances.clear()
-        self._tool_registry.clear()
-        self._resource_registry.clear()
-        self._prompt_registry.clear()
+        async with self._lock:
+            self._modules.clear()
+            self._module_instances.clear()
+            self._tool_registry.clear()
+            self._resource_registry.clear()
+            self._prompt_registry.clear()
 
         logger.info("All modules shut down")
 
@@ -479,7 +552,7 @@ class ModuleRegistry:
                 method = getattr(module, operation)
                 return await module.execute_with_circuit_breaker(method, *args, **kwargs)
             except Exception as e:
-                logger.warning(f"Primary module {primary_module_id} failed: {e}")
+                logger.warning(f"Primary module {primary_module_id} failed ({_exception_type_name(e)})")
                 errors.append((primary_module_id, str(e)))
 
         # Try fallback modules
@@ -490,7 +563,7 @@ class ModuleRegistry:
                     method = getattr(module, operation)
                     return await module.execute_with_circuit_breaker(method, *args, **kwargs)
                 except Exception as e:
-                    logger.warning(f"Fallback module {module_id} failed: {e}")
+                    logger.warning(f"Fallback module {module_id} failed ({_exception_type_name(e)})")
                     errors.append((module_id, str(e)))
 
         # All modules failed

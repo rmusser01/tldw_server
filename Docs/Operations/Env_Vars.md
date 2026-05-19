@@ -43,7 +43,27 @@ Operational notes:
 - If `CIRCUIT_BREAKER_HALF_OPEN_LEASE_TTL_SECONDS` is too high, abandoned probe slots take longer to self-heal; if too low, long-running probes can lose their lease before completion.
 
 ## OCR (PDF pipeline)
-- `OCR_PAGE_CONCURRENCY`: Per-page OCR concurrency (default `1`).
+- `OCR_PAGE_CONCURRENCY`: Global per-page OCR concurrency cap (default `1`). The PDF pipeline applies `min(OCR_PAGE_CONCURRENCY, backend profile max_page_concurrency)` before dispatching page OCR work.
+
+### Llama.cpp OCR
+- `LLAMACPP_OCR_MODE`: `auto|remote|managed|cli`.
+- `LLAMACPP_OCR_ALLOW_MANAGED_START`: `true|false`. Managed mode is single-process only in v1.
+- `LLAMACPP_OCR_AUTO_ELIGIBLE`: Enables participation in `auto` when the backend is configured and locally available.
+- `LLAMACPP_OCR_AUTO_HIGH_QUALITY_ELIGIBLE`: Enables participation in `auto_high_quality` when the backend is configured and locally available.
+- `LLAMACPP_OCR_MAX_PAGE_CONCURRENCY`: Backend-local per-page cap; defaults to `1` unless you raise it explicitly.
+- Remote: `LLAMACPP_OCR_HOST`, `LLAMACPP_OCR_PORT`, `LLAMACPP_OCR_MODEL_PATH`, `LLAMACPP_OCR_USE_DATA_URL`.
+- Managed: `LLAMACPP_OCR_ARGV`, `LLAMACPP_OCR_MODEL_PATH`, optional `LLAMACPP_OCR_HOST`, `LLAMACPP_OCR_PORT`, `LLAMACPP_OCR_STARTUP_TIMEOUT_SEC`. Managed startup in `auto` is preferred over `remote` when `LLAMACPP_OCR_ALLOW_MANAGED_START=true` and the managed profile is configured.
+- CLI: `LLAMACPP_OCR_ARGV`, `LLAMACPP_OCR_MODEL_PATH`.
+
+### ChatLLM OCR
+- `CHATLLM_OCR_MODE`: `auto|remote|managed|cli`.
+- `CHATLLM_OCR_ALLOW_MANAGED_START`: `true|false`. Managed mode is single-process only in v1.
+- `CHATLLM_OCR_AUTO_ELIGIBLE`: Enables participation in `auto` when the backend is configured and locally available.
+- `CHATLLM_OCR_AUTO_HIGH_QUALITY_ELIGIBLE`: Enables participation in `auto_high_quality` when the backend is configured and locally available.
+- `CHATLLM_OCR_MAX_PAGE_CONCURRENCY`: Backend-local per-page cap; defaults to `1` unless you raise it explicitly.
+- Remote: `CHATLLM_OCR_URL`, `CHATLLM_OCR_MODEL`, `CHATLLM_OCR_API_KEY`.
+- Managed: `CHATLLM_OCR_SERVER_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_HOST`, `CHATLLM_OCR_PORT`, `CHATLLM_OCR_STARTUP_TIMEOUT_SEC`, `CHATLLM_OCR_SERVER_ARGS_JSON`, `CHATLLM_OCR_HEALTHCHECK_URL`.
+- CLI: `CHATLLM_OCR_CLI_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_CLI_ARGS_JSON`.
 
 ### MinerU OCR
 - `MINERU_CMD`: Command used to launch MinerU for document-level PDF OCR. Defaults to `mineru`. The command is tokenized safely and executed without a shell.
@@ -509,6 +529,21 @@ Quick start (local dev):
 - Additional provider-specific variables as required by their APIs.
 - `OPENROUTER_MODEL_DISCOVERY_TTL_SECONDS`: TTL for cached OpenRouter `/models` discovery results used by `/api/v1/llm/models/metadata` (default `600`, minimum `30`). Use `refresh_openrouter=true` on the metadata endpoint to force an immediate refresh.
 
+### Custom OpenAI-Compatible Endpoints
+- `CUSTOM_OPENAI_API_IP`: Canonical base URL override for `custom-openai-api` (for example `http://127.0.0.1:8000/v1`). Overrides `[API] custom_openai_api_ip`.
+- `CUSTOM_OPENAI_API_BASE`: Alias for `CUSTOM_OPENAI_API_IP`, accepted for OpenAI-compatible naming compatibility.
+- `CUSTOM_OPENAI_API_URL`: Alias for `CUSTOM_OPENAI_API_IP`, accepted for OpenAI-compatible naming compatibility.
+- `CUSTOM_OPENAI_API_IP_1`: Backward-compatible alias for the first custom OpenAI-compatible endpoint.
+- `CUSTOM_OPENAI2_API_IP`: Canonical base URL override for `custom-openai-api-2`. Overrides `[API] custom_openai2_api_ip`.
+- `CUSTOM_OPENAI_API_IP_2`: Backward-compatible alias for the second custom OpenAI-compatible endpoint.
+- Additional accepted aliases: `CUSTOM_OPENAI_API_BASE_URL`, `CUSTOM_OPENAI_BASE_URL`, `CUSTOM_OPENAI2_API_BASE`, `CUSTOM_OPENAI2_API_URL`, `CUSTOM_OPENAI2_API_BASE_URL`, `CUSTOM_OPENAI2_BASE_URL`, `CUSTOM_OPENAI_API_2_IP`, `CUSTOM_OPENAI_API_2_BASE`, `CUSTOM_OPENAI_API_2_URL`, `CUSTOM_OPENAI_API_2_BASE_URL`, `CUSTOM_OPENAI_API_BASE_2`, `CUSTOM_OPENAI_API_URL_2`, `CUSTOM_OPENAI_API_BASE_URL_2`.
+- Provider-specific endpoint env vars only apply to their matching endpoint slot; provider-1 env vars do not override provider-2 `config.txt` settings.
+- Additional named endpoints are supported as `custom-openai-api-3` through `custom-openai-api-99`.
+  - Endpoint env aliases for endpoint `N`: `CUSTOM_OPENAI_API_IP_{N}`, `CUSTOM_OPENAI_API_BASE_{N}`, `CUSTOM_OPENAI_API_URL_{N}`, `CUSTOM_OPENAI_API_BASE_URL_{N}`, `CUSTOM_OPENAI{N}_API_IP`, `CUSTOM_OPENAI{N}_API_BASE`, `CUSTOM_OPENAI{N}_API_URL`, `CUSTOM_OPENAI{N}_API_BASE_URL`, `CUSTOM_OPENAI_API_{N}_IP`, `CUSTOM_OPENAI_API_{N}_BASE`, `CUSTOM_OPENAI_API_{N}_URL`, `CUSTOM_OPENAI_API_{N}_BASE_URL`.
+  - API key env aliases for endpoint `N`: `CUSTOM_OPENAI_API_KEY_{N}`, `CUSTOM_OPENAI{N}_API_KEY`, `CUSTOM_OPENAI_API_{N}_API_KEY`.
+  - Model env aliases for endpoint `N`: `CUSTOM_OPENAI_API_MODEL_{N}`, `CUSTOM_OPENAI{N}_API_MODEL`, `CUSTOM_OPENAI_API_{N}_MODEL`.
+  - Equivalent `config.txt` fields use either `custom_openaiN_api_*` or `custom_openai_api_N_*`; for example `custom_openai37_api_ip`, `custom_openai37_api_key`, `custom_openai37_api_model`.
+
 ### Qwen / Model Studio Routing
 - `QWEN_BASE_URL`: Overrides Qwen chat base URL directly (highest non-request precedence).
 - `QWEN_REGION`: Region preset for Qwen chat when `QWEN_BASE_URL` and `qwen_api.api_base_url` are unset (`sg|cn|us`).
@@ -575,6 +610,29 @@ Quick start (local dev):
 ## Notes
 - Many subsystems also support file-based configuration under `Config_Files/` and module-specific YAML files (e.g., TTS provider config). Environment variables always take precedence when present.
 
+## STT vNext Controls
+
+These settings back the canonical `get_stt_config()` loader and apply to REST `/api/v1/audio/transcriptions`, WS `/api/v1/audio/stream/transcribe`, and STT persistence paths.
+
+- `STT_WS_CONTROL_V2_ENABLED`: Enable explicit WS control v2 negotiation (`true|false`, default `false`). Config key: `[STT-Settings] ws_control_v2_enabled`.
+- `STT_PAUSED_AUDIO_QUEUE_CAP_SECONDS`: Paused-audio queue cap in seconds for WS control v2 (default `2.0`). Config key: `[STT-Settings] paused_audio_queue_cap_seconds`.
+- `STT_OVERFLOW_WARNING_INTERVAL_SECONDS`: Minimum interval between paused-queue overflow warnings (default `5.0`). Config key: `[STT-Settings] overflow_warning_interval_seconds`.
+- `STT_TRANSCRIPT_DIAGNOSTICS_ENABLED`: Emit deterministic final/full transcript diagnostics (`true|false`, default `false`). Config key: `[STT-Settings] transcript_diagnostics_enabled`.
+- `STT_DELETE_AUDIO_AFTER_SUCCESS`: Delete raw audio after successful transcription (`true|false`, default `true`). Legacy alias: `STT_DELETE_AUDIO_AFTER`. Config keys: `[STT-Settings] delete_audio_after_success` or `delete_audio_after`.
+- `STT_AUDIO_RETENTION_HOURS`: Default retained-audio TTL in hours (default `0.0`). Config key: `[STT-Settings] audio_retention_hours`.
+- `STT_REDACT_PII`: Enable transcript redaction (`true|false`, default `false`). Config key: `[STT-Settings] redact_pii`.
+- `STT_ALLOW_UNREDACTED_PARTIALS`: Allow unredacted partial WS frames when policy permits it (`true|false`, default `false`). Config key: `[STT-Settings] allow_unredacted_partials`.
+- `STT_REDACT_CATEGORIES`: Comma-separated or JSON list of redact categories. Config key: `[STT-Settings] redact_categories`.
+
+Policy precedence:
+- Multi-user mode: org STT settings override global defaults.
+- Single-user mode: global defaults only.
+- Request-level overrides may only be stricter than the effective policy.
+
+Operator notes:
+- Retention TTL is only meaningful when retained artifacts are indexed; otherwise `delete_audio_after_success=true` remains the safe default.
+- Org admins manage per-org policy with `GET/PATCH /api/v1/admin/orgs/{org_id}/stt/settings`.
+
 ## TTS Placeholder Handling (2026-03-02)
 - Legacy placeholder literals in `[TTS-Settings]` are now treated as unset during config load: empty string, `FIXME`, `TODO`, `TBD`, `CHANGE_ME`, `PLACEHOLDER`, `NONE`, `NULL`, `N/A`, `NA`.
 - When placeholders are encountered, safe defaults are applied:
@@ -602,6 +660,7 @@ Quick start (local dev):
   - `ENABLE_OTEL_LOGGING`: Enable OTEL logging integration (`true|false`, default `false`).
   - `ENABLE_OTEL_CONSOLE_METRICS_EXPORTER`: Add the console metrics exporter (`true|false`, default `false`).
   - `METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED`: Rolling metrics sample window size (default `10000`). Set `0` or a negative value for an unbounded buffer.
+  - `METRICS_CUMULATIVE_SERIES_MAX_PER_METRIC`: Hard cap for in-memory cumulative label sets per metric (default `10000`). New STT metric families rely on bounded-label mapping and this cap together.
   - `OTEL_METRICS_EXPORTER`: Comma list of metrics exporters (`prometheus` by default).
   - `OTEL_TRACES_EXPORTER`: Comma list of traces exporters (`console` by default).
 
@@ -632,6 +691,7 @@ Notes
 | `ENABLE_OTEL_LOGGING`           | `false`             | Enable OTEL logging integration |
 | `ENABLE_OTEL_CONSOLE_METRICS_EXPORTER` | `false`      | Add console metrics exporter |
 | `METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED` | `10000`    | Rolling metrics sample window size |
+| `METRICS_CUMULATIVE_SERIES_MAX_PER_METRIC` | `10000`   | Hard cap for cumulative label sets per metric |
 | `OTEL_METRICS_EXPORTER`         | `prometheus`        | Comma-separated exporters |
 | `OTEL_TRACES_EXPORTER`          | `console`           | Comma-separated exporters |
 | `PROMETHEUS_HOST`               | `0.0.0.0`           | Bind host for Prometheus exporter |

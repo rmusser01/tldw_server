@@ -110,6 +110,7 @@ class MediaRepository:
         if source_hash is not None:
             source_hash_str = str(source_hash).strip()
             source_hash_norm = source_hash_str if source_hash_str else None
+        owner_lookup_value = str(owner_user_id).strip() if owner_user_id is not None else None
         raw_url_input = str(url).strip() if url is not None else ""
         if raw_url_input:
             dedupe_url_candidates = media_dedupe_url_candidates(raw_url_input)
@@ -298,11 +299,19 @@ class MediaRepository:
                 )
 
                 if not row:
-                    row = _fetchone(
-                        "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
-                        "FROM Media WHERE content_hash = ? AND deleted = 0 LIMIT 1",
-                        (content_hash,),
-                    )
+                    if owner_lookup_value:
+                        row = _fetchone(
+                            "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 "
+                            "AND COALESCE(CAST(owner_user_id AS TEXT), client_id) = ? LIMIT 1",
+                            (content_hash, owner_lookup_value),
+                        )
+                    else:
+                        row = _fetchone(
+                            "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
+                            "FROM Media WHERE content_hash = ? AND deleted = 0 LIMIT 1",
+                            (content_hash,),
+                        )
 
                 if row:
                     media_id = row["id"]
@@ -322,6 +331,65 @@ class MediaRepository:
                                 f"Media content for ID {media_id} is identical. Updating metadata/chunks only."
                             )
 
+                            def _update_latest_document_version_metadata() -> bool:
+                                latest_version = _fetchone(
+                                    "SELECT id, uuid, version FROM DocumentVersions "
+                                    "WHERE media_id = ? AND deleted = 0 "
+                                    "ORDER BY version_number DESC LIMIT 1",
+                                    (media_id,),
+                                )
+                                if not latest_version:
+                                    return False
+
+                                update_fields: list[str] = []
+                                update_params: list[Any] = []
+                                payload_updates: dict[str, Any] = {"last_modified": now}
+
+                                if prompt is not None:
+                                    update_fields.append("prompt = ?")
+                                    update_params.append(prompt)
+                                    payload_updates["prompt"] = prompt
+                                if analysis_content is not None:
+                                    update_fields.append("analysis_content = ?")
+                                    update_params.append(analysis_content)
+                                    payload_updates["analysis_content"] = analysis_content
+                                if safe_metadata is not None:
+                                    update_fields.append("safe_metadata = ?")
+                                    update_params.append(safe_metadata)
+                                    payload_updates["safe_metadata"] = safe_metadata
+
+                                if not update_fields:
+                                    return False
+
+                                current_doc_version = int(latest_version.get("version") or 0)
+                                new_doc_version = current_doc_version + 1
+                                update_fields.extend(
+                                    ["last_modified = ?", "version = ?", "client_id = ?"]
+                                )
+                                update_params.extend([now, new_doc_version, client_id])
+                                update_sql = (
+                                    f"UPDATE DocumentVersions SET {', '.join(update_fields)} "  # nosec B608
+                                    "WHERE id = ? AND version = ?"
+                                )
+                                update_params.extend([latest_version["id"], current_doc_version])
+                                update_cursor = _exec(update_sql, tuple(update_params))
+                                if update_cursor.rowcount == 0:
+                                    raise ConflictError(  # noqa: TRY003, TRY301
+                                        f"DocumentVersions (identical content metadata update for media id={media_id})",
+                                        media_id,
+                                    )
+
+                                db._log_sync_event(
+                                    conn,
+                                    "DocumentVersions",
+                                    latest_version["uuid"],
+                                    "update",
+                                    new_doc_version,
+                                    payload_updates,
+                                )
+                                return True
+
+                            _update_latest_document_version_metadata()
                             db.update_keywords_for_media(media_id, keywords_norm, conn=conn)
                             _persist_chunks(conn, media_id)
 

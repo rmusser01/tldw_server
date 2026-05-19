@@ -122,7 +122,16 @@ async def emit_admin_event(
 # SSE Endpoint
 # ---------------------------------------------------------------------------
 
-@router.get("/events/stream")
+@router.get(
+    "/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Server-sent events stream for admin dashboard events",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
 async def admin_events_stream(
     request: Request,
     categories: str | None = Query(

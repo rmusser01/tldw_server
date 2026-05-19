@@ -464,6 +464,36 @@
   "flashcards_basics_quizContent": {
     "message": "Jump into Quiz mode from your selected deck to validate retention with assessments."
   },
+  "moderation_basics_label": {
+    "message": "Content Rules Basics"
+  },
+  "moderation_basics_description": {
+    "message": "Learn how to set up moderation policies, blocklists, overrides, and tests."
+  },
+  "moderation_basics_heroTitle": {
+    "message": "Content Rules"
+  },
+  "moderation_basics_heroContent": {
+    "message": "This is your rule configuration hub. The status badge shows whether your server is connected."
+  },
+  "moderation_basics_policyTitle": {
+    "message": "Policy & Settings"
+  },
+  "moderation_basics_policyContent": {
+    "message": "Start here. Set your base content safety policy — what categories to filter and how strictly."
+  },
+  "moderation_basics_blocklistTitle": {
+    "message": "Blocklist Studio"
+  },
+  "moderation_basics_blocklistContent": {
+    "message": "Add specific words, phrases, or patterns you want to always block or flag."
+  },
+  "moderation_basics_testTitle": {
+    "message": "Test Sandbox"
+  },
+  "moderation_basics_testContent": {
+    "message": "Try your rules in real time. Type a message and see whether it would be allowed or blocked."
+  },
   "worldBooks_basics_label": {
     "message": "World Books Basics"
   },
@@ -499,5 +529,131 @@
   },
   "worldBooks_basics_actionsContent": {
     "message": "Create a new world book or import an existing JSON bundle to seed your knowledge base."
+  },
+  "mcpHub_basics_label": {
+    "message": "MCP Hub Basics"
+  },
+  "mcpHub_basics_description": {
+    "message": "Learn how to browse tools, connect servers, and manage permissions."
+  },
+  "mcpHub_basics_welcomeTitle": {
+    "message": "Welcome to MCP Hub"
+  },
+  "mcpHub_basics_welcomeContent": {
+    "message": "MCP Hub manages external AI tools. Start here to see what tools are available and connect new servers."
+  },
+  "mcpHub_basics_catalogTitle": {
+    "message": "Tool Catalog"
+  },
+  "mcpHub_basics_catalogContent": {
+    "message": "Browse all registered tools here. Each tool shows its capabilities and risk level."
+  },
+  "mcpHub_basics_credentialsTitle": {
+    "message": "Servers & Credentials"
+  },
+  "mcpHub_basics_credentialsContent": {
+    "message": "Connect external MCP servers here. Each server provides additional tools for your AI assistant."
+  },
+  "mcpHub_basics_profilesTitle": {
+    "message": "Access Workflow"
+  },
+  "mcpHub_basics_profilesContent": {
+    "message": "Use Access to create profiles and assign which tools each user or persona can reach."
+  },
+  "mcpHub_basics_auditTitle": {
+    "message": "Governance Audit"
+  },
+  "mcpHub_basics_auditContent": {
+    "message": "Review policy findings and configuration issues across all your MCP Hub settings."
+  },
+  "quiz_basics_label": {
+    "message": "Quiz Basics"
+  },
+  "quiz_basics_description": {
+    "message": "Learn how to generate, take, and review quizzes from your media content."
+  },
+  "quiz_basics_tabsTitle": {
+    "message": "Quiz Playground"
+  },
+  "quiz_basics_tabsContent": {
+    "message": "The Quiz Playground has five tabs. Generate quizzes from your media, create them manually, take quizzes, manage your library, and review results."
+  },
+  "quiz_basics_generateTitle": {
+    "message": "Generate from Media"
+  },
+  "quiz_basics_generateContent": {
+    "message": "Start here. Select a video, article, or document from your media library, and the AI will generate quiz questions for you."
+  },
+  "quiz_basics_createTitle": {
+    "message": "Create Manually"
+  },
+  "quiz_basics_createContent": {
+    "message": "Prefer to write your own? Create quizzes with multiple choice, true/false, fill-in-the-blank, and matching questions."
+  },
+  "quiz_basics_takeTitle": {
+    "message": "Take a Quiz"
+  },
+  "quiz_basics_takeContent": {
+    "message": "Once you have quizzes, come here to take them. Your answers are saved and scored automatically."
+  },
+  "quiz_basics_resultsTitle": {
+    "message": "Review Results"
+  },
+  "quiz_basics_resultsContent": {
+    "message": "See your scores, review incorrect answers, and track your progress over time."
+  },
+  "watchlists_basics_label": {
+    "message": "Watchlists Basics"
+  },
+  "watchlists_basics_description": {
+    "message": "Learn how to add feeds, create monitors, and review collected articles"
+  },
+  "watchlists_basics_setupTitle": {
+    "message": "Quick Setup"
+  },
+  "watchlists_basics_setupContent": {
+    "message": "Start here to add your first feed and create a monitor. The guided setup walks you through it step by step."
+  },
+  "watchlists_basics_feedsTitle": {
+    "message": "Add Feeds"
+  },
+  "watchlists_basics_feedsContent": {
+    "message": "Feeds are sources like RSS feeds or websites that your monitors check for new content."
+  },
+  "watchlists_basics_monitorsTitle": {
+    "message": "Create Monitors"
+  },
+  "watchlists_basics_monitorsContent": {
+    "message": "Monitors run on a schedule to fetch and process content from your feeds. Choose a preset schedule like daily or hourly."
+  },
+  "watchlists_basics_articlesTitle": {
+    "message": "Review Articles"
+  },
+  "watchlists_basics_articlesContent": {
+    "message": "Articles are collected content from successful monitor runs. Switch to the Articles tab to browse and read them."
+  },
+  "monitoring_basics_label": {
+    "message": "Monitoring Basics"
+  },
+  "monitoring_basics_description": {
+    "message": "Learn how to monitor server health and set up alert rules"
+  },
+  "monitoring_basics_overviewTitle": {
+    "message": "System Overview"
+  },
+  "monitoring_basics_overviewContent": {
+    "message": "This section shows your server's current health metrics and security status. Use the refresh button or enable auto-refresh to keep it up to date."
+  },
+  "monitoring_basics_createRuleTitle": {
+    "message": "Create Alert Rules"
+  },
+  "monitoring_basics_createRuleContent": {
+    "message": "Set up rules to be notified when metrics cross thresholds. Pick a metric name, set a threshold and duration, then choose a severity level."
+  },
+  "monitoring_basics_historyTitle": {
+    "message": "Alert History"
+  },
+  "monitoring_basics_historyContent": {
+    "message": "When alerts trigger, they appear here. You can assign alerts to yourself, snooze them, or escalate to critical."
   }
 }

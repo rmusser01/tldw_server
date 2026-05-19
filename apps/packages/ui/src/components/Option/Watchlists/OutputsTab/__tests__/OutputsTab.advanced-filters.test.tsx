@@ -53,9 +53,9 @@ vi.mock("antd", () => {
   const Table = ({ dataSource = [] }: any) => (
     <div data-testid="outputs-table-rows">{dataSource.length}</div>
   )
-  const Alert = ({ message, description, action, ...rest }: any) => (
+  const Alert = ({ title, message, description, action, ...rest }: any) => (
     <div data-testid={rest["data-testid"] || "outputs-alert"}>
-      <div>{message}</div>
+      <div>{title ?? message}</div>
       <div>{description}</div>
       {action}
     </div>

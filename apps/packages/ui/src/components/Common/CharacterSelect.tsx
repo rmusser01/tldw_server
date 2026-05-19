@@ -1534,7 +1534,7 @@ export const CharacterSelect: React.FC<Props> = ({
       >
         {t(
           "playground:composer.actorTitle",
-          "Scene Director (Actor)"
+          "Optional scene context"
         ) as string}
       </button>
     ),

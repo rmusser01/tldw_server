@@ -6,6 +6,7 @@ export const SKILLS_PATH = "/skills"
 export const PERSONA_DOCK_PATH = "/persona"
 export const COMPANION_PATH = "/companion"
 export const COMPANION_CONVERSATION_PATH = "/companion/conversation"
+export const CLIPPER_PATH = "/clipper"
 
 export const isGuardianSettingsAvailable = (
   capabilities: ServerCapabilities | null | undefined
@@ -31,6 +32,10 @@ export const isCompanionConversationAvailable = (
   capabilities: ServerCapabilities | null | undefined
 ): boolean => Boolean(capabilities?.hasPersonalization && capabilities?.hasPersona)
 
+export const isClipperAvailable = (
+  capabilities: ServerCapabilities | null | undefined
+): boolean => Boolean(capabilities?.hasWebClipper)
+
 export const isRouteEnabledForCapabilities = (
   routePath: string,
   capabilities: ServerCapabilities | null | undefined
@@ -52,6 +57,9 @@ export const isRouteEnabledForCapabilities = (
   }
   if (routePath === COMPANION_CONVERSATION_PATH) {
     return isCompanionConversationAvailable(capabilities)
+  }
+  if (routePath === CLIPPER_PATH) {
+    return isClipperAvailable(capabilities)
   }
   return true
 }

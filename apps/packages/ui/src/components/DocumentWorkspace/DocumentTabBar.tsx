@@ -91,8 +91,12 @@ const DocumentTab: React.FC<DocumentTabProps> = ({
  * - Horizontal scrolling when many documents are open
  * - Keyboard navigation support
  */
-export const DocumentTabBar: React.FC<{ onOpenPicker?: () => void }> = ({
-  onOpenPicker
+export const DocumentTabBar: React.FC<{
+  onOpenPicker?: () => void
+  onCloseDocument?: (id: number) => void
+}> = ({
+  onOpenPicker,
+  onCloseDocument
 }) => {
   const { t } = useTranslation(["option", "common"])
   const tabsContainerRef = useRef<HTMLDivElement>(null)
@@ -120,8 +124,12 @@ export const DocumentTabBar: React.FC<{ onOpenPicker?: () => void }> = ({
 
   const handleCloseDocument = useCallback((e: React.MouseEvent, id: number) => {
     e.stopPropagation()
-    closeDocument(id)
-  }, [closeDocument])
+    if (onCloseDocument) {
+      onCloseDocument(id)
+    } else {
+      closeDocument(id)
+    }
+  }, [closeDocument, onCloseDocument])
 
   // Keyboard navigation between tabs
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

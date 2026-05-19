@@ -1,10 +1,21 @@
 import { useQuery } from "@tanstack/react-query"
+import React from "react"
 import { Link } from "react-router-dom"
+import { browser } from "wxt/browser"
 
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { useSafeDemoMode } from "@/context/demo-mode"
 import { fetchChatModels } from "@/services/tldw-server"
+import { StorageQuotaBanner } from "@/components/Common/StorageQuotaBanner"
 import { CompanionHomePage } from "./CompanionHomePage"
+
+type QuickAction = {
+  href: string
+  label: string
+  description: string
+  /** When true, opens options.html at the given hash route in a new tab. */
+  external?: boolean
+}
 
 type CompanionHomeShellProps = {
   surface: "options" | "sidepanel"
@@ -27,7 +38,7 @@ export function CompanionHomeShell({
   })
   const needsProvider = isConnected && !demoEnabled && models.length === 0
 
-  const actions =
+  const actions: QuickAction[] =
     surface === "sidepanel"
       ? [
           {
@@ -39,6 +50,18 @@ export function CompanionHomeShell({
             href: "/settings",
             label: "Open Settings",
             description: "Adjust connection and sidepanel behavior."
+          },
+          {
+            href: "/media",
+            label: "Open Media Library",
+            description: "Browse and manage your ingested media collection.",
+            external: true
+          },
+          {
+            href: "/quiz",
+            label: "Open Quizzes",
+            description: "Review and take quizzes generated from your content.",
+            external: true
           }
         ]
       : [
@@ -58,6 +81,17 @@ export function CompanionHomeShell({
             description: "Review and compare media from the main workspace."
           }
         ]
+
+  const openOptionsRoute = React.useCallback((hash: string) => {
+    const url = browser.runtime.getURL(`/options.html#${hash}`)
+    if (browser.tabs?.create) {
+      browser.tabs.create({ url }).catch(() => {
+        window.open(url, "_blank", "noopener,noreferrer")
+      })
+      return
+    }
+    window.open(url, "_blank", "noopener,noreferrer")
+  }, [])
 
   return (
     <section
@@ -107,6 +141,8 @@ export function CompanionHomeShell({
         </div>
       )}
 
+      {!demoEnabled && <StorageQuotaBanner />}
+
       <CompanionHomePage
         onPersonalizationEnabled={onPersonalizationEnabled}
         surface={surface}
@@ -120,17 +156,38 @@ export function CompanionHomeShell({
           </p>
         </div>
         <div className="grid gap-3 pt-4 sm:grid-cols-2 xl:grid-cols-3" data-testid="companion-home-quick-actions">
-          {actions.map((action) => (
-            <Link
-              key={action.href}
-              to={action.href}
-              data-testid={`companion-home-action-${action.href.replace(/\//g, "-").replace(/^-/, "")}`}
-              className="rounded-2xl border border-border bg-bg/60 px-4 py-4 transition-colors hover:border-primary/40 hover:bg-primary/5"
-            >
-              <div className="text-sm font-semibold text-text">{action.label}</div>
-              <p className="mt-2 text-sm leading-6 text-text-muted">{action.description}</p>
-            </Link>
-          ))}
+          {actions.map((action) => {
+            const testId = `companion-home-action-${action.href.replace(/\//g, "-").replace(/^-/, "")}`
+            const cardClass =
+              "rounded-2xl border border-border bg-bg/60 px-4 py-4 transition-colors hover:border-primary/40 hover:bg-primary/5 text-left"
+
+            if (action.external) {
+              return (
+                <button
+                  key={action.href}
+                  type="button"
+                  onClick={() => openOptionsRoute(action.href)}
+                  data-testid={testId}
+                  className={cardClass}
+                >
+                  <div className="text-sm font-semibold text-text">{action.label}</div>
+                  <p className="mt-2 text-sm leading-6 text-text-muted">{action.description}</p>
+                </button>
+              )
+            }
+
+            return (
+              <Link
+                key={action.href}
+                to={action.href}
+                data-testid={testId}
+                className={cardClass}
+              >
+                <div className="text-sm font-semibold text-text">{action.label}</div>
+                <p className="mt-2 text-sm leading-6 text-text-muted">{action.description}</p>
+              </Link>
+            )
+          })}
         </div>
       </div>
     </section>

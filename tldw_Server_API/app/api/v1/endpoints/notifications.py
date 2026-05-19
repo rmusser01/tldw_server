@@ -12,8 +12,10 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, rbac_rate_limit
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
+    NotificationCancelSnoozeResponse,
     NotificationDismissResponse,
     NotificationPreferencesResponse,
     NotificationPreferencesUpdateRequest,
@@ -27,7 +29,10 @@ from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_CONTROL, NOTIFICATIONS_READ
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, UserNotificationRow
-from tldw_Server_API.app.core.Reminders.reminders_service import RemindersService
+from tldw_Server_API.app.core.Reminders.reminders_service import (
+    NotificationSnoozeMatch,
+    RemindersService,
+)
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.services.reminders_scheduler import get_reminders_scheduler
 
@@ -51,16 +56,22 @@ _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS = (
 async def _reconcile_snooze_task_best_effort(*, task_id: str, user_id: int) -> None:
     try:
         await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
-    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(
-            "notifications snooze reconcile_task failed task_id={} user_id={} error={}",
-            task_id,
-            user_id,
-            exc,
-        )
+    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+        logger.warning("notifications snooze reconcile_task failed")
 
 
-def _notification_to_response(row: UserNotificationRow) -> NotificationResponse:
+async def _unschedule_snooze_task_best_effort(*, task_id: str) -> None:
+    try:
+        await get_reminders_scheduler().unschedule_task(task_id=task_id)
+    except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+        logger.warning("notifications snooze unschedule_task failed")
+
+
+def _notification_to_response(
+    row: UserNotificationRow,
+    *,
+    snooze_until: str | None = None,
+) -> NotificationResponse:
     return NotificationResponse(
         id=row.id,
         user_id=row.user_id,
@@ -82,6 +93,7 @@ def _notification_to_response(row: UserNotificationRow) -> NotificationResponse:
         created_at=row.created_at,
         read_at=row.read_at,
         dismissed_at=row.dismissed_at,
+        snooze_until=snooze_until,
     )
 
 
@@ -146,13 +158,37 @@ async def list_notifications(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     include_archived: bool = Query(False),
+    only_snoozed: bool = Query(False),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationsListResponse:
     """List notifications for the authenticated user."""
 
-    rows = db.list_user_notifications(include_archived=include_archived, limit=limit, offset=offset)
-    return NotificationsListResponse(items=[_notification_to_response(row) for row in rows], total=len(rows))
+    rows: list[UserNotificationRow]
+    total: int
+    snooze_matches: dict[int, NotificationSnoozeMatch] = {}
+    service = RemindersService(user_id=db.user_id, collections_db=db)
+    if only_snoozed:
+        rows, snooze_matches, total = service.list_snoozed_notifications(limit=limit, offset=offset)
+    else:
+        rows = db.list_user_notifications(include_archived=include_archived, limit=limit, offset=offset)
+        total = db.count_user_notifications(include_archived=include_archived)
+        if include_archived and rows:
+            snooze_matches = service.list_notification_snoozes(notifications=rows)
+    pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(rows))
+    return NotificationsListResponse(
+        items=[
+            _notification_to_response(
+                row,
+                snooze_until=snooze_matches.get(row.id).run_at if row.id in snooze_matches else None,
+            )
+            for row in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 @router.get(
@@ -162,7 +198,7 @@ async def list_notifications(
 )
 async def unread_count(
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationsUnreadCountResponse:
     """Return unread notification count for the authenticated user."""
 
@@ -177,7 +213,7 @@ async def unread_count(
 async def mark_read(
     payload: NotificationsMarkReadRequest,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationsMarkReadResponse:
     """Mark one or more notifications as read."""
 
@@ -193,7 +229,7 @@ async def mark_read(
 async def dismiss_notification(
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationDismissResponse:
     """Dismiss a notification from the active inbox view."""
 
@@ -209,7 +245,7 @@ async def snooze_notification(
     payload: NotificationSnoozeRequest,
     notification_id: int = Path(..., ge=1),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationSnoozeResponse:
     """Create a one-time reminder derived from an existing notification."""
 
@@ -227,6 +263,33 @@ async def snooze_notification(
     return NotificationSnoozeResponse(task_id=task.id, run_at=task.run_at)
 
 
+@router.delete(
+    "/{notification_id}/snooze",
+    response_model=NotificationCancelSnoozeResponse,
+    dependencies=[Depends(rbac_rate_limit("notifications.control"))],
+)
+async def cancel_notification_snooze(
+    notification_id: int = Path(..., ge=1),
+    db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
+) -> NotificationCancelSnoozeResponse:
+    """Cancel any active snooze reminder derived from an existing notification."""
+
+    service = RemindersService(user_id=db.user_id, collections_db=db)
+    try:
+        deleted_task_ids = service.cancel_notification_snooze(notification_id=notification_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="notification_not_found") from exc
+
+    for task_id in deleted_task_ids:
+        await _unschedule_snooze_task_best_effort(task_id=task_id)
+
+    return NotificationCancelSnoozeResponse(
+        cancelled=bool(deleted_task_ids),
+        deleted_tasks=len(deleted_task_ids),
+    )
+
+
 @router.get(
     "/preferences",
     response_model=NotificationPreferencesResponse,
@@ -234,7 +297,7 @@ async def snooze_notification(
 )
 async def get_preferences(
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> NotificationPreferencesResponse:
     """Fetch notification preference flags for the current user."""
 
@@ -256,7 +319,7 @@ async def get_preferences(
 async def patch_preferences(
     payload: NotificationPreferencesUpdateRequest,
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_CONTROL)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_CONTROL)),  # noqa: B008
 ) -> NotificationPreferencesResponse:
     """Update notification preference flags for the current user."""
 
@@ -276,13 +339,22 @@ async def patch_preferences(
 
 @router.get(
     "/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "Notification event stream.",
+            "content": {
+                "text/event-stream": {},
+            },
+        },
+    },
     dependencies=[Depends(rbac_rate_limit("notifications.read"))],
 )
 async def stream_notifications(
     after: int = Query(0, ge=0),
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
     db: CollectionsDatabase = Depends(get_collections_db_for_user),
-    _principal=Depends(require_permissions(NOTIFICATIONS_READ)),  # noqa: B008
+    _principal=Depends(RequirePermission(NOTIFICATIONS_READ)),  # noqa: B008
 ) -> StreamingResponse:
     """Stream live notification events via Server-Sent Events."""
 
@@ -310,7 +382,7 @@ async def stream_notifications(
             await asyncio.wait_for(stream.send_event(event, payload, event_id=event_id), timeout=send_timeout_s)
             return True
         except asyncio.TimeoutError:
-            logger.warning("notifications stream send timeout for event={}", event)
+            logger.warning("notifications stream send timeout")
             with contextlib.suppress(_NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS):
                 await stream.done(force=True)
             return False
@@ -380,8 +452,8 @@ async def stream_notifications(
                         await asyncio.sleep(poll_interval_s)
             except (asyncio.CancelledError, GeneratorExit):
                 break
-            except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning("notifications stream loop error: {}", exc)
+            except _NOTIFICATIONS_STREAM_NONCRITICAL_EXCEPTIONS:
+                logger.warning("notifications stream loop error")
                 await asyncio.sleep(poll_interval_s)
 
     async def _gen() -> AsyncGenerator[str, None]:

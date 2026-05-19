@@ -302,6 +302,7 @@ export const QuizRemediationPanel: React.FC<QuizRemediationPanelProps> = ({
               availableActions={assistantQuery.data?.available_actions ?? [...DEFAULT_AVAILABLE_ACTIONS]}
               isLoading={assistantQuery.isLoading}
               isError={assistantQuery.isError}
+              queryError={assistantQuery.error}
               isResponding={assistantRespondMutation.isPending}
               onReloadContext={() => assistantQuery.refetch()}
               onRespond={handleAssistantRespond}

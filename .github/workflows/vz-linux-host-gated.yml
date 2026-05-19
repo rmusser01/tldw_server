@@ -1,0 +1,115 @@
+name: VZ Linux Host-Gated Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_path:
+        description: Path to the canonical vz_linux bundle on the self-hosted runner
+        required: false
+        type: string
+      entitlements_path:
+        description: Optional helper entitlements plist path on the self-hosted runner
+        required: false
+        type: string
+      skip_sign:
+        description: Skip ad hoc helper signing
+        required: false
+        default: false
+        type: boolean
+      include_failure_drills:
+        description: Run manual-only VZ Linux failure recovery drills
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '17 10 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vz-linux-host-gated-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  vz-linux-host-gated-smoke:
+    name: VZ Linux real execution smoke
+    if: ${{ (github.event_name == 'workflow_dispatch' || vars.TLDW_SANDBOX_VZ_LINUX_HOST_GATED_NIGHTLY == '1') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+    runs-on: [self-hosted, macOS, ARM64, vz-linux]
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: .
+      TEST_MODE: '0'
+      TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH: ${{ inputs.bundle_path || vars.TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH }}
+      TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH: ${{ inputs.entitlements_path || vars.TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH }}
+      TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN: ${{ inputs.skip_sign == null && (vars.TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN || 'false') || inputs.skip_sign }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Verify prepared Apple Silicon host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+          command -v swift
+          xcrun --find codesign
+          if [[ -z "${TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH:-}" ]]; then
+            echo "Set workflow input bundle_path or repository variable TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" >&2
+            exit 1
+          fi
+          if [[ ! -d "${TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH}" ]]; then
+            echo "Bundle path does not exist or is not a directory: ${TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH}" >&2
+            exit 1
+          fi
+
+      - name: Setup Python and deps
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.12'
+          use-uv: 'true'
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Run managed host smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_dir="${RUNNER_TEMP}/tldw-vz-helper-ci"
+          rm -rf "${runtime_dir}"
+          mkdir -p "${runtime_dir}/serial"
+          chmod 700 "${runtime_dir}"
+          chmod 700 "${runtime_dir}/serial"
+
+          args=(
+            --bundle "${TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH}"
+            --socket "${runtime_dir}/helper.sock"
+            --serial-log-dir "${runtime_dir}/serial"
+            --python "$(command -v python)"
+          )
+          if [[ -n "${TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH:-}" ]]; then
+            args+=(--entitlements "${TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH}")
+          fi
+          case "${TLDW_SANDBOX_VZ_HELPER_SKIP_SIGN:-false}" in
+            1|true|TRUE|True|yes|YES|Yes)
+              args+=(--skip-sign)
+              ;;
+          esac
+          case "${{ inputs.include_failure_drills || false }}" in
+            1|true|TRUE|True|yes|YES|Yes)
+              args+=(--include-failure-drills)
+              ;;
+          esac
+
+          bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh "${args[@]}"
+
+      - name: Upload helper logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vz-linux-host-gated-helper-logs
+          path: ${{ runner.temp }}/tldw-vz-helper-ci/**
+          if-no-files-found: ignore

@@ -3,6 +3,7 @@
 import React, { Component, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, RefreshCw, Home, ChevronDown, ChevronUp } from 'lucide-react';
+import { logger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -51,8 +52,8 @@ class ErrorBoundaryBase extends Component<ErrorBoundaryProps, ErrorBoundaryState
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     this.setState({ errorInfo });
 
-    // Log error to console
-    console.error('Error Boundary caught an error:', error, errorInfo);
+    // Log error
+    logger.error('Error Boundary caught an error', { component: 'ErrorBoundary', error: error.message, componentStack: errorInfo?.componentStack ?? undefined });
 
     // Call optional error handler
     if (this.props.onError) {
@@ -248,7 +249,7 @@ export function PageErrorBoundary({ children }: { children: ReactNode }) {
     <ErrorBoundary
       onError={(error) => {
         // Could send to error reporting service here
-        console.error('Page error:', error.message);
+        logger.error('Page error', { component: 'PageErrorBoundary', error: error.message });
       }}
     >
       {children}
@@ -274,7 +275,7 @@ export function CardErrorBoundary({
     <ErrorBoundary
       onReload={handleReload}
       onError={(error) => {
-        console.error('Card section error:', error.message);
+        logger.error('Card section error', { component: 'CardErrorBoundary', error: error.message });
       }}
       fallback={
         <Card className="border-destructive/50">

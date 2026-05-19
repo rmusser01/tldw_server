@@ -355,6 +355,279 @@ class VoiceCommandRouter:
             include_disabled=include_disabled,
         )
 
+    # ------------------------------------------------------------------
+    # Dry-run validation (REVIEW.md 4.12)
+    # ------------------------------------------------------------------
+
+    async def validate_command_config(
+        self,
+        command: "VoiceCommand",
+        *,
+        db: Optional[Any] = None,
+        persona_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Validate a voice command's action config without executing anything.
+
+        Returns a list of step dicts, each with keys: name, passed, message, details.
+        """
+        from .schemas import ActionType  # already imported at module level, but explicit
+
+        steps: list[dict[str, Any]] = []
+
+        # ---- Step 1: config_schema -- basic structural checks ----
+        steps.append(self._validate_config_schema(command))
+
+        # ---- Step 2: action_target -- does the referenced target exist? ----
+        target_step = await self._validate_action_target(command, db=db, persona_id=persona_id)
+        steps.append(target_step)
+
+        # ---- Step 3: phrases -- at least one non-empty phrase ----
+        steps.append(self._validate_phrases(command))
+
+        return steps
+
+    @staticmethod
+    def _validate_phrases(command: "VoiceCommand") -> dict[str, Any]:
+        """Validate that at least one non-blank phrase is configured."""
+        non_empty = [p for p in (command.phrases or []) if p.strip()]
+        if non_empty:
+            return {
+                "name": "phrases",
+                "passed": True,
+                "message": f"{len(non_empty)} trigger phrase(s) configured",
+                "details": None,
+            }
+        return {
+            "name": "phrases",
+            "passed": False,
+            "message": "No trigger phrases configured",
+            "details": None,
+        }
+
+    @staticmethod
+    def _validate_config_schema(command: "VoiceCommand") -> dict[str, Any]:
+        """Check that the action_config contains the required keys for its action_type."""
+        action_type = command.action_type
+        config = command.action_config or {}
+
+        if action_type == ActionType.MCP_TOOL:
+            if not config.get("tool_name"):
+                return {
+                    "name": "config_schema",
+                    "passed": False,
+                    "message": "Missing required field 'tool_name' in action_config for mcp_tool action",
+                    "details": {"required_fields": ["tool_name"]},
+                }
+        elif action_type == ActionType.WORKFLOW:
+            has_id = bool(config.get("workflow_id"))
+            has_template = bool(config.get("workflow_template"))
+            has_definition = bool(config.get("workflow_definition"))
+            if not (has_id or has_template or has_definition):
+                return {
+                    "name": "config_schema",
+                    "passed": False,
+                    "message": "Workflow action requires 'workflow_id', 'workflow_template', or 'workflow_definition' in action_config",
+                    "details": {"required_one_of": ["workflow_id", "workflow_template", "workflow_definition"]},
+                }
+        elif action_type == ActionType.CUSTOM:
+            if not config.get("action"):
+                return {
+                    "name": "config_schema",
+                    "passed": False,
+                    "message": "Missing required field 'action' in action_config for custom action",
+                    "details": {"required_fields": ["action"]},
+                }
+        # LLM_CHAT has no required config keys
+
+        return {
+            "name": "config_schema",
+            "passed": True,
+            "message": f"Action config is well-formed for '{action_type.value}'",
+            "details": None,
+        }
+
+    async def _validate_action_target(
+        self,
+        command: "VoiceCommand",
+        *,
+        db: Optional[Any] = None,
+        persona_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Check whether the referenced action target (tool, workflow, handler) exists."""
+        action_type = command.action_type
+        config = command.action_config or {}
+
+        if action_type == ActionType.MCP_TOOL:
+            return await self._validate_mcp_tool_exists(config)
+
+        if action_type == ActionType.WORKFLOW:
+            return self._validate_workflow_target_exists(config)
+
+        if action_type == ActionType.CUSTOM:
+            return self._validate_custom_handler_exists(config, command=command, db=db, persona_id=persona_id)
+
+        if action_type == ActionType.LLM_CHAT:
+            return {
+                "name": "action_target",
+                "passed": True,
+                "message": "LLM chat actions use the default LLM provider (no specific target to validate)",
+                "details": None,
+            }
+
+        return {
+            "name": "action_target",
+            "passed": False,
+            "message": f"Unknown action type: {action_type}",
+            "details": None,
+        }
+
+    async def _validate_mcp_tool_exists(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Check whether an MCP tool name resolves to an available tool."""
+        tool_name = config.get("tool_name", "")
+        if not tool_name:
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": "No tool_name specified",
+                "details": None,
+            }
+        try:
+            from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+            protocol = MCPProtocol()
+            context = RequestContext(
+                request_id="validate-dry-run",
+                user_id="0",
+                client_id="voice_assistant_validator",
+                session_id="dry-run",
+            )
+            result = await protocol._handle_tools_list({}, context)
+            available = [t.get("name") for t in result.get("tools", [])]
+
+            if tool_name in available:
+                return {
+                    "name": "action_target",
+                    "passed": True,
+                    "message": f"MCP tool '{tool_name}' is available",
+                    "details": None,
+                }
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": f"MCP tool '{tool_name}' not found in available tools",
+                "details": {"available_tools_sample": available[:20]},
+            }
+        except (ImportError, ModuleNotFoundError):
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": "MCP protocol module is not available",
+                "details": None,
+            }
+        except Exception as e:
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": f"Error checking MCP tools: {e}",
+                "details": None,
+            }
+
+    def _validate_workflow_target_exists(self, config: dict[str, Any]) -> dict[str, Any]:
+        """Check whether a workflow template or ID resolves."""
+        template_name = config.get("workflow_template")
+        workflow_id = config.get("workflow_id")
+        workflow_def = config.get("workflow_definition")
+
+        if template_name:
+            templates = self.workflow_handler.get_voice_workflow_templates()
+            if template_name in templates:
+                return {
+                    "name": "action_target",
+                    "passed": True,
+                    "message": f"Workflow template '{template_name}' found",
+                    "details": None,
+                }
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": f"Workflow template '{template_name}' not found",
+                "details": {"available_templates": list(templates.keys())},
+            }
+
+        if workflow_id:
+            return {
+                "name": "action_target",
+                "passed": True,
+                "message": f"Workflow ID '{workflow_id}' configured (runtime resolution)",
+                "details": None,
+            }
+
+        if workflow_def:
+            if isinstance(workflow_def, dict) and workflow_def.get("steps"):
+                return {
+                    "name": "action_target",
+                    "passed": True,
+                    "message": "Inline workflow definition with steps found",
+                    "details": {"step_count": len(workflow_def["steps"])},
+                }
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": "Inline workflow definition is missing 'steps'",
+                "details": None,
+            }
+
+        return {
+            "name": "action_target",
+            "passed": False,
+            "message": "No workflow target specified",
+            "details": None,
+        }
+
+    def _validate_custom_handler_exists(
+        self,
+        config: dict[str, Any],
+        *,
+        command: Optional["VoiceCommand"] = None,
+        db: Optional[Any] = None,
+        persona_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Check whether a custom action handler is registered."""
+        action_name = config.get("action", "")
+
+        # External connection-backed commands are valid if they have a connection_id
+        if command and getattr(command, "connection_id", None):
+            return {
+                "name": "action_target",
+                "passed": True,
+                "message": f"Custom action backed by external connection '{command.connection_id}'",
+                "details": None,
+            }
+
+        if not action_name:
+            return {
+                "name": "action_target",
+                "passed": False,
+                "message": "No 'action' name specified in action_config",
+                "details": None,
+            }
+
+        if action_name in self._custom_handlers:
+            return {
+                "name": "action_target",
+                "passed": True,
+                "message": f"Custom handler '{action_name}' is registered",
+                "details": None,
+            }
+
+        return {
+            "name": "action_target",
+            "passed": False,
+            "message": f"Custom handler '{action_name}' is not registered",
+            "details": {"available_handlers": sorted(self._custom_handlers.keys())},
+        }
+
     async def _execute_intent(
         self,
         intent: VoiceIntent,

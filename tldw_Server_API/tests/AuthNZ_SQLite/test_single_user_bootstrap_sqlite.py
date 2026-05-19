@@ -78,6 +78,49 @@ async def test_single_user_bootstrap_creates_admin_user_and_primary_key(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_single_user_bootstrap_is_idempotent_for_new_format_api_key(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import format_api_key
+
+    db_path = tmp_path / "users_new_format.db"
+    primary_key = format_api_key("abcdef123456", "new-format-secret")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", primary_key)
+    monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
+
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings, get_settings
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+
+    reset_settings()
+    await reset_db_pool()
+
+    pool = await get_db_pool()
+    ensure_authnz_tables(Path(pool.db_path))
+
+    from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
+
+    ok_first = await bootstrap_single_user_profile()
+    ok_second = await bootstrap_single_user_profile()
+    assert ok_first is True
+    assert ok_second is True
+
+    settings = get_settings()
+    rows = await pool.fetch(
+        """
+        SELECT user_id, key_id, scope, status, is_virtual
+        FROM api_keys
+        WHERE user_id = ? AND status = 'active' AND COALESCE(is_virtual, 0) = 0
+        """,
+        settings.SINGLE_USER_FIXED_ID,
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["key_id"] == "abcdef123456"
+    assert row["scope"] == "admin"
+
+
+@pytest.mark.asyncio
 async def test_single_user_bootstrap_reuses_preseeded_primary_key(tmp_path, monkeypatch):
     # Configure single-user SQLite AuthNZ with a deterministic key
     db_path = tmp_path / "users_preseeded.db"

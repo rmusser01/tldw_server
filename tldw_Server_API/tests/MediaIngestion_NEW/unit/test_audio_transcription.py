@@ -644,6 +644,66 @@ def test_transcribe_audio_uses_safe_default_provider(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        ("qwen2audio", "[Transcription error] Qwen2Audio transcription failed"),
+        ("parakeet", "Parakeet transcription error"),
+        ("canary", "Canary transcription error"),
+        ("external:default", "External provider transcription error"),
+        ("faster-whisper", "Error in transcription"),
+    ],
+)
+def test_transcribe_audio_sanitizes_provider_wrapper_errors(monkeypatch, provider, expected):
+    """Provider wrapper failures should not expose backend exception details."""
+    import sys
+    import types
+
+    import numpy as np
+
+    raw_error = "backend failed at /private/audio/model.bin"
+
+    def raise_backend_error(*_args, **_kwargs):
+        raise RuntimeError(raw_error)
+
+    monkeypatch.setattr(atlib, "get_stt_config", lambda: {"nemo_model_variant": "standard"})
+
+    if provider == "qwen2audio":
+        monkeypatch.setattr(atlib, "transcribe_with_qwen2audio", raise_backend_error)
+    elif provider in {"parakeet", "canary"}:
+        nemo_module_name = (
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+            "Audio_Transcription_Nemo"
+        )
+        nemo_module = types.ModuleType(nemo_module_name)
+        nemo_module.transcribe_with_parakeet = raise_backend_error
+        nemo_module.transcribe_with_canary = raise_backend_error
+        monkeypatch.setitem(sys.modules, nemo_module_name, nemo_module)
+    elif provider.startswith("external"):
+        external_module_name = (
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+            "Audio_Transcription_External_Provider"
+        )
+        external_module = types.ModuleType(external_module_name)
+        external_module.transcribe_with_external_provider = raise_backend_error
+        monkeypatch.setitem(sys.modules, external_module_name, external_module)
+    else:
+        monkeypatch.setattr(atlib, "speech_to_text", lambda *_args, **_kwargs: {"error": raw_error})
+
+    audio_data = np.zeros(1600, dtype=np.float32)
+    result = atlib.transcribe_audio(
+        audio_data,
+        transcription_provider=provider,
+        sample_rate=16000,
+    )
+
+    assert result == expected
+    assert "backend failed" not in result
+    assert "/private" not in result
+    assert "model.bin" not in result
+
+
+@pytest.mark.unit
 def test_speech_to_text_qwen2audio_disabled_falls_back_to_whisper(monkeypatch, tmp_path):
     """When Qwen2Audio is disabled via config, speech_to_text with a qwen2audio model
     should fall back to Whisper without raising."""
@@ -882,6 +942,15 @@ def test_get_whisper_model_respects_compute_type_override(monkeypatch):
 
     _ = atlib.get_whisper_model("tiny", "cuda", check_download_status=False)
     assert captured.get("compute_type") == "int8_float16"
+
+
+@pytest.mark.unit
+def test_resolve_processing_choice_prefers_env_override(monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    monkeypatch.setenv("PROCESSING_CHOICE", "cpu")
+
+    assert atlib._resolve_processing_choice({"processing_choice": "cuda"}) == "cpu"
 
 
 @pytest.mark.unit

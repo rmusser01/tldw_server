@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from loguru import logger
+from tldw_Server_API.app.core.testing import is_truthy
 
 # Pre-compiled regex patterns for common operations (performance optimization)
 _RE_MULTI_SPACE = re.compile(r'[ \t]+')
@@ -40,6 +41,17 @@ _TEMPLATE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     re.error,
     json.JSONDecodeError,
 )
+
+
+def _coerce_bool_option(value: Any, default: bool = False) -> bool:
+    """Normalize loose template options into stable booleans."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return is_truthy(value.strip().lower())
+    return bool(value)
 
 
 @dataclass
@@ -248,9 +260,9 @@ class TemplateProcessor:
         try:
             cfg = chunk_ops.get('config', {}) if isinstance(chunk_ops, dict) else {}
             hierarchical = (
-                bool(options.get('hierarchical')) or
-                bool(cfg.get('hierarchical')) or
-                bool((extra_params or {}).get('hierarchical'))
+                _coerce_bool_option(options.get('hierarchical'), False) or
+                _coerce_bool_option(cfg.get('hierarchical'), False) or
+                _coerce_bool_option((extra_params or {}).get('hierarchical'), False)
             )
             hier_template = (
                 options.get('hierarchical_template') or

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  CLIPPER_PATH,
   COMPANION_CONVERSATION_PATH,
   COMPANION_PATH,
   FAMILY_WIZARD_SETTINGS_PATH,
   GUARDIAN_SETTINGS_PATH,
   PERSONA_DOCK_PATH,
+  isClipperAvailable,
   isCompanionAvailable,
   isGuardianSettingsAvailable,
   isPersonaDockAvailable,
@@ -18,6 +20,7 @@ const makeCapabilities = (
 ): ServerCapabilities =>
   ({
     hasGuardian: false,
+    hasWebClipper: false,
     hasPersonalization: false,
     hasSelfMonitoring: false,
     hasPersona: false,
@@ -135,5 +138,21 @@ describe("route capability gating", () => {
       hasPersonalization: true
     })
     expect(isRouteEnabledForCapabilities(COMPANION_CONVERSATION_PATH, caps)).toBe(true)
+  })
+
+  it("hides the clipper route when web clipper capability is missing", () => {
+    const caps = makeCapabilities({
+      hasWebClipper: false
+    })
+    expect(isClipperAvailable(caps)).toBe(false)
+    expect(isRouteEnabledForCapabilities(CLIPPER_PATH, caps)).toBe(false)
+  })
+
+  it("enables the clipper route when web clipper capability is present", () => {
+    const caps = makeCapabilities({
+      hasWebClipper: true
+    })
+    expect(isClipperAvailable(caps)).toBe(true)
+    expect(isRouteEnabledForCapabilities(CLIPPER_PATH, caps)).toBe(true)
   })
 })

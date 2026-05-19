@@ -103,4 +103,40 @@ describe("PromptListTable visual hooks", () => {
 
     expect(markup).toContain('data-bordered="false"')
   })
+
+  it("announces zero selected prompts to screen readers", () => {
+    const markup = renderToStaticMarkup(
+      <PromptListTable
+        rows={baseRows}
+        total={1}
+        isOnline
+        isCompactViewport={false}
+        query={baseQuery}
+        selectedIds={[]}
+        onQueryChange={() => undefined}
+        onSelectionChange={() => undefined}
+        onRowOpen={() => undefined}
+      />
+    )
+
+    expect(markup).toContain("0 prompts selected")
+  })
+
+  it("announces singular selection counts to screen readers", () => {
+    const markup = renderToStaticMarkup(
+      <PromptListTable
+        rows={baseRows}
+        total={1}
+        isOnline
+        isCompactViewport={false}
+        query={baseQuery}
+        selectedIds={["prompt-1"]}
+        onQueryChange={() => undefined}
+        onSelectionChange={() => undefined}
+        onRowOpen={() => undefined}
+      />
+    )
+
+    expect(markup).toContain("1 prompt selected")
+  })
 })

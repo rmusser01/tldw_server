@@ -1,5 +1,6 @@
 global:
-  scrape_interval: 5s
+  scrape_interval: 15s
+  scrape_timeout: 10s
 
 alerting:
   alertmanagers:
@@ -7,11 +8,14 @@ alerting:
         - targets: ['alertmanager:9093']
 
 rule_files:
-  - /etc/prometheus/alerts/tldw_alerts.yml
+  - /etc/prometheus/alerts/*.yml
+  - /etc/prometheus/alerts/*.yaml
+  - /etc/prometheus/alerts/extra/*.yml
+  - /etc/prometheus/alerts/extra/*.yaml
 
 scrape_configs:
   - job_name: 'tldw_server'
     # tldw_server exposes Prometheus text at /api/v1/metrics/text
     metrics_path: /api/v1/metrics/text
     static_configs:
-      - targets: ['host.docker.internal:8000']
+      - targets: ['app:8000']

@@ -1,5 +1,6 @@
 import { Select } from "antd";
 import { useTranslation } from "react-i18next";
+import { getDesignSystemState } from "@/design-system";
 import type { AudioSourceKind } from "@/audio";
 import type { AudioInputDeviceOption } from "@/hooks/useAudioSourceCatalog";
 
@@ -22,6 +23,7 @@ type AudioSourcePickerProps = {
 };
 
 const DEFAULT_MIC_VALUE = "default_mic";
+const UNAVAILABLE_STATE_LABEL = getDesignSystemState("unavailable").label;
 
 export function AudioSourcePicker({
   requestedSourceKind,
@@ -63,7 +65,7 @@ export function AudioSourcePicker({
 
   if (requestedDeviceMissing && requestedDeviceId) {
     options.splice(1, 0, {
-      label: `${lastKnownLabel || requestedDeviceId} (${t("audioSourcePicker.unavailable", "Unavailable")})`,
+      label: `${lastKnownLabel || requestedDeviceId} (${t("audioSourcePicker.unavailable", UNAVAILABLE_STATE_LABEL)})`,
       value: `mic_device:${requestedDeviceId}`,
     });
   }

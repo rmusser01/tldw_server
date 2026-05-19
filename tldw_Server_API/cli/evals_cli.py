@@ -30,6 +30,7 @@ if str(project_root) not in sys.path:
 
 from tldw_Server_API.app.core.Evaluations.cli.benchmark_cli import benchmark_group
 from tldw_Server_API.app.core.Evaluations.cli.evals_cli_enhanced import recipes_group
+from tldw_Server_API.app.core.Evaluations.cli.persona_chat_judge_cli import persona_chat_judge_group
 from tldw_Server_API.cli.commands.config import config_group
 from tldw_Server_API.cli.commands.database import db_group
 from tldw_Server_API.cli.commands.evaluation import eval_group
@@ -187,6 +188,7 @@ main.add_command(export_group, name='export')
 main.add_command(watchlists_group, name='watchlists')
 main.add_command(benchmark_group, name='benchmark')
 main.add_command(recipes_group, name='recipes')
+main.add_command(persona_chat_judge_group, name='persona-chat-judge')
 
 
 @main.command(name="list-benchmarks")

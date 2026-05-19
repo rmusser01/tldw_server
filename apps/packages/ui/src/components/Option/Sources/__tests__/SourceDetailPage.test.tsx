@@ -48,6 +48,13 @@ import { SourceDetailPage } from "@/components/Option/Sources/SourceDetailPage"
 const renderDetail = (ui: React.ReactElement) =>
   render(<MemoryRouter initialEntries={["/sources/42"]}>{ui}</MemoryRouter>)
 
+const expectInsideDesignSystemAlert = (text: string | RegExp) => {
+  const node = screen.getByText(text)
+  const alert = node.closest('[data-ds-component="Alert"]')
+  expect(alert).toHaveAttribute("data-ds-component", "Alert")
+  return alert
+}
+
 describe("SourceDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -133,10 +140,15 @@ describe("SourceDetailPage", () => {
 
     expect(await screen.findByRole("button", { name: "Sync now" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Upload archive" })).toBeInTheDocument()
-    expect(screen.getByText("Archive member could not be parsed")).toBeInTheDocument()
-    expect(
-      screen.getByText("Source identity is locked after the first successful sync.")
-    ).toBeInTheDocument()
+    const errorAlert = expectInsideDesignSystemAlert(
+      "Archive member could not be parsed"
+    )
+    expect(errorAlert).toHaveAttribute("role", "alert")
+    const identityAlert = expectInsideDesignSystemAlert(
+      "Source identity is locked after the first successful sync."
+    )
+    expect(identityAlert).toHaveAttribute("role", "status")
+    expect(identityAlert).toHaveAttribute("aria-live", "polite")
 
     fireEvent.click(screen.getByRole("button", { name: "Sync now" }))
 

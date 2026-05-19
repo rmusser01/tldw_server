@@ -7,12 +7,21 @@ import os
 import shutil
 import tempfile
 import uuid as _uuid
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.config import clear_config_cache
+
+
+@asynccontextmanager
+async def _lifespan_async_client(app, *, base_url: str = "http://test"):
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=base_url) as client:
+            yield client
 
 
 @pytest.mark.asyncio
@@ -24,8 +33,7 @@ async def test_world_book_negative_paths_and_duplicate_name():
 
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             # Duplicate world-book name should 409
             name = f"WB {_uuid.uuid4()}"
             create = {
@@ -122,8 +130,7 @@ async def test_world_book_process_endpoint_handles_new_return_shape():
 
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             create = {
                 "name": f"WB {_uuid.uuid4()}",
                 "description": "Lore book",
@@ -169,8 +176,7 @@ async def test_world_book_process_endpoint_returns_diagnostics_payload():
 
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             create = {
                 "name": f"WB {_uuid.uuid4()}",
                 "description": "Lore diagnostics book",
@@ -255,8 +261,7 @@ async def test_rate_limits_max_messages_and_chats_and_completions_endpoint():
 
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             # Pick a character
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200
@@ -311,8 +316,7 @@ async def test_complete_v2_operational_and_persists():
 
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with _lifespan_async_client(app) as client:
             # Character and chat
             r = await client.get("/api/v1/characters/", headers=headers)
             assert r.status_code == 200

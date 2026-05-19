@@ -102,8 +102,10 @@ def search_ieee(
         articles = data.get("articles") or []
         items = [_normalize_article(it) for it in articles]
         return items, total, None
-    except Exception as e:
-        return None, 0, f"IEEE Xplore error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "IEEE Xplore request timed out."
+    except Exception:
+        return None, 0, "IEEE Xplore request failed."
 
 
 def get_ieee_by_doi(doi: str) -> tuple[dict | None, str | None]:
@@ -123,8 +125,10 @@ def get_ieee_by_doi(doi: str) -> tuple[dict | None, str | None]:
         if not articles:
             return None, None
         return _normalize_article(articles[0]), None
-    except Exception as e:
-        return None, f"IEEE Xplore error: {str(e)}"
+    except TimeoutError:
+        return None, "IEEE Xplore request timed out."
+    except Exception:
+        return None, "IEEE Xplore request failed."
 
 
 def get_ieee_by_id(article_number: str) -> tuple[dict | None, str | None]:
@@ -144,5 +148,7 @@ def get_ieee_by_id(article_number: str) -> tuple[dict | None, str | None]:
         if not articles:
             return None, None
         return _normalize_article(articles[0]), None
-    except Exception as e:
-        return None, f"IEEE Xplore error: {str(e)}"
+    except TimeoutError:
+        return None, "IEEE Xplore request timed out."
+    except Exception:
+        return None, "IEEE Xplore request failed."

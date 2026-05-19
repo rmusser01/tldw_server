@@ -13,9 +13,10 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_configured_providers_async
 from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
     WritingCapabilitiesResponse,
@@ -64,8 +65,7 @@ from tldw_Server_API.app.api.v1.schemas.writing_schemas import (
     WritingWordcloudResult,
     WritingWordcloudWord,
 )
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -114,6 +114,7 @@ _WRITING_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+TOKENIZER_UNAVAILABLE_DETAIL = "Tokenizer unavailable for provider/model"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -123,11 +124,7 @@ async def _enforce_rate_limit(rate_limiter: RateLimiter, user_id: int, scope: st
         allowed, meta = await rate_limiter.check_user_rate_limit(int(user_id), scope)
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         retry_after = 60
-        logger.exception(
-            "Rate limiter check failed for user_id={} scope={}",
-            user_id,
-            scope,
-        )
+        logger.error("Rate limiter check failed")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Rate limiter unavailable",
@@ -147,22 +144,26 @@ def _handle_db_errors(exc: Exception, entity_label: str) -> NoReturn:
         raise exc
     if isinstance(exc, InputError):
         logger.warning("Input error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, ConflictError):
         message = str(exc)
         lowered = message.lower()
         if "not found" in lowered or "soft-deleted" in lowered or "soft deleted" in lowered:
             logger.debug("Entity not found for {}: {}", entity_label, exc)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{entity_label} not found") from exc
+            raise map_db_error_to_http(
+                exc,
+                conflict_status_code=status.HTTP_404_NOT_FOUND,
+                conflict_detail=f"{entity_label} not found",
+            ) from exc
         logger.warning("Conflict error for {}: {}", entity_label, exc)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message) from exc
+        raise map_db_error_to_http(exc) from exc
     if isinstance(exc, CharactersRAGDBError):
-        logger.error("Database error for {}: {}", entity_label, exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error while processing {entity_label}",
+        logger.error("Database error while processing writing entity")
+        raise map_db_error_to_http(
+            exc,
+            default_detail=f"Database error while processing {entity_label}",
         ) from exc
-    logger.exception("Unexpected error for {}: {}", entity_label, exc)
+    logger.error("Unexpected error while processing writing entity")
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Unexpected error while processing {entity_label}",
@@ -515,39 +516,18 @@ def _restore_soft_deleted_writing_session(
     schema_version: int,
     version_parent_id: str | None,
 ) -> None:
-    """Restore a soft-deleted writing session while preserving its ID."""
-    existing = db.get_writing_session(session_id, include_deleted=True)
-    if not existing:
-        raise ConflictError(
-            f"Session with ID '{session_id}' already exists.",
-            entity="writing_sessions",
-            entity_id=session_id,
-        )
-    payload_json = json.dumps(payload, ensure_ascii=True)
-    next_version = int(existing.get("version") or 1) + 1
-    db.execute_query(
-        """
-        UPDATE writing_sessions
-           SET name = ?,
-               payload_json = ?,
-               schema_version = ?,
-               version_parent_id = ?,
-               deleted = 0,
-               last_modified = CURRENT_TIMESTAMP,
-               version = ?,
-               client_id = ?
-         WHERE id = ?
-        """,
-        (
-            name,
-            payload_json,
-            int(schema_version),
-            version_parent_id,
-            next_version,
-            db.client_id,
-            session_id,
-        ),
-        commit=True,
+    """Restore a soft-deleted writing session while preserving its ID.
+
+    Delegates to ``db.restore_writing_session()`` so that all SQL stays
+    in the DB-management layer.  The *conn* parameter is accepted for
+    call-site compatibility but is no longer used directly.
+    """
+    db.restore_writing_session(
+        session_id,
+        name=name,
+        payload=payload,
+        schema_version=schema_version,
+        version_parent_id=version_parent_id,
     )
 
 
@@ -572,12 +552,12 @@ def _tokenizer_support(provider: str, model: str) -> WritingTokenizerSupport:
             count_accuracy=count_accuracy,
             strict_mode_effective=strict_mode_effective,
         )
-    except TokenizerUnavailable as exc:
+    except TokenizerUnavailable:
         return WritingTokenizerSupport(
             available=False,
             count_accuracy="unavailable",
             strict_mode_effective=_strict_token_counting_enabled(),
-            error=str(exc),
+            error=TOKENIZER_UNAVAILABLE_DETAIL,
         )
 
 
@@ -586,6 +566,7 @@ WORDCLOUD_STATUS_QUEUED = "queued"
 WORDCLOUD_STATUS_RUNNING = "running"
 WORDCLOUD_STATUS_READY = "ready"
 WORDCLOUD_STATUS_FAILED = "failed"
+WORDCLOUD_GENERATION_FAILED_DETAIL = "Wordcloud generation failed"
 WORDCLOUD_TOKEN_RE = re.compile(r"[\w'-]+", flags=re.UNICODE)
 DEFAULT_WORDCLOUD_STOPWORDS = {
     "a",
@@ -821,15 +802,15 @@ def _run_wordcloud_job(
             error=None,
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
-        logger.exception("Wordcloud job failed for {}: {}", wordcloud_id, exc)
+        logger.error("Wordcloud job failed")
         try:
             db.set_writing_wordcloud_result(
                 wordcloud_id,
                 status=WORDCLOUD_STATUS_FAILED,
-                error=str(exc),
+                error=WORDCLOUD_GENERATION_FAILED_DETAIL,
             )
         except _WRITING_NONCRITICAL_EXCEPTIONS:
-            logger.exception("Failed to persist wordcloud failure for {}", wordcloud_id)
+            logger.error("Failed to persist wordcloud failure")
 
 
 def _build_wordcloud_response_from_row(row: dict[str, Any], *, cached: bool) -> WritingWordcloudResponse:
@@ -968,8 +949,8 @@ async def get_writing_capabilities(
                     strict_mode_effective,
                 ) = _resolve_tokenizer_details(provider_name, model_name)
                 tokenizer_available = True
-            except TokenizerUnavailable as exc:
-                tokenization_error = str(exc)
+            except TokenizerUnavailable:
+                tokenization_error = TOKENIZER_UNAVAILABLE_DETAIL
             extra_body_compat = _safe_model_extra_body_compat(provider_name, model_name, runtime_ctx)
         elif provider_name:
             extra_body_compat = _safe_provider_extra_body_compat(provider_name, runtime_ctx)
@@ -1038,7 +1019,18 @@ async def list_writing_sessions(
         sessions = db.list_writing_sessions(limit=limit, offset=offset)
         total = db.count_writing_sessions()
         items = [WritingSessionListItem(**item) for item in sessions]
-        return WritingSessionListResponse(sessions=items, total=total)
+        return WritingSessionListResponse(
+            sessions=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(items),
+            ),
+        )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing sessions")
 
@@ -1217,6 +1209,14 @@ async def list_writing_templates(
         return WritingTemplateListResponse(
             templates=[WritingTemplateResponse(**tmpl) for tmpl in templates],
             total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(templates),
+            ),
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing templates")
@@ -1375,6 +1375,14 @@ async def list_writing_themes(
         return WritingThemeListResponse(
             themes=[WritingThemeResponse(**theme) for theme in themes],
             total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(themes),
+            ),
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "writing themes")
@@ -1607,133 +1615,61 @@ async def import_writing_snapshot(
     """Import sessions, templates, and themes from a snapshot payload."""
     await _enforce_rate_limit(rate_limiter, int(current_user.id), "writing.snapshot.import")
     try:
-        if payload.mode == "replace":
-            for session in _list_all_writing_sessions(db):
-                session_id = str(session.get("id") or "")
-                if not session_id:
-                    continue
-                db.soft_delete_writing_session(session_id, int(session.get("version") or 1))
-            for template in _list_all_writing_templates(db):
-                template_name = str(template.get("name") or "")
-                if not template_name:
-                    continue
-                db.soft_delete_writing_template(template_name, int(template.get("version") or 1))
-            for theme in _list_all_writing_themes(db):
-                theme_name = str(theme.get("name") or "")
-                if not theme_name:
-                    continue
-                db.soft_delete_writing_theme(theme_name, int(theme.get("version") or 1))
-
-        imported_sessions = 0
+        # Validate all session names up front before touching the DB.
         for session_item in payload.snapshot.sessions:
-            session_name = session_item.name.strip()
-            if not session_name:
+            if not session_item.name.strip():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Session name cannot be empty")
-            session_id = session_item.id.strip() if isinstance(session_item.id, str) and session_item.id.strip() else None
-            try:
-                db.add_writing_session(
-                    name=session_name,
-                    payload=session_item.payload,
-                    schema_version=int(session_item.schema_version),
-                    session_id=session_id,
-                    version_parent_id=session_item.version_parent_id,
-                )
-            except ConflictError:
-                if not session_id:
-                    raise
-                existing = db.get_writing_session(session_id, include_deleted=True)
-                if not existing:
-                    raise
-                if bool(existing.get("deleted")):
-                    _restore_soft_deleted_writing_session(
-                        db,
-                        session_id=session_id,
-                        name=session_name,
-                        payload=session_item.payload,
-                        schema_version=int(session_item.schema_version),
-                        version_parent_id=session_item.version_parent_id,
-                    )
-                else:
-                    db.update_writing_session(
-                        session_id,
-                        {
-                            "name": session_name,
-                            "payload": session_item.payload,
-                            "schema_version": int(session_item.schema_version),
-                            "version_parent_id": session_item.version_parent_id,
-                        },
-                        int(existing.get("version") or 1),
-                    )
-            imported_sessions += 1
-
-        imported_templates = 0
         for template_item in payload.snapshot.templates:
-            template_name = template_item.name.strip()
-            if not template_name:
+            if not template_item.name.strip():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template name cannot be empty")
-            try:
-                db.add_writing_template(
-                    name=template_name,
-                    payload=template_item.payload,
-                    schema_version=int(template_item.schema_version),
-                    version_parent_id=template_item.version_parent_id,
-                    is_default=bool(template_item.is_default),
-                )
-            except ConflictError:
-                existing = db.get_writing_template_by_name(template_name)
-                if not existing:
-                    raise
-                db.update_writing_template(
-                    template_name,
-                    {
-                        "payload": template_item.payload,
-                        "schema_version": int(template_item.schema_version),
-                        "version_parent_id": template_item.version_parent_id,
-                        "is_default": bool(template_item.is_default),
-                    },
-                    int(existing.get("version") or 1),
-                )
-            imported_templates += 1
-
-        imported_themes = 0
         for theme_item in payload.snapshot.themes:
-            theme_name = theme_item.name.strip()
-            if not theme_name:
+            if not theme_item.name.strip():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Theme name cannot be empty")
-            try:
-                db.add_writing_theme(
-                    name=theme_name,
-                    class_name=theme_item.class_name,
-                    css=theme_item.css,
-                    schema_version=int(theme_item.schema_version),
-                    version_parent_id=theme_item.version_parent_id,
-                    is_default=bool(theme_item.is_default),
-                    order_index=int(theme_item.order),
-                )
-            except ConflictError:
-                existing = db.get_writing_theme_by_name(theme_name)
-                if not existing:
-                    raise
-                db.update_writing_theme(
-                    theme_name,
-                    {
-                        "class_name": theme_item.class_name,
-                        "css": theme_item.css,
-                        "schema_version": int(theme_item.schema_version),
-                        "version_parent_id": theme_item.version_parent_id,
-                        "is_default": bool(theme_item.is_default),
-                        "order_index": int(theme_item.order),
-                    },
-                    int(existing.get("version") or 1),
-                )
-            imported_themes += 1
+
+        # Delegate to the DB layer which runs everything in a single atomic
+        # transaction using one connection — no partial imports on failure.
+        imported = db.import_writing_snapshot(
+            mode=payload.mode,
+            sessions=[
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "payload": s.payload,
+                    "schema_version": s.schema_version,
+                    "version_parent_id": s.version_parent_id,
+                }
+                for s in payload.snapshot.sessions
+            ],
+            templates=[
+                {
+                    "name": t.name,
+                    "payload": t.payload,
+                    "schema_version": t.schema_version,
+                    "version_parent_id": t.version_parent_id,
+                    "is_default": t.is_default,
+                }
+                for t in payload.snapshot.templates
+            ],
+            themes=[
+                {
+                    "name": th.name,
+                    "class_name": th.class_name,
+                    "css": th.css,
+                    "schema_version": th.schema_version,
+                    "version_parent_id": th.version_parent_id,
+                    "is_default": th.is_default,
+                    "order_index": th.order,
+                }
+                for th in payload.snapshot.themes
+            ],
+        )
 
         return WritingSnapshotImportResponse(
             mode=payload.mode,
             imported=WritingSnapshotCounts(
-                sessions=imported_sessions,
-                templates=imported_templates,
-                themes=imported_themes,
+                sessions=imported["sessions"],
+                templates=imported["templates"],
+                themes=imported["themes"],
             ),
         )
     except _WRITING_NONCRITICAL_EXCEPTIONS as exc:

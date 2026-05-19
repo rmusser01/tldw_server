@@ -32,13 +32,14 @@ async def test_authnz_usage_repo_insert_usage_log_postgres(test_db_pool):
         )
         key_id = await conn.fetchval(
             """
-            INSERT INTO api_keys (user_id, key_hash, key_prefix, status)
-            VALUES ($1, $2, $3, 'active')
+            INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
+            VALUES ($1, $2, $3, $4, 'active')
             RETURNING id
             """,
             int(user_id),
             "pg-usage-key-hash",
             "pg-usage-prefix",
+            "read",
         )
 
     await repo.insert_usage_log(

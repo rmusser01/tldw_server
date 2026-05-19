@@ -37,7 +37,10 @@ vi.mock("@/utils/safe-storage", () => ({
   }
 }))
 
-import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import {
+  TldwApiClient,
+  normalizePersonaProfile
+} from "@/services/tldw/TldwApiClient"
 
 const createConfiguredClient = (): TldwApiClient => {
   mocks.storedConfig = {
@@ -131,7 +134,17 @@ describe("TldwApiClient assistant identity helpers", () => {
               id: 17,
               name: "Garden Helper",
               character_card_id: 42,
-              origin_character_id: 42
+              origin_character_id: 42,
+              buddy_summary: {
+                has_buddy: 1,
+                persona_name: " Garden Helper ",
+                role_summary: " Research organizer ",
+                visual: {
+                  species_id: " owl ",
+                  silhouette_id: " owl_round ",
+                  palette_id: " moss "
+                }
+              }
             }
           ]
         }
@@ -144,12 +157,22 @@ describe("TldwApiClient assistant identity helpers", () => {
     const profiles = await client.listPersonaProfiles()
 
     expect(profiles).toEqual([
-      expect.objectContaining({
+      {
         id: "17",
         name: "Garden Helper",
         character_card_id: 42,
-        origin_character_id: 42
-      })
+        origin_character_id: 42,
+        buddy_summary: {
+          has_buddy: true,
+          persona_name: "Garden Helper",
+          role_summary: "Research organizer",
+          visual: {
+            species_id: "owl",
+            silhouette_id: "owl_round",
+            palette_id: "moss"
+          }
+        }
+      }
     ])
   })
 
@@ -164,7 +187,17 @@ describe("TldwApiClient assistant identity helpers", () => {
             id: "garden-helper",
             name: "Garden Helper",
             system_prompt: "Stay focused on the garden.",
-            use_persona_state_context_default: true
+            use_persona_state_context_default: true,
+            buddy_summary: {
+              has_buddy: 1,
+              persona_name: " Garden Helper ",
+              role_summary: " Research organizer ",
+              visual: {
+                species_id: " owl ",
+                silhouette_id: " owl_round ",
+                palette_id: " moss "
+              }
+            }
           }
         }
 
@@ -175,11 +208,67 @@ describe("TldwApiClient assistant identity helpers", () => {
     const client = createConfiguredClient()
     const profile = await client.getPersonaProfile("garden-helper")
 
-    expect(profile).toMatchObject({
+    expect(profile).toEqual({
       id: "garden-helper",
       name: "Garden Helper",
       system_prompt: "Stay focused on the garden.",
-      use_persona_state_context_default: true
+      use_persona_state_context_default: true,
+      buddy_summary: {
+        has_buddy: true,
+        persona_name: "Garden Helper",
+        role_summary: "Research organizer",
+        visual: {
+          species_id: "owl",
+          silhouette_id: "owl_round",
+          palette_id: "moss"
+        }
+      }
+    })
+  })
+
+  it("preserves an explicit null buddy_summary over legacy camelCase fallback data", () => {
+    const normalized = normalizePersonaProfile({
+      id: "garden-helper",
+      name: "Garden Helper",
+      buddy_summary: null,
+      buddySummary: {
+        hasBuddy: true,
+        personaName: "Stale Buddy",
+        roleSummary: "Should not win",
+        visual: {
+          speciesId: "owl",
+          silhouetteId: "perch",
+          paletteId: "dawn"
+        }
+      }
+    })
+
+    expect(normalized.buddy_summary).toBeNull()
+  })
+
+  it("defaults has_buddy to true when a summary object exists without an explicit flag", () => {
+    const normalized = normalizePersonaProfile({
+      id: "garden-helper",
+      name: "Garden Helper",
+      buddy_summary: {
+        persona_name: "Garden Helper",
+        role_summary: "Keeps the route on track",
+        visual: {
+          species_id: "owl",
+          silhouette_id: "perch",
+          palette_id: "dawn"
+        }
+      }
+    })
+
+    expect(normalized.buddy_summary).toMatchObject({
+      has_buddy: true,
+      persona_name: "Garden Helper",
+      visual: {
+        species_id: "owl",
+        silhouette_id: "perch",
+        palette_id: "dawn"
+      }
     })
   })
 })

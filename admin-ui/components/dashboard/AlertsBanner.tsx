@@ -5,12 +5,15 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CheckCheck } from 'lucide-react';
 
 type AlertSeverity = 'info' | 'warning' | 'error' | 'critical';
 
-type DashboardAlertSummaryItem = {
+export type DashboardAlertSummaryItem = {
+  id?: string | number;
   severity?: AlertSeverity;
+  message?: string;
+  created_at?: string;
 };
 
 type DashboardAlertFull = DashboardAlertSummaryItem & {
@@ -47,6 +50,32 @@ export const summarizeAlertSeverities = (alerts: DashboardAlertSummaryItem[]) =>
   return summary;
 };
 
+const SEVERITY_PRIORITY: Record<string, number> = {
+  critical: 0,
+  error: 1,
+  warning: 2,
+  info: 3,
+};
+
+export const findMostRelevantAlert = (
+  alerts: DashboardAlertSummaryItem[]
+): DashboardAlertSummaryItem | null => {
+  if (alerts.length === 0) return null;
+
+  const withMessage = alerts.filter((a) => a.message);
+  if (withMessage.length === 0) return null;
+
+  return withMessage.sort((a, b) => {
+    const severityA = SEVERITY_PRIORITY[(a.severity ?? 'info').toLowerCase()] ?? 3;
+    const severityB = SEVERITY_PRIORITY[(b.severity ?? 'info').toLowerCase()] ?? 3;
+    if (severityA !== severityB) return severityA - severityB;
+
+    const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return dateB - dateA;
+  })[0];
+};
+
 const getAlertToneClasses = (critical: number, warning: number) => {
   if (critical > 0) {
     return {
@@ -75,11 +104,7 @@ export const AlertsBanner = ({ alerts, onAcknowledgeAll }: AlertsBannerProps) =>
   const summary = summarizeAlertSeverities(alerts);
   const tone = getAlertToneClasses(summary.critical, summary.warning);
   const total = summary.critical + summary.warning + summary.info;
-
-  // Find the most recent critical/warning alert with a message
-  const topAlert = alerts.find(
-    (a) => a.message && (a.severity === 'critical' || a.severity === 'error')
-  ) ?? alerts.find((a) => a.message && a.severity === 'warning');
+  const topAlert = findMostRelevantAlert(alerts);
 
   return (
     <Alert className={cn('mb-6', tone.container)}>
@@ -101,13 +126,22 @@ export const AlertsBanner = ({ alerts, onAcknowledgeAll }: AlertsBannerProps) =>
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <span>
             {total} active alert{total !== 1 ? 's' : ''} require attention.{' '}
             <Link href="/monitoring" className="underline font-medium">View all</Link>
           </span>
-          {summary.critical > 0 && onAcknowledgeAll && (
-            <Button variant="ghost" size="sm" onClick={onAcknowledgeAll} className="text-xs">
+          {onAcknowledgeAll && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={onAcknowledgeAll}
+              title="Acknowledge all alerts"
+              data-testid="acknowledge-alerts-btn"
+            >
+              <CheckCheck className="h-3.5 w-3.5 mr-1" />
               Acknowledge All
             </Button>
           )}

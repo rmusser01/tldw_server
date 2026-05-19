@@ -208,7 +208,8 @@ describe("WorldBooksManager information gaps stage-4 AI generation", () => {
   it("generates, allows edits, and saves suggestions with provider/model metadata", async () => {
     render(<WorldBooksManager />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    fireEvent.click(screen.getByText("Arcana"))
     fireEvent.click(await screen.findByRole("button", { name: "Generate entries with AI" }))
 
     fireEvent.change(screen.getByLabelText("AI generation topic"), {
@@ -258,7 +259,8 @@ describe("WorldBooksManager information gaps stage-4 AI generation", () => {
 
     render(<WorldBooksManager />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    fireEvent.click(screen.getByText("Arcana"))
     fireEvent.click(await screen.findByRole("button", { name: "Generate entries with AI" }))
     fireEvent.change(screen.getByLabelText("AI generation topic"), {
       target: { value: "Empty output case" }

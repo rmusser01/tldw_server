@@ -2150,9 +2150,12 @@ END;
         *,
         board_id: int | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         if limit < 1:
             raise InputError("limit must be positive")  # noqa: TRY003
+        if offset < 0:
+            raise InputError("offset must be non-negative")  # noqa: TRY003
 
         now = _utcnow_iso()
         with self._lock:
@@ -2173,8 +2176,8 @@ END;
                 if board_id is not None:
                     sql += " AND c.board_id = ?"
                     params.append(board_id)
-                sql += " ORDER BY s.lease_expires_at ASC LIMIT ?"
-                params.append(limit)
+                sql += " ORDER BY s.lease_expires_at ASC, s.card_id ASC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
                 rows = conn.execute(sql, params).fetchall()
 
                 return [

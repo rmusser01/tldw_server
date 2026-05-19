@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorldBooksManager } from "../Manager"
 
@@ -196,17 +196,23 @@ describe("WorldBooksManager error-handling stage-3 optimistic concurrency", () =
   })
 
   it(
-    "passes expectedVersion when saving edits",
+    "passes expectedVersion when saving edits from the detail-panel settings tab",
     async () => {
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Edit world book" }))
+      await user.click(screen.getByRole("button", { name: "Edit Arcana" }))
 
-      const nameInput = await screen.findByRole("textbox", { name: "Name" })
+      const detailPanel = await screen.findByRole("main", { name: "World book detail" })
+      const settingsTab = within(detailPanel).getByRole("tab", { name: "Settings" })
+      await waitFor(() => {
+        expect(settingsTab).toHaveAttribute("aria-selected", "true")
+      })
+
+      const nameInput = within(detailPanel).getByRole("textbox", { name: "Name" })
       await user.clear(nameInput)
       await user.type(nameInput, "Arcana Updated")
-      await user.click(screen.getByRole("button", { name: "Save" }))
+      await user.click(within(detailPanel).getByRole("button", { name: "Save" }))
 
       await waitFor(() => {
         expect(tldwClientMock.updateWorldBook).toHaveBeenCalledWith(
@@ -220,7 +226,7 @@ describe("WorldBooksManager error-handling stage-3 optimistic concurrency", () =
   )
 
   it(
-    "shows conflict recovery actions and retries with latest version",
+    "shows conflict recovery actions in the detail-panel settings tab and retries with latest version",
     async () => {
       const user = userEvent.setup()
 
@@ -240,18 +246,26 @@ describe("WorldBooksManager error-handling stage-3 optimistic concurrency", () =
 
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Edit world book" }))
+      await user.click(screen.getByRole("button", { name: "Edit Arcana" }))
 
-      const descriptionInput = await screen.findByRole("textbox", { name: "Description (optional)" })
-      await user.clear(descriptionInput)
-      await user.type(descriptionInput, "My local edit")
-      await user.click(screen.getByRole("button", { name: "Save" }))
-
+      const detailPanel = await screen.findByRole("main", { name: "World book detail" })
+      const settingsTab = within(detailPanel).getByRole("tab", { name: "Settings" })
       await waitFor(() => {
-        expect(screen.getByTestId("world-book-edit-conflict")).toBeInTheDocument()
+        expect(settingsTab).toHaveAttribute("aria-selected", "true")
       })
 
-      await user.click(screen.getByRole("button", { name: "Reapply my edits" }))
+      const descriptionInput = within(detailPanel).getByRole("textbox", {
+        name: "Description (optional)"
+      })
+      await user.clear(descriptionInput)
+      await user.type(descriptionInput, "My local edit")
+      await user.click(within(detailPanel).getByRole("button", { name: "Save" }))
+
+      await waitFor(() => {
+        expect(within(detailPanel).getByTestId("world-book-edit-conflict")).toBeInTheDocument()
+      })
+
+      await user.click(within(detailPanel).getByRole("button", { name: "Reapply my edits" }))
 
       await waitFor(() => {
         expect(notificationMock.info).toHaveBeenCalledWith(
@@ -259,12 +273,12 @@ describe("WorldBooksManager error-handling stage-3 optimistic concurrency", () =
         )
       })
 
-      const descriptionAfterMerge = await screen.findByRole("textbox", {
+      const descriptionAfterMerge = within(detailPanel).getByRole("textbox", {
         name: "Description (optional)"
       })
       expect(descriptionAfterMerge).toHaveValue("My local edit")
 
-      await user.click(screen.getByRole("button", { name: "Save" }))
+      await user.click(within(detailPanel).getByRole("button", { name: "Save" }))
 
       await waitFor(() => {
         expect(tldwClientMock.updateWorldBook).toHaveBeenNthCalledWith(

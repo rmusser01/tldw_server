@@ -15,6 +15,7 @@ import {
   DEFAULT_POST_LOGIN_REDIRECT,
   getRedirectTargetFromSearch,
 } from '@/lib/auth-navigation';
+import { logger } from '@/lib/logger';
 
 type AuthMode = 'password' | 'apikey';
 
@@ -80,7 +81,7 @@ export default function LoginPage() {
         setServerError('Invalid username or password.');
       }
     } catch (error) {
-      console.error('Password authentication failed:', error);
+      logger.error('Password authentication failed', { component: 'LoginPage', error: error instanceof Error ? error.message : String(error) });
       setServerError('Authentication failed. Please try again.');
     } finally {
       setIsLoading(false);
@@ -99,7 +100,7 @@ export default function LoginPage() {
         setServerError('Invalid API key.');
       }
     } catch (error) {
-      console.error('API key authentication failed:', error);
+      logger.error('API key authentication failed', { component: 'LoginPage', error: error instanceof Error ? error.message : String(error) });
       setServerError('Authentication failed. Please try again.');
     } finally {
       setIsLoading(false);
@@ -130,7 +131,7 @@ export default function LoginPage() {
         setServerError('Invalid verification code.');
       }
     } catch (error) {
-      console.error('MFA authentication failed:', error);
+      logger.error('MFA authentication failed', { component: 'LoginPage', error: error instanceof Error ? error.message : String(error) });
       setServerError('Authentication failed. Please try again.');
     } finally {
       setIsLoading(false);

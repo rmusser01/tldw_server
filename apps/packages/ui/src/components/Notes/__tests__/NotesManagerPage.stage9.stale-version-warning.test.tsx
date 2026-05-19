@@ -220,7 +220,7 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
 
     expect(await screen.findByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1")
     expect(await screen.findByTestId("notes-stale-version-warning")).toHaveTextContent(
-      "A newer version is available on the server"
+      "This note was updated elsewhere. Reload to see the latest version."
     )
 
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {

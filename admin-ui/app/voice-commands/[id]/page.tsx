@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Form, FormCheckbox, FormInput, FormSelect, FormTextarea } from '@/components/ui/form';
-import { ArrowLeft, Save, Trash2, Mic, MicOff, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Mic, MicOff, BarChart3, ShieldCheck, CheckCircle2, XCircle } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import {
   parseVoiceCommandInputs,
@@ -22,8 +22,9 @@ import {
   testVoiceCommandPhraseMatch,
   type VoiceCommandMatchResult,
 } from '@/lib/voice-commands';
-import type { VoiceCommand, VoiceActionType, VoiceCommandUsage } from '@/types';
+import type { VoiceCommand, VoiceActionType, VoiceCommandUsage, VoiceCommandValidationResponse } from '@/types';
 import { Skeleton } from '@/components/ui/skeleton';
+import { logger } from '@/lib/logger';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import Link from 'next/link';
@@ -67,6 +68,9 @@ export default function VoiceCommandDetailPage({
   const [saveError, setSaveError] = useState('');
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<VoiceCommandMatchResult | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<VoiceCommandValidationResponse | null>(null);
+  const [validationError, setValidationError] = useState('');
 
   const form = useForm<EditCommandFormInput, unknown, EditCommandFormData>({
     resolver: zodResolver(editCommandSchema),
@@ -101,7 +105,7 @@ export default function VoiceCommandDetailPage({
       });
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
-      console.error('Failed to load voice command:', err);
+      logger.error('Failed to load voice command', { component: 'VoiceCommandDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to load voice command');
     } finally {
       if (signal?.aborted) return;
@@ -116,7 +120,7 @@ export default function VoiceCommandDetailPage({
       setUsage(data);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
-      console.warn('Failed to load usage data:', err);
+      logger.warn('Failed to load usage data', { component: 'VoiceCommandDetailPage', error: err instanceof Error ? err.message : String(err) });
     }
   }, [commandId]);
 
@@ -205,6 +209,23 @@ export default function VoiceCommandDetailPage({
     const phraseInput = form.getValues('phrases');
     const triggerPhrases = parseVoiceCommandPhrases(phraseInput);
     setTestResult(testVoiceCommandPhraseMatch(testInput, triggerPhrases));
+  };
+
+  const handleValidate = async () => {
+    if (validating) return;
+    try {
+      setValidating(true);
+      setValidationError('');
+      setValidationResult(null);
+      const result = await api.validateVoiceCommand(commandId);
+      setValidationResult(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Validation request failed';
+      setValidationError(message);
+      showError('Validation failed', message);
+    } finally {
+      setValidating(false);
+    }
   };
 
   if (loading) {
@@ -377,6 +398,75 @@ export default function VoiceCommandDetailPage({
                   </AlertDescription>
                 </Alert>
               ) : null}
+            </CardContent>
+          </Card>
+
+          {/* Dry-Run Validation */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Validate Configuration</CardTitle>
+              <CardDescription>
+                Dry-run check: verify the action config is valid and the referenced target
+                (MCP tool, workflow template, handler) exists -- without executing anything.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleValidate}
+                disabled={validating}
+                loading={validating}
+                loadingText="Validating..."
+                data-testid="validate-button"
+              >
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                Validate
+              </Button>
+
+              {validationError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{validationError}</AlertDescription>
+                </Alert>
+              )}
+
+              {validationResult && (
+                <div className="space-y-2" data-testid="validation-report">
+                  <div className="flex items-center gap-2 mb-3">
+                    {validationResult.valid ? (
+                      <Badge variant="default" className="bg-green-600">All checks passed</Badge>
+                    ) : (
+                      <Badge variant="destructive">Validation failed</Badge>
+                    )}
+                    <span className="text-sm text-muted-foreground">
+                      Action type: {validationResult.action_type}
+                    </span>
+                  </div>
+
+                  {validationResult.steps.map((step) => (
+                    <div
+                      key={step.name}
+                      className="flex items-start gap-3 rounded-md border p-3"
+                      data-testid={`validation-step-${step.name}`}
+                    >
+                      {step.passed ? (
+                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
+                      ) : (
+                        <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm">{step.name}</p>
+                        <p className="text-sm text-muted-foreground">{step.message}</p>
+                        {step.details && (
+                          <pre className="mt-1 text-xs bg-muted p-2 rounded overflow-auto max-h-32">
+                            {JSON.stringify(step.details, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 

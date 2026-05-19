@@ -1,10 +1,12 @@
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatLinkedResearchPath } from "@/components/Option/Playground/research-run-status"
+import { normalizeConversationContextIdList } from "@/services/conversation-context/conversationContextSettings"
 import {
   CHAT_SETTINGS_SCHEMA_VERSION,
   ChatSettingsRecord,
   CharacterMemoryEntry,
+  ConversationContextSettings,
   DeepResearchAttachment
 } from "@/types/chat-session-settings"
 
@@ -45,6 +47,8 @@ const CHAT_SETTINGS_OPTIONAL_KEYS = [
   "authorNotePosition",
   "characterMemoryById",
   "chatGenerationOverride",
+  "conversationContext",
+  "chat_dictionary_ids",
   "summary",
   "imageEventSyncMode"
 ] as const
@@ -64,6 +68,9 @@ export const resolveChatSettingsKey = (params: {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const hasOwn = (record: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(record, key)
 
 const asNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== "string") return null
@@ -95,6 +102,39 @@ const copyKnownChatSettings = (
     }
   }
   return next
+}
+
+const normalizeConversationContextMirrors = (
+  settings: ChatSettingsRecord,
+  raw: Record<string, unknown>
+): void => {
+  const rawContext = isRecord(raw.conversationContext)
+    ? raw.conversationContext
+    : null
+  const context: ConversationContextSettings =
+    isRecord(settings.conversationContext)
+      ? { ...settings.conversationContext }
+      : {}
+  const hasNestedDictionaryIds =
+    rawContext !== null && hasOwn(rawContext, "chat_dictionary_ids")
+  const hasLegacyDictionaryIds = hasOwn(raw, "chat_dictionary_ids")
+
+  if (rawContext && hasOwn(rawContext, "world_book_ids")) {
+    context.world_book_ids = normalizeConversationContextIdList(
+      rawContext.world_book_ids
+    )
+    settings.conversationContext = context
+  }
+
+  if (hasNestedDictionaryIds || hasLegacyDictionaryIds) {
+    const source = hasNestedDictionaryIds
+      ? rawContext?.chat_dictionary_ids
+      : raw.chat_dictionary_ids
+    const dictionaryIds = normalizeConversationContextIdList(source)
+    context.chat_dictionary_ids = dictionaryIds
+    settings.conversationContext = context
+    settings.chat_dictionary_ids = dictionaryIds
+  }
 }
 
 const sanitizeDeepResearchAttachment = (
@@ -224,6 +264,7 @@ const coerceSettings = (raw: any): ChatSettingsRecord | null => {
     schemaVersion,
     updatedAt
   }
+  normalizeConversationContextMirrors(next, raw)
   const hasAttachment = Object.prototype.hasOwnProperty.call(
     raw,
     "deepResearchAttachment"
@@ -392,18 +433,23 @@ export const mergeChatSettings = (
     merged.deepResearchPinnedAttachment = local.deepResearchPinnedAttachment
   }
 
-  const mergedHistory = sanitizeDeepResearchAttachmentHistory(
-    [
-      ...(local.deepResearchAttachmentHistory || []),
-      ...(remote.deepResearchAttachmentHistory || [])
-    ],
-    [
-      merged.deepResearchAttachment?.run_id ?? null,
-      merged.deepResearchPinnedAttachment?.run_id ?? null
-    ]
-  )
-  if (mergedHistory !== undefined) {
-    merged.deepResearchAttachmentHistory = mergedHistory
+  const hasAttachmentHistory =
+    Array.isArray(local.deepResearchAttachmentHistory) ||
+    Array.isArray(remote.deepResearchAttachmentHistory)
+  if (hasAttachmentHistory) {
+    const mergedHistory = sanitizeDeepResearchAttachmentHistory(
+      [
+        ...(local.deepResearchAttachmentHistory || []),
+        ...(remote.deepResearchAttachmentHistory || [])
+      ],
+      [
+        merged.deepResearchAttachment?.run_id ?? null,
+        merged.deepResearchPinnedAttachment?.run_id ?? null
+      ]
+    )
+    if (mergedHistory !== undefined) {
+      merged.deepResearchAttachmentHistory = mergedHistory
+    }
   }
 
   return merged

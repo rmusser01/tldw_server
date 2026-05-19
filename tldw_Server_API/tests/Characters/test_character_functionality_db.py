@@ -81,6 +81,38 @@ def sample_card_data(name="Test Character", **kwargs) -> dict:
     return data
 
 
+def normalize_expected_character_tags(tags: Any) -> list[str]:
+    """Mirror the public contract for stored character tags."""
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except json.JSONDecodeError:
+            tags = [tags]
+    if not isinstance(tags, list):
+        tags = [] if tags is None else [tags]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        if tag is None:
+            continue
+        tag_str = str(tag).strip()
+        if not tag_str or tag_str in seen:
+            continue
+        seen.add(tag_str)
+        normalized.append(tag_str)
+
+    folder_tag: str | None = None
+    non_folder_tags: list[str] = []
+    for tag in normalized:
+        if tag.startswith("__tldw_folder_id:"):
+            folder_tag = tag
+            continue
+        non_folder_tags.append(tag)
+    if folder_tag:
+        non_folder_tags.append(folder_tag)
+    return non_folder_tags
+
+
 # --- Helper for sample conversation data ---
 def sample_conversation_data(character_id: int, **kwargs) -> dict:
     data = {
@@ -434,6 +466,31 @@ class TestCharacterCardAddition:
         assert retrieved["tags"] == json.loads(tags_json_str)
         assert retrieved["extensions"] == json.loads(extensions_json_str)
 
+    def test_add_character_with_null_tags_in_json_string_skips_none_entries(self, db: CharactersRAGDB):
+        data = sample_card_data(
+            name="NullTagsJSONChar",
+            tags='["tag_json_str1", null, "tag_json_str2"]',  # type: ignore[arg-type]
+        )
+
+        card_id = db.add_character_card(data)
+        retrieved = db.get_character_card_by_id(card_id)
+
+        assert retrieved["tags"] == ["tag_json_str1", "tag_json_str2"]
+
+    def test_add_character_with_whitespace_only_tags_in_json_string_normalizes_empty(
+        self,
+        db: CharactersRAGDB,
+    ):
+        data = sample_card_data(
+            name="WhitespaceTagsJSONChar",
+            tags='[" ", "\\t"]',  # type: ignore[arg-type]
+        )
+
+        card_id = db.add_character_card(data)
+        retrieved = db.get_character_card_by_id(card_id)
+
+        assert retrieved["tags"] == []
+
     def test_add_character_with_invalid_string_for_json_field_becomes_none(self, db: CharactersRAGDB):
         invalid_json_str = "this is not a valid json array"
         data = sample_card_data(name="InvalidStringJSONChar", tags=invalid_json_str)  # type: ignore
@@ -491,13 +548,21 @@ class TestCharacterCardAddition:
             if isinstance(original_value, str):
                 try:
                     expected_deserialized = json.loads(original_value)
-                    assert retrieved_value == expected_deserialized
+                    if key == "tags":
+                        assert list(retrieved_value or []) == normalize_expected_character_tags(
+                            expected_deserialized
+                        )
+                    else:
+                        assert retrieved_value == expected_deserialized
                 except json.JSONDecodeError:
                     assert retrieved_value is None
             elif original_value is None:
                 assert retrieved_value is None
             elif isinstance(original_value, list) and key in ["tags", "alternate_greetings"]:
-                assert set(retrieved_value or []) == set(original_value or [])
+                if key == "tags":
+                    assert list(retrieved_value or []) == normalize_expected_character_tags(original_value)
+                else:
+                    assert set(retrieved_value or []) == set(original_value or [])
             else:  # dicts for extensions
                 assert retrieved_value == original_value
 
@@ -667,6 +732,70 @@ class TestCharacterCardUpdate:
         assert after_noop_card["version"] == original_card["version"]
         assert after_noop_card["last_modified"] == original_card["last_modified"]
 
+    def test_empty_update_payload_remains_a_noop(self, db: CharactersRAGDB):
+        char_id = db.add_character_card(sample_card_data(name="NoOpCharacter"))
+        existing = db.get_character_card_by_id(char_id, include_deleted=True)
+        assert existing is not None
+
+        assert db.update_character_card(char_id, {}, expected_version=int(existing["version"])) is True
+
+        unchanged = db.get_character_card_by_id(char_id, include_deleted=True)
+        assert unchanged is not None
+        assert int(unchanged["version"]) == int(existing["version"])
+
+    def test_restore_character_card_raises_conflict_when_row_is_already_active(self, db: CharactersRAGDB):
+        char_id = db.add_character_card(sample_card_data(name="RestoreActive"))
+        active = db.get_character_card_by_id(char_id)
+        assert active is not None
+
+        with pytest.raises(ConflictError, match="already active"):
+            db.restore_character_card(char_id, expected_version=int(active["version"]))
+
+    def test_restore_character_card_concurrent_restore_raises_conflict(
+        self, db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+    ):
+        char_id = db.add_character_card(sample_card_data(name="RestoreConcurrentRace"))
+        active = db.get_character_card_by_id(char_id)
+        assert active is not None
+
+        deleted_version = int(active["version"])
+        deleted_at = active["last_modified"]
+
+        class FakeCursor:
+            def __init__(self, *, rows: list[dict[str, Any]] | None = None, rowcount: int = 0):
+                self._rows = list(rows or [])
+                self._index = 0
+                self.rowcount = rowcount
+
+            def fetchone(self):
+                if self._index >= len(self._rows):
+                    return None
+                row = self._rows[self._index]
+                self._index += 1
+                return row
+
+        class FakeConnection:
+            def execute(self, query: str, params: tuple | list | dict | None = None):
+                if query.startswith("SELECT deleted, version, last_modified FROM character_cards WHERE id = ?"):
+                    return FakeCursor(rows=[{"deleted": 1, "version": deleted_version, "last_modified": deleted_at}])
+                if query.startswith("UPDATE character_cards SET deleted = ?"):
+                    return FakeCursor(rowcount=0)
+                if query.startswith("SELECT version, deleted FROM character_cards WHERE id = ?"):
+                    return FakeCursor(rows=[{"version": deleted_version + 1, "deleted": 0}])
+                raise AssertionError(f"Unexpected query in fake restore race test: {query}")
+
+        class FakeTransaction:
+            def __enter__(self):
+                return FakeConnection()
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+        monkeypatch.setattr(db, "transaction", lambda: FakeTransaction())
+
+        with pytest.raises(ConflictError, match="already active"):
+            db.restore_character_card(char_id, expected_version=deleted_version)
+
     def test_update_character_with_only_ignored_fields_touches_record(
         self, db: CharactersRAGDB, char_id_for_update: int
     ):
@@ -727,11 +856,22 @@ class TestCharacterCardUpdate:
                 if isinstance(value, str) and key in db._CHARACTER_CARD_JSON_FIELDS:
                     try:
                         expected_deserialized = json.loads(value)
-                        assert retrieved_value == expected_deserialized
+                        if key == "tags":
+                            assert list(retrieved_value or []) == normalize_expected_character_tags(
+                                expected_deserialized
+                            )
+                        else:
+                            assert retrieved_value == expected_deserialized
                     except json.JSONDecodeError:
-                        assert retrieved_value is None
+                        if key == "tags":
+                            assert list(retrieved_value or []) == normalize_expected_character_tags(value)
+                        else:
+                            assert retrieved_value is None
                 elif isinstance(value, list) and key in ["tags", "alternate_greetings"]:
-                    assert set(retrieved_value or []) == set(value or [])
+                    if key == "tags":
+                        assert list(retrieved_value or []) == normalize_expected_character_tags(value)
+                    else:
+                        assert set(retrieved_value or []) == set(value or [])
                 else:
                     assert retrieved_value == value
         check_sync_log_entry(db, "character_cards", card_id, "update", expected_version=original_card["version"] + 1)
@@ -1090,8 +1230,8 @@ class TestMessageCRUD:
         with pytest.raises(InputError, match="Message must have text content or image data."):
             db.add_message({"conversation_id": conv_id_for_msg, "sender": "user", "content": None})  # type: ignore
 
-        # Case 2: 'content' key is missing entirely -> should hit "Required field 'content' is missing"
-        with pytest.raises(InputError, match="Required field 'content' is missing for message."):
+        # Case 2: 'content' key is missing entirely and no image is provided.
+        with pytest.raises(InputError, match="Message must have text content or image data."):
             db.add_message({"conversation_id": conv_id_for_msg, "sender": "user"})
 
     def test_add_message_image_without_mime_type_fails(self, db: CharactersRAGDB, conv_id_for_msg: str):
@@ -1198,6 +1338,11 @@ class TestMessageCRUD:
 
         results_all_keyword = db.search_messages_by_content("keyword")
         assert len(results_all_keyword) >= 2  # At least the two we added
+        first_page = db.search_messages_by_content("keyword", limit=1, offset=0)
+        second_page = db.search_messages_by_content("keyword", limit=1, offset=1)
+        assert first_page
+        assert second_page
+        assert first_page[0]["id"] != second_page[0]["id"]
 
 
 class TestKeywordAndCollectionCRUD:

@@ -69,8 +69,9 @@ describe("SettingsPanel behavior and copy guardrails", () => {
     })
 
     expect(screen.getByText("Documents & Media")).toBeInTheDocument()
-    expect(screen.getByText("Character Cards")).toBeInTheDocument()
-    expect(screen.getByText("Chat History")).toBeInTheDocument()
+    expect(screen.getByText("Characters")).toBeInTheDocument()
+    expect(screen.getByText("Chats")).toBeInTheDocument()
+    expect(screen.getByText("Task Boards")).toBeInTheDocument()
   })
 
   it("shows scope note, balanced-reset copy, and preserves drawer focus trap/backdrop behavior", () => {
@@ -141,6 +142,17 @@ describe("SettingsPanel behavior and copy guardrails", () => {
 
     getItemSpy.mockRestore()
     setItemSpy.mockRestore()
+  })
+
+  it("closes on Escape before nested controls can trap the event", () => {
+    const onClose = vi.fn()
+    render(<SettingsPanel open onClose={onClose} />)
+
+    const dialog = screen.getByRole("dialog", { name: "RAG Settings" })
+    dialog.addEventListener("keydown", (event) => event.stopPropagation())
+    fireEvent.keyDown(dialog, { key: "Escape" })
+
+    expect(onClose).toHaveBeenCalledOnce()
   })
 
   it("hides the expert-mode onboarding hint when toggling back to basic mode", () => {

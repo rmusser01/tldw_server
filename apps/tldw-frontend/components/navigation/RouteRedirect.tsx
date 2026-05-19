@@ -66,18 +66,26 @@ export const RouteRedirect: React.FC<RouteRedirectProps> = ({
     let cancelled = false;
 
     const redirect = async () => {
-      await trackRouteAliasRedirect({
-        sourcePath: router.asPath || router.pathname || '',
-        destinationPath: destination,
-        preserveParams,
-      });
-
       try {
-        if (typeof router.prefetch === 'function') {
-          await router.prefetch(destination);
-        }
+        void trackRouteAliasRedirect({
+          sourcePath: router.asPath || router.pathname || '',
+          destinationPath: destination,
+          preserveParams,
+        }).catch(() => {
+          // Keep the redirect moving even if telemetry persistence fails asynchronously.
+        });
       } catch {
-        // Keep the redirect moving even when prefetch is unavailable.
+        // Keep the redirect moving even if telemetry setup throws synchronously.
+      }
+
+      if (typeof router.prefetch === 'function') {
+        try {
+          void router.prefetch(destination).catch(() => {
+            // Keep the redirect moving even when prefetch is unavailable.
+          });
+        } catch {
+          // Keep the redirect moving even when prefetch is unavailable.
+        }
       }
 
       if (cancelled) return;
@@ -120,9 +128,9 @@ export const RouteRedirect: React.FC<RouteRedirectProps> = ({
           <Link
             href="/"
             className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-sm text-text hover:bg-surface2"
-            data-testid="route-redirect-go-chat"
+            data-testid="route-redirect-open-home"
           >
-            Go to Chat
+            Open Home
           </Link>
           <Link
             href="/settings"

@@ -28,6 +28,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Field } from '@/components/data-ops/Field';
+import { logger } from '@/lib/logger';
 
 type BackupsSectionProps = {
   refreshSignal: number;
@@ -316,7 +317,7 @@ export const BackupsSection = ({ refreshSignal }: BackupsSectionProps) => {
         .sort((a, b) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''));
       setHistoryItems(parsed);
     } catch (err: unknown) {
-      console.error('Failed to load backup history:', err);
+      logger.error('Failed to load backup history', { component: 'BackupsSection', error: err instanceof Error ? err.message : String(err) });
       setHistoryError(err instanceof Error && err.message ? err.message : 'Failed to load backup history');
       setHistoryItems([]);
     } finally {
@@ -352,7 +353,7 @@ export const BackupsSection = ({ refreshSignal }: BackupsSectionProps) => {
       const response = await api.getUsers({ limit: '100' });
       setScheduleUsers(response);
     } catch (err: unknown) {
-      console.error('Failed to load backup schedule users:', err);
+      logger.error('Failed to load backup schedule users', { component: 'BackupsSection', error: err instanceof Error ? err.message : String(err) });
       setScheduleUsers([]);
     } finally {
       setScheduleUsersLoading(false);

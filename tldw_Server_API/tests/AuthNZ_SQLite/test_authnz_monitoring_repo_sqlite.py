@@ -77,8 +77,8 @@ async def test_authnz_monitoring_repo_sqlite_basic(tmp_path):
                 (1, "dummy-hash", (now + timedelta(hours=1)).isoformat()),
             )
             await pool.execute(
-                "INSERT INTO api_keys (user_id, key_hash, key_prefix, status) VALUES (?, ?, ?, 'active')",
-                (1, "dummy-key-hash", "dummy-prefix"),
+                "INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status) VALUES (?, ?, ?, ?, 'active')",
+                (1, "dummy-key-hash", "dummy-prefix", "read"),
             )
 
             active_sessions = await repo.get_active_sessions_count(now)

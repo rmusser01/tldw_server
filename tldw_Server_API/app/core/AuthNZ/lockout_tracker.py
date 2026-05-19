@@ -50,8 +50,8 @@ class LockoutTracker:
             self._repo = AuthnzRateLimitsRepo(self.db_pool)
         try:
             await self._repo.ensure_schema()
-        except Exception as exc:
-            logger.warning(f"LockoutTracker schema ensure warning: {exc}")
+        except Exception:
+            logger.warning("LockoutTracker schema ensure warning")
         self._initialized = True
 
     def _get_repo(self) -> AuthnzRateLimitsRepo:
@@ -114,13 +114,17 @@ class LockoutTracker:
         if not self._initialized:
             await self.initialize()
         repo = self._get_repo()
-        locked_until = await repo.get_active_lockout(identifier=identifier, now=datetime.now(timezone.utc))
+        locked_until = await repo.get_active_lockout(
+            identifier=identifier,
+            attempt_type=attempt_type,
+            now=datetime.now(timezone.utc),
+        )
         if locked_until is not None:
             return True, locked_until
         return False, None
 
     async def reset_failed_attempts(self, identifier: str, attempt_type: str = "login") -> None:
-        """Clear failed attempt counters and lockout for an identifier."""
+        """Clear failed attempt counters and lockout for an identifier and attempt type."""
         if not self._initialized:
             await self.initialize()
         repo = self._get_repo()

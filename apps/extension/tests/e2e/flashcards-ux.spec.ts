@@ -10,7 +10,7 @@ test.describe("Flashcards workspace UX", () => {
     page: import("@playwright/test").Page,
     timeoutMs = 15000
   ) => {
-    const managerTab = page.getByRole("tab", { name: "Review", exact: true })
+    const managerTab = page.getByRole("tab", { name: /^(Review|Study)$/i })
     const offlineHeadline = page.getByText(
       /Connect to use Flashcards|Explore Flashcards in demo mode|Flashcards API not available|Can.?t reach your tldw server/i
     )
@@ -127,7 +127,7 @@ test.describe("Flashcards workspace UX", () => {
   }
 
   const openCreateDrawer = async (page: import("@playwright/test").Page) => {
-    const cardsTab = page.getByRole("tab", { name: "Cards", exact: true })
+    const cardsTab = page.getByRole("tab", { name: /^(Cards|Manage)$/i })
     await expect(cardsTab).toBeVisible()
     await cardsTab.click()
 
@@ -136,9 +136,9 @@ test.describe("Flashcards workspace UX", () => {
     await fab.click()
 
     const drawer = page
-      .locator(".ant-drawer")
+      .locator(".ant-drawer.ant-drawer-open")
       .filter({ has: page.getByText(/Create Flashcard/i) })
-      .first()
+      .last()
     await expect(drawer).toBeVisible()
     return drawer
   }
@@ -471,11 +471,14 @@ test.describe("Flashcards workspace UX", () => {
 
       const tabsRoot = page
         .locator(".ant-tabs")
-        .filter({ has: page.getByRole("tab", { name: "Review", exact: true }) })
+        .filter({ has: page.getByRole("tab", { name: /^(Review|Study)$/i }) })
         .first()
       await expect(tabsRoot).toBeVisible()
-      const getTabPanel = async (name: string) => {
-        const tab = tabsRoot.getByRole("tab", { name, exact: true })
+      const getTabPanel = async (name: string | RegExp) => {
+        const tab =
+          typeof name === "string"
+            ? tabsRoot.getByRole("tab", { name, exact: true })
+            : tabsRoot.getByRole("tab", { name })
         await expect(tab).toBeVisible()
         await tab.scrollIntoViewIfNeeded()
         await tab.click()
@@ -489,7 +492,7 @@ test.describe("Flashcards workspace UX", () => {
       }
 
       mark("review tab")
-      const reviewPanel = await getTabPanel("Review")
+      const reviewPanel = await getTabPanel(/^(Review|Study)$/i)
       const reviewDeckSelect = reviewPanel.getByTestId(
         "flashcards-review-deck-select"
       )
@@ -505,6 +508,23 @@ test.describe("Flashcards workspace UX", () => {
           mark("review tab: deck selected")
         } else {
           mark("review tab: deck option not visible")
+        }
+      }
+      const promptSideToggle = reviewPanel.getByTestId(
+        "flashcards-review-prompt-side-toggle"
+      )
+      if ((await promptSideToggle.count()) > 0) {
+        mark("review tab: prompt side toggle")
+        await expect(promptSideToggle).toBeVisible()
+        const frontFirst = promptSideToggle.getByText("Front first", { exact: true })
+        const backFirst = promptSideToggle.getByText("Back first", { exact: true })
+        if ((await backFirst.count()) > 0) {
+          await backFirst.click()
+          await expect(backFirst).toBeVisible()
+        }
+        if ((await frontFirst.count()) > 0) {
+          await frontFirst.click()
+          await expect(frontFirst).toBeVisible()
         }
       }
       const showAnswerButton = reviewPanel.getByTestId(
@@ -554,11 +574,26 @@ test.describe("Flashcards workspace UX", () => {
         mark("review tab: ready for next card")
       }
 
+      const templatesTab = tabsRoot.getByRole("tab", { name: /Templates/i })
+      if ((await templatesTab.count()) > 0) {
+        mark("templates tab")
+        const templatesPanel = await getTabPanel(/Templates/i)
+        await expect(templatesPanel).toBeVisible()
+      }
+
       mark("cards tab: create")
       const createdFront = `${baseName} UI: Define recursion`
       const createdBack = `${baseName} UI: A function that calls itself`
+      const addAnotherFront = `${baseName} UI: Tail recursion`
+      const addAnotherBack = `${baseName} UI: Recursion with optimized tail calls`
       const createDrawer = await openCreateDrawer(page)
       mark("cards tab: create drawer open")
+      await expect(
+        createDrawer.getByText(/Existing cards in this deck/i)
+      ).toHaveCount(0)
+      const referenceToggle = createDrawer.getByRole("button", {
+        name: /Existing cards in this deck/i
+      })
       const drawerDeckSelected = await selectDeckInDrawer(
         page,
         createDrawer,
@@ -569,6 +604,13 @@ test.describe("Flashcards workspace UX", () => {
       } else {
         mark("cards tab: deck option not visible", fixture.deckName)
       }
+      await expect(referenceToggle).toBeVisible()
+      await referenceToggle.click()
+      const referenceSearch = createDrawer.getByPlaceholder(/Search this deck/i)
+      const referenceSearchTerm = fixture.cards[0].front
+      await expect(referenceSearch).toBeVisible()
+      await expect(createDrawer.getByText(fixture.cards[1].front)).toBeVisible()
+      await expect(createDrawer.getByText(fixture.cards[1].back)).toBeVisible()
       const createFrontField = await pick(
         createDrawer.getByLabel(/Front/i),
         createDrawer.getByPlaceholder(/Question or prompt/i)
@@ -577,6 +619,7 @@ test.describe("Flashcards workspace UX", () => {
         createDrawer.getByLabel(/Back/i),
         createDrawer.getByPlaceholder(/Answer/i)
       )
+      await referenceSearch.fill(referenceSearchTerm)
       mark("cards tab: fill create form")
       await createFrontField.fill(createdFront)
       await createBackField.fill(createdBack)
@@ -586,8 +629,82 @@ test.describe("Flashcards workspace UX", () => {
       await waitForDrawerToCloseOrError(page, createDrawer, "Create flashcard")
       mark("cards tab: create drawer closed")
 
+      mark("cards tab: reopen create drawer for add another")
+      const reopenedCreateDrawer = await openCreateDrawer(page)
+      await expect(
+        reopenedCreateDrawer.getByText(/Existing cards in this deck/i)
+      ).toHaveCount(0)
+      const reopenedDeckSelected = await selectDeckInDrawer(
+        page,
+        reopenedCreateDrawer,
+        fixture.deckName
+      )
+      if (reopenedDeckSelected) {
+        mark("cards tab: drawer reopened deck selected", fixture.deckName)
+      } else {
+        mark("cards tab: drawer reopened deck option not visible", fixture.deckName)
+      }
+      const reopenedReferenceToggle = reopenedCreateDrawer.getByRole("button", {
+        name: /Existing cards in this deck/i
+      })
+      const reopenedDeckField = reopenedCreateDrawer.getByRole("combobox", {
+        name: /Deck/i
+      })
+      await expect(reopenedReferenceToggle).toBeVisible()
+      await reopenedReferenceToggle.click()
+      const reopenedReferenceSearch = reopenedCreateDrawer.getByPlaceholder(
+        /Search this deck/i
+      )
+      await expect(reopenedReferenceSearch).toHaveValue("")
+      await reopenedReferenceSearch.fill(referenceSearchTerm)
+      const reopenedFrontField = await pick(
+        reopenedCreateDrawer.getByLabel(/Front/i),
+        reopenedCreateDrawer.getByPlaceholder(/Question or prompt/i)
+      )
+      const reopenedBackField = await pick(
+        reopenedCreateDrawer.getByLabel(/Back/i),
+        reopenedCreateDrawer.getByPlaceholder(/Answer/i)
+      )
+      await reopenedFrontField.fill(addAnotherFront)
+      await reopenedBackField.fill(addAnotherBack)
+      await reopenedCreateDrawer
+        .getByRole("button", { name: /^Create & Add Another$/i })
+        .click()
+      await expect(reopenedCreateDrawer).toBeVisible()
+      await expect(reopenedFrontField).toHaveValue("")
+      await expect(reopenedBackField).toHaveValue("")
+      await expect(reopenedDeckField).toContainText(fixture.deckName)
+      await expect(reopenedReferenceSearch).toHaveValue(referenceSearchTerm)
+      await expect(reopenedCreateDrawer.getByText(addAnotherFront)).toBeVisible()
+      await expect(reopenedCreateDrawer.getByText(addAnotherBack)).toBeVisible()
+
+      mark("cards tab: close and reopen to verify search reset")
+      await reopenedCreateDrawer.getByRole("button", { name: /Cancel/i }).click()
+      await expect(reopenedCreateDrawer).toBeHidden()
+      const resetCreateDrawer = await openCreateDrawer(page)
+      const resetDeckSelected = await selectDeckInDrawer(
+        page,
+        resetCreateDrawer,
+        fixture.deckName
+      )
+      if (resetDeckSelected) {
+        mark("cards tab: drawer reopened after add another", fixture.deckName)
+      }
+      await expect(
+        resetCreateDrawer.getByRole("button", {
+          name: /Existing cards in this deck/i
+        })
+      ).toBeVisible()
+      await resetCreateDrawer
+        .getByRole("button", { name: /Existing cards in this deck/i })
+        .click()
+      await expect(resetCreateDrawer.getByPlaceholder(/Search this deck/i)).toHaveValue("")
+      await resetCreateDrawer.getByRole("button", { name: /Cancel/i }).click()
+      await expect(resetCreateDrawer).toBeHidden()
+      mark("cards tab: create drawer closed")
+
       mark("cards tab")
-      const managePanel = await getTabPanel("Cards")
+      const managePanel = await getTabPanel(/^(Cards|Manage)$/i)
       mark("cards tab: panel ready")
       const manageSearch = await pick(
         managePanel.getByTestId("flashcards-manage-search"),
@@ -832,7 +949,7 @@ test.describe("Flashcards workspace UX", () => {
         await clickVisibleMenuItem(page, /Review now/i, "Review now")
       }
       const reviewActivated = await page
-        .getByRole("tab", { name: "Review", exact: true })
+        .getByRole("tab", { name: /^(Review|Study)$/i })
         .getAttribute("aria-selected")
         .then((value) => value === "true")
         .catch(() => false)
@@ -978,7 +1095,7 @@ test.describe("Flashcards workspace UX", () => {
         .toBe(true)
 
       mark("cards tab: bulk actions")
-      const bulkPanel = await getTabPanel("Cards")
+      const bulkPanel = await getTabPanel(/^(Cards|Manage)$/i)
       const bulkSearch = await pick(
         bulkPanel.getByTestId("flashcards-manage-search"),
         bulkPanel.getByPlaceholder(/Search/i)

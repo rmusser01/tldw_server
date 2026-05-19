@@ -73,12 +73,13 @@ async def test_authnz_monitoring_repo_postgres_basic(test_db_pool: Any) -> None:
         )
         await conn.execute(
             """
-            INSERT INTO api_keys (user_id, key_hash, key_prefix, status)
-            VALUES ($1, $2, $3, 'active')
+            INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
+            VALUES ($1, $2, $3, $4, 'active')
             """,
             int(user_id),
             "key-hash",
             "prefix",
+            "read",
         )
 
     active_sessions = await repo.get_active_sessions_count(now)

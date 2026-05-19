@@ -7,8 +7,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDateTime } from '@/lib/format';
 import {
+  formatCostUsd,
   formatErrorRate24h,
   formatRequestCount24h,
+  formatTokenCount,
   getKeyAgeIndicator,
   getKeyExpiryIndicator,
   isInactiveKey,
@@ -79,7 +81,12 @@ export const UnifiedApiKeysTable = ({
   const selectedCount = rowIds.filter((rowId) => selectedRowIds?.has(rowId)).length;
   const allSelected = selectedCount > 0 && selectedCount === rowIds.length;
   const hasTelemetry = rows.some(
-    (r) => r.requestCount24h != null && Number.isFinite(r.requestCount24h)
+    (row) => row.requestCount24h !== null || row.errorRate24h !== null
+  );
+
+  // Show usage attribution columns when any row has token or cost data
+  const hasUsage = rows.some(
+    (row) => row.totalTokens !== null || row.estimatedCostUsd !== null
   );
 
   return (
@@ -101,20 +108,23 @@ export const UnifiedApiKeysTable = ({
           <TableHead>Last Used</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>
-            Age
-            <span
-              aria-hidden="true"
-              className="text-muted-foreground cursor-help"
-              title="Green: <90 days, Yellow: 90-180 days, Red: >180 days"
-            >
-              &#9432;
-            </span>
+            <button type="button" className="group relative cursor-help border-0 bg-transparent p-0 font-medium text-inherit focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded" title="Green: <90d, Yellow: 90-180d, Red: >180d" aria-label="Age — threshold guide">
+              Age
+              <span className="ml-1 inline-block text-muted-foreground text-xs align-super">?</span>
+              <span className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-48 rounded-md border bg-popover p-2 text-xs font-normal text-popover-foreground shadow-md group-hover:block group-focus:block">
+                <span className="block"><span className="inline-block h-2 w-2 rounded-full bg-green-600 mr-1" />Green: &lt;90 days</span>
+                <span className="block"><span className="inline-block h-2 w-2 rounded-full bg-yellow-500 mr-1" />Yellow: 90-180 days</span>
+                <span className="block"><span className="inline-block h-2 w-2 rounded-full bg-red-600 mr-1" />Red: &gt;180 days</span>
+              </span>
+            </button>
             <span className="sr-only">
               Green under 90 days, yellow 90 to 180 days, red over 180 days.
             </span>
           </TableHead>
           <TableHead>Expiry</TableHead>
           <TableHead>Activity</TableHead>
+          {hasUsage && <TableHead>Tokens</TableHead>}
+          {hasUsage && <TableHead>Est. Cost</TableHead>}
           {hasTelemetry && <TableHead>Requests (24h)</TableHead>}
           {hasTelemetry && <TableHead>Error Rate (24h)</TableHead>}
           <TableHead className="text-right">Actions</TableHead>
@@ -174,6 +184,8 @@ export const UnifiedApiKeysTable = ({
                   <Badge variant="secondary">Normal</Badge>
                 )}
               </TableCell>
+              {hasUsage && <TableCell>{formatTokenCount(row.totalTokens)}</TableCell>}
+              {hasUsage && <TableCell>{formatCostUsd(row.estimatedCostUsd)}</TableCell>}
               {hasTelemetry && <TableCell>{formatRequestCount24h(row.requestCount24h)}</TableCell>}
               {hasTelemetry && <TableCell>{formatErrorRate24h(row.errorRate24h)}</TableCell>}
               <TableCell className="text-right">

@@ -42,8 +42,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
     prepare_chunking_options_dict,
     prepare_common_options,
+    resolve_chunking_options_and_plan,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
@@ -54,6 +56,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
     DEFAULT_MEDIA_TYPE_CONFIG,
 )
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
+from tldw_Server_API.app.core.Metrics.stt_metrics import emit_stt_run_write_total
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -99,6 +102,15 @@ _MEDIA_INGESTION_BYTES_CATEGORY = "ingestion_bytes"
 
 _media_ingestion_daily_ledger = None
 _media_ingestion_daily_ledger_lock = asyncio.Lock()
+
+_SHARED_TRANSCRIPT_REUSABLE_HOSTS = frozenset(
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+    }
+)
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -162,9 +174,7 @@ def _resolve_media_budget_context(
         app_state = getattr(request.app, "state", None)
         gov = getattr(app_state, "rg_governor", None)
         loader = getattr(app_state, "rg_policy_loader", None)
-        policy_id = str(
-            getattr(request.state, "rg_policy_id", None) or _MEDIA_INGESTION_POLICY_ID
-        )
+        policy_id = str(getattr(request.state, "rg_policy_id", None) or _MEDIA_INGESTION_POLICY_ID)
         policy: dict[str, Any] = {}
         if loader is not None:
             try:
@@ -272,10 +282,7 @@ def _callable_accepts_keyword(
     ):
         return True
 
-    return any(
-        candidate.kind == inspect.Parameter.VAR_KEYWORD
-        for candidate in signature.parameters.values()
-    )
+    return any(candidate.kind == inspect.Parameter.VAR_KEYWORD for candidate in signature.parameters.values())
 
 
 def _normalize_analysis_text_chunk(
@@ -400,9 +407,7 @@ def _extract_analysis_extra_chunks_for_indexing(
                     score = det.get("score")
                     bbox = det.get("bbox")
                     caption_text = _normalize_analysis_text_chunk(
-                        det.get("caption")
-                        or det.get("description")
-                        or det.get("summary"),
+                        det.get("caption") or det.get("description") or det.get("summary"),
                         max_chars=1200,
                     )
                     if caption_text:
@@ -563,12 +568,7 @@ def _classify_ingestion_validation_failure_reason(message: str | None) -> str:
         or "quota exceeded" in lower
     ):
         return "size_limit"
-    if (
-        "not allowed" in lower
-        or "unsupported media type" in lower
-        or "mime" in lower
-        or "extension" in lower
-    ):
+    if "not allowed" in lower or "unsupported media type" in lower or "mime" in lower or "extension" in lower:
         return "file_type"
     if "validation" in lower or "validator" in lower:
         return "validator_rejected"
@@ -719,6 +719,7 @@ _METADATA_COMMON_TYPED_KEYS: dict[str, tuple[type, ...]] = {
     "keywords": (list,),
     "tags": (list,),
     "email": (dict,),
+    "chunking_plan": (dict,),
 }
 
 _METADATA_CONTRACTS: dict[str, dict[str, Any]] = {
@@ -981,9 +982,7 @@ def _enforce_metadata_contract_on_result(
         error_message = f"Metadata contract validation failed: {issue_text}"
         existing_error = str(result.get("error", "") or "").strip()
         result["status"] = "Error"
-        result["error"] = (
-            f"{existing_error} | {error_message}" if existing_error else error_message
-        )
+        result["error"] = f"{existing_error} | {error_message}" if existing_error else error_message
         result["db_message"] = "DB operation skipped (metadata contract failure)."
         result["db_id"] = None
         result["media_uuid"] = None
@@ -1017,9 +1016,7 @@ def _skip_chunk_consistency_for_db_message(db_message: Any) -> bool:
     normalized = str(db_message or "").strip().lower()
     if not normalized:
         return False
-    return any(
-        marker in normalized for marker in _CHUNK_CONSISTENCY_SKIP_DB_MESSAGE_MARKERS
-    )
+    return any(marker in normalized for marker in _CHUNK_CONSISTENCY_SKIP_DB_MESSAGE_MARKERS)
 
 
 async def _fetch_unvectorized_chunk_count(
@@ -1038,9 +1035,7 @@ async def _fetch_unvectorized_chunk_count(
             return _with_media_db_session(
                 db_path=db_path,
                 client_id=client_id,
-                operation=lambda worker_db: worker_db.get_unvectorized_chunk_count(
-                    media_id_int
-                ),
+                operation=lambda worker_db: worker_db.get_unvectorized_chunk_count(media_id_int),
             )
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
             return None
@@ -1100,10 +1095,7 @@ async def _enforce_chunk_consistency_after_persist(
     if persisted_chunk_count == expected:
         return
 
-    issue_text = (
-        f"expected {expected} chunk rows but found {persisted_chunk_count} "
-        f"(media_id={media_id_int})"
-    )
+    issue_text = f"expected {expected} chunk rows but found {persisted_chunk_count} " f"(media_id={media_id_int})"
     logger.warning(
         "Chunk consistency mismatch (policy={}) for {} via {} [{}]: {}",
         policy,
@@ -1121,16 +1113,10 @@ async def _enforce_chunk_consistency_after_persist(
         error_message = f"Chunk consistency validation failed: {issue_text}"
         existing_error = str(result.get("error", "") or "").strip()
         result["status"] = "Error"
-        result["error"] = (
-            f"{existing_error} | {error_message}" if existing_error else error_message
-        )
+        result["error"] = f"{existing_error} | {error_message}" if existing_error else error_message
         _ensure_warnings_list(result).append(error_message)
         existing_db_message = str(result.get("db_message", "") or "").strip()
-        result["db_message"] = (
-            f"{existing_db_message} | {error_message}"
-            if existing_db_message
-            else error_message
-        )
+        result["db_message"] = f"{existing_db_message} | {error_message}" if existing_db_message else error_message
         return
 
     warning_message = f"Chunk consistency warning: {issue_text}"
@@ -1185,10 +1171,7 @@ def _compute_source_hash_safe(
 def _media_has_source_hash_column(db: MediaDatabase) -> bool:
     for table_name in ("Media", "media"):
         try:
-            columns = {
-                col.get("name", "").lower()
-                for col in db.backend.get_table_info(table_name)
-            }
+            columns = {col.get("name", "").lower() for col in db.backend.get_table_info(table_name)}
             if columns:
                 return "source_hash" in columns
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
@@ -1229,6 +1212,547 @@ def _normalize_dedupe_url_for_db(value: str) -> str:
         return raw
     normalized = normalize_media_dedupe_url(raw)
     return str(normalized).strip() if normalized else raw
+
+
+def _merge_video_lite_summary_safe_metadata(
+    safe_meta: dict[str, Any],
+    *,
+    process_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Reserve a stable lightweight-summary slot separate from generic analysis content."""
+    summary_value = process_result.get("summary")
+    if summary_value is None:
+        summary_value = process_result.get("analysis")
+
+    merged = dict(safe_meta)
+    existing_block = merged.get("video_lite")
+    if isinstance(existing_block, dict):
+        video_lite_meta = dict(existing_block)
+    else:
+        video_lite_meta = {}
+
+    summary_status = str(process_result.get("video_lite_summary_status") or "").strip().lower()
+    if summary_value is not None:
+        summary_text = str(summary_value).strip()
+        if summary_text:
+            video_lite_meta["summary"] = summary_text
+            video_lite_meta["summary_status"] = "ready"
+            merged["video_lite"] = video_lite_meta
+            return merged
+
+    if summary_status == "failed":
+        video_lite_meta["summary_status"] = "failed"
+        merged["video_lite"] = video_lite_meta
+        return merged
+
+    if not video_lite_meta:
+        return safe_meta
+
+    merged["video_lite"] = video_lite_meta
+    return merged
+
+
+_SAFE_METADATA_ALLOWED_KEYS = frozenset(
+    {
+        "title",
+        "author",
+        "doi",
+        "pmid",
+        "pmcid",
+        "arxiv_id",
+        "s2_paper_id",
+        "url",
+        "pdf_url",
+        "pmc_url",
+        "date",
+        "year",
+        "venue",
+        "journal",
+        "license",
+        "license_url",
+        "publisher",
+        "source",
+        "creators",
+        "rights",
+        "source_hash",
+        "chunking_plan",
+    }
+)
+
+
+def _json_safe_metadata_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        cleaned_list = []
+        for item in value:
+            cleaned = _json_safe_metadata_value(item)
+            if cleaned is not None or item is None:
+                cleaned_list.append(cleaned)
+        return cleaned_list
+    if isinstance(value, dict):
+        cleaned_dict: dict[str, Any] = {}
+        for key, item in value.items():
+            if key is None:
+                continue
+            cleaned = _json_safe_metadata_value(item)
+            if cleaned is not None or item is None:
+                cleaned_dict[str(key)] = cleaned
+        return cleaned_dict
+    return None
+
+
+def build_safe_metadata_subset(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Copy safe metadata fields while preserving nested JSON-safe plan data."""
+    safe_meta: dict[str, Any] = {}
+    if not isinstance(metadata, dict):
+        return safe_meta
+
+    for key, value in metadata.items():
+        if key not in _SAFE_METADATA_ALLOWED_KEYS:
+            continue
+        cleaned = _json_safe_metadata_value(value)
+        if cleaned is not None:
+            safe_meta[key] = cleaned
+
+    ext_ids = metadata.get("externalIds")
+    if isinstance(ext_ids, dict):
+        for ext_key in ("DOI", "ArXiv", "PMID", "PMCID"):
+            ext_value = ext_ids.get(ext_key)
+            if ext_value:
+                target_key = "arxiv_id" if ext_key == "ArXiv" else ext_key.lower()
+                safe_meta[target_key] = ext_value
+
+    return safe_meta
+
+
+def _shared_transcript_dedupe_candidates(
+    *,
+    source_path_or_url: str,
+    source_hash: str | None,
+    form_data: Any,
+) -> list[tuple[str, str]]:
+    raw_source = str(source_path_or_url or "").strip()
+    if not raw_source:
+        return []
+
+    signature_payload = {
+        "transcription_model": getattr(form_data, "transcription_model", None),
+        "transcription_language": getattr(form_data, "transcription_language", None),
+        "start_time": getattr(form_data, "start_time", None),
+        "end_time": getattr(form_data, "end_time", None),
+        "timestamp_option": getattr(form_data, "timestamp_option", None),
+        "diarize": bool(getattr(form_data, "diarize", False)),
+        "vad_use": bool(getattr(form_data, "vad_use", False)),
+    }
+    normalized_signature = {key: value for key, value in signature_payload.items() if value not in (None, "")}
+    reuse_signature = json.dumps(
+        normalized_signature,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+    candidates: list[tuple[str, str]] = []
+    if raw_source.lower().startswith(("http://", "https://")):
+        normalized = normalize_media_dedupe_url(raw_source) or raw_source
+        parsed = urlparse(str(normalized))
+        host = (parsed.netloc or "").strip().lower()
+        if ":" in host:
+            host = host.split(":", 1)[0]
+        if host in _SHARED_TRANSCRIPT_REUSABLE_HOSTS:
+            candidates.append(("url", f"{str(normalized).strip()}|{reuse_signature}"))
+        return candidates
+
+    source_hash_value = str(source_hash or "").strip()
+    if source_hash_value:
+        candidates.append(("source_hash", f"{source_hash_value}|{reuse_signature}"))
+    return candidates
+
+
+async def _get_media_ingest_dedupe_repo():
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.media_ingest_dedupe_repo import (
+        MediaIngestDedupeRepo,
+    )
+
+    pool = await get_db_pool()
+    repo = MediaIngestDedupeRepo(pool)
+    await repo.ensure_tables()
+    return repo
+
+
+def _parse_normalized_stt_artifact(raw_value: Any) -> dict[str, Any] | None:
+    if isinstance(raw_value, dict):
+        return dict(raw_value)
+    if not isinstance(raw_value, str):
+        return None
+    stripped = raw_value.lstrip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return None
+    return dict(parsed) if isinstance(parsed, dict) else None
+
+
+def _extract_reusable_transcript_payload(
+    *,
+    source_media: dict[str, Any],
+    transcript_rows: list[dict[str, Any]],
+) -> tuple[str, dict[str, Any] | None]:
+    normalized_stt = None
+    for row in transcript_rows:
+        normalized_stt = _parse_normalized_stt_artifact(row.get("transcription"))
+        if normalized_stt:
+            break
+
+    content_text = ""
+    if isinstance(normalized_stt, dict):
+        content_text = str(normalized_stt.get("text") or "").strip()
+    if not content_text:
+        content_text = str(source_media.get("content") or "").strip()
+
+    if normalized_stt is None and content_text:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
+            to_normalized_stt_artifact,
+        )
+
+        normalized_stt = to_normalized_stt_artifact(
+            text=content_text,
+            segments=None,
+            language=None,
+            provider="dedupe",
+            model=str(source_media.get("transcription_model") or "dedupe"),
+        )
+
+    return content_text, normalized_stt
+
+
+def _build_reused_process_result(
+    *,
+    original_input_ref: str,
+    media_type: str,
+    content_text: str,
+    source_media: dict[str, Any],
+    normalized_stt: dict[str, Any] | None,
+) -> dict[str, Any]:
+    reusable_content_text = str(content_text or "").strip()
+    if not reusable_content_text and isinstance(normalized_stt, dict):
+        reusable_content_text = str(normalized_stt.get("text") or "").strip()
+    artifact_meta = dict(normalized_stt.get("metadata") or {}) if isinstance(normalized_stt, dict) else {}
+    metadata = {
+        "title": source_media.get("title"),
+        "author": source_media.get("author"),
+        "url": source_media.get("url"),
+        "source_url": source_media.get("url"),
+        "model": artifact_meta.get("model") or source_media.get("transcription_model"),
+        "provider": artifact_meta.get("provider"),
+        "source_hash": source_media.get("source_hash"),
+    }
+    metadata = {key: value for key, value in metadata.items() if value not in (None, "")}
+
+    analysis_details: dict[str, Any] = {}
+    language_value = artifact_meta.get("language")
+    if language_value:
+        analysis_details["transcription_language"] = language_value
+
+    return {
+        "status": "Success",
+        "input_ref": original_input_ref,
+        "processing_source": original_input_ref,
+        "media_type": media_type,
+        "metadata": metadata,
+        "content": reusable_content_text,
+        "segments": (normalized_stt.get("segments") if isinstance(normalized_stt, dict) else None),
+        "chunks": None,
+        "analysis": None,
+        "summary": None,
+        "analysis_details": analysis_details,
+        "error": None,
+        "warnings": None,
+        "normalized_stt": normalized_stt,
+        "video_lite_summary_status": None,
+    }
+
+
+def _synthesize_reused_transcript_analysis_sync(
+    *,
+    process_result: dict[str, Any],
+    form_data: Any,
+    chunk_options: dict[str, Any] | None,
+) -> tuple[str | None, list[str], list[dict[str, Any]] | None]:
+    from tldw_Server_API.app.core.Chunking import improved_chunking_process
+    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+
+    warnings: list[str] = []
+    text_to_analyze = str(process_result.get("content") or "").strip()
+    if not text_to_analyze:
+        return None, warnings, None
+
+    api_name = getattr(form_data, "api_name", None)
+    if not api_name or str(api_name).strip().lower() == "none":
+        return None, warnings, None
+
+    custom_prompt = getattr(form_data, "custom_prompt", None)
+    system_prompt = getattr(form_data, "system_prompt", None)
+    perform_chunking = bool(getattr(form_data, "perform_chunking", True))
+    summarize_recursively = bool(getattr(form_data, "summarize_recursively", False))
+
+    if not perform_chunking or not chunk_options:
+        return (
+            analyze(
+                api_name,
+                text_to_analyze,
+                custom_prompt,
+                None,
+                system_message=system_prompt,
+            ),
+            warnings,
+            None,
+        )
+
+    try:
+        chunked_texts_list = improved_chunking_process(text_to_analyze, chunk_options)
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
+        warnings.append(f"Chunking process failed during dedupe reuse: {exc}")
+        return (
+            analyze(
+                api_name,
+                text_to_analyze,
+                custom_prompt,
+                None,
+                system_message=system_prompt,
+            ),
+            warnings,
+            None,
+        )
+
+    if not chunked_texts_list:
+        warnings.append("Chunking yielded no chunks during dedupe reuse.")
+        return (
+            analyze(
+                api_name,
+                text_to_analyze,
+                custom_prompt,
+                None,
+                system_message=system_prompt,
+            ),
+            warnings,
+            None,
+        )
+
+    chunk_summaries: list[str] = []
+    for index, chunk_block in enumerate(chunked_texts_list):
+        chunk_text = str((chunk_block or {}).get("text") or "").strip()
+        if not chunk_text:
+            continue
+        try:
+            chunk_summary = analyze(
+                api_name,
+                chunk_text,
+                custom_prompt,
+                None,
+                system_message=system_prompt,
+            )
+        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
+            warnings.append(f"Chunk summarization failed during dedupe reuse for chunk {index}: {exc}")
+            continue
+        if chunk_summary:
+            chunk_summaries.append(str(chunk_summary))
+            if isinstance(chunk_block.get("metadata"), dict):
+                chunk_block["metadata"]["summary"] = str(chunk_summary)
+            else:
+                chunk_block["metadata"] = {"summary": str(chunk_summary)}
+
+    if not chunk_summaries:
+        warnings.append("No chunk summaries were produced during dedupe reuse.")
+        return None, warnings, chunked_texts_list
+
+    if summarize_recursively and len(chunk_summaries) > 1:
+        combined_chunk_summaries = "\n\n---\n\n".join(chunk_summaries)
+        return (
+            analyze(
+                api_name,
+                combined_chunk_summaries,
+                custom_prompt or "Summarize the key points from the preceding text sections.",
+                None,
+                system_message=system_prompt,
+            ),
+            warnings,
+            chunked_texts_list,
+        )
+
+    return "\n\n---\n\n".join(chunk_summaries), warnings, chunked_texts_list
+
+
+async def _populate_reused_transcript_summary(
+    *,
+    process_result: dict[str, Any],
+    form_data: Any,
+    chunk_options: dict[str, Any] | None,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    if process_result.get("analysis") or process_result.get("summary"):
+        return
+    if not getattr(form_data, "perform_analysis", False):
+        return
+
+    analysis_details = process_result.get("analysis_details")
+    if not isinstance(analysis_details, dict):
+        analysis_details = {}
+        process_result["analysis_details"] = analysis_details
+    analysis_details["llm_api"] = getattr(form_data, "api_name", None)
+    analysis_details["custom_prompt"] = getattr(form_data, "custom_prompt", None)
+    analysis_details["system_prompt"] = getattr(form_data, "system_prompt", None)
+    if chunk_options:
+        analysis_details["chunking_options"] = dict(chunk_options)
+
+    try:
+        analysis_text, warnings, chunks = await loop.run_in_executor(
+            None,
+            functools.partial(
+                _synthesize_reused_transcript_analysis_sync,
+                process_result=process_result,
+                form_data=form_data,
+                chunk_options=chunk_options,
+            ),
+        )
+        if chunks is not None:
+            process_result["chunks"] = chunks
+        if warnings:
+            _ensure_warnings_list(process_result).extend(warnings)
+        process_result["analysis"] = analysis_text
+        process_result["summary"] = analysis_text
+        if analysis_text:
+            process_result["video_lite_summary_status"] = "ready"
+        else:
+            process_result["video_lite_summary_status"] = "failed"
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
+        _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {exc}")
+        process_result["video_lite_summary_status"] = "failed"
+
+
+async def _maybe_build_reused_transcript_process_result(
+    *,
+    media_type: str,
+    original_input_ref: str,
+    source_path_or_url: str,
+    source_hash: str | None,
+    form_data: Any,
+    chunk_options: dict[str, Any] | None,
+    loop: asyncio.AbstractEventLoop,
+) -> dict[str, Any] | None:
+    if str(media_type) != "video":
+        return None
+
+    dedupe_candidates = _shared_transcript_dedupe_candidates(
+        source_path_or_url=source_path_or_url,
+        source_hash=source_hash,
+        form_data=form_data,
+    )
+    if not dedupe_candidates:
+        return None
+
+    repo = await _get_media_ingest_dedupe_repo()
+    hit = await repo.lookup_source(
+        media_type=str(media_type),
+        dedupe_keys=[f"{kind}:{value}" for kind, value in dedupe_candidates],
+    )
+    if not hit:
+        return None
+
+    source_user_id = hit.get("source_user_id")
+    source_media_id = hit.get("source_media_id")
+    try:
+        source_user_id_int = int(source_user_id)
+        source_media_id_int = int(source_media_id)
+    except (TypeError, ValueError):
+        return None
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.media_db.api import (
+        get_media_transcripts,
+    )
+
+    source_db = create_media_database(
+        client_id=f"media_ingest_dedupe_source:{source_user_id_int}",
+        db_path=str(DatabasePaths.get_media_db_path(str(source_user_id_int))),
+    )
+    try:
+        source_media = source_db.get_media_by_id(
+            source_media_id_int,
+            include_deleted=False,
+            include_trash=False,
+        )
+        if not source_media:
+            return None
+        transcript_rows = get_media_transcripts(source_db, source_media_id_int)
+        content_text, normalized_stt = _extract_reusable_transcript_payload(
+            source_media=source_media,
+            transcript_rows=transcript_rows,
+        )
+        if not content_text:
+            return None
+        reused_result = _build_reused_process_result(
+            original_input_ref=original_input_ref,
+            media_type=media_type,
+            content_text=content_text,
+            source_media=source_media,
+            normalized_stt=normalized_stt,
+        )
+    finally:
+        source_db.close_connection()
+
+    await _populate_reused_transcript_summary(
+        process_result=reused_result,
+        form_data=form_data,
+        chunk_options=chunk_options,
+        loop=loop,
+    )
+    return reused_result
+
+
+async def _register_reusable_transcript_source(
+    *,
+    media_type: str,
+    original_input_ref: str,
+    source_hash: str | None,
+    process_result: dict[str, Any],
+    user_id: int | None,
+    form_data: Any,
+) -> None:
+    if str(media_type) != "video" or user_id is None:
+        return
+
+    media_id = process_result.get("db_id")
+    if media_id is None:
+        return
+    try:
+        media_id_int = int(media_id)
+    except (TypeError, ValueError):
+        return
+
+    dedupe_candidates = _shared_transcript_dedupe_candidates(
+        source_path_or_url=original_input_ref,
+        source_hash=source_hash,
+        form_data=form_data,
+    )
+    if not dedupe_candidates:
+        return
+
+    repo = await _get_media_ingest_dedupe_repo()
+    for key_type, key_value in dedupe_candidates:
+        await repo.upsert_source(
+            dedupe_key=f"{key_type}:{key_value}",
+            key_type=key_type,
+            media_type=str(media_type),
+            source_user_id=int(user_id),
+            source_media_id=media_id_int,
+            source_url=original_input_ref if key_type == "url" else None,
+            source_hash=source_hash if key_type == "source_hash" else None,
+        )
 
 
 def _build_url_match_clause(
@@ -1299,9 +1823,7 @@ def _validate_downloaded_url_file(
 
     validator = _resolve_ingestion_file_validator(media_mod)
     normalized_allowed_extensions = (
-        {str(ext).lower() for ext in allowed_extensions if ext}
-        if allowed_extensions is not None
-        else None
+        {str(ext).lower() for ext in allowed_extensions if ext} if allowed_extensions is not None else None
     )
 
     file_extension = downloaded_path.suffix.lower()
@@ -1317,11 +1839,7 @@ def _validate_downloaded_url_file(
     }
     validate_email_archive_contents = True
     try:
-        media_cfg = (
-            loaded_config_data.get("media_processing", {})
-            if loaded_config_data
-            else {}
-        )
+        media_cfg = loaded_config_data.get("media_processing", {}) if loaded_config_data else {}
         if isinstance(media_cfg, dict):
             validate_email_archive_contents = bool(
                 media_cfg.get("validate_email_archive_contents", True),
@@ -1483,8 +2001,7 @@ def sync_media_add_results_to_collections(
 
             source_url = (
                 input_ref
-                if isinstance(input_ref, str)
-                and input_ref.lower().startswith(("http://", "https://"))
+                if isinstance(input_ref, str) and input_ref.lower().startswith(("http://", "https://"))
                 else None
             )
             url_value = source_url or input_ref or f"media://{media_id}"
@@ -1495,9 +2012,7 @@ def sync_media_add_results_to_collections(
                     domain = (urlparse(source_url).hostname or "").lower() or None
 
             content_hash = (
-                hashlib.sha256(content_text.encode("utf-8", errors="ignore")).hexdigest()
-                if content_text
-                else None
+                hashlib.sha256(content_text.encode("utf-8", errors="ignore")).hexdigest() if content_text else None
             )
             word_count = len(content_text.split()) if content_text else None
             published_at = metadata_map.get("published_at") or metadata_map.get("publish_date")
@@ -1567,6 +2082,36 @@ def sync_media_add_results_to_collections(
             )
             result["collections_item_id"] = item_row.id
             result["collections_origin"] = collections_origin
+
+            result_planned_item_id_raw = result.get("media_collection_item_id") or result.get("planned_item_id")
+            planned_item_id_raw = (
+                result_planned_item_id_raw
+                or getattr(form_data, "media_collection_item_id", None)
+                or getattr(form_data, "planned_item_id", None)
+            )
+            try:
+                planned_item_id = int(planned_item_id_raw) if planned_item_id_raw is not None else None
+            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                planned_item_id = None
+            if planned_item_id is not None and planned_item_id > 0:
+                if len(results) > 1 and result_planned_item_id_raw is None:
+                    _ensure_warnings_list(result).append(
+                        "Skipped collection item resolution: missing per-result planned item id for batch ingest."
+                    )
+                    continue
+                latest_job_id = getattr(form_data, "media_ingest_job_id", None)
+                resolved_status = "completed"
+                status_text = str(result.get("status") or "").strip().lower()
+                message_text = str(result.get("db_message") or result.get("message") or "").lower()
+                if status_text in {"skipped", "duplicate", "skipped_existing"} or "already exists" in message_text:
+                    resolved_status = "skipped_existing"
+                collections_db.resolve_media_collection_item(
+                    planned_item_id,
+                    media_id=media_id,
+                    status=resolved_status,
+                    latest_job_id=str(latest_job_id).strip() if latest_job_id is not None else None,
+                )
+                result["media_collection_item_id"] = planned_item_id
 
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Collections dual-write failed: {}", exc)
@@ -1689,9 +2234,7 @@ def _resolve_media_add_embedding_config(form_data: Any) -> tuple[str, str, int, 
         or "sentence-transformers/all-MiniLM-L6-v2"
     )
     embedding_provider = (
-        getattr(form_data, "embedding_provider", None)
-        or embedding_settings.get("embedding_provider")
-        or "huggingface"
+        getattr(form_data, "embedding_provider", None) or embedding_settings.get("embedding_provider") or "huggingface"
     )
     chunk_size = _coerce_positive_int(getattr(form_data, "chunk_size", None), 1000)
     chunk_overlap = _coerce_positive_int(
@@ -1713,26 +2256,17 @@ def _build_media_add_embeddings_provenance(
     current_user: Any,
     media_id: int,
 ) -> dict[str, Any]:
-    origin = str(
-        result.get("collections_origin")
-        or getattr(form_data, "collections_origin", None)
-        or "media_add"
-    )
+    origin = str(result.get("collections_origin") or getattr(form_data, "collections_origin", None) or "media_add")
     media_type = str(result.get("media_type") or getattr(form_data, "media_type", "")).strip()
     input_ref = str(result.get("input_ref") or "")
     processing_source = str(result.get("processing_source") or "")
     source_url = (
-        input_ref
-        if isinstance(input_ref, str)
-        and input_ref.lower().startswith(("http://", "https://"))
-        else None
+        input_ref if isinstance(input_ref, str) and input_ref.lower().startswith(("http://", "https://")) else None
     )
 
     collections_item_id = result.get("collections_item_id")
     try:
-        collections_item_id = (
-            int(collections_item_id) if collections_item_id is not None else None
-        )
+        collections_item_id = int(collections_item_id) if collections_item_id is not None else None
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         collections_item_id = None
 
@@ -1783,9 +2317,7 @@ async def schedule_media_add_embeddings(
         dispatch_mode,
     )
 
-    embedding_model, embedding_provider, chunk_size, chunk_overlap = (
-        _resolve_media_add_embedding_config(form_data)
-    )
+    embedding_model, embedding_provider, chunk_size, chunk_overlap = _resolve_media_add_embedding_config(form_data)
     user_id = str(getattr(current_user, "id", "1"))
 
     for result in results:
@@ -1830,9 +2362,7 @@ async def schedule_media_add_embeddings(
                     embedding_priority=None,
                     provenance=provenance,
                 )
-                job_id = str(
-                    (job_row or {}).get("uuid") or (job_row or {}).get("id") or ""
-                ).strip()
+                job_id = str((job_row or {}).get("uuid") or (job_row or {}).get("id") or "").strip()
                 result["embeddings_scheduled"] = True
                 result["embeddings_dispatch"] = "jobs"
                 if job_id:
@@ -1902,9 +2432,7 @@ async def schedule_media_add_embeddings(
                         _mark_media_embeddings_error(
                             db,
                             media_id,
-                            result_emb.get("error")
-                            or result_emb.get("message")
-                            or "Embedding generation failed",
+                            result_emb.get("error") or result_emb.get("message") or "Embedding generation failed",
                         )
                     logger.info(
                         "Embedding generation result for media {}: {}",
@@ -1975,10 +2503,7 @@ def determine_add_media_final_status(results: list[dict[str, Any]]) -> int:
     if not processing_results:
         return status.HTTP_200_OK
 
-    if all(
-        str(r.get("status", "")).lower() == "success"
-        for r in processing_results
-    ):
+    if all(str(r.get("status", "")).lower() == "success" for r in processing_results):
         return status.HTTP_200_OK
     return status.HTTP_207_MULTI_STATUS
 
@@ -2012,7 +2537,6 @@ async def add_media_orchestrate(
         media_mod = None  # type: ignore[assignment]
 
     _validate_inputs = validate_add_media_inputs
-    _prepare_chunking_options_dict = prepare_chunking_options_dict
     _prepare_common_options = prepare_common_options
     _determine_final_status = determine_add_media_final_status
 
@@ -2022,6 +2546,7 @@ async def add_media_orchestrate(
     from tldw_Server_API.app.core.Ingestion_Media_Processing import (  # type: ignore  # noqa: E501
         input_sourcing as input_sourcing_mod,
     )
+
     CoreTempDirManager = input_sourcing_mod.TempDirManager
 
     if media_mod is not None:
@@ -2090,12 +2615,7 @@ async def add_media_orchestrate(
         pass
 
     # --- 1b. Resource Governor per-user concurrency budget ---
-    if (
-        rg_governor is not None
-        and RGRequest is not None
-        and rg_entity
-        and rg_jobs_limit > 0
-    ):
+    if rg_governor is not None and RGRequest is not None and rg_entity and rg_jobs_limit > 0:
         try:
             rg_decision, rg_handle = await rg_governor.reserve(
                 RGRequest(
@@ -2109,13 +2629,11 @@ async def add_media_orchestrate(
                 op_id=f"media-add-jobs:{rg_entity}:{time.time_ns()}",
             )
             if not bool(getattr(rg_decision, "allowed", False)) or not rg_handle:
-                cat_details = (
-                    ((getattr(rg_decision, "details", {}) or {}).get("categories", {}) or {}).get("jobs")
-                    or {}
-                )
+                cat_details = ((getattr(rg_decision, "details", {}) or {}).get("categories", {}) or {}).get(
+                    "jobs"
+                ) or {}
                 retry_after = _safe_int(
-                    getattr(rg_decision, "retry_after", None)
-                    or cat_details.get("retry_after"),
+                    getattr(rg_decision, "retry_after", None) or cat_details.get("retry_after"),
                     1,
                 )
                 headers = _build_ingestion_budget_headers(
@@ -2142,9 +2660,7 @@ async def add_media_orchestrate(
     if not hasattr(db, "client_id") or not db.client_id:
         logger.error("CRITICAL: Database instance dependency missing client_id.")
         db.client_id = settings.get("SERVER_CLIENT_ID", "SERVER_API_V1_FALLBACK")
-        logger.warning(
-            "Manually set missing client_id on DB instance to: {}", db.client_id
-        )
+        logger.warning("Manually set missing client_id on DB instance to: {}", db.client_id)
 
     results: list[dict[str, Any]] = []
     temp_dir_manager = TempDirManagerCls(  # type: ignore[call-arg]
@@ -2187,11 +2703,7 @@ async def add_media_orchestrate(
                 "email": [".eml"]
                 + ([".zip"] if getattr(form_data, "accept_archives", False) else [])
                 + ([".mbox"] if getattr(form_data, "accept_mbox", False) else [])
-                + (
-                    [".pst", ".ost"]
-                    if getattr(form_data, "accept_pst", False)
-                    else []
-                ),
+                + ([".pst", ".ost"] if getattr(form_data, "accept_pst", False) else []),
                 "json": [".json"],
                 # For "document", allow a broad set; leave None to let validator handle.
             }
@@ -2203,8 +2715,7 @@ async def add_media_orchestrate(
                 validator=file_validator_instance,
                 allowed_extensions=allowed_exts,
                 skip_archive_scanning=(
-                    str(form_data.media_type).lower() == "email"
-                    and bool(getattr(form_data, "accept_archives", False))
+                    str(form_data.media_type).lower() == "email" and bool(getattr(form_data, "accept_archives", False))
                 ),
             )
 
@@ -2247,9 +2758,7 @@ async def add_media_orchestrate(
                     for pf in saved_files_info:
                         try:
                             # Use filesystem Path (not FastAPI's Path) to compute size.
-                            total_uploaded_bytes += FilePath(
-                                str(pf["path"]).strip()
-                            ).stat().st_size
+                            total_uploaded_bytes += FilePath(str(pf["path"]).strip()).stat().st_size
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                             pass
                     if total_uploaded_bytes > 0:
@@ -2326,18 +2835,14 @@ async def add_media_orchestrate(
                     )
                     if not bool(getattr(rg_decision, "allowed", False)):
                         cat_details = (
-                            (
-                                (getattr(rg_decision, "details", {}) or {}).get(
-                                    "categories",
-                                    {},
-                                )
-                                or {}
-                            ).get(_MEDIA_INGESTION_BYTES_CATEGORY)
+                            (getattr(rg_decision, "details", {}) or {}).get(
+                                "categories",
+                                {},
+                            )
                             or {}
-                        )
+                        ).get(_MEDIA_INGESTION_BYTES_CATEGORY) or {}
                         retry_after = _safe_int(
-                            getattr(rg_decision, "retry_after", None)
-                            or cat_details.get("retry_after"),
+                            getattr(rg_decision, "retry_after", None) or cat_details.get("retry_after"),
                             1,
                         )
                         headers = _build_ingestion_budget_headers(
@@ -2354,11 +2859,7 @@ async def add_media_orchestrate(
                         entity_scope, entity_value = rg_entity.split(":", 1)
                     else:
                         entity_scope, entity_value = "entity", rg_entity
-                    request_id_part = (
-                        request.headers.get("X-Request-ID", "")
-                        if request is not None
-                        else ""
-                    )
+                    request_id_part = request.headers.get("X-Request-ID", "") if request is not None else ""
                     if not request_id_part:
                         request_id_part = str(time.time_ns())
                     await _record_media_ingestion_bytes_ledger_entry(
@@ -2389,6 +2890,7 @@ async def add_media_orchestrate(
                     from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import (
                         parse_and_expand_urls,
                     )
+
                     expanded_urls = parse_and_expand_urls(url_list)
                     if expanded_urls != url_list:
                         logger.info(
@@ -2406,23 +2908,17 @@ async def add_media_orchestrate(
             # Check if any valid sources remain after potential save errors
             if not all_valid_input_sources:
                 if file_save_errors:
-                    logger.warning(
-                        "No valid inputs remaining after file handling errors."
-                    )
+                    logger.warning("No valid inputs remaining after file handling errors.")
                     if upload_error_status and upload_error_status[0] == HTTP_413_TOO_LARGE:
                         raise HTTPException(
                             status_code=upload_error_status[0],
                             detail=upload_error_status[1],
                         )
                     if all(
-                        _is_nonfatal_upload_validation_error(
-                            str(err_info.get("error", "") or "")
-                        )
+                        _is_nonfatal_upload_validation_error(str(err_info.get("error", "") or ""))
                         for err_info in file_save_errors
                     ):
-                        logger.info(
-                            "Returning multi-status response for upload validation-only failures."
-                        )
+                        logger.info("Returning multi-status response for upload validation-only failures.")
                     elif upload_error_status:
                         raise HTTPException(
                             status_code=upload_error_status[0],
@@ -2434,39 +2930,44 @@ async def add_media_orchestrate(
                             detail="File upload failed; no valid media sources found to process.",
                         )
                 else:
-                    logger.error(
-                        "No input URLs or successfully saved files found for /media/add."
-                    )
+                    logger.error("No input URLs or successfully saved files found for /media/add.")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="No valid media sources found to process.",
                     )
 
-            # Prepare chunking options and auto-apply templates
-            chunking_options_dict = _prepare_chunking_options_dict(form_data)
+            first_url = (form_data.urls or [None])[0]
+            first_filename = None
+            try:
+                if saved_files_info:
+                    first_filename = saved_files_info[0]["original_filename"]
+            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                first_filename = None
+            first_source = all_valid_input_sources[0] if all_valid_input_sources else first_url or first_filename
 
-            # Apply explicit or auto-selected chunking templates when requested.
+            # Prepare chunking options and auto-apply templates.
+            chunking_options_dict, chunking_plan = resolve_chunking_options_and_plan(
+                form_data,
+                media_type=str(form_data.media_type) if form_data.media_type else None,
+                source_name=str(first_source) if first_source else None,
+            )
+
+            # Apply explicit or auto-selected chunking templates for legacy/manual
+            # requests. Auto requests already own the resolved planner options.
             try:
                 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (  # type: ignore  # noqa: E501
                     apply_chunking_template_if_any as _apply_tpl,
                 )
 
-                first_url = (form_data.urls or [None])[0]
-                first_filename = None
-                try:
-                    if saved_files_info:
-                        first_filename = saved_files_info[0]["original_filename"]
-                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                    first_filename = None
-
-                chunking_options_dict = _apply_tpl(
-                    form_data=form_data,
-                    db=db,
-                    chunking_options_dict=chunking_options_dict,
-                    TemplateClassifier=TemplateClassifier,
-                    first_url=first_url,
-                    first_filename=first_filename,
-                )
+                if chunking_plan is None:
+                    chunking_options_dict = _apply_tpl(
+                        form_data=form_data,
+                        db=db,
+                        chunking_options_dict=chunking_options_dict,
+                        TemplateClassifier=TemplateClassifier,
+                        first_url=first_url,
+                        first_filename=first_filename,
+                    )
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as auto_err:
                 logger.warning("Auto-apply chunking template failed: {}", auto_err)
 
@@ -2477,11 +2978,7 @@ async def add_media_orchestrate(
             # Map input sources back to original refs (URL or original filename)
             source_to_ref_map: dict[str, str] = {src: src for src in url_list}
             source_to_ref_map.update(
-                {
-                    str(path): pf["original_filename"]
-                    for pf in saved_files_info
-                    if (path := pf.get("path"))
-                }
+                {str(path): pf["original_filename"] for pf in saved_files_info if (path := pf.get("path"))}
             )
             for pf in saved_files_info:
                 path = pf.get("path")
@@ -2558,11 +3055,7 @@ async def add_media_orchestrate(
                             loop=loop,
                             db_path=db_path_for_workers,
                             client_id=client_id_for_workers,
-                            user_id=(
-                                current_user.id
-                                if hasattr(current_user, "id")
-                                else None
-                            ),
+                            user_id=(current_user.id if hasattr(current_user, "id") else None),
                         )
 
                 tasks = [_run_doc_item(source) for source in all_valid_input_sources]
@@ -2578,13 +3071,9 @@ async def add_media_orchestrate(
                         status_code = getattr(result, "status_code", None)
                         detail_text = str(detail) if detail else str(result)
                         if status_code:
-                            error_msg = (
-                                f"Processing failed (HTTP {status_code}): {detail_text}"
-                            )
+                            error_msg = f"Processing failed (HTTP {status_code}): {detail_text}"
                         else:
-                            error_msg = (
-                                f"Processing failed: {type(result).__name__}: {detail_text}"
-                            )
+                            error_msg = f"Processing failed: {type(result).__name__}: {detail_text}"
                         logger.error(
                             "Document-like processing failed for {}: {}",
                             source,
@@ -2647,9 +3136,7 @@ async def add_media_orchestrate(
                                 "Original file path rejected outside temp dir: {}",
                                 source_path,
                             )
-                            _ensure_warnings_list(result).append(
-                                "Original file not stored: unsafe local path"
-                            )
+                            _ensure_warnings_list(result).append("Original file not stored: unsafe local path")
                             continue
                         source_file = safe_source
                         if not source_file.exists():
@@ -2673,6 +3160,7 @@ async def add_media_orchestrate(
                             # Check storage quota before storing
                             try:
                                 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
+
                                 quota_service = StorageQuotaService()
                                 await quota_service.initialize()
 
@@ -2740,24 +3228,17 @@ async def add_media_orchestrate(
                                 checksum=checksum,
                             )
 
-                            logger.info(
-                                f"Stored original file for media_id={media_id}: {storage_path}"
-                            )
+                            logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
 
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
-                            logger.error(
-                                f"Failed to store original file for media_id={media_id}: {store_err}"
-                            )
+                            logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
                             # Non-fatal - don't fail the entire ingestion
                             result["original_file_stored"] = False
-                            _ensure_warnings_list(result).append(
-                                f"Failed to store original file: {store_err}"
-                            )
+                            _ensure_warnings_list(result).append(f"Failed to store original file: {store_err}")
 
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as storage_init_err:
                     logger.error(f"Failed to initialize storage backend: {storage_init_err}")
-
 
         # --- 6b. Dual-write to Collections content_items ---
         try:
@@ -2769,7 +3250,6 @@ async def add_media_orchestrate(
             )
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as collections_err:
             logger.warning("Collections dual-write step failed: {}", collections_err)
-
 
         # --- 7. Generate Embeddings if Requested ---
         try:
@@ -2805,11 +3285,7 @@ async def add_media_orchestrate(
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
             pass
 
-        log_level = (
-            "INFO"
-            if final_status_code == status.HTTP_200_OK
-            else "WARNING"
-        )
+        log_level = "INFO" if final_status_code == status.HTTP_200_OK else "WARNING"
         logger.log(
             log_level,
             "Request finished with status {}. Results count: {}",
@@ -2821,20 +3297,14 @@ async def add_media_orchestrate(
         try:
             if is_test_mode() and response is not None:
                 try:
-                    _dbp = getattr(
-                        db, "db_path_str", getattr(db, "db_path", "?")
-                    )
+                    _dbp = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                     _dbp = "?"
                 response.headers["X-TLDW-DB-Path"] = str(_dbp)
                 response.headers["X-TLDW-Add-Results-Len"] = str(len(results))
                 try:
                     ok_with_id = sum(
-                        1
-                        for r in results
-                        if isinstance(r, dict)
-                        and r.get("status") == "Success"
-                        and r.get("db_id")
+                        1 for r in results if isinstance(r, dict) and r.get("status") == "Success" and r.get("db_id")
                     )
                     response.headers["X-TLDW-Add-OK-With-Id"] = str(ok_with_id)
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
@@ -2857,9 +3327,7 @@ async def add_media_orchestrate(
         raise
     except OSError as os_err:
         request_outcome = "error"
-        logger.error(
-            "OSError during /media/add setup: {}", os_err, exc_info=True
-        )
+        logger.error("OSError during /media/add setup: {}", os_err, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OS error during setup: {os_err}",
@@ -2926,6 +3394,26 @@ async def add_media_persist(
     )
 
 
+async def _resolve_auto_chunking_options_for_persistence(
+    form_data: Any,
+    *,
+    media_type: Any,
+    source_name: str,
+    extracted_text: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        return await async_resolve_chunking_options_and_plan(
+            form_data,
+            media_type=media_type,
+            source_name=source_name,
+            extracted_text=extracted_text,
+        )
+    except asyncio.CancelledError:
+        raise
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+        return None, None
+
+
 async def persist_primary_av_item(
     *,
     process_result: dict[str, Any],
@@ -2954,6 +3442,22 @@ async def persist_primary_av_item(
     content_for_db = process_result.get("transcript", process_result.get("content"))
     analysis_for_db = process_result.get("summary", process_result.get("analysis"))
     metadata_for_db = process_result.get("metadata", {}) or {}
+    if not isinstance(metadata_for_db, dict):
+        metadata_for_db = {}
+    resolved_chunk_options = chunk_options
+    if getattr(form_data, "chunking_mode", None) == "auto":
+        auto_chunking_options, auto_chunking_plan = await _resolve_auto_chunking_options_for_persistence(
+            form_data,
+            media_type=media_type,
+            source_name=str(original_input_ref or ""),
+            extracted_text=content_for_db if isinstance(content_for_db, str) else None,
+        )
+        if auto_chunking_options is not None:
+            resolved_chunk_options = auto_chunking_options
+        if auto_chunking_plan:
+            metadata_for_db = dict(metadata_for_db)
+            metadata_for_db["chunking_plan"] = auto_chunking_plan
+            process_result["metadata"] = metadata_for_db
 
     # Use the model reported by the processor if available, else fall back.
     transcription_model_used = metadata_for_db.get(
@@ -3004,40 +3508,11 @@ async def persist_primary_av_item(
         # Build a safe metadata subset for persistence.
         safe_meta: dict[str, Any] = {}
         try:
-            allowed_keys = {
-                "title",
-                "author",
-                "doi",
-                "pmid",
-                "pmcid",
-                "arxiv_id",
-                "s2_paper_id",
-                "url",
-                "pdf_url",
-                "pmc_url",
-                "date",
-                "year",
-                "venue",
-                "journal",
-                "license",
-                "license_url",
-                "publisher",
-                "source",
-                "creators",
-                "rights",
-                "source_hash",
-            }
-            for k, v in metadata_for_db.items():
-                if k in allowed_keys and isinstance(v, (str, int, float, bool)):
-                    safe_meta[k] = v
-                elif k in allowed_keys and isinstance(v, list):
-                    safe_meta[k] = [x for x in v if isinstance(x, (str, int, float, bool))]
-            # Extract from externalIds if present.
-            ext = metadata_for_db.get("externalIds")
-            if isinstance(ext, dict):
-                for kk in ("DOI", "ArXiv", "PMID", "PMCID"):
-                    if ext.get(kk):
-                        safe_meta[kk.lower()] = ext.get(kk)
+            safe_meta = build_safe_metadata_subset(metadata_for_db)
+            safe_meta = _merge_video_lite_summary_safe_metadata(
+                safe_meta,
+                process_result=process_result,
+            )
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
             safe_meta = {}
 
@@ -3065,7 +3540,7 @@ async def persist_primary_av_item(
             raw_source_hash_str = str(raw_source_hash).strip()
             source_hash_for_db = raw_source_hash_str if raw_source_hash_str else None
 
-        effective_chunk_options = chunk_options
+        effective_chunk_options = resolved_chunk_options
         if effective_chunk_options is None and getattr(form_data, "perform_chunking", False):
             try:
                 effective_chunk_options = prepare_chunking_options_dict(form_data)
@@ -3156,6 +3631,7 @@ async def persist_primary_av_item(
                             from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
                                 Chunker as _Chunker,
                             )
+
                             normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                             normalized_chunk_type = raw_chunk_type
@@ -3192,9 +3668,7 @@ async def persist_primary_av_item(
             return _with_media_db_session(
                 db_path=db_path,
                 client_id=client_id,
-                operation=lambda worker_db: _resolve_media_writer(
-                    worker_db
-                ).add_media_with_keywords(**db_add_kwargs),
+                operation=lambda worker_db: _resolve_media_writer(worker_db).add_media_with_keywords(**db_add_kwargs),
             )
 
         media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
@@ -3211,9 +3685,7 @@ async def persist_primary_av_item(
             media_type=media_type,
             path_kind=path_kind,
             processor=f"{_coerce_ingestion_label(media_type)}_primary_persist",
-            expected_chunk_count=(
-                len(chunks_for_sql) if isinstance(chunks_for_sql, list) else None
-            ),
+            expected_chunk_count=(len(chunks_for_sql) if isinstance(chunks_for_sql, list) else None),
             db_message=db_message_result,
             media_id=media_id_result,
             db_path=db_path,
@@ -3229,51 +3701,66 @@ async def persist_primary_av_item(
         # Optionally persist a normalized STT transcript into the Transcripts table
         # for audio/video items when a transcription model is known.
         try:
-            if (
-                media_type in ["audio", "video"]
-                and media_id_result
-                and transcription_model_used
-                and content_for_db
-            ):
-                from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
-                    to_normalized_stt_artifact,
-                )
-                from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (  # type: ignore
-                    get_stt_provider_registry,
-                )
+            if media_type in ["audio", "video"] and media_id_result and transcription_model_used and content_for_db:
+                artifact = process_result.get("normalized_stt")
+                provider_name = None
+                if isinstance(artifact, dict):
+                    artifact = dict(artifact)
+                    artifact_meta = artifact.get("metadata") or {}
+                    if isinstance(artifact_meta, dict):
+                        provider_name = artifact_meta.get("provider")
+                else:
+                    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
+                        to_normalized_stt_artifact,
+                    )
+                    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (  # type: ignore
+                        get_stt_provider_registry,
+                    )
 
-                registry = get_stt_provider_registry()
-                provider_name, provider_model, _ = registry.resolve_provider_for_model(
-                    str(transcription_model_used)
-                )
-                analysis_details = process_result.get("analysis_details") or {}
-                lang_for_stt = analysis_details.get("transcription_language")
+                    registry = get_stt_provider_registry()
+                    provider_name, provider_model, _ = registry.resolve_provider_for_model(
+                        str(transcription_model_used)
+                    )
+                    analysis_details = process_result.get("analysis_details") or {}
+                    lang_for_stt = analysis_details.get("transcription_language")
 
-                artifact = to_normalized_stt_artifact(
-                    text=str(content_for_db),
-                    segments=process_result.get("segments"),
-                    language=lang_for_stt,
-                    provider=provider_name,
-                    model=provider_model or str(transcription_model_used),
-                )
+                    artifact = to_normalized_stt_artifact(
+                        text=str(content_for_db),
+                        segments=process_result.get("segments"),
+                        language=lang_for_stt,
+                        provider=provider_name,
+                        model=provider_model or str(transcription_model_used),
+                    )
                 serialized_artifact = json.dumps(artifact, default=str)
+                artifact_meta = artifact.get("metadata") or {}
+                whisper_model_value = str(artifact_meta.get("model") or transcription_model_used)
 
-                def _upsert_worker() -> None:
-                    _with_media_db_session(
+                def _upsert_worker() -> dict[str, Any]:
+                    return _with_media_db_session(
                         db_path=db_path,
                         client_id=client_id,
                         operation=lambda db: upsert_transcript(
                             db_instance=db,
                             media_id=int(media_id_result),
                             transcription=serialized_artifact,
-                            whisper_model=artifact["metadata"]["model"],
+                            whisper_model=whisper_model_value,
                         ),
                     )
 
-                await loop.run_in_executor(None, _upsert_worker)
+                write_payload = await loop.run_in_executor(None, _upsert_worker)
+                with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
+                    emit_stt_run_write_total(
+                        provider=provider_name,
+                        write_result=(write_payload or {}).get("write_result", "created"),
+                    )
                 # Attach normalized artifact to the process_result for callers
                 process_result["normalized_stt"] = artifact
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as stt_err:
+            with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
+                emit_stt_run_write_total(
+                    provider=locals().get("provider_name"),
+                    write_result="failed",
+                )
             logger.debug(
                 "STT transcript upsert skipped/failed for {} (media_id={}): {}",
                 original_input_ref,
@@ -3361,7 +3848,7 @@ async def persist_primary_av_item(
             exc_info=True,
         )
         process_result["status"] = "Warning"
-        process_result["error"] = (process_result.get("error") or "")
+        process_result["error"] = process_result.get("error") or ""
         _ensure_warnings_list(process_result).append(
             f"Unexpected persistence error: {exc}",
         )
@@ -3401,6 +3888,7 @@ async def process_batch_media(
     combined_results: list[dict[str, Any]] = []
     all_processing_sources = urls + uploaded_file_paths
     items_to_process: list[str] = []
+    reused_processing_results: list[dict[str, Any]] = []
     source_hash_by_ref: dict[str, list[str]] = {}
     source_hash_by_source: dict[str, str] = {}
     source_hash_column_available: bool | None = None
@@ -3436,9 +3924,7 @@ async def process_batch_media(
         reason = "Ready for processing."
         pre_check_warning: str | None = None
         source_hash: str | None = None
-        is_url = isinstance(source_path_or_url, str) and source_path_or_url.lower().startswith(
-            ("http://", "https://")
-        )
+        is_url = isinstance(source_path_or_url, str) and source_path_or_url.lower().startswith(("http://", "https://"))
         if is_url:
             url_dedupe_candidates = media_dedupe_url_candidates(identifier_for_check)
             if not url_dedupe_candidates:
@@ -3454,11 +3940,7 @@ async def process_batch_media(
                 )
 
                 block_override: bool | None = None
-                if (
-                    is_explicit_pytest_runtime()
-                    or env_flag_enabled("TESTING")
-                    or is_test_mode()
-                ):
+                if is_explicit_pytest_runtime() or env_flag_enabled("TESTING") or is_test_mode():
                     block_override = False
 
                 policy_result = evaluate_url_policy(
@@ -3512,9 +3994,7 @@ async def process_batch_media(
                 )
                 if hash_warning:
                     pre_check_warning = (
-                        hash_warning
-                        if not pre_check_warning
-                        else f"{pre_check_warning}; {hash_warning}"
+                        hash_warning if not pre_check_warning else f"{pre_check_warning}; {hash_warning}"
                     )
                 if source_hash and input_ref:
                     source_hash_by_ref.setdefault(str(input_ref), []).append(source_hash)
@@ -3538,29 +4018,25 @@ async def process_batch_media(
                     column="m.url",
                 )
                 if source_hash and not is_url:
+
                     def _source_hash_precheck(db: MediaDatabase) -> Any:
                         nonlocal source_hash_column_available
                         if source_hash_column_available is None:
-                            source_hash_column_available = _media_has_source_hash_column(
-                                db
-                            )
+                            source_hash_column_available = _media_has_source_hash_column(db)
                         if source_hash_column_available:
                             pre_check_query_template = """
                                 SELECT id
                                 FROM Media
                                 WHERE {url_clause}
-                                  AND transcription_model = ?
                                   AND source_hash = ?
                                   AND is_trash = 0
                                   AND deleted = 0
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(
-                                url_clause=url_clause
-                            )  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params, model_for_check, source_hash),
+                                (*url_params, source_hash),
                             )
                             existing_record = cursor.fetchone()
                             if not existing_record:
@@ -3569,7 +4045,6 @@ async def process_batch_media(
                                     FROM Media m
                                     JOIN DocumentVersions dv ON dv.media_id = m.id
                                     WHERE {url_clause_alias}
-                                      AND m.transcription_model = ?
                                       AND m.is_trash = 0
                                       AND m.deleted = 0
                                       AND dv.deleted = 0
@@ -3579,10 +4054,10 @@ async def process_batch_media(
                                 pre_check_query = pre_check_query_template.format(
                                     url_clause_alias=url_clause_alias
                                 )  # nosec B608
-                                hash_fragment = f"%\"source_hash\":\"{source_hash}\"%"
+                                hash_fragment = f'%"source_hash":"{source_hash}"%'
                                 cursor = db.execute_query(
                                     pre_check_query,
-                                    (*url_params_alias, model_for_check, hash_fragment),
+                                    (*url_params_alias, hash_fragment),
                                 )
                                 existing_record = cursor.fetchone()
                         else:
@@ -3591,7 +4066,6 @@ async def process_batch_media(
                                 FROM Media m
                                 JOIN DocumentVersions dv ON dv.media_id = m.id
                                 WHERE {url_clause_alias}
-                                  AND m.transcription_model = ?
                                   AND m.is_trash = 0
                                   AND m.deleted = 0
                                   AND dv.deleted = 0
@@ -3601,10 +4075,10 @@ async def process_batch_media(
                             pre_check_query = pre_check_query_template.format(
                                 url_clause_alias=url_clause_alias
                             )  # nosec B608
-                            hash_fragment = f"%\"source_hash\":\"{source_hash}\"%"
+                            hash_fragment = f'%"source_hash":"{source_hash}"%'
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params_alias, model_for_check, hash_fragment),
+                                (*url_params_alias, hash_fragment),
                             )
                             existing_record = cursor.fetchone()
                         return existing_record
@@ -3620,36 +4094,30 @@ async def process_batch_media(
                         should_process = False
                         reason = (
                             f"Media exists (ID: {existing_id}) with the same filename "
-                            f"and source hash for transcription model ('{model_for_check}'). "
+                            "and source hash. "
                             "Overwrite is False."
                         )
                     else:
                         should_process = True
-                        reason = (
-                            "Media not found with this filename and source hash "
-                            "for transcription model."
-                        )
+                        reason = "Media not found with this filename and source hash."
                 elif not is_url and not source_hash:
                     should_process = True
-                    reason = (
-                        "Local file pre-check skipped (no source hash available)."
-                    )
+                    reason = "Local file pre-check skipped (no source hash available)."
                 else:
+
                     def _url_precheck(db: MediaDatabase) -> Any:
                         pre_check_query_template = """
                                           SELECT id
                                           FROM Media
                                           WHERE {url_clause}
-                                            AND transcription_model = ?
                                             AND is_trash = 0
                                             AND deleted = 0
+                                          LIMIT 1
                                           """
-                        pre_check_query = pre_check_query_template.format(
-                            url_clause=url_clause
-                        )  # nosec B608
+                        pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
                         cursor = db.execute_query(
                             pre_check_query,
-                            (*url_params, model_for_check),
+                            url_params,
                         )
                         return cursor.fetchone()
 
@@ -3664,14 +4132,11 @@ async def process_batch_media(
                         should_process = False
                         reason = (
                             f"Media exists (ID: {existing_id}) with the same URL/identifier "
-                            f"and transcription model ('{model_for_check}'). Overwrite is False."
+                            "for this user. Overwrite is False."
                         )
                     else:
                         should_process = True
-                        reason = (
-                            "Media not found with this URL/identifier and "
-                            "transcription model."
-                        )
+                        reason = "Media not found with this URL/identifier."
             except (DatabaseError, sqlite3.Error) as check_err:
                 logger.error(
                     "DB pre-check (custom query) failed for {}: {}",
@@ -3697,15 +4162,30 @@ async def process_batch_media(
                     None,
                     f"Unexpected pre-check error: {check_err}",
                 )
-                pre_check_warning = (
-                    f"Unexpected database pre-check error: {check_err}"
-                )
+                pre_check_warning = f"Unexpected database pre-check error: {check_err}"
         else:
             should_process = True
-            reason = (
-                "Overwrite requested or not applicable, proceeding regardless "
-                "of existence."
+            reason = "Overwrite requested or not applicable, proceeding regardless " "of existence."
+
+        if should_process:
+            reused_process_result = await _maybe_build_reused_transcript_process_result(
+                media_type=str(media_type),
+                original_input_ref=str(input_ref),
+                source_path_or_url=str(source_path_or_url),
+                source_hash=source_hash,
+                form_data=form_data,
+                chunk_options=chunk_options,
+                loop=loop,
             )
+            if reused_process_result is not None:
+                if pre_check_warning:
+                    _ensure_warnings_list(reused_process_result).append(pre_check_warning)
+                reused_processing_results.append(reused_process_result)
+                logger.info(
+                    "Reused internal transcript source for {} without rerunning processor work.",
+                    input_ref,
+                )
+                continue
 
         if not should_process:
             logger.info("Skipping processing for {}: {}", input_ref, reason)
@@ -3738,7 +4218,7 @@ async def process_batch_media(
                 source_to_ref_map[source_path_or_url] = (input_ref, pre_check_warning)
             logger.info(log_msg)
 
-    if not items_to_process:
+    if not items_to_process and not reused_processing_results:
         logging.info("No items require processing after pre-checks.")
         return combined_results
 
@@ -3776,7 +4256,13 @@ async def process_batch_media(
 
     processing_output: dict[str, Any] | None = None
     try:
-        if str(media_type) == "video":
+        if not items_to_process:
+            processing_output = {
+                "results": [],
+                "errors_count": 0,
+                "errors": [],
+            }
+        elif str(media_type) == "video":
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import (  # type: ignore  # noqa: E501
                 process_videos,
             )
@@ -3805,31 +4291,19 @@ async def process_batch_media(
                 "perform_analysis": getattr(form_data, "perform_analysis", False),
                 "perform_chunking": getattr(form_data, "perform_chunking", True),
                 "chunk_method": chunk_options.get("method") if chunk_options else None,
-                "max_chunk_size": (
-                    chunk_options.get("max_size") if chunk_options else 500
-                ),
-                "chunk_overlap": (
-                    chunk_options.get("overlap") if chunk_options else 200
-                ),
-                "use_adaptive_chunking": (
-                    chunk_options.get("adaptive", False) if chunk_options else False
-                ),
-                "use_multi_level_chunking": (
-                    chunk_options.get("multi_level", False)
-                    if chunk_options
-                    else False
-                ),
-                "chunk_language": (
-                    chunk_options.get("language") if chunk_options else None
-                ),
+                "max_chunk_size": (chunk_options.get("max_size") if chunk_options else 500),
+                "chunk_overlap": (chunk_options.get("overlap") if chunk_options else 200),
+                "use_adaptive_chunking": (chunk_options.get("adaptive", False) if chunk_options else False),
+                "use_multi_level_chunking": (chunk_options.get("multi_level", False) if chunk_options else False),
+                "chunk_language": (chunk_options.get("language") if chunk_options else None),
                 "summarize_recursively": getattr(
                     form_data,
                     "summarize_recursively",
                     False,
                 ),
-                "api_name": getattr(form_data, "api_name", None)
-                if getattr(form_data, "perform_analysis", False)
-                else None,
+                "api_name": (
+                    getattr(form_data, "api_name", None) if getattr(form_data, "perform_analysis", False) else None
+                ),
                 "use_cookies": getattr(form_data, "use_cookies", False),
                 "cookies": getattr(form_data, "cookies", None),
                 "timestamp_option": getattr(form_data, "timestamp_option", None),
@@ -3880,30 +4354,18 @@ async def process_batch_media(
                 ),
                 "perform_chunking": getattr(form_data, "perform_chunking", True),
                 "chunk_method": chunk_options.get("method") if chunk_options else None,
-                "max_chunk_size": (
-                    chunk_options.get("max_size") if chunk_options else 500
-                ),
-                "chunk_overlap": (
-                    chunk_options.get("overlap") if chunk_options else 200
-                ),
-                "use_adaptive_chunking": (
-                    chunk_options.get("adaptive", False) if chunk_options else False
-                ),
-                "use_multi_level_chunking": (
-                    chunk_options.get("multi_level", False)
-                    if chunk_options
-                    else False
-                ),
-                "chunk_language": (
-                    chunk_options.get("language") if chunk_options else None
-                ),
+                "max_chunk_size": (chunk_options.get("max_size") if chunk_options else 500),
+                "chunk_overlap": (chunk_options.get("overlap") if chunk_options else 200),
+                "use_adaptive_chunking": (chunk_options.get("adaptive", False) if chunk_options else False),
+                "use_multi_level_chunking": (chunk_options.get("multi_level", False) if chunk_options else False),
+                "chunk_language": (chunk_options.get("language") if chunk_options else None),
                 "diarize": getattr(form_data, "diarize", False),
                 "vad_use": getattr(form_data, "vad_use", False),
                 "timestamp_option": getattr(form_data, "timestamp_option", None),
                 "perform_analysis": getattr(form_data, "perform_analysis", False),
-                "api_name": getattr(form_data, "api_name", None)
-                if getattr(form_data, "perform_analysis", False)
-                else None,
+                "api_name": (
+                    getattr(form_data, "api_name", None) if getattr(form_data, "perform_analysis", False) else None
+                ),
                 "custom_prompt_input": getattr(form_data, "custom_prompt", None),
                 "system_prompt_input": getattr(form_data, "system_prompt", None),
                 "summarize_recursively": getattr(
@@ -3973,10 +4435,10 @@ async def process_batch_media(
         return combined_results
 
     final_batch_results: list[dict[str, Any]] = []
-    processing_results_list: list[dict[str, Any]] = []
+    processing_results_list: list[dict[str, Any]] = list(reused_processing_results)
 
     if processing_output and isinstance(processing_output.get("results"), list):
-        processing_results_list = processing_output["results"]
+        processing_results_list.extend(processing_output["results"])
         if processing_output.get("errors_count", 0) > 0:
             logger.warning(
                 "Batch {} processor reported errors: {}",
@@ -4029,22 +4491,16 @@ async def process_batch_media(
                     "for processing_source: {}. Falling back.",
                     processing_source,
                 )
-                original_input_ref = (
-                    process_result.get("input_ref") or processing_source or "Unknown Input"
-                )
+                original_input_ref = process_result.get("input_ref") or processing_source or "Unknown Input"
         else:
             original_input_ref = process_result.get("input_ref") or "Unknown Input (Missing Source)"
             logger.warning(
                 "Processing result missing 'processing_source'. Using fallback input_ref: {}",
                 original_input_ref,
             )
-            process_result["processing_source"] = (
-                str(original_input_ref) if original_input_ref else "Unknown"
-            )
+            process_result["processing_source"] = str(original_input_ref) if original_input_ref else "Unknown"
 
-        process_result["input_ref"] = (
-            str(original_input_ref) if original_input_ref else "Unknown"
-        )
+        process_result["input_ref"] = str(original_input_ref) if original_input_ref else "Unknown"
 
         pre_check_info = source_to_ref_map.get(processing_source) if processing_source else None
         pre_check_warning_msg = None
@@ -4069,8 +4525,7 @@ async def process_batch_media(
 
         path_kind = (
             "url"
-            if isinstance(original_input_ref, str)
-            and original_input_ref.lower().startswith(("http://", "https://"))
+            if isinstance(original_input_ref, str) and original_input_ref.lower().startswith(("http://", "https://"))
             else "upload"
         )
         _enforce_metadata_contract_on_result(
@@ -4116,6 +4571,15 @@ async def process_batch_media(
             client_id=client_id,
             loop=loop,
             claims_context=claims_context,
+        )
+
+        await _register_reusable_transcript_source(
+            media_type=str(media_type),
+            original_input_ref=str(original_input_ref) if original_input_ref else "",
+            source_hash=source_hash,
+            process_result=process_result,
+            user_id=user_id,
+            form_data=form_data,
         )
 
         final_batch_results.append(process_result)
@@ -4236,11 +4700,7 @@ async def process_document_like_item(
                 # environment quirk so tests that stub downloads can
                 # still execute the ingestion path.
                 detail = getattr(exc, "detail", "")
-                if (
-                    is_test_mode()
-                    and isinstance(detail, str)
-                    and "Host could not be resolved" in detail
-                ):
+                if is_test_mode() and isinstance(detail, str) and "Host could not be resolved" in detail:
                     logger.warning(
                         "TEST_MODE: ignoring host resolution error for {}: {}",
                         processing_source,
@@ -4273,19 +4733,13 @@ async def process_document_like_item(
                 check_extension=check_extension,
                 media_type_key=None,
             )
-            if (
-                downloaded_path
-                and isinstance(downloaded_path, FilePath)
-                and downloaded_path.exists()
-            ):
+            if downloaded_path and isinstance(downloaded_path, FilePath) and downloaded_path.exists():
                 safe_downloaded_path = resolve_safe_local_path(
                     downloaded_path,
                     temp_dir,
                 )
                 if safe_downloaded_path is None:
-                    raise FileNotFoundError(
-                        "Downloaded file path rejected outside temp directory."
-                    )
+                    raise FileNotFoundError("Downloaded file path rejected outside temp directory.")
                 processing_filepath = safe_downloaded_path
                 processing_filename = safe_downloaded_path.name
                 _validate_downloaded_url_file(
@@ -4689,13 +5143,17 @@ async def process_document_like_item(
                 process_result_dict = await processing_func(**final_args)
 
             # Email containers may return a list of children.
-            if media_type_str == "email" and isinstance(
-                process_result_dict,
-                list,
-            ) and (
-                getattr(form_data, "accept_archives", False)
-                or getattr(form_data, "accept_mbox", False)
-                or getattr(form_data, "accept_pst", False)
+            if (
+                media_type_str == "email"
+                and isinstance(
+                    process_result_dict,
+                    list,
+                )
+                and (
+                    getattr(form_data, "accept_archives", False)
+                    or getattr(form_data, "accept_mbox", False)
+                    or getattr(form_data, "accept_pst", False)
+                )
             ):
                 final_result.update(
                     {
@@ -4703,10 +5161,7 @@ async def process_document_like_item(
                         "media_type": "email",
                         "content": None,
                         "metadata": {
-                            "title": (
-                                getattr(form_data, "title", None)
-                                or (processing_filename or item_input_ref)
-                            ),
+                            "title": (getattr(form_data, "title", None) or (processing_filename or item_input_ref)),
                             "parser_used": "builtin-email",
                         },
                         "children": process_result_dict,
@@ -4718,19 +5173,13 @@ async def process_document_like_item(
                     if archive_name:
                         lower_name = str(archive_name).lower()
                         if lower_name.endswith(".zip"):
-                            archive_keyword = (
-                                f"email_archive:{FilePath(archive_name).stem}"
-                            )
+                            archive_keyword = f"email_archive:{FilePath(archive_name).stem}"
                         elif lower_name.endswith(".mbox"):
-                            archive_keyword = (
-                                f"email_mbox:{FilePath(archive_name).stem}"
-                            )
+                            archive_keyword = f"email_mbox:{FilePath(archive_name).stem}"
                         elif lower_name.endswith(".pst") or lower_name.endswith(
                             ".ost",
                         ):
-                            archive_keyword = (
-                                f"email_pst:{FilePath(archive_name).stem}"
-                            )
+                            archive_keyword = f"email_pst:{FilePath(archive_name).stem}"
                     if archive_keyword:
                         base_keywords: list[str] = []
                         try:
@@ -4741,17 +5190,13 @@ async def process_document_like_item(
                             )
                             if isinstance(keywords_from_form, list):
                                 base_keywords = [
-                                    str(keyword).strip().lower()
-                                    for keyword in keywords_from_form
-                                    if keyword
+                                    str(keyword).strip().lower() for keyword in keywords_from_form if keyword
                                 ]
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                             base_keywords = []
                         merged = sorted(
                             set(
-                                (final_result.get("keywords") or [])
-                                + base_keywords
-                                + [archive_keyword],
+                                (final_result.get("keywords") or []) + base_keywords + [archive_keyword],
                             ),
                         )
                         final_result["keywords"] = merged
@@ -4761,15 +5206,13 @@ async def process_document_like_item(
             else:
                 if not isinstance(process_result_dict, dict):
                     raise TypeError(
-                        f"Processor '{func_name}' returned non-dict: "
-                        f"{type(process_result_dict)}",
+                        f"Processor '{func_name}' returned non-dict: " f"{type(process_result_dict)}",
                     )
                 if (
                     isinstance(process_result_dict, dict)
                     and process_result_dict.get("processing_source")
                     and final_result.get("processing_source")
-                    and final_result.get("processing_source")
-                    != process_result_dict.get("processing_source")
+                    and final_result.get("processing_source") != process_result_dict.get("processing_source")
                 ):
                     final_result.setdefault(
                         "original_processing_source",
@@ -4778,9 +5221,7 @@ async def process_document_like_item(
                 final_result.update(process_result_dict)
                 final_result["status"] = process_result_dict.get(
                     "status",
-                    "Error"
-                    if process_result_dict.get("error")
-                    else "Success",
+                    "Error" if process_result_dict.get("error") else "Success",
                 )
 
             proc_warnings: Any | None = None
@@ -4826,10 +5267,7 @@ async def process_document_like_item(
         final_result.update(
             {
                 "status": "Error",
-                "error": (
-                    "Processing error: "
-                    f"{type(proc_err).__name__}: {proc_err}"
-                ),
+                "error": ("Processing error: " f"{type(proc_err).__name__}: {proc_err}"),
             },
         )
 
@@ -4895,9 +5333,7 @@ async def process_document_like_item(
             claims_context=claims_context,
         )
     else:
-        final_result["db_message"] = (
-            "DB operation skipped (processing failed)."
-        )
+        final_result["db_message"] = "DB operation skipped (processing failed)."
         final_result["db_id"] = None
         final_result["media_uuid"] = None
 
@@ -4936,15 +5372,27 @@ async def persist_doc_item_and_children(
     content_for_db = final_result.get("content", "")
     analysis_for_db = final_result.get("summary") or final_result.get("analysis")
     metadata_for_db = final_result.get("metadata", {}) or {}
+    if not isinstance(metadata_for_db, dict):
+        metadata_for_db = {}
+    resolved_chunk_options = chunk_options
+    if getattr(form_data, "chunking_mode", None) == "auto":
+        auto_chunking_options, auto_chunking_plan = await _resolve_auto_chunking_options_for_persistence(
+            form_data,
+            media_type=media_type,
+            source_name=str(item_input_ref or processing_filename or ""),
+            extracted_text=content_for_db if isinstance(content_for_db, str) else None,
+        )
+        if auto_chunking_options is not None:
+            resolved_chunk_options = auto_chunking_options
+        if auto_chunking_plan:
+            metadata_for_db = dict(metadata_for_db)
+            metadata_for_db["chunking_plan"] = auto_chunking_plan
+            final_result["metadata"] = metadata_for_db
 
     extracted_keywords = final_result.get("keywords", [])
     combined_keywords = set(getattr(form_data, "keywords", None) or [])
     if isinstance(extracted_keywords, list):
-        combined_keywords.update(
-            k.strip().lower()
-            for k in extracted_keywords
-            if isinstance(k, str) and k.strip()
-        )
+        combined_keywords.update(k.strip().lower() for k in extracted_keywords if isinstance(k, str) and k.strip())
 
     try:
         if media_type == "email":
@@ -4963,9 +5411,7 @@ async def persist_doc_item_and_children(
         if media_type == "email" and getattr(form_data, "ingest_attachments", False):
             parent_msg_id = None
             try:
-                parent_msg_id = ((metadata_for_db or {}).get("email") or {}).get(
-                    "message_id"
-                )
+                parent_msg_id = ((metadata_for_db or {}).get("email") or {}).get("message_id")
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 parent_msg_id = None
             if parent_msg_id:
@@ -5006,17 +5452,11 @@ async def persist_doc_item_and_children(
 
     model_used = metadata_for_db.get("parser_used", "Imported")
     if not model_used and media_type == "pdf":
-        model_used = (final_result.get("analysis_details") or {}).get(
-            "parser", "Imported"
-        )
+        model_used = (final_result.get("analysis_details") or {}).get("parser", "Imported")
 
     default_title = FilePath(item_input_ref).stem if item_input_ref else "Untitled"
 
-    title_for_db = (
-        getattr(form_data, "title", None)
-        or metadata_for_db.get("title")
-        or default_title
-    )
+    title_for_db = getattr(form_data, "title", None) or metadata_for_db.get("title") or default_title
     author_for_db = metadata_for_db.get(
         "author",
         getattr(form_data, "author", None) or "Unknown",
@@ -5030,45 +5470,7 @@ async def persist_doc_item_and_children(
             )
             safe_meta: dict[str, Any] = {}
             try:
-                allowed_keys = {
-                    "title",
-                    "author",
-                    "doi",
-                    "pmid",
-                    "pmcid",
-                    "arxiv_id",
-                    "s2_paper_id",
-                    "url",
-                    "pdf_url",
-                    "pmc_url",
-                    "date",
-                    "year",
-                    "venue",
-                    "journal",
-                    "license",
-                    "license_url",
-                    "publisher",
-                    "source",
-                    "creators",
-                    "rights",
-                    "source_hash",
-                }
-                for key, value in (metadata_for_db or {}).items():
-                    if key in allowed_keys and isinstance(
-                        value, (str, int, float, bool)
-                    ):
-                        safe_meta[key] = value
-                    elif key in allowed_keys and isinstance(value, list):
-                        safe_meta[key] = [
-                            x
-                            for x in value
-                            if isinstance(x, (str, int, float, bool))
-                        ]
-                ext_ids = (metadata_for_db or {}).get("externalIds")
-                if isinstance(ext_ids, dict):
-                    for ext_key in ("DOI", "ArXiv", "PMID", "PMCID"):
-                        if ext_ids.get(ext_key):
-                            safe_meta[ext_key.lower()] = ext_ids.get(ext_key)
+                safe_meta = build_safe_metadata_subset(metadata_for_db)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 safe_meta = {}
 
@@ -5098,7 +5500,7 @@ async def persist_doc_item_and_children(
 
             chunks_for_sql: list[dict[str, Any]] | None = None
             try:
-                opts = chunk_options or {}
+                opts = resolved_chunk_options or {}
                 if opts:
                     from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
                         Chunker as _Chunker,
@@ -5114,9 +5516,9 @@ async def persist_doc_item_and_children(
                     chunks_for_sql = []
                     for item in flat_chunks:
                         meta = item.get("metadata") or {}
-                        chunk_type = chunker.normalize_chunk_type(
-                            meta.get("chunk_type") or meta.get("paragraph_kind")
-                        ) or "text"
+                        chunk_type = (
+                            chunker.normalize_chunk_type(meta.get("chunk_type") or meta.get("paragraph_kind")) or "text"
+                        )
                         small_meta: dict[str, Any] = {}
                         if meta.get("ancestry_titles"):
                             small_meta["ancestry_titles"] = meta.get("ancestry_titles")
@@ -5147,7 +5549,7 @@ async def persist_doc_item_and_children(
                 "transcription_model": model_used,
                 "author": author_for_db,
                 "overwrite": getattr(form_data, "overwrite_existing", False),
-                "chunk_options": chunk_options,
+                "chunk_options": resolved_chunk_options,
                 "chunks": chunks_for_sql,
             }
 
@@ -5168,9 +5570,11 @@ async def persist_doc_item_and_children(
                                     tenant_id=str(client_id),
                                     provider="upload",
                                     source_key=str(processing_filename or item_input_ref or "upload"),
-                                    labels=(metadata_for_db or {}).get("labels")
-                                    if isinstance(metadata_for_db, dict)
-                                    else None,
+                                    labels=(
+                                        (metadata_for_db or {}).get("labels")
+                                        if isinstance(metadata_for_db, dict)
+                                        else None
+                                    ),
                                 )
                                 _emit_email_native_persist_metric(
                                     path_kind="primary",
@@ -5234,9 +5638,7 @@ async def persist_doc_item_and_children(
                 media_type=media_type,
                 path_kind=path_kind,
                 processor=f"{_coerce_ingestion_label(media_type)}_document_persist",
-                expected_chunk_count=(
-                    len(chunks_for_sql) if isinstance(chunks_for_sql, list) else None
-                ),
+                expected_chunk_count=(len(chunks_for_sql) if isinstance(chunks_for_sql, list) else None),
                 db_message=db_message_result,
                 media_id=media_id_result,
                 db_path=db_path,
@@ -5245,7 +5647,7 @@ async def persist_doc_item_and_children(
             )
             _emit_ingestion_chunks_metric(
                 media_type=media_type,
-                chunk_method=(chunk_options or {}).get("method"),
+                chunk_method=(resolved_chunk_options or {}).get("method"),
                 chunk_count=len(chunks_for_sql) if isinstance(chunks_for_sql, list) else 0,
             )
             logger.info(
@@ -5257,16 +5659,10 @@ async def persist_doc_item_and_children(
             )
 
             try:
-                if media_type == "email" and getattr(
-                    form_data, "ingest_attachments", False
-                ):
+                if media_type == "email" and getattr(form_data, "ingest_attachments", False):
                     children = final_result.get("children") or []
                     if isinstance(children, list) and children:
-                        if any(
-                            isinstance(child, dict)
-                            and child.get("status") != "Success"
-                            for child in children
-                        ):
+                        if any(isinstance(child, dict) and child.get("status") != "Success" for child in children):
                             final_result["child_db_results"] = None
                         else:
                             child_db_results: list[dict[str, Any]] = []
@@ -5303,9 +5699,7 @@ async def persist_doc_item_and_children(
                                         key: value
                                         for key, value in child_meta.items()
                                         if key in allowed_keys_child
-                                        and isinstance(
-                                            value, (str, int, float, bool, list)
-                                        )
+                                        and isinstance(value, (str, int, float, bool, list))
                                     }
                                     safe_child_meta["parent_media_uuid"] = media_uuid_result
                                     try:
@@ -5313,59 +5707,45 @@ async def persist_doc_item_and_children(
                                             normalize_safe_metadata,
                                         )
 
-                                        safe_child_meta = normalize_safe_metadata(
-                                            safe_child_meta
-                                        )
-                                        safe_child_meta_json = json.dumps(
-                                            safe_child_meta, ensure_ascii=False
-                                        )
+                                        safe_child_meta = normalize_safe_metadata(safe_child_meta)
+                                        safe_child_meta_json = json.dumps(safe_child_meta, ensure_ascii=False)
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         safe_child_meta_json = None
 
                                     child_chunks_for_sql: list[dict[str, Any]] | None = None
                                     try:
-                                        opts_child = chunk_options or {}
+                                        opts_child = resolved_chunk_options or {}
                                         if opts_child:
                                             from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
                                                 Chunker as _Chunker,
                                             )
 
                                             chunker_child = _Chunker()
-                                            flat_child = (
-                                                chunker_child.chunk_text_hierarchical_flat(
-                                                    child_content,
-                                                    method=opts_child.get("method")
-                                                    or "sentences",
-                                                    max_size=opts_child.get("max_size")
-                                                    or 500,
-                                                    overlap=opts_child.get("overlap")
-                                                    or 50,
-                                                )
+                                            flat_child = chunker_child.chunk_text_hierarchical_flat(
+                                                child_content,
+                                                method=opts_child.get("method") or "sentences",
+                                                max_size=opts_child.get("max_size") or 500,
+                                                overlap=opts_child.get("overlap") or 50,
                                             )
                                             child_chunks_for_sql = []
                                             for item in flat_child:
                                                 meta = item.get("metadata") or {}
-                                                chunk_type = chunker_child.normalize_chunk_type(
-                                                    meta.get("chunk_type") or meta.get("paragraph_kind")
-                                                ) or "text"
+                                                chunk_type = (
+                                                    chunker_child.normalize_chunk_type(
+                                                        meta.get("chunk_type") or meta.get("paragraph_kind")
+                                                    )
+                                                    or "text"
+                                                )
                                                 small_meta: dict[str, Any] = {}
                                                 if meta.get("ancestry_titles"):
-                                                    small_meta["ancestry_titles"] = meta.get(
-                                                        "ancestry_titles"
-                                                    )
+                                                    small_meta["ancestry_titles"] = meta.get("ancestry_titles")
                                                 if meta.get("section_path"):
-                                                    small_meta["section_path"] = meta.get(
-                                                        "section_path"
-                                                    )
+                                                    small_meta["section_path"] = meta.get("section_path")
                                                 child_chunks_for_sql.append(
                                                     {
                                                         "text": item.get("text", ""),
-                                                        "start_char": meta.get(
-                                                            "start_offset"
-                                                        ),
-                                                        "end_char": meta.get(
-                                                            "end_offset"
-                                                        ),
+                                                        "start_char": meta.get("start_offset"),
+                                                        "end_char": meta.get("end_offset"),
                                                         "chunk_type": chunk_type,
                                                         "metadata": small_meta,
                                                     }
@@ -5383,21 +5763,22 @@ async def persist_doc_item_and_children(
                                         getattr(form_data, "author", None) or "Unknown",
                                     )
                                     child_url = (
-                                        f"{item_input_ref}::child::"
-                                        f"{child_meta.get('filename') or child_title}"
+                                        f"{item_input_ref}::child::" f"{child_meta.get('filename') or child_title}"
                                     )
 
                                     def _db_child_worker(
                                         child_url: str = child_url,
                                         child_title: str = child_title,
                                         child_content: str = child_content,
-                                        child_metadata_local: dict[str, Any] = child_meta if isinstance(child_meta, dict) else {},
+                                        child_metadata_local: dict[str, Any] = (
+                                            child_meta if isinstance(child_meta, dict) else {}
+                                        ),
                                         final_keywords: list[str] = final_keywords_list,
                                         safe_child_meta_json_local: str | None = safe_child_meta_json,
                                         model_used_local: str | None = model_used,
                                         child_author_local: str = child_author,
                                         child_chunks_for_sql_local: list[dict[str, Any]] | None = child_chunks_for_sql,
-                                        chunk_options_local: dict[str, Any] | None = chunk_options,
+                                        chunk_options_local: dict[str, Any] | None = resolved_chunk_options,
                                         form_data_local: Any = form_data,
                                         media_type_local: str = media_type,
                                         client_id_local: str = client_id,
@@ -5405,24 +5786,22 @@ async def persist_doc_item_and_children(
                                     ) -> Any:
                                         def _persist_child(worker_db: MediaDatabase) -> Any:
                                             media_writer = _resolve_media_writer(worker_db)
-                                            child_id_local, child_uuid_local, child_msg_local = media_writer.add_media_with_keywords(
-                                                url=_normalize_dedupe_url_for_db(child_url),
-                                                title=child_title,
-                                                media_type=media_type_local,
-                                                content=child_content,
-                                                keywords=final_keywords,
-                                                prompt=getattr(
-                                                    form_data_local, "custom_prompt", None
-                                                ),
-                                                analysis_content=None,
-                                                safe_metadata=safe_child_meta_json_local,
-                                                transcription_model=model_used_local,
-                                                author=child_author_local,
-                                                overwrite=getattr(
-                                                    form_data_local, "overwrite_existing", False
-                                                ),
-                                                chunk_options=chunk_options_local,
-                                                chunks=child_chunks_for_sql_local,
+                                            child_id_local, child_uuid_local, child_msg_local = (
+                                                media_writer.add_media_with_keywords(
+                                                    url=_normalize_dedupe_url_for_db(child_url),
+                                                    title=child_title,
+                                                    media_type=media_type_local,
+                                                    content=child_content,
+                                                    keywords=final_keywords,
+                                                    prompt=getattr(form_data_local, "custom_prompt", None),
+                                                    analysis_content=None,
+                                                    safe_metadata=safe_child_meta_json_local,
+                                                    transcription_model=model_used_local,
+                                                    author=child_author_local,
+                                                    overwrite=getattr(form_data_local, "overwrite_existing", False),
+                                                    chunk_options=chunk_options_local,
+                                                    chunks=child_chunks_for_sql_local,
+                                                )
                                             )
                                             if media_type_local == "email" and child_id_local:
                                                 if _is_email_native_persist_enabled():
@@ -5493,11 +5872,9 @@ async def persist_doc_item_and_children(
                                     )
                                     _emit_ingestion_chunks_metric(
                                         media_type=media_type,
-                                        chunk_method=(chunk_options or {}).get("method"),
+                                        chunk_method=(resolved_chunk_options or {}).get("method"),
                                         chunk_count=(
-                                            len(child_chunks_for_sql)
-                                            if isinstance(child_chunks_for_sql, list)
-                                            else 0
+                                            len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else 0
                                         ),
                                     )
                                     child_db_results.append(
@@ -5541,7 +5918,7 @@ async def persist_doc_item_and_children(
                 exc_info=True,
             )
             final_result["status"] = "Warning"
-            final_result["error"] = (final_result.get("error") or "")
+            final_result["error"] = final_result.get("error") or ""
             if not isinstance(final_result.get("warnings"), list):
                 final_result["warnings"] = []
             final_result["warnings"].append(f"Unexpected persistence error: {exc}")
@@ -5558,10 +5935,7 @@ async def persist_doc_item_and_children(
             try:
                 children = final_result.get("children") or []
                 if isinstance(children, list) and children:
-                    if any(
-                        isinstance(child, dict) and child.get("status") != "Success"
-                        for child in children
-                    ):
+                    if any(isinstance(child, dict) and child.get("status") != "Success" for child in children):
                         final_result["child_db_results"] = None
                         persisted_any_children = False
                     else:
@@ -5597,10 +5971,7 @@ async def persist_doc_item_and_children(
                                 safe_child_meta = {
                                     key: value
                                     for key, value in child_meta.items()
-                                    if key in allowed_keys_child
-                                    and isinstance(
-                                        value, (str, int, float, bool, list)
-                                    )
+                                    if key in allowed_keys_child and isinstance(value, (str, int, float, bool, list))
                                 }
                                 safe_child_meta_json: str | None = None
                                 try:
@@ -5608,55 +5979,44 @@ async def persist_doc_item_and_children(
                                         normalize_safe_metadata,
                                     )
 
-                                    safe_child_meta = normalize_safe_metadata(
-                                        safe_child_meta
-                                    )
-                                    safe_child_meta_json = json.dumps(
-                                        safe_child_meta, ensure_ascii=False
-                                    )
+                                    safe_child_meta = normalize_safe_metadata(safe_child_meta)
+                                    safe_child_meta_json = json.dumps(safe_child_meta, ensure_ascii=False)
                                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                     pass
 
                                 child_chunks_for_sql: list[dict[str, Any]] | None = None
                                 try:
-                                    opts_child = chunk_options or {}
+                                    opts_child = resolved_chunk_options or {}
                                     if opts_child:
                                         from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
                                             Chunker as _Chunker,
                                         )
 
                                         chunker_child = _Chunker()
-                                        flat_child = (
-                                            chunker_child.chunk_text_hierarchical_flat(
-                                                child_content,
-                                                method=opts_child.get("method")
-                                                or "sentences",
-                                                max_size=opts_child.get("max_size")
-                                                or 500,
-                                                overlap=opts_child.get("overlap") or 50,
-                                            )
+                                        flat_child = chunker_child.chunk_text_hierarchical_flat(
+                                            child_content,
+                                            method=opts_child.get("method") or "sentences",
+                                            max_size=opts_child.get("max_size") or 500,
+                                            overlap=opts_child.get("overlap") or 50,
                                         )
                                         child_chunks_for_sql = []
                                         for item in flat_child:
                                             meta = item.get("metadata") or {}
-                                            chunk_type = chunker_child.normalize_chunk_type(
-                                                meta.get("chunk_type") or meta.get("paragraph_kind")
-                                            ) or "text"
+                                            chunk_type = (
+                                                chunker_child.normalize_chunk_type(
+                                                    meta.get("chunk_type") or meta.get("paragraph_kind")
+                                                )
+                                                or "text"
+                                            )
                                             small_meta: dict[str, Any] = {}
                                             if meta.get("ancestry_titles"):
-                                                small_meta["ancestry_titles"] = meta.get(
-                                                    "ancestry_titles"
-                                                )
+                                                small_meta["ancestry_titles"] = meta.get("ancestry_titles")
                                             if meta.get("section_path"):
-                                                small_meta["section_path"] = meta.get(
-                                                    "section_path"
-                                                )
+                                                small_meta["section_path"] = meta.get("section_path")
                                             child_chunks_for_sql.append(
                                                 {
                                                     "text": item.get("text", ""),
-                                                    "start_char": meta.get(
-                                                        "start_offset"
-                                                    ),
+                                                    "start_char": meta.get("start_offset"),
                                                     "end_char": meta.get("end_offset"),
                                                     "chunk_type": chunk_type,
                                                     "metadata": small_meta,
@@ -5675,15 +6035,16 @@ async def persist_doc_item_and_children(
                                     getattr(form_data, "author", None) or "Unknown",
                                 )
                                 child_url = (
-                                    f"{item_input_ref}::archive::"
-                                    f"{child_meta.get('filename') or child_title}"
+                                    f"{item_input_ref}::archive::" f"{child_meta.get('filename') or child_title}"
                                 )
 
                                 def _db_child_arch_worker(
                                     child_url_local: str = child_url,
                                     child_title_local: str = child_title,
                                     child_content_local: str = child_content,
-                                    child_metadata_local: dict[str, Any] = child_meta if isinstance(child_meta, dict) else {},
+                                    child_metadata_local: dict[str, Any] = (
+                                        child_meta if isinstance(child_meta, dict) else {}
+                                    ),
                                     final_keywords_local: list[str] = final_keywords_list,
                                     safe_child_meta_json_local: str | None = safe_child_meta_json,
                                     model_used_local: str | None = model_used,
@@ -5691,30 +6052,28 @@ async def persist_doc_item_and_children(
                                     child_chunks_for_sql_local: list[dict[str, Any]] | None = child_chunks_for_sql,
                                     media_type_local: str = media_type,
                                     form_data_local: Any = form_data,
-                                    chunk_options_local: dict[str, Any] | None = chunk_options,
+                                    chunk_options_local: dict[str, Any] | None = resolved_chunk_options,
                                     db_path_local: str = db_path,
                                     client_id_local: str = client_id,
                                 ) -> Any:
                                     def _persist_archive_child(worker_db: MediaDatabase) -> Any:
                                         media_writer = _resolve_media_writer(worker_db)
-                                        child_id_local, child_uuid_local, child_msg_local = media_writer.add_media_with_keywords(
-                                            url=_normalize_dedupe_url_for_db(child_url_local),
-                                            title=child_title_local,
-                                            media_type=media_type_local,
-                                            content=child_content_local,
-                                            keywords=final_keywords_local,
-                                            prompt=getattr(
-                                                form_data_local, "custom_prompt", None
-                                            ),
-                                            analysis_content=None,
-                                            safe_metadata=safe_child_meta_json_local,
-                                            transcription_model=model_used_local,
-                                            author=child_author_local,
-                                            overwrite=getattr(
-                                                form_data_local, "overwrite_existing", False
-                                            ),
-                                            chunk_options=chunk_options_local,
-                                            chunks=child_chunks_for_sql_local,
+                                        child_id_local, child_uuid_local, child_msg_local = (
+                                            media_writer.add_media_with_keywords(
+                                                url=_normalize_dedupe_url_for_db(child_url_local),
+                                                title=child_title_local,
+                                                media_type=media_type_local,
+                                                content=child_content_local,
+                                                keywords=final_keywords_local,
+                                                prompt=getattr(form_data_local, "custom_prompt", None),
+                                                analysis_content=None,
+                                                safe_metadata=safe_child_meta_json_local,
+                                                transcription_model=model_used_local,
+                                                author=child_author_local,
+                                                overwrite=getattr(form_data_local, "overwrite_existing", False),
+                                                chunk_options=chunk_options_local,
+                                                chunks=child_chunks_for_sql_local,
+                                            )
                                         )
                                         if media_type_local == "email" and child_id_local:
                                             if _is_email_native_persist_enabled():
@@ -5773,9 +6132,7 @@ async def persist_doc_item_and_children(
                                     path_kind=path_kind,
                                     processor="email_child_archive_persist",
                                     expected_chunk_count=(
-                                        len(child_chunks_for_sql)
-                                        if isinstance(child_chunks_for_sql, list)
-                                        else None
+                                        len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else None
                                     ),
                                     db_message=child_msg,
                                     media_id=child_id,
@@ -5785,11 +6142,9 @@ async def persist_doc_item_and_children(
                                 )
                                 _emit_ingestion_chunks_metric(
                                     media_type=media_type,
-                                    chunk_method=(chunk_options or {}).get("method"),
+                                    chunk_method=(resolved_chunk_options or {}).get("method"),
                                     chunk_count=(
-                                        len(child_chunks_for_sql)
-                                        if isinstance(child_chunks_for_sql, list)
-                                        else 0
+                                        len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else 0
                                     ),
                                 )
                                 child_db_results.append(

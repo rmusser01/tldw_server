@@ -25,17 +25,29 @@ import numpy as np
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.db_path_utils import (
+    DatabasePaths,
+    resolve_trusted_database_path,
+)
 from tldw_Server_API.app.core.DB_Management.migrations import migrate_evaluations_database
+from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
 
 class EvaluationManager:
     """Manages evaluation operations and persistence."""
 
-    def __init__(self, db_path: Optional[Union[str, Path]] = None, *, user_id: Optional[int] = None):
+    def __init__(self, db_path: Optional[Union[str, Path]] = None, *, user_id: Optional[int | str] = None) -> None:
         self.config = load_comprehensive_config()
-        self._user_id = int(user_id) if user_id is not None else DatabasePaths.get_single_user_id()
+        if user_id is None:
+            self._user_id = canonical_evaluations_user_scope(
+                user_id,
+                fallback=DatabasePaths.get_single_user_id(),
+            )
+        elif isinstance(user_id, str) and not user_id.strip():
+            raise ValueError("Evaluations user scope is required")
+        else:
+            self._user_id = canonical_evaluations_user_scope(user_id)
         self.db_path = self._get_db_path(explicit_path=db_path)
         self._init_database()
         # Session identifier to isolate list operations within the lifetime of this manager
@@ -62,10 +74,16 @@ class EvaluationManager:
         if explicit_path is not None:
             candidate_str = str(explicit_path).replace("\x00", "")
             try:
-                candidate_path = Path(candidate_str).expanduser()
-                candidate_path = candidate_path.resolve()
+                candidate_path = resolve_trusted_database_path(
+                    candidate_str,
+                    label="evaluations_db_path",
+                    extra_roots=[base_resolved],
+                ).resolve()
             except Exception:
-                logger.warning(f"EvaluationManager: failed to resolve explicit db_path '{candidate_str}', using default.")
+                logger.warning(
+                    "EvaluationManager: failed to resolve explicit db_path '{}', using default.",
+                    candidate_str,
+                )
                 candidate_path = default_path
             candidate_path.parent.mkdir(parents=True, exist_ok=True)
             return candidate_path

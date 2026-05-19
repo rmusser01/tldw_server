@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from tldw_Server_API.app.api.v1.endpoints.media import document_outline as outline_endpoint
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
@@ -16,6 +17,32 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 # Sample PDF bytes (minimal valid PDF header for testing)
 # This is NOT a real PDF but enough for mocking purposes
 FAKE_PDF_BYTES = b"%PDF-1.4\nfake pdf content"
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.debug_calls = []
+        self.error_calls = []
+        self.warning_calls = []
+        self.exception_calls = []
+
+    def debug(self, *args, **kwargs):
+        self.debug_calls.append((args, kwargs))
+
+    def error(self, *args, **kwargs):
+        self.error_calls.append((args, kwargs))
+
+    def warning(self, *args, **kwargs):
+        self.warning_calls.append((args, kwargs))
+
+    def exception(self, *args, **kwargs):
+        self.exception_calls.append((args, kwargs))
+
+
+_OUTLINE_HELPER_SENSITIVE_MARKERS = (
+    "outline helper leaked",
+    "/private/tmp/pdf-outline",
+)
 
 
 @pytest.fixture
@@ -446,3 +473,23 @@ class TestExtractPdfOutline:
             assert entries[0].page == 1
             assert entries[1].page == 10
             assert entries[2].page == 1
+
+    def test_extract_sanitizes_open_failure_log(self, monkeypatch):
+        logger_stub = _LoggerStub()
+        monkeypatch.setattr(outline_endpoint, "logger", logger_stub, raising=True)
+
+        with patch(
+            "pymupdf.open",
+            side_effect=RuntimeError("outline helper leaked /private/tmp/pdf-outline"),
+        ):
+            entries, total_pages = outline_endpoint._extract_pdf_outline(FAKE_PDF_BYTES)
+
+        assert entries == []
+        assert total_pages == 0
+        assert [args[0] for args, _kwargs in logger_stub.error_calls if args] == [
+            "Error extracting PDF outline"
+        ]
+
+        rendered_calls = repr(logger_stub.error_calls)
+        for marker in _OUTLINE_HELPER_SENSITIVE_MARKERS:
+            assert marker not in rendered_calls

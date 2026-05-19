@@ -14,7 +14,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
@@ -576,6 +576,7 @@ class StreamingResponseHandler:
         stream: Union[Iterator, AsyncIterator],
         save_callback: Optional[callable] = None,
         finalize_callback: Optional[callable] = None,
+        before_success_callback: Optional[Callable[[], Any]] = None,
     ) -> AsyncIterator[str]:
         """
         Safely generate streaming responses with error handling and cleanup.
@@ -681,10 +682,7 @@ class StreamingResponseHandler:
                                             }
                                         }
                                         self._attach_stream_metadata(err_payload)
-                                        # Combine error and DONE into a single chunk to ensure clients see DONE
-                                        combined = f"data: {json.dumps(err_payload)}\n\n" + "data: [DONE]\n\n"
-                                        outputs.append(combined)
-                                        self.done_sent = True
+                                        outputs.append(f"data: {json.dumps(err_payload)}\n\n")
                                         self.error_occurred = True
                                         return outputs, True
                                     except StopIteration:
@@ -722,9 +720,7 @@ class StreamingResponseHandler:
                         }
                     }
                     self._attach_stream_metadata(err_payload)
-                    combined = f"data: {json.dumps(err_payload)}\n\n" + "data: [DONE]\n\n"
-                    outputs.append(combined)
-                    self.done_sent = True
+                    outputs.append(f"data: {json.dumps(err_payload)}\n\n")
                     self.error_occurred = True
                     return outputs, True
                 except StopIteration:
@@ -931,6 +927,39 @@ class StreamingResponseHandler:
                 has_output = self.has_accumulated_output()
                 if (
                     not self.is_cancelled
+                    and not self.error_occurred
+                ):
+                    if before_success_callback and not self.is_cancelled:
+                        try:
+                            maybe_before_success = before_success_callback()
+                            if hasattr(maybe_before_success, "__await__"):
+                                await maybe_before_success
+                        except StopStreamWithError as stopper:
+                            err_payload = {
+                                "error": {
+                                    "message": str(stopper) or "Stream blocked by policy",
+                                    "type": stopper.error_type,
+                                }
+                            }
+                            self._attach_stream_metadata(err_payload)
+                            self.error_occurred = True
+                            yield f"data: {json.dumps(err_payload)}\n\n"
+                        except _STREAMING_NONCRITICAL_EXCEPTIONS as before_success_err:
+                            logger.error(
+                                f"Before-success callback error for {self.conversation_id}: {before_success_err}"
+                            )
+                            self.error_occurred = True
+                            err_payload = {
+                                "error": {
+                                    "message": f"Stream error: {str(before_success_err)}",
+                                    "type": "stream_error",
+                                }
+                            }
+                            self._attach_stream_metadata(err_payload)
+                            yield f"data: {json.dumps(err_payload)}\n\n"
+
+                if (
+                    not self.is_cancelled
                     and save_callback
                     and not self.error_occurred
                     and has_output
@@ -1041,6 +1070,7 @@ async def create_streaming_response_with_timeout(
     model_name: str,
     save_callback: Optional[callable] = None,
     finalize_callback: Optional[callable] = None,
+    before_success_callback: Optional[Callable[[], Any]] = None,
     idle_timeout: int = STREAMING_IDLE_TIMEOUT,
     heartbeat_interval: int = HEARTBEAT_INTERVAL,
     text_transform: Optional[callable] = None,
@@ -1077,7 +1107,12 @@ async def create_streaming_response_with_timeout(
 
     # Create tasks for streaming and optional heartbeat using persistent generator instances
     async def stream_with_heartbeat():
-        stream_gen = handler.safe_stream_generator(stream, save_callback, finalize_callback)
+        stream_gen = handler.safe_stream_generator(
+            stream,
+            save_callback,
+            finalize_callback,
+            before_success_callback,
+        )
         heartbeats_enabled = isinstance(heartbeat_interval, (int, float)) and heartbeat_interval > 0
         heartbeat_gen = handler.heartbeat_generator() if heartbeats_enabled else None
 
@@ -1087,8 +1122,14 @@ async def create_streaming_response_with_timeout(
         )
 
         try:
-            while not handler.is_cancelled and not handler.error_occurred:
+            while not handler.is_cancelled and (stream_task is not None or heartbeat_task is not None):
+                if handler.error_occurred and heartbeat_task is not None:
+                    if not heartbeat_task.done():
+                        heartbeat_task.cancel()
+                    heartbeat_task = None
                 wait_set = {t for t in (stream_task, heartbeat_task) if t is not None}
+                if not wait_set:
+                    break
                 done, pending = await asyncio.wait(wait_set, return_when=asyncio.FIRST_COMPLETED)
 
                 should_exit = False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 ALLOWED_PARAKEET_VARIANTS = {"standard", "onnx", "mlx"}
+CANONICAL_PARAKEET_ONNX_ALIASES = {"parakeet-tdt-0.6b-v3-onnx"}
 
 
 def normalize_model_and_variant(
@@ -13,7 +14,8 @@ def normalize_model_and_variant(
     Normalize streaming STT model + variant selection from potentially combined identifiers.
 
     Rules (kept in parity with unified WebSocket handler expectations):
-    - If model is hyphenated (e.g., "parakeet-onnx"):
+    - If model is a known Parakeet ONNX alias (e.g., "parakeet-tdt-0.6b-v3-onnx"
+      or "parakeet-onnx"):
       - When base is "parakeet" and no explicit override is given, set model="parakeet"
         and model_variant to the suffix (only if recognized), else keep current variant.
       - For non-parakeet bases (e.g., "whisper-1", "canary-1b"), collapse to base model
@@ -28,6 +30,12 @@ def normalize_model_and_variant(
 
     if raw_model is not None:
         s = str(raw_model)
+        lowered = s.lower()
+        if lowered in CANONICAL_PARAKEET_ONNX_ALIASES:
+            model_out = "parakeet"
+            variant_out = str(variant_override).lower() if variant_override else "onnx"
+            return model_out, variant_out
+
         base, sep, suffix = s.partition("-")
         base_lower = base.lower()
 
@@ -55,4 +63,8 @@ def normalize_model_and_variant(
     return model_out, variant_out
 
 
-__all__ = ["normalize_model_and_variant", "ALLOWED_PARAKEET_VARIANTS"]
+__all__ = [
+    "normalize_model_and_variant",
+    "ALLOWED_PARAKEET_VARIANTS",
+    "CANONICAL_PARAKEET_ONNX_ALIASES",
+]

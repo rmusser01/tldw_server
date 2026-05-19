@@ -22,6 +22,17 @@ type NavigateOptions = {
   state?: unknown
 }
 
+type NavigateTo =
+  | string
+  | number
+  | {
+      pathname?: string
+      search?: string
+      hash?: string
+    }
+
+export type NavigateFunction = (to: NavigateTo, options?: NavigateOptions) => void
+
 type RouteParams = Record<string, string | undefined>
 
 type BlockerHookArg = boolean | ((...args: unknown[]) => boolean)
@@ -38,6 +49,27 @@ const runNavigationTransition = (update: () => void) => {
     return
   }
   update()
+}
+
+const normalizeDelimitedSegment = (
+  value: string | undefined,
+  delimiter: "?" | "#"
+) => {
+  const trimmed = value?.trim() ?? ""
+  if (!trimmed) return ""
+  return trimmed.startsWith(delimiter) ? trimmed : `${delimiter}${trimmed}`
+}
+
+const formatNavigateHref = (
+  to: Exclude<NavigateTo, number>,
+  fallbackPath: string
+) => {
+  if (typeof to === "string") return to
+  const href = `${to.pathname ?? ""}${normalizeDelimitedSegment(
+    to.search,
+    "?"
+  )}${normalizeDelimitedSegment(to.hash, "#")}`
+  return href || fallbackPath
 }
 
 const noop = () => {}
@@ -78,7 +110,7 @@ NavLink.displayName = "NavLink"
 
 export const useNavigate = () => {
   const router = useRouter()
-  return (to: string | number, options?: NavigateOptions) => {
+  return (to: NavigateTo, options?: NavigateOptions) => {
     if (typeof to === "number") {
       if (to < 0) {
         runNavigationTransition(() => {
@@ -87,23 +119,26 @@ export const useNavigate = () => {
       }
       return
     }
+    const href = formatNavigateHref(to, router.asPath)
     const doFallback = () => {
       if (typeof window === "undefined") return
       const proto = window.location.protocol
       if (proto === "chrome-extension:" || proto === "moz-extension:") {
-        window.location.hash = `#${to}`
+        window.location.hash = `#${href}`
         return
       }
-      window.location.assign(to)
+      window.location.assign(href)
     }
 
     try {
       runNavigationTransition(() => {
-        if (options?.replace) {
-          void router.replace(to)
-        } else {
-          void router.push(to)
-        }
+        const navigation = options?.replace
+          ? router.replace(href)
+          : router.push(href)
+        void navigation.catch((err) => {
+          console.error("[useNavigate shim] Navigation failed:", err)
+          doFallback()
+        })
       })
     } catch (err) {
       console.error("[useNavigate shim] Navigation failed:", err)
@@ -166,11 +201,12 @@ export const useSearchParams = (): [
         ? `${router.pathname}?${queryString}`
         : router.pathname
       runNavigationTransition(() => {
-        if (options?.replace) {
-          void router.replace(nextPath)
-        } else {
-          void router.push(nextPath)
-        }
+        const navigation = options?.replace
+          ? router.replace(nextPath)
+          : router.push(nextPath)
+        void navigation.catch((error) => {
+          console.error("[useSearchParams shim] Navigation failed:", error)
+        })
       })
     },
     [router]
@@ -188,6 +224,8 @@ export const useBlocker = (_when: BlockerHookArg): ShimBlocker =>
     }),
     []
   )
+
+export const useInRouterContext = () => true
 
 export const Routes: React.FC<{ children?: React.ReactNode }> = ({
   children
@@ -218,11 +256,10 @@ export const Navigate: React.FC<NavigateProps> = ({ to, replace }) => {
   const router = useRouter()
   React.useEffect(() => {
     runNavigationTransition(() => {
-      if (replace) {
-        void router.replace(to)
-      } else {
-        void router.push(to)
-      }
+      const navigation = replace ? router.replace(to) : router.push(to)
+      void navigation.catch((error) => {
+        console.error("[Navigate shim] Navigation failed:", error)
+      })
     })
   }, [router, to, replace])
   return null

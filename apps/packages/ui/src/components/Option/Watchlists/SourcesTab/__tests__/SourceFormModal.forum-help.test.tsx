@@ -31,9 +31,9 @@ vi.mock("antd", () => {
     Form: FormComponent,
     Input: ({ placeholder }: any) => <input placeholder={placeholder} />,
     Modal: ({ open, title, children }: any) => (open ? <div><h2>{title}</h2>{children}</div> : null),
-    Alert: ({ message, description }: any) => (
+    Alert: ({ title, message, description }: any) => (
       <div>
-        {message ? <span>{message}</span> : null}
+        {title ?? message ? <span>{title ?? message}</span> : null}
         {description ? <span>{description}</span> : null}
       </div>
     ),
@@ -74,5 +74,23 @@ describe("SourceFormModal forum type guidance", () => {
       screen.getByText("Forum monitoring is coming soon. Use RSS Feed or Website for now.")
     ).toBeInTheDocument()
     expect(screen.getByText("Forum (coming soon)")).toBeInTheDocument()
+  })
+
+  it("enables forum source option when the backend capability is enabled", () => {
+    render(
+      <SourceFormModal
+        open
+        forumsEnabled
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    expect(
+      screen.queryByText("Forum monitoring is coming soon. Use RSS Feed or Website for now.")
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Forum (coming soon)")).not.toBeInTheDocument()
+    expect(screen.getByText("Forum")).toBeInTheDocument()
   })
 })

@@ -14,6 +14,7 @@ import { ArrowLeft, Check, X } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Role, Permission } from '@/types';
 import { deriveComparisonCellState } from '@/lib/role-comparison';
+import { logger } from '@/lib/logger';
 
 type RolePermissionMap = Record<number, Set<number>>;
 
@@ -50,7 +51,7 @@ export default function RoleComparisonPage() {
               (Array.isArray(rolePerms) ? rolePerms : []).map((permission: Permission) => permission.id)
             );
           } catch (err: unknown) {
-            console.warn(`Failed to load permissions for role ${role.id}`, err);
+            logger.warn(`Failed to load permissions for role ${role.id}`, { component: 'RoleComparisonPage', error: err instanceof Error ? err.message : String(err) });
             permissionMap[role.id] = new Set();
           }
         })
@@ -58,7 +59,7 @@ export default function RoleComparisonPage() {
       setRolePermissions(permissionMap);
       setSelectedRoleIds(roleItems.slice(0, 2).map((role) => role.id));
     } catch (err: unknown) {
-      console.error('Failed to load role comparison data:', err);
+      logger.error('Failed to load role comparison data', { component: 'RoleComparisonPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to load role comparison data');
     } finally {
       setLoading(false);

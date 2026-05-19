@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal, Union
+from typing import Any, ClassVar, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
 
 # -----------------------------------------------------------------------------
 # Agent Types
@@ -12,6 +22,42 @@ from pydantic import BaseModel, Field
 
 # Agent type identifiers are user-configurable strings.
 ACPAgentType = str
+ACP_COMPATIBILITY_DOCS_URL = "/docs-static/Development/ACP_Compatibility_Matrix.md"
+ACPSupportState = Literal[
+    "supported",
+    "supported_with_caveats",
+    "experimental",
+    "documented_unverified",
+    "unsupported",
+]
+ACPVerificationLevel = Literal[
+    "documented_only",
+    "stub_smoke_tested",
+    "live_e2e_tested",
+    "sandbox_tested",
+    "production_supported",
+]
+ACPEntryPointStrategy = Literal[
+    "native_acp",
+    "adapter_acp",
+    "documented_candidate",
+    "custom_template",
+]
+ACPProbeState = Literal["ready_to_probe", "blocked", "custom_template", "documented_only"]
+ACPSetupHealthStatus = Literal["unknown", "ready", "blocked", "not_configured", "partial"]
+
+
+class ACPAgentEntrypointStatus(BaseModel):
+    """ACP stdio entrypoint readiness metadata for one downstream agent."""
+    profile_key: str = Field(..., description="Registry profile key this metadata describes")
+    entrypoint_strategy: ACPEntryPointStrategy = Field(default="documented_candidate")
+    probe_state: ACPProbeState = Field(default="documented_only")
+    acp_command: str = Field(default="")
+    acp_args: list[str] = Field(default_factory=list)
+    primary_blocker: str | None = Field(default=None)
+    blockers: list[str] = Field(default_factory=list)
+    status_message: str = Field(default="")
+    docs_url: str | None = Field(default=ACP_COMPATIBILITY_DOCS_URL)
 
 
 class ACPAgentInfo(BaseModel):
@@ -26,12 +72,83 @@ class ACPAgentInfo(BaseModel):
         default=None,
         description="Name of required API key if not configured (e.g., 'ANTHROPIC_API_KEY')",
     )
+    support_state: ACPSupportState = Field(
+        default="documented_unverified",
+        description="Compatibility support state from the ACP compatibility matrix.",
+    )
+    verification_level: ACPVerificationLevel = Field(
+        default="documented_only",
+        description="Evidence level behind the compatibility support state.",
+    )
+    compatibility_notes: str = Field(
+        default="Configured locally; live-agent ACP compatibility has not been certified.",
+        description="Human-readable compatibility caveat or certification note.",
+    )
+    compatibility_docs_url: str | None = Field(
+        default=ACP_COMPATIBILITY_DOCS_URL,
+        description="Documentation path or URL for compatibility details.",
+    )
+    entrypoint: ACPAgentEntrypointStatus = Field(
+        ...,
+        description="ACP stdio entrypoint readiness metadata.",
+    )
 
 
 class ACPAgentListResponse(BaseModel):
     """Response for listing available agents."""
     agents: list[ACPAgentInfo] = Field(default_factory=list)
     default_agent: ACPAgentType = Field(default="custom")
+
+
+class ACPAgentCompatibilityStatus(BaseModel):
+    """Compatibility status for an ACP downstream agent."""
+    support_state: ACPSupportState = Field(
+        default="documented_unverified",
+        description="Compatibility support state from the ACP compatibility matrix.",
+    )
+    verification_level: ACPVerificationLevel = Field(
+        default="documented_only",
+        description="Evidence level behind the compatibility support state.",
+    )
+    notes: str = Field(
+        default="Configured locally; live-agent ACP compatibility has not been certified.",
+        description="Human-readable compatibility caveat or certification note.",
+    )
+    docs_url: str = Field(
+        default=ACP_COMPATIBILITY_DOCS_URL,
+        description="Served documentation URL for compatibility details.",
+    )
+
+
+class ACPSetupGuideComponent(BaseModel):
+    """Setup guide entry for a non-agent ACP component."""
+    component: str = Field(..., description="Component identifier")
+    status: str = Field(default="unknown", description="Runtime setup status")
+    steps: list[str] = Field(default_factory=list, description="Actionable setup steps")
+
+
+class ACPSetupGuideAgent(BaseModel):
+    """Setup guide entry for one ACP downstream agent."""
+    agent_type: ACPAgentType = Field(..., description="Agent type identifier")
+    name: str = Field(..., description="Human-readable agent name")
+    status: str = Field(default="unknown", description="Runtime setup status")
+    compatibility: ACPAgentCompatibilityStatus = Field(
+        default_factory=ACPAgentCompatibilityStatus,
+        description="Compatibility support status and evidence level.",
+    )
+    steps: list[str] = Field(default_factory=list, description="Actionable setup or certification steps")
+    docs_url: str | None = Field(default=None, description="Agent documentation URL")
+    entrypoint: ACPAgentEntrypointStatus = Field(
+        ...,
+        description="ACP stdio entrypoint readiness metadata.",
+    )
+
+
+class ACPSetupGuideResponse(BaseModel):
+    """Response for ACP setup-guide diagnostics."""
+    timestamp: str = Field(..., description="ISO 8601 timestamp")
+    runner: ACPSetupGuideComponent = Field(..., description="Runner setup guidance")
+    guides: list[ACPSetupGuideAgent] = Field(default_factory=list, description="Agent setup guidance")
 
 
 class ACPAgentRegisterRequest(BaseModel):
@@ -45,6 +162,12 @@ class ACPAgentRegisterRequest(BaseModel):
     requires_api_key: str | None = Field(default=None, description="Required API key env var")
     install_instructions: list[str] = Field(default_factory=list, description="Installation steps")
     docs_url: str | None = Field(default=None, description="Documentation URL")
+    entrypoint_strategy: ACPEntryPointStrategy = Field(default="documented_candidate")
+    acp_command: str = Field(default="")
+    acp_args: list[str] = Field(default_factory=list)
+    adapter_source: str | None = Field(default=None)
+    adapter_docs_url: str | None = Field(default=None)
+    certification_blocker: str | None = Field(default=None)
     mcp_orchestration: Literal["agent_driven", "llm_driven"] = Field(
         default="agent_driven",
         description="MCP orchestration mode when protocol='mcp'",
@@ -65,6 +188,19 @@ class ACPAgentRegisterRequest(BaseModel):
 
 class ACPAgentUpdateRequest(BaseModel):
     """Request to update an existing agent."""
+    NON_NULLABLE_FIELDS: ClassVar[frozenset[str]] = frozenset({
+        "name",
+        "description",
+        "command",
+        "entrypoint_strategy",
+        "acp_command",
+        "mcp_orchestration",
+        "mcp_entry_tool",
+        "mcp_structured_response",
+        "mcp_max_iterations",
+        "mcp_refresh_tools",
+    })
+
     name: str | None = None
     description: str | None = None
     command: str | None = None
@@ -73,6 +209,12 @@ class ACPAgentUpdateRequest(BaseModel):
     requires_api_key: str | None = None
     install_instructions: list[str] | None = None
     docs_url: str | None = None
+    entrypoint_strategy: ACPEntryPointStrategy | None = None
+    acp_command: str | None = None
+    acp_args: list[str] | None = None
+    adapter_source: str | None = None
+    adapter_docs_url: str | None = None
+    certification_blocker: str | None = None
     mcp_orchestration: Literal["agent_driven", "llm_driven"] | None = None
     mcp_entry_tool: str | None = None
     mcp_structured_response: bool | None = None
@@ -80,6 +222,21 @@ class ACPAgentUpdateRequest(BaseModel):
     mcp_llm_model: str | None = None
     mcp_max_iterations: int | None = None
     mcp_refresh_tools: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_for_non_nullable_fields(cls, data: Any) -> Any:
+        """Reject explicit null for scalar fields that are non-null at runtime."""
+        if not isinstance(data, dict):
+            return data
+        null_fields = sorted(
+            field for field in cls.NON_NULLABLE_FIELDS
+            if field in data and data[field] is None
+        )
+        if null_fields:
+            joined = ", ".join(null_fields)
+            raise ValueError(f"Explicit null is not allowed for: {joined}")
+        return data
 
 
 # -----------------------------------------------------------------------------
@@ -432,12 +589,25 @@ class ACPSessionInfo(BaseModel):
         default=None, description="Last ACP policy snapshot refresh error, if any"
     )
     forked_from: str | None = Field(default=None, description="Source session ID when this session was forked")
+    model: str | None = Field(default=None, description="LLM model used in this session (for cost estimation)")
+    estimated_cost_usd: float | None = Field(default=None, description="Estimated cost in USD based on token usage and model pricing")
+    token_budget: int | None = Field(default=None, description="Maximum token count for this session (NULL = no limit)")
+    auto_terminate_at_budget: bool = Field(default=False, description="Whether the session auto-terminates when budget is exceeded")
+    budget_exhausted: bool = Field(default=False, description="Whether the session was terminated due to budget exhaustion")
+    budget_remaining: int | None = Field(default=None, description="Tokens remaining before budget is hit (NULL if no budget set)")
 
 
 class ACPSessionListResponse(BaseModel):
     """Response for listing ACP sessions."""
     sessions: list[ACPSessionInfo] = Field(default_factory=list)
     total: int = Field(default=0, description="Total number of sessions matching filters")
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ACPSessionDetailResponse(ACPSessionInfo):
@@ -474,6 +644,157 @@ class ACPSessionUsageResponse(BaseModel):
     message_count: int = 0
     created_at: str = ""
     last_activity_at: str | None = None
+    model: str | None = Field(default=None, description="LLM model used in this session")
+    estimated_cost_usd: float | None = Field(default=None, description="Estimated cost in USD")
+
+
+# -----------------------------------------------------------------------------
+# Agent Metrics (Admin aggregation)
+# -----------------------------------------------------------------------------
+
+
+class ACPAgentMetrics(BaseModel):
+    """Aggregated runtime metrics for a single agent type."""
+    agent_type: str = Field(..., description="Agent type identifier")
+    session_count: int = Field(default=0, description="Total number of sessions")
+    active_sessions: int = Field(default=0, description="Currently active sessions")
+    total_prompt_tokens: int = Field(default=0, description="Sum of prompt tokens across all sessions")
+    total_completion_tokens: int = Field(default=0, description="Sum of completion tokens across all sessions")
+    total_tokens: int = Field(default=0, description="Sum of total tokens across all sessions")
+    total_messages: int = Field(default=0, description="Sum of messages across all sessions")
+    last_used_at: str | None = Field(default=None, description="ISO 8601 timestamp of most recent activity")
+    total_estimated_cost_usd: float | None = Field(default=None, description="Total estimated cost in USD across all sessions for this agent")
+
+
+class ACPAgentMetricsListResponse(BaseModel):
+    """Response for the agent metrics aggregation endpoint."""
+    items: list[ACPAgentMetrics] = Field(default_factory=list)
+
+
+class ACPExecutionHealthSessionSummary(BaseModel):
+    """Aggregated ACP session status counts for admin execution-health reporting."""
+    total: int = Field(default=0, description="Total ACP sessions considered in this summary")
+    by_status: dict[str, int] = Field(default_factory=dict, description="Session count by persisted status")
+
+
+class ACPExecutionHealthFailureBuckets(BaseModel):
+    """Normalized ACP execution-health failure buckets for admin reporting."""
+    setup_blockers: int = Field(
+        default=0,
+        description="Agents or sessions blocked by setup/certification gaps",
+    )
+    runner_session_failures: int = Field(
+        default=0,
+        description="Sessions or events that indicate runner/session failure",
+    )
+    reviewer_rejections: int = Field(
+        default=0,
+        description="Sessions with reviewer rejection outcomes",
+    )
+    reviewer_failures: int = Field(
+        default=0,
+        description="Sessions with reviewer execution or decision failures",
+    )
+    governance_denials: int = Field(
+        default=0,
+        description="Sessions with governance or permission-denial outcomes",
+    )
+    structured_completion_failures: int = Field(
+        default=0,
+        description="Sessions with invalid or missing structured completion signals",
+    )
+    sandbox_runtime_errors: int = Field(
+        default=0,
+        description="Sessions with sandbox/runtime launch or execution errors",
+    )
+    retention_redaction_actions: int = Field(
+        default=0,
+        description="Sessions with retention or redaction actions observed",
+    )
+
+
+class ACPExecutionHealthSetupDimension(BaseModel):
+    """Setup-health status for one ACP readiness dimension."""
+    status: ACPSetupHealthStatus = Field(default="unknown", description="Dimension status")
+    blockers: list[str] = Field(
+        default_factory=list,
+        description="Normalized blocker codes for this setup dimension",
+    )
+    evidence_count: int = Field(
+        default=0,
+        description="Number of observed records contributing evidence to this dimension",
+    )
+
+
+class ACPExecutionHealthSetupSummary(BaseModel):
+    """ACP setup-health dimensions for admin readiness reporting."""
+    agent: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    workspace: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    sandbox_runtime: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    mcp_injection: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+    scheduler_trigger_path: ACPExecutionHealthSetupDimension = Field(
+        default_factory=ACPExecutionHealthSetupDimension,
+    )
+
+
+class ACPExecutionHealthAgentSummary(BaseModel):
+    """Compatibility and setup posture for one configured ACP agent."""
+    agent_type: str = Field(..., description="Agent type identifier")
+    name: str = Field(default="", description="Human-readable agent name")
+    is_configured: bool = Field(default=False, description="Whether local prerequisites appear configured")
+    support_state: ACPSupportState = Field(default="documented_unverified")
+    verification_level: ACPVerificationLevel = Field(default="documented_only")
+    setup_blocked: bool = Field(default=False, description="Whether this agent contributes a setup blocker")
+    primary_blocker: str | None = Field(default=None, description="Primary setup or entrypoint blocker, if known")
+
+
+class ACPExecutionHealthCompatibilitySummary(BaseModel):
+    """Downstream-agent compatibility evidence summary for ACP admin reporting."""
+    by_support_state: dict[str, int] = Field(default_factory=dict)
+    documented_unverified_agents: list[str] = Field(default_factory=list)
+    live_certification_required: bool = Field(default=False)
+    docs_url: str = Field(default=ACP_COMPATIBILITY_DOCS_URL)
+
+
+class ACPExecutionHealthRetentionSummary(BaseModel):
+    """Configured ACP retention posture for admin execution-health reporting."""
+    session_retention_days: int = Field(default=30)
+    audit_retention_days: int = Field(default=30)
+    policy: str = Field(default="closed_error_sessions_and_audit_events_purged_after_retention")
+
+
+class ACPExecutionHealthRedactionSummary(BaseModel):
+    """Redaction posture for support-safe ACP drill-through surfaces."""
+    detail_events_artifacts_redacted_views: bool = Field(default=True)
+    diagnostics_sanitized: bool = Field(default=True)
+    audit_metadata_sanitized: bool = Field(default=True)
+
+
+class ACPExecutionHealthSummaryResponse(BaseModel):
+    """Admin ACP execution-health rollup across sessions, agents, and support posture."""
+    timestamp: str = Field(..., description="ISO 8601 timestamp for this summary")
+    range_days: int = Field(..., description="Lookback window used for session aggregation")
+    sessions: ACPExecutionHealthSessionSummary = Field(
+        default_factory=ACPExecutionHealthSessionSummary,
+    )
+    failure_buckets: ACPExecutionHealthFailureBuckets = Field(
+        default_factory=ACPExecutionHealthFailureBuckets,
+    )
+    setup_health: ACPExecutionHealthSetupSummary = Field(
+        default_factory=ACPExecutionHealthSetupSummary,
+    )
+    agents: list[ACPExecutionHealthAgentSummary] = Field(default_factory=list)
+    compatibility: ACPExecutionHealthCompatibilitySummary = Field(default_factory=ACPExecutionHealthCompatibilitySummary)
+    retention: ACPExecutionHealthRetentionSummary = Field(default_factory=ACPExecutionHealthRetentionSummary)
+    redaction: ACPExecutionHealthRedactionSummary = Field(default_factory=ACPExecutionHealthRedactionSummary)
 
 
 class ACPAgentUsageItem(BaseModel):
@@ -515,6 +836,14 @@ class ACPAgentConfigCreate(BaseModel):
     org_id: int | None = Field(default=None, description="Restrict to specific organization")
     team_id: int | None = Field(default=None, description="Restrict to specific team")
     enabled: bool = Field(default=True, description="Whether the agent is enabled")
+    default_token_budget: int | None = Field(
+        default=None,
+        description="Default token budget for new sessions using this agent (NULL = no limit)",
+    )
+    default_auto_terminate_at_budget: bool = Field(
+        default=True,
+        description="Whether new sessions using this agent auto-terminate when budget is exceeded",
+    )
     max_token_budget: int | None = Field(default=None, description="Maximum total tokens per session (null = unlimited)")
 
 
@@ -571,12 +900,45 @@ class ACPPermissionPolicyListResponse(BaseModel):
 # -----------------------------------------------------------------------------
 
 
+class ACPSessionBudgetRequest(BaseModel):
+    """Request to set or update the token budget for an ACP session."""
+    token_budget: int | None = Field(
+        default=None,
+        description="Maximum token count for this session. NULL removes the budget.",
+    )
+    auto_terminate_at_budget: bool = Field(
+        default=True,
+        description="Whether to auto-terminate the session when the budget is exceeded.",
+    )
+
+
+class ACPSessionBudgetResponse(BaseModel):
+    """Response after updating a session's token budget."""
+    session_id: str = Field(..., description="Session identifier")
+    token_budget: int | None = Field(default=None, description="Current token budget")
+    auto_terminate_at_budget: bool = Field(default=False, description="Auto-terminate enabled")
+    budget_exhausted: bool = Field(default=False, description="Whether the budget has been exhausted")
+    total_tokens: int = Field(default=0, description="Current total token usage")
+    budget_remaining: int | None = Field(default=None, description="Tokens remaining in budget")
+
+
+class ACPHealthRouteStatus(BaseModel):
+    """Route-gating status for ACP endpoints."""
+    stable_only: bool = Field(..., description="Whether the server is in stable-only route mode")
+    acp_enabled: bool = Field(..., description="Whether ACP routes are currently enabled")
+    note: str | None = Field(
+        default=None,
+        description="Helpful note when ACP might be hidden by route gating",
+    )
+
+
 class ACPHealthResponse(BaseModel):
     """ACP dependency chain health check response."""
     timestamp: str = Field(..., description="ISO 8601 timestamp")
     runner: dict[str, Any] = Field(default_factory=dict, description="Runner binary status")
     agents: list[dict[str, Any]] = Field(default_factory=list, description="Downstream agent statuses")
     runner_probe: dict[str, Any] = Field(default_factory=dict, description="Runner process probe result")
+    routes: ACPHealthRouteStatus | None = Field(default=None, description="Route-gating status")
     overall: str = Field(default="unknown", description="ok | degraded | unavailable")
     message: str | None = Field(default=None, description="Human-readable status message")
 
@@ -601,4 +963,89 @@ class ACPErrorResponse(BaseModel):
     )
     data: dict[str, Any] | None = Field(
         default=None, description="Additional error context"
+    )
+
+
+# -----------------------------------------------------------------------------
+# Async Fire-and-Forget API
+# -----------------------------------------------------------------------------
+
+
+class ACPAsyncPromptRequest(BaseModel):
+    """Request body for async prompt submission."""
+    prompt: str | list[dict[str, Any]] = Field(
+        ..., description="Prompt text or message list"
+    )
+    cwd: str = Field(default=".", description="Working directory for the agent")
+    agent_type: str | None = Field(
+        default=None, description="Agent type identifier"
+    )
+    model: str | None = Field(default=None, description="Model override")
+    token_budget: int | None = Field(
+        default=None, description="Maximum token budget"
+    )
+    persona_id: str | None = Field(
+        default=None, description="Persona context for session creation"
+    )
+    workspace_id: str | None = Field(
+        default=None, description="Workspace context for session creation"
+    )
+    sandbox_enabled: bool = Field(
+        default=False, description="Whether to enable sandbox mode"
+    )
+
+
+class ACPAsyncPromptResponse(BaseModel):
+    """Response for async prompt submission."""
+    task_id: str = Field(..., description="Unique identifier for the background task")
+    poll_url: str = Field(
+        ..., description="Relative URL to poll for task status"
+    )
+    status: str = Field(default="queued", description="Initial task status")
+
+
+class ACPTaskStatusResponse(BaseModel):
+    """Response for polling task status."""
+    task_id: str = Field(..., description="Task identifier")
+    status: str = Field(
+        ...,
+        description="Task status: queued, running, completed, failed",
+    )
+    result: Any | None = Field(default=None, description="Task result when completed")
+    usage: dict[str, Any] = Field(
+        default_factory=dict, description="Token usage information"
+    )
+    error: str | None = Field(default=None, description="Error message if failed")
+    duration_ms: int | None = Field(
+        default=None, description="Execution duration in milliseconds"
+    )
+
+
+class ACPRollbackRequest(BaseModel):
+    """Request body for rolling back sandbox state to a checkpoint."""
+    to_sequence: int | None = Field(
+        default=None,
+        description="Target event sequence number; the nearest checkpoint at or before this sequence is used.",
+    )
+    to_snapshot_id: str | None = Field(
+        default=None,
+        description="Direct snapshot ID to restore. Takes precedence over to_sequence if both provided.",
+    )
+
+
+class ACPRollbackResponse(BaseModel):
+    """Response from a rollback operation."""
+    restored: bool = Field(..., description="Whether the rollback succeeded")
+    snapshot_id: str = Field(..., description="The snapshot ID that was restored")
+    sequence: int | None = Field(
+        default=None, description="The event sequence the snapshot corresponds to, if resolved from to_sequence"
+    )
+
+
+class ACPCheckpointListResponse(BaseModel):
+    """Response listing available checkpoints for a session."""
+    session_id: str = Field(..., description="The session these checkpoints belong to")
+    checkpoints: dict[int, str] = Field(
+        default_factory=dict,
+        description="Mapping of event sequence numbers to snapshot IDs",
     )

@@ -20,10 +20,10 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id_optional,
-    shutdown_all_audit_services,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
+    MandatoryAuditWriteError,
     UnifiedAuditService,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
@@ -155,19 +155,29 @@ async def _emit(
     result: str = "success",
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    svc = await _get_svc(user_id)
-    ctx = AuditContext(user_id=user_id)
-    await svc.log_event(
-        event_type=event_type,
-        context=ctx,
-        action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        result=result,
-        metadata=metadata,
-    )
-    # Mandatory audit: flush immediately and surface failures.
-    await svc.flush(raise_on_failure=True)
+    try:
+        svc = await _get_svc(user_id)
+        ctx = AuditContext(user_id=user_id)
+        await svc.log_event(
+            event_type=event_type,
+            context=ctx,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            result=result,
+            metadata=metadata,
+        )
+        # Mandatory audit: flush immediately and surface failures.
+        await svc.flush(raise_on_failure=True)
+    except Exception as exc:
+        logger.error(
+            "Mandatory evaluations audit write failed for {}:{} ({})",
+            action,
+            resource_id,
+            type(exc).__name__,
+            exc_info=True,
+        )
+        raise MandatoryAuditWriteError("Mandatory audit persistence unavailable") from exc
 
 
 # Convenience wrappers
@@ -266,21 +276,20 @@ def log_webhook_unregistration(*, user_id: str, webhook_id: str | None, url: str
     _schedule(_emit(user_id=user_id, event_type=event, action="webhook_unregister", resource_type="webhook", resource_id=str(webhook_id) if webhook_id else None, result=res, metadata={"url": url, "events": events, "error": error}))
 
 
+def shutdown_local_evaluations_audit_loop() -> None:
+    """Shutdown the adapter-local sync loop."""
+    _stop_sync_loop()
+
+
 async def shutdown_evaluations_audit_services() -> None:
-    """Shutdown shared audit services used by this adapter."""
-    try:
-        await shutdown_all_audit_services()
-    finally:
-        _stop_sync_loop()
+    """Backward-compatible async wrapper for adapter-local cleanup."""
+    shutdown_local_evaluations_audit_loop()
 
 
 def _shutdown_on_exit() -> None:
     """Atexit handler for best-effort local cleanup without late logging."""
-    # Application shutdown hooks should perform full async audit shutdown.
-    # At interpreter exit, invoking async shutdown can emit log lines after
-    # stdio/log sinks are already closing, which causes noisy teardown errors.
     with contextlib.suppress(Exception):
-        _stop_sync_loop()
+        shutdown_local_evaluations_audit_loop()
 
 
 atexit.register(_shutdown_on_exit)

@@ -8,6 +8,7 @@ import {
   useDecksQuery,
   useDeleteFlashcardMutation,
   useDueCountsQuery,
+  useGlobalFlashcardTagSuggestionsQuery,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
   useFlashcardShortcuts,
@@ -59,6 +60,14 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return {
+    ...actual,
+    useNavigate: () => vi.fn()
+  }
+})
+
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => messageSpies
 }))
@@ -80,6 +89,9 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
   useDeleteFlashcardMutation: vi.fn(),
@@ -172,6 +184,12 @@ describe("ReviewTab study assistant panel", () => {
     vi.mocked(useDeleteFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
+    } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false
     } as any)
     vi.mocked(useFlashcardShortcuts).mockImplementation(() => undefined)
     vi.mocked(useDueCountsQuery).mockReturnValue({
@@ -281,7 +299,7 @@ describe("ReviewTab study assistant panel", () => {
   it("renders assistant quick actions and existing history on the active card", () => {
     renderReviewTab()
 
-    expect(screen.getByText("Study assistant")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-study-assistant")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Explain" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Fact-check me" })).toBeInTheDocument()
     expect(screen.getByText("Earlier explanation")).toBeInTheDocument()
@@ -350,7 +368,11 @@ describe("ReviewTab study assistant panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
-      expect(screen.getByText("Study assistant unavailable")).toBeInTheDocument()
+      expect(
+        screen.getByText(
+          "Study assistant requires an LLM provider. Configure one in Settings → LLM Providers."
+        )
+      ).toBeInTheDocument()
     })
     expect(screen.getByTestId("flashcards-review-show-answer")).toBeInTheDocument()
   })
@@ -433,6 +455,89 @@ describe("ReviewTab study assistant panel", () => {
           input_modality: "voice_transcript"
         }
       })
+    })
+  })
+
+  it("uses refreshed top-level remediation context after conflict recovery", async () => {
+    assistantMutateAsync.mockRejectedValueOnce(
+      Object.assign(new Error("Version mismatch"), { response: { status: 409 } })
+    )
+    assistantRefetchMock.mockImplementationOnce(async () => {
+      assistantQueryState = {
+        ...assistantQueryState,
+        data: {
+          ...assistantQueryState.data,
+          thread: {
+            ...assistantQueryState.data.thread,
+            version: 2,
+            message_count: 2
+          },
+          messages: [
+            ...(assistantQueryState.data?.messages ?? []),
+            {
+              id: 13,
+              thread_id: 9,
+              role: "assistant",
+              action_type: "follow_up",
+              input_modality: "text",
+              content: "Fresh thread update",
+              structured_payload: {},
+              context_snapshot: {},
+              provider: "openai",
+              model: "gpt-5",
+              created_at: "2026-03-13T08:05:00Z",
+              client_id: "test"
+            }
+          ],
+          citations: [
+            {
+              id: 1,
+              flashcard_uuid: "card-1",
+              source_type: "note",
+              source_id: "88",
+              citation_text: "Retry context adds the missing remediation quote.",
+              locator: "{\"section\":\"retry-context\"}",
+              ordinal: 0,
+              deleted: false,
+              client_id: "test",
+              version: 1
+            }
+          ],
+          primary_citation: {
+            id: 1,
+            flashcard_uuid: "card-1",
+            source_type: "note",
+            source_id: "88",
+            citation_text: "Retry context adds the missing remediation quote.",
+            locator: "{\"section\":\"retry-context\"}",
+            ordinal: 0,
+            deleted: false,
+            client_id: "test",
+            version: 1
+          },
+          deep_dive_target: {
+            source_type: "note",
+            source_id: "88",
+            citation_ordinal: 0,
+            route_kind: "exact_locator",
+            route: "/notes/88?section=retry-context",
+            available: true,
+            fallback_reason: null
+          }
+        }
+      }
+      return assistantQueryState
+    })
+    renderReviewTab()
+
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Retry context adds the missing remediation quote\./)).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: "Deep dive to source" })).toHaveAttribute(
+        "href",
+        "/notes/88?section=retry-context"
+      )
     })
   })
 })

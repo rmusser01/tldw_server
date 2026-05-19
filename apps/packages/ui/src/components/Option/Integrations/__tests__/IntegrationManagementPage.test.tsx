@@ -4,6 +4,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -52,6 +53,17 @@ vi.mock("@/services/integrations-control-plane", () => ({
   revokeWorkspaceTelegramLinkedActor: (...args: unknown[]) => mocks.revokeWorkspaceTelegramLinkedActor(...args)
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string | { defaultValue?: string }) => {
+      if (typeof fallback === "string") {
+        return fallback
+      }
+      return fallback?.defaultValue ?? _key
+    }
+  })
+}))
+
 import {
   IntegrationManagementPage,
   buildIntegrationQueryKey
@@ -66,7 +78,9 @@ const renderWithQueryClient = (ui: React.ReactElement) => {
   })
 
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/integrations"]}>{ui}</MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -348,11 +362,76 @@ describe("IntegrationManagementPage", () => {
 
     renderWithQueryClient(<IntegrationManagementPage scope="personal" />)
 
-    expect(await screen.findByText("Personal integrations unavailable")).toBeInTheDocument()
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Personal integrations are unavailable")).toBeInTheDocument()
     expect(
-      screen.getByText("This server does not expose the personal integrations control-plane yet.")
+      screen.getByText("This server does not expose the personal integrations capability.")
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check server setup" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("/api/v1/integrations/personal")
     expect(mocks.listPersonalIntegrations).not.toHaveBeenCalled()
+  })
+
+  it("keeps integration overview endpoint failures in diagnostics", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceIntegrations.mockRejectedValue(
+      Object.assign(new Error("Internal Server Error (GET /api/v1/integrations/workspace)"), {
+        status: 500
+      })
+    )
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    const heading = await screen.findByRole(
+      "heading",
+      {
+        name: "Workspace integrations could not load"
+      },
+      { timeout: 4000 }
+    )
+    const primaryState = heading.closest("div")
+    const diagnostics = screen.getByLabelText("Diagnostics")
+
+    expect(primaryState).not.toHaveTextContent("/api/v1/integrations/workspace")
+    expect(diagnostics).toHaveTextContent("/api/v1/integrations/workspace")
+    expect(diagnostics).toHaveTextContent("500")
+    expect(diagnostics).toHaveTextContent(
+      "Internal Server Error (GET /api/v1/integrations/workspace)"
+    )
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+  })
+
+  it("retries transient integration overview failures before showing state", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceIntegrations
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Temporary gateway error"), { status: 502 })
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Temporary gateway error"), { status: 502 })
+      )
+      .mockResolvedValueOnce({
+        scope: "workspace",
+        items: [
+          {
+            id: "workspace:slack",
+            provider: "slack",
+            scope: "workspace",
+            display_name: "Slack workspace",
+            status: "connected",
+            enabled: true,
+            metadata: {},
+            actions: ["disable", "remove"]
+          }
+        ]
+      })
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    expect(await screen.findByText("Slack workspace", {}, { timeout: 4000 })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.listWorkspaceIntegrations).toHaveBeenCalledTimes(3)
+    })
   })
 
   it("keys workspace-scoped queries by the active org id", () => {
@@ -416,6 +495,27 @@ describe("IntegrationManagementPage", () => {
     expect(screen.getByText("Telegram")).toBeInTheDocument()
     expect(screen.getByText("Slack policy")).toBeInTheDocument()
     expect(screen.getByText("Telegram bot")).toBeInTheDocument()
+  })
+
+  it("shows Telegram linked-actor load failures as a degraded shared state", async () => {
+    mockWorkspaceQueries()
+    mocks.listWorkspaceTelegramLinkedActors.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "Telegram actors unavailable (GET /api/v1/integrations/workspace/telegram/linked-actors)"
+        ),
+        { status: 503 }
+      )
+    )
+
+    renderWithQueryClient(<IntegrationManagementPage scope="workspace" />)
+
+    expect(await screen.findByText("Degraded")).toBeInTheDocument()
+    expect(screen.getByText("Workspace integrations are partially available")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/integrations/workspace/telegram/linked-actors"
+    )
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent("503")
   })
 
   it("preserves hidden Slack policy fields when saving visible settings", async () => {

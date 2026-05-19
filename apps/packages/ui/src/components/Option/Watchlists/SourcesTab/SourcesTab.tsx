@@ -5,6 +5,7 @@ import {
   Empty,
   Input,
   Modal,
+  Pagination,
   Select,
   Space,
   Switch,
@@ -71,6 +72,7 @@ import {
 import { getSourceStatusVisual, type SourceStatusIconToken } from "./sourceStatus"
 import { findActiveSourceUsage, mapActiveSourceUsage } from "./source-usage"
 import { mapWatchlistsError } from "../shared/watchlists-error"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 
 const { Search } = Input
 
@@ -134,6 +136,7 @@ const toNormalizedGroupIds = (source: WatchlistSource): number[] => {
 export const SourcesTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const { showUndoNotification } = useUndoNotification()
+  const { isConstrained } = useWatchlistsViewport()
 
   // Store state
   const sources = useWatchlistsStore((s) => s.sources)
@@ -144,11 +147,13 @@ export const SourcesTab: React.FC = () => {
   const sourcesPageSize = useWatchlistsStore((s) => s.sourcesPageSize)
   const tags = useWatchlistsStore((s) => s.tags)
   const groups = useWatchlistsStore((s) => s.groups)
+  const settings = useWatchlistsStore((s) => s.settings)
   const groupsLoading = useWatchlistsStore((s) => s.groupsLoading)
   const selectedGroupId = useWatchlistsStore((s) => s.selectedGroupId)
   const selectedTagName = useWatchlistsStore((s) => s.selectedTagName)
   const sourceFormOpen = useWatchlistsStore((s) => s.sourceFormOpen)
   const sourceFormEditId = useWatchlistsStore((s) => s.sourceFormEditId)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
   const setSources = useWatchlistsStore((s) => s.setSources)
@@ -245,6 +250,7 @@ export const SourcesTab: React.FC = () => {
     try {
       const useClientFilter = Boolean(selectedGroupId || selectedTypeFilter)
       const baseParams = {
+        watchlist_id: selectedWatchlistId ?? undefined,
         q: sourcesSearch || undefined,
         tags: selectedTagName ? [selectedTagName] : undefined
       }
@@ -334,6 +340,7 @@ export const SourcesTab: React.FC = () => {
     selectedTagName,
     selectedTypeFilter,
     selectedGroupId,
+    selectedWatchlistId,
     sourcesPage,
     sourcesPageSize,
     setSources,
@@ -407,6 +414,7 @@ export const SourcesTab: React.FC = () => {
 
     while (page <= SOURCE_USAGE_LOOKUP_MAX_PAGES) {
       const response = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
         page,
         size: SOURCE_USAGE_LOOKUP_PAGE_SIZE
       })
@@ -422,7 +430,7 @@ export const SourcesTab: React.FC = () => {
     }
 
     return allJobs
-  }, [])
+  }, [selectedWatchlistId])
 
   // Handle delete
   const handleDelete = async (sourceId: number) => {
@@ -1089,9 +1097,26 @@ export const SourcesTab: React.FC = () => {
     return resolveCheckNowTargets(sourceId, selectedSourceIds)
   }, [selectedSourceIds])
 
+  const toggleSourceSelection = useCallback((source: WatchlistSource) => {
+    setSelectedRowKeys((previousKeys) => {
+      const selectedSet = new Set(previousKeys.map((key) => String(key)))
+      const sourceKey = String(source.id)
+      if (selectedSet.has(sourceKey)) {
+        return previousKeys.filter((key) => String(key) !== sourceKey)
+      }
+      return [...previousKeys, source.id]
+    })
+  }, [])
+
   // Handle form submit
   const handleFormSubmit = async (
-    values: { name: string; url: string; source_type: SourceType; tags: string[] }
+    values: {
+      name: string
+      url: string
+      source_type: SourceType
+      tags: string[]
+      settings?: Record<string, unknown> | null
+    }
   ) => {
     try {
       if (sourceFormEditId) {
@@ -1099,7 +1124,10 @@ export const SourcesTab: React.FC = () => {
         updateSourceInList(sourceFormEditId, updated)
         message.success(t("watchlists:sources.updated", "Source updated"))
       } else {
-        const created = await createWatchlistSource(values)
+        const created = await createWatchlistSource({
+          ...values,
+          watchlist_id: selectedWatchlistId ?? undefined
+        })
         addSource(created)
         message.success(t("watchlists:sources.created", "Source created"))
       }
@@ -1367,6 +1395,176 @@ export const SourcesTab: React.FC = () => {
     ? [columns[0], columns[1], columns[2], tagsColumn, columns[3], columns[4], columns[5]]
     : columns
 
+  const renderSourceStatus = (source: WatchlistSource) => {
+    const statusVisual = getSourceStatusVisual(source.status, source.active)
+    const health = sourceHealthById[source.id]
+    const deferUntil = health?.defer_until
+    const consecutiveNotModified = health?.consec_not_modified ?? 0
+    const hasBackoff = typeof deferUntil === "string" && deferUntil.length > 0
+
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        <Tag color={statusVisual.color}>
+          <span className="inline-flex items-center gap-1">
+            {renderSourceStatusIcon(statusVisual.iconToken)}
+            <span>{statusVisual.label}</span>
+          </span>
+        </Tag>
+        {consecutiveNotModified > 0 && (
+          <Tag color={consecutiveNotModified >= 5 ? "red" : "gold"}>
+            {t("watchlists:sources.staleCount", "Stale x{{count}}", {
+              count: consecutiveNotModified
+            })}
+          </Tag>
+        )}
+        {hasBackoff && (
+          <Tag color="gold">
+            {t("watchlists:sources.backoffUntil", "Backoff {{time}}", {
+              time: formatRelativeTime(deferUntil, t, { compact: true })
+            })}
+          </Tag>
+        )}
+      </div>
+    )
+  }
+
+  const renderConstrainedSourceList = () => (
+    <div className="space-y-3" data-testid="watchlists-sources-constrained-list">
+      {(Array.isArray(sources) ? sources : []).map((source) => {
+        const groupCount = toNormalizedGroupIds(source).length
+        const groupLabel = groupCount === 1
+          ? t("watchlists:sources.compactSummaryGroupSingular", "group")
+          : t("watchlists:sources.compactSummaryGroupPlural", "groups")
+        const sourceTags = Array.isArray(source.tags) ? source.tags : []
+        const targetIds = resolveCheckNowTargetIds(source.id)
+        const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
+        const isSelected = selectedRowKeys.some((key) => String(key) === String(source.id))
+
+        return (
+          <article
+            key={source.id}
+            className="rounded-lg border border-border bg-surface p-3"
+            data-testid={`watchlists-source-card-${source.id}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <label className="flex min-w-0 items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 shrink-0"
+                  checked={isSelected}
+                  aria-label={t("watchlists:sources.selectSourceAria", "Select {{name}}", { name: source.name })}
+                  onChange={() => toggleSourceSelection(source)}
+                />
+                <span className="min-w-0 space-y-1">
+                  <span className="block truncate font-medium text-text">{source.name}</span>
+                  {source.url ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block truncate text-xs text-text-muted hover:text-primary"
+                    >
+                      {source.url}
+                    </a>
+                  ) : null}
+                </span>
+              </label>
+              <Tag color={SOURCE_TYPE_COLORS[source.source_type] || "default"} className="shrink-0">
+                {source.source_type.toUpperCase()}
+              </Tag>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {sourceTags.slice(0, 4).map((tag) => (
+                <Tag key={tag}>{tag}</Tag>
+              ))}
+              {sourceTags.length > 4 ? <Tag>+{sourceTags.length - 4}</Tag> : null}
+              <Tag>
+                {t("watchlists:sources.groupCount", "{{count}} {{label}}", {
+                  count: groupCount,
+                  label: groupLabel
+                })}
+              </Tag>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              {renderSourceStatus(source)}
+              <span className="text-xs text-text-muted">
+                {source.last_scraped_at
+                  ? formatRelativeTime(source.last_scraped_at, t)
+                  : t("watchlists:sources.never", "Never")}
+              </span>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-2">
+                <Switch
+                  checked={source.active}
+                  size="small"
+                  aria-label={t("watchlists:sources.toggleActiveAria", "Toggle active for {{name}}", { name: source.name })}
+                  onChange={() => handleToggleActive(source)}
+                />
+                <span className="text-xs text-text-muted">
+                  {source.active ? t("common:enabled", "Enabled") : t("common:disabled", "Disabled")}
+                </span>
+              </span>
+              <Space size="small">
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("watchlists:sources.checkNowForSourceAria", "Check now for {{name}}", { name: source.name })}
+                  icon={<RefreshCw className="h-4 w-4" />}
+                  loading={checkNowLoading}
+                  onClick={() => requestCheckNow(targetIds)}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("watchlists:sources.seenInfoForSourceAria", "Source Health & Dedup Stats for {{name}}", { name: source.name })}
+                  icon={<Eye className="h-4 w-4" />}
+                  onClick={() => setSeenDrawerSourceId(source.id)}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("watchlists:sources.editSourceAria", "Edit {{name}}", { name: source.name })}
+                  icon={<Edit2 className="h-4 w-4" />}
+                  onClick={() => openSourceForm(source.id)}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  aria-label={t("watchlists:sources.deleteSourceAria", "Delete {{name}}", { name: source.name })}
+                  icon={<Trash2 className="h-4 w-4" />}
+                  onClick={() => void requestDeleteConfirmation(source)}
+                />
+              </Space>
+            </div>
+          </article>
+        )
+      })}
+      <div className="text-xs text-text-subtle">
+        {t("watchlists:sources.totalItems", "{{total}} sources", { total: sourcesTotal })}
+      </div>
+      {sourcesTotal > sourcesPageSize && (
+        <Pagination
+          current={sourcesPage}
+          pageSize={sourcesPageSize}
+          total={sourcesTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:sources.totalItems", "{{total}} sources", { total })}
+          onChange={(page, pageSize) => {
+            setSourcesPage(page)
+            if (pageSize !== sourcesPageSize) {
+              setSourcesPageSize(pageSize)
+            }
+          }}
+        />
+      )}
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -1407,7 +1605,7 @@ export const SourcesTab: React.FC = () => {
             ]}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type={showAdvancedColumns ? "default" : "dashed"}
             data-testid="watchlists-sources-advanced-toggle"
@@ -1548,7 +1746,7 @@ export const SourcesTab: React.FC = () => {
               </div>
             }
           >
-            <Space direction="vertical" align="center" size="middle">
+            <Space orientation="vertical" align="center" size="middle">
               <Button
                 type="primary"
                 size="large"
@@ -1588,44 +1786,48 @@ export const SourcesTab: React.FC = () => {
           </div>
 
           <div className="flex-1">
-            <Table
-              dataSource={Array.isArray(sources) ? sources : []}
-              columns={tableColumns}
-              rowKey="id"
-              aria-label={t("watchlists:sources.tableAria", "Feeds table")}
-              loading={sourcesLoading}
-              locale={{
-                emptyText: (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={t(
-                      "watchlists:sources.emptyTableDescription",
-                      tableEmptyDescription
-                    )}
-                  />
-                )
-              }}
-              rowSelection={{
-                selectedRowKeys,
-                onChange: setSelectedRowKeys
-              }}
-              pagination={{
-                current: sourcesPage,
-                pageSize: sourcesPageSize,
-                total: sourcesTotal,
-                showSizeChanger: true,
-                showTotal: (total) =>
-                  t("watchlists:sources.totalItems", "{{total}} sources", { total }),
-                onChange: (page, pageSize) => {
-                  setSourcesPage(page)
-                  if (pageSize !== sourcesPageSize) {
-                    setSourcesPageSize(pageSize)
+            {isConstrained ? (
+              renderConstrainedSourceList()
+            ) : (
+              <Table
+                dataSource={Array.isArray(sources) ? sources : []}
+                columns={tableColumns}
+                rowKey="id"
+                aria-label={t("watchlists:sources.tableAria", "Feeds table")}
+                loading={sourcesLoading}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={t(
+                        "watchlists:sources.emptyTableDescription",
+                        tableEmptyDescription
+                      )}
+                    />
+                  )
+                }}
+                rowSelection={{
+                  selectedRowKeys,
+                  onChange: setSelectedRowKeys
+                }}
+                pagination={{
+                  current: sourcesPage,
+                  pageSize: sourcesPageSize,
+                  total: sourcesTotal,
+                  showSizeChanger: true,
+                  showTotal: (total) =>
+                    t("watchlists:sources.totalItems", "{{total}} sources", { total }),
+                  onChange: (page, pageSize) => {
+                    setSourcesPage(page)
+                    if (pageSize !== sourcesPageSize) {
+                      setSourcesPageSize(pageSize)
+                    }
                   }
-                }
-              }}
-              size="middle"
-              scroll={{ x: "max-content" }}
-            />
+                }}
+                size="middle"
+                scroll={{ x: "max-content" }}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1636,6 +1838,7 @@ export const SourcesTab: React.FC = () => {
         onSubmit={handleFormSubmit}
         initialValues={editingSource}
         existingTags={(Array.isArray(tags) ? tags : []).map((t) => t.name)}
+        forumsEnabled={Boolean(settings?.forums_enabled)}
       />
 
       <SourcesBulkImport
@@ -1644,6 +1847,7 @@ export const SourcesTab: React.FC = () => {
         groups={groups}
         tags={tags}
         defaultGroupId={selectedGroupId}
+        watchlistId={selectedWatchlistId}
         onImported={() => {
           loadSources()
           loadTags()

@@ -99,14 +99,16 @@ Navigation:
 - Get the service in endpoints via DI: `get_chatbook_service()` → `ChatbookService` with user‑scoped `CharactersRAGDB`.
 - Export (sync)
   - Call `await ChatbookService.create_chatbook(..., async_mode=False)` with `content_selections: Dict[ContentType, List[str]]`.
-  - Returns `(success, message, file_path)`; endpoint persists a completed `ExportJob` and returns `download_url`.
+  - Returns `(success, message, archive_path)`; the endpoint persists a completed `ExportJob` and returns `job_id` plus `download_url`.
 - Export (async)
   - Call with `async_mode=True`; returns `(success, message, job_id)`. A core Jobs worker completes the job.
+- Export continuation
+  - `POST /api/v1/chatbooks/export/continue` is sync-only. Successful continuations are persisted as completed export jobs with job-backed download URLs.
 - Import (sync/async)
   - `await ChatbookService.import_chatbook(file_path, content_selections?, conflict_resolution?, prefix_imported?, import_media?, import_embeddings?, async_mode?)`.
-  - Conflict strategies: `skip`, `overwrite`, `rename`, `merge` (where supported).
+  - Current API-supported conflict strategies: `skip` and `rename`. `overwrite` and `merge` remain planned.
 - Preview
-  - `service.preview_chatbook(file_path)` parses and validates the manifest without DB writes.
+  - `service.preview_chatbook(file_path)` parses and validates the manifest without DB writes. Invalid archives/manifests are surfaced as HTTP `400` by the API layer.
 - Jobs & status
   - `service.list_export_jobs()`, `service.get_export_job(job_id)`, `service.cancel_export_job(job_id)`; analogous import methods.
 
@@ -143,11 +145,13 @@ Navigation:
 - Download
   - `curl -OJ "$API/chatbooks/download/<job_id>" -H "X-API-KEY: $KEY"`
 - Remove export job (completed/cancelled)
+  - Export remove supports completed, cancelled, failed, and expired jobs.
   - `curl -sS -X DELETE "$API/chatbooks/export/jobs/<job_id>/remove" -H "X-API-KEY: $KEY"`
 - Import (sync)
   - `curl -sS -X POST "$API/chatbooks/import" -H "X-API-KEY: $KEY" -F "file=@/path/to/file.chatbook" -F 'conflict_resolution=skip' -F 'async_mode=false'`
   - Note: Import options are sent as multipart form fields alongside the uploaded file.
 - Remove import job (completed/cancelled)
+  - Import remove supports completed, cancelled, and failed jobs.
   - `curl -sS -X DELETE "$API/chatbooks/import/jobs/<job_id>/remove" -H "X-API-KEY: $KEY"`
 - Preview
   - `curl -sS -X POST "$API/chatbooks/preview" -H "X-API-KEY: $KEY" -F "file=@/path/to/file.chatbook"`

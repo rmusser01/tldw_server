@@ -98,6 +98,11 @@ async def test_chat_export_includes_tool_calls_and_metadata():
             assert "tool_calls" in am
             assert any(tc.get("id") == tool_call_id for tc in am.get("tool_calls", []))
 
+            pagination = data["pagination"]
+            assert pagination["mode"] == "page"
+            assert pagination["per_page"] == 1000
+            assert pagination["total"] == pagination["total_messages"]
+
             # message_metadata_extra is returned only when stored; we don't require it here
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

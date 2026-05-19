@@ -12,7 +12,8 @@ const connectionState = {
     | "error_auth"
     | "error_unreachable"
     | "unconfigured",
-  navigate: vi.fn()
+  navigate: vi.fn(),
+  search: ""
 }
 
 const mockBlocklist = {
@@ -37,6 +38,7 @@ const mockBlocklist = {
   lintManagedLine: vi.fn().mockResolvedValue(undefined),
   lintLine: vi.fn().mockResolvedValue({ items: [], valid_count: 0, invalid_count: 0 })
 }
+const markMilestone = vi.fn()
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: null, isFetching: false, error: null, refetch: vi.fn() })
@@ -50,7 +52,8 @@ vi.mock("react-router-dom", async () => {
   )
   return {
     ...actual,
-    useNavigate: () => connectionState.navigate
+    useNavigate: () => connectionState.navigate,
+    useSearchParams: () => [new URLSearchParams(connectionState.search)]
   }
 })
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -70,6 +73,10 @@ vi.mock("@/services/moderation", () => ({
   testModeration: vi.fn(),
   getUserOverride: vi.fn()
 }))
+vi.mock("@/store/milestones", () => ({
+  useMilestoneStore: (selector: (state: { markMilestone: typeof markMilestone }) => unknown) =>
+    selector({ markMilestone })
+}))
 vi.mock("../hooks/useBlocklist", () => ({
   useBlocklist: () => mockBlocklist
 }))
@@ -82,7 +89,14 @@ describe("ModerationPlaygroundShell", () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
     connectionState.online = true
     connectionState.uxState = "connected_ok"
+    connectionState.search = ""
     mockBlocklist.isDirtyRaw = false
+  })
+
+  it("marks content rules reviewed when the playground opens", () => {
+    render(<ModerationPlaygroundShell />)
+
+    expect(markMilestone).toHaveBeenCalledWith("content_rules_reviewed")
   })
 
   it("renders 5 tab buttons", () => {
@@ -94,6 +108,18 @@ describe("ModerationPlaygroundShell", () => {
     expect(screen.getByRole("tab", { name: /advanced/i })).toBeInTheDocument()
   })
 
+  it("uses Content Rules naming for the rules configuration surface", () => {
+    render(<ModerationPlaygroundShell />)
+
+    expect(
+      screen.getByRole("heading", { name: "Content Rules" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Moderation Playground")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/policies, blocklists, user overrides, and rule tests/i)
+    ).toBeInTheDocument()
+  })
+
   it("shows Policy tab content by default", async () => {
     render(<ModerationPlaygroundShell />)
     expect(await screen.findByText(/personal data protection/i)).toBeInTheDocument()
@@ -103,6 +129,27 @@ describe("ModerationPlaygroundShell", () => {
     render(<ModerationPlaygroundShell />)
     fireEvent.click(screen.getByRole("tab", { name: /blocklist/i }))
     expect(await screen.findByText(/syntax reference/i)).toBeInTheDocument()
+  })
+
+  it("marks content rules tested when the test sandbox opens", async () => {
+    render(<ModerationPlaygroundShell />)
+
+    fireEvent.click(screen.getByRole("tab", { name: /test/i }))
+
+    await waitFor(() => {
+      expect(markMilestone).toHaveBeenCalledWith("content_rules_tested")
+    })
+  })
+
+  it("opens the Test Sandbox from the tab query parameter", async () => {
+    connectionState.search = "tab=test"
+
+    render(<ModerationPlaygroundShell />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /test/i })).toHaveAttribute("aria-selected", "true")
+    })
+    expect(markMilestone).toHaveBeenCalledWith("content_rules_tested")
   })
 
   it("renders context bar with scope selector", () => {

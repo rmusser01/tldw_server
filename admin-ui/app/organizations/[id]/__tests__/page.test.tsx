@@ -24,6 +24,7 @@ vi.mock('next/navigation', () => ({
     replace: vi.fn(),
     prefetch: vi.fn(),
   }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock('@/components/PermissionGuard', () => ({
@@ -159,15 +160,24 @@ describe('OrganizationDetailPage billing state', () => {
     const { rerender } = render(<OrganizationDetailPage />);
 
     await screen.findByText('Org 1');
-    await user.click(screen.getByRole('tab', { name: /billing/i }));
-    expect((await screen.findByTestId('invoice-table')).textContent).toBe('1');
+
+    // Navigate to the Billing tab to see billing content
+    const billingTab = await screen.findByRole('tab', { name: /billing/i });
+    await user.click(billingTab);
+
+    expect(await screen.findByText('active')).toBeInTheDocument();
+    expect(screen.getByTestId('invoice-table').textContent).toBe('1');
     expect(screen.getByTestId('usage-meter').textContent).toBe('42');
 
     currentOrgId = '2';
     rerender(<OrganizationDetailPage />);
 
     await screen.findByText('Org 2');
-    await user.click(screen.getByRole('tab', { name: /billing/i }));
+
+    // Navigate to Billing tab again for the second org
+    const billingTab2 = await screen.findByRole('tab', { name: /billing/i });
+    await user.click(billingTab2);
+
     await waitFor(() => {
       expect(screen.getByText('No active subscription.')).toBeInTheDocument();
     });
@@ -200,5 +210,114 @@ describe('OrganizationDetailPage billing state', () => {
       expect(screen.getByText('No members match your search.')).toBeInTheDocument();
     });
     expect(screen.queryByText('alice')).not.toBeInTheDocument();
+  });
+});
+
+describe('OrganizationDetailPage tab navigation', () => {
+  it('renders all tab triggers (Members, Teams, Keys, Billing)', async () => {
+    render(<OrganizationDetailPage />);
+
+    await screen.findByText('Org 1');
+
+    expect(screen.getByRole('tab', { name: /members/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /teams/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /keys/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /billing/i })).toBeInTheDocument();
+  });
+
+  it('navigates between tabs when clicking tab triggers', async () => {
+    const user = userEvent.setup();
+    render(<OrganizationDetailPage />);
+
+    await screen.findByText('Org 1');
+
+    // Members tab is default - verify we can see member content area
+    const membersTab = screen.getByRole('tab', { name: /members/i });
+    expect(membersTab).toBeInTheDocument();
+
+    // Click Teams tab
+    const teamsTab = screen.getByRole('tab', { name: /teams/i });
+    await user.click(teamsTab);
+
+    // Click Keys tab
+    const keysTab = screen.getByRole('tab', { name: /keys/i });
+    await user.click(keysTab);
+
+    // Click Billing tab
+    const billingTab = screen.getByRole('tab', { name: /billing/i });
+    await user.click(billingTab);
+
+    // After navigating to billing, billing content should be visible
+    await waitFor(() => {
+      expect(screen.getByText('active')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('OrganizationDetailPage member search', () => {
+  it('filters member table by search input', async () => {
+    apiMock.getOrgMembers.mockResolvedValue([
+      { user_id: 10, role: 'admin', user: { username: 'alice', email: 'alice@example.com' } },
+      { user_id: 20, role: 'member', user: { username: 'bob', email: 'bob@example.com' } },
+      { user_id: 30, role: 'member', user: { username: 'charlie', email: 'charlie@example.com' } },
+    ]);
+
+    const user = userEvent.setup();
+    render(<OrganizationDetailPage />);
+
+    await screen.findByText('Org 1');
+
+    // All three members should be visible initially
+    expect(await screen.findByText('alice')).toBeInTheDocument();
+    expect(screen.getByText('bob')).toBeInTheDocument();
+    expect(screen.getByText('charlie')).toBeInTheDocument();
+
+    // Type in search to filter
+    const searchInput = screen.getByPlaceholderText('Search members by name or email...');
+    await user.type(searchInput, 'alice');
+
+    // Only alice should remain visible
+    expect(screen.getByText('alice')).toBeInTheDocument();
+    expect(screen.queryByText('bob')).not.toBeInTheDocument();
+    expect(screen.queryByText('charlie')).not.toBeInTheDocument();
+  });
+
+  it('shows empty message when search matches no members', async () => {
+    apiMock.getOrgMembers.mockResolvedValue([
+      { user_id: 10, role: 'admin', user: { username: 'alice', email: 'alice@example.com' } },
+    ]);
+
+    const user = userEvent.setup();
+    render(<OrganizationDetailPage />);
+
+    await screen.findByText('alice');
+
+    const searchInput = screen.getByPlaceholderText('Search members by name or email...');
+    await user.type(searchInput, 'nonexistent');
+
+    expect(screen.getByText('No members match your search.')).toBeInTheDocument();
+    expect(screen.queryByText('alice')).not.toBeInTheDocument();
+  });
+});
+
+describe('OrganizationDetailPage design system Select usage', () => {
+  it('uses Select component for member role dropdowns (not raw <select>)', async () => {
+    apiMock.getOrgMembers.mockResolvedValue([
+      { user_id: 10, role: 'admin', user: { username: 'alice', email: 'alice@example.com' } },
+    ]);
+
+    render(<OrganizationDetailPage />);
+
+    await screen.findByText('alice');
+
+    // The role dropdown for the member should be a <select> element from the design system Select component.
+    // The Select component renders a native <select> element, which is correct.
+    // Verify the role selector exists with the expected value and options.
+    const roleSelects = screen.getAllByRole('combobox');
+    const memberRoleSelect = roleSelects.find(
+      (el) => (el as HTMLSelectElement).value === 'admin'
+    );
+    expect(memberRoleSelect).toBeDefined();
+    expect(memberRoleSelect!.tagName).toBe('SELECT');
   });
 });

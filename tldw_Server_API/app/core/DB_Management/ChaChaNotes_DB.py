@@ -43,10 +43,11 @@ import sqlite3  # noqa: E402
 import tempfile  # noqa: E402
 import threading  # noqa: E402
 import uuid  # noqa: E402
+from collections.abc import Mapping
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any  # noqa: E402
+from typing import Any, Callable, Protocol, TypeAlias  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -74,7 +75,11 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E402
+    DatabaseBackendFactory,
+    is_factory_managed_backend,
+    release_managed_backend,
+)
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
@@ -83,6 +88,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     replace_insert_or_ignore,
     transform_sqlite_query_for_postgres,
 )
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed  # noqa: E402
@@ -118,11 +124,38 @@ from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile
 _SUPPORTED_FLASHCARD_SCHEDULERS = {"sm2_plus", "fsrs"}
 _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES = {"lined", "grid", "cornell"}
 _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES = {"off", "accented"}
+_FLASHCARD_REVIEW_SESSION_STATUSES = frozenset({"active", "completed", "abandoned"})
+_FLASHCARD_REVIEW_MODES = frozenset({"due", "cram"})
+_FLASHCARD_REVIEW_SESSION_TIMEOUT = timedelta(minutes=30)
+_FLASHCARD_REVIEW_SESSION_JSON_FIELDS = ["source_bundle_json"]
+_SUPPORTED_WEB_CLIPPER_DESTINATIONS = {"note", "workspace", "both"}
+_SUPPORTED_WEB_CLIPPER_OUTCOME_STATES = {"saved", "saved_with_warnings", "partially_saved", "failed"}
+_SUPPORTED_WEB_CLIPPER_ENRICHMENT_TYPES = {"ocr", "vlm"}
+_FLASHCARD_TEMPLATE_FIELD_NAMES = ("front_template", "back_template", "notes_template", "extra_template")
+_FLASHCARD_TEMPLATE_TOKEN_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+_DECK_VISIBILITIES = frozenset({"private", "team", "org", "public"})
+_DECK_SHARE_ROLES = frozenset({"owner", "editor", "viewer"})
 
 
 def _coerce_scheduler_type(value: Any) -> str:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in _SUPPORTED_FLASHCARD_SCHEDULERS else "sm2_plus"
+
+
+def _normalize_deck_visibility(value: Any) -> str:
+    normalized = str(value or "private").strip().lower()
+    if normalized not in _DECK_VISIBILITIES:
+        raise InputError(
+            "Invalid deck visibility. Must be one of: private, team, org, public"
+        )
+    return normalized
+
+
+def _normalize_deck_share_role(value: Any) -> str:
+    normalized = str(value or "viewer").strip().lower()
+    if normalized not in _DECK_SHARE_ROLES:
+        raise InputError("Invalid deck share role. Must be one of: owner, editor, viewer")
+    return normalized
 
 
 def _normalize_scheduler_settings_envelope(raw: Mapping[str, Any] | str | None) -> dict[str, Any]:
@@ -300,7 +333,6 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     ConflictError,
 )
 
-
 class BackendCursorAdapter:
     """Adapter exposing QueryResult via a cursor-like interface."""
 
@@ -342,9 +374,10 @@ class BackendCursorAdapter:
 class BackendCursorWrapper:
     """Cursor wrapper that routes operations through the configured backend."""
 
-    def __init__(self, db: CharactersRAGDB, connection):
+    def __init__(self, db: CharactersRAGDB, connection, backend: DatabaseBackend):
         self._db = db
         self._connection = connection
+        self._backend = backend
         self._result: QueryResult | None = None
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
@@ -353,7 +386,7 @@ class BackendCursorWrapper:
 
     def execute(self, query: str, params: tuple | list | dict | None = None):
         prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
-        self._result = self._db.backend.execute(
+        self._result = self._backend.execute(
             prepared_query,
             prepared_params,
             connection=self._connection,
@@ -366,7 +399,7 @@ class BackendCursorWrapper:
 
     def executemany(self, query: str, params_list: list[tuple | list | dict]):
         prepared_query, prepared_params_list = self._db._prepare_backend_many_statement(query, params_list)
-        self._result = self._db.backend.execute_many(
+        self._result = self._backend.execute_many(
             prepared_query,
             prepared_params_list,
             connection=self._connection,
@@ -407,14 +440,15 @@ class BackendCursorWrapper:
 class BackendConnectionWrapper:
     """Connection wrapper that returns backend-aware cursors."""
 
-    def __init__(self, db: CharactersRAGDB, connection):
+    def __init__(self, db: CharactersRAGDB, connection, backend: DatabaseBackend):
         self._db = db
         self._connection = connection
+        self._backend = backend
 
     def cursor(self):
-        if self._db.backend_type == BackendType.SQLITE:
+        if self._backend.backend_type == BackendType.SQLITE:
             return self._connection.cursor()
-        return BackendCursorWrapper(self._db, self._connection)
+        return BackendCursorWrapper(self._db, self._connection, self._backend)
 
     def execute(self, query: str, params: tuple | list | dict | None = None):
         cursor = self.cursor()
@@ -439,12 +473,27 @@ class BackendConnectionWrapper:
 
     @property
     def in_transaction(self) -> bool:
-        if self._db.backend_type == BackendType.SQLITE:
+        if self._backend.backend_type == BackendType.SQLITE:
             return self._connection.in_transaction
         return True
 
     def __getattr__(self, item):
         return getattr(self._connection, item)
+
+
+class SupportsRawBackendConnection(Protocol):
+    """Protocol for pooled backend connections handled outside sqlite3."""
+
+    def close(self) -> Any: ...
+
+    def commit(self) -> Any: ...
+
+    def rollback(self) -> Any: ...
+
+    def cursor(self) -> Any: ...
+
+
+RawBackendConnection: TypeAlias = sqlite3.Connection | SupportsRawBackendConnection
 
 
 class BackendManagedTransaction:
@@ -462,7 +511,8 @@ class BackendManagedTransaction:
         self._depth = getattr(self._db._local, "tx_depth", 0)
         self._managed = self._depth == 0
         self._db._local.tx_depth = self._depth + 1
-        self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn)
+        backend = self._db._get_pinned_backend() or self._db.backend
+        self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
         return self._wrapper
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -531,7 +581,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 40  # Schema v40 adds persona buddy storage contract table
+    _CURRENT_SCHEMA_VERSION = 47  # Schema v47 adds persona visual candidate provenance
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -562,6 +612,48 @@ class CharactersRAGDB:
         "transcript_import",
         "character_seed",
         "generated_candidate",
+    )
+    _ALLOWED_PERSONA_VISUAL_PACK_STATUSES: tuple[str, ...] = (
+        "draft",
+        "review",
+        "active",
+        "archived",
+        "failed",
+    )
+    _ALLOWED_PERSONA_VISUAL_RENDERER_TYPES: tuple[str, ...] = (
+        "sprite_frames",
+        "sprite_sheet",
+        "static_image",
+        "live2d",
+    )
+    _ALLOWED_PERSONA_VISUAL_PROVENANCE_TYPES: tuple[str, ...] = (
+        "uploaded",
+        "generated",
+        "imported",
+        "mixed",
+    )
+    _ALLOWED_PERSONA_VISUAL_ASSET_ROLES: tuple[str, ...] = (
+        "frame",
+        "still_pose",
+        "sprite_sheet",
+        "preview",
+        "generated_candidate",
+    )
+    _ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES: tuple[str, ...] = (
+        "review",
+        "accepted",
+        "rejected",
+        "failed",
+    )
+    _ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES: tuple[str, ...] = (
+        "draft",
+        "reviewing",
+        "accepted",
+        "needs_revision",
+        "rejected",
+        "exported",
+        "assigned",
+        "archived",
     )
 
     _FTS_CONFIG: list[tuple[str, str, list[str]]] = [
@@ -621,9 +713,15 @@ class CharactersRAGDB:
         ("decks", "id"),
         ("flashcards", "id"),
         ("flashcard_reviews", "id"),
+        ("flashcard_review_sessions", "id"),
         ("quizzes", "id"),
         ("quiz_questions", "id"),
         ("quiz_attempts", "id"),
+        ("study_packs", "id"),
+        ("study_pack_cards", "id"),
+        ("flashcard_citations", "id"),
+        ("suggestion_snapshots", "id"),
+        ("suggestion_generation_links", "id"),
         ("study_assistant_threads", "id"),
         ("study_assistant_messages", "id"),
         ("writing_templates", "id"),
@@ -1413,7 +1511,9 @@ CREATE TABLE IF NOT EXISTS decks(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT UNIQUE NOT NULL,
   description   TEXT,
+  parent_deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL,
   workspace_id  TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+  review_prompt_side TEXT NOT NULL DEFAULT 'front',
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted       BOOLEAN  NOT NULL DEFAULT 0,
@@ -1423,6 +1523,7 @@ CREATE TABLE IF NOT EXISTS decks(
 CREATE INDEX IF NOT EXISTS idx_decks_deleted ON decks(deleted);
 CREATE INDEX IF NOT EXISTS idx_decks_last_modified ON decks(last_modified);
 CREATE INDEX IF NOT EXISTS idx_decks_workspace_id ON decks(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_decks_parent_deck_id ON decks(parent_deck_id);
 
 /* Flashcards table - with integer id for FTS external-content */
 CREATE TABLE IF NOT EXISTS flashcards(
@@ -1514,6 +1615,28 @@ CREATE TABLE IF NOT EXISTS flashcard_reviews(
 );
 CREATE INDEX IF NOT EXISTS idx_flashcard_reviews_card ON flashcard_reviews(card_id);
 CREATE INDEX IF NOT EXISTS idx_flashcard_reviews_time ON flashcard_reviews(reviewed_at);
+
+/* Review session persistence for grouped flashcard study runs */
+CREATE TABLE IF NOT EXISTS flashcard_review_sessions(
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  deck_id          INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+  review_mode      TEXT NOT NULL DEFAULT 'due',
+  tag_filter       TEXT,
+  scope_key        TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'active',
+  started_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_activity_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at     DATETIME,
+  cards_reviewed   INTEGER DEFAULT 0,
+  correct_count    INTEGER DEFAULT 0,
+  source_bundle_json TEXT,
+  study_pack_id    INTEGER,
+  client_id        TEXT NOT NULL DEFAULT 'unknown'
+);
+CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_scope ON flashcard_review_sessions(scope_key);
+CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_status ON flashcard_review_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_deck ON flashcard_review_sessions(deck_id);
+CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_activity ON flashcard_review_sessions(last_activity_at);
 
 /* Sync triggers for decks */
 DROP TRIGGER IF EXISTS decks_sync_create;
@@ -3329,6 +3452,1906 @@ UPDATE db_schema_version
  WHERE schema_name = 'rag_char_chat_schema'
    AND version < 40;
 """
+    _MIGRATION_SQL_V40_TO_V41 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 41 - Manuscript management tables (2026-04-03)
+───────────────────────────────────────────────────────────────*/
+
+/* ── manuscript_projects ───────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_projects (
+  id               TEXT PRIMARY KEY,
+  title            TEXT NOT NULL,
+  subtitle         TEXT,
+  author           TEXT,
+  genre            TEXT,
+  status           TEXT NOT NULL DEFAULT 'draft'
+                     CHECK(status IN ('draft','outlining','writing','revising','complete','archived')),
+  synopsis         TEXT,
+  target_word_count INTEGER,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  settings_json    TEXT NOT NULL DEFAULT '{}',
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT 0,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_projects_deleted
+  ON manuscript_projects(deleted);
+
+/* ── manuscript_parts ──────────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_parts (
+  id               TEXT PRIMARY KEY,
+  project_id       TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL,
+  sort_order       REAL NOT NULL DEFAULT 0,
+  synopsis         TEXT,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT 0,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_parts_deleted
+  ON manuscript_parts(deleted);
+CREATE INDEX IF NOT EXISTS idx_manuscript_parts_project
+  ON manuscript_parts(project_id, sort_order);
+
+/* ── manuscript_chapters ───────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_chapters (
+  id               TEXT PRIMARY KEY,
+  project_id       TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  part_id          TEXT REFERENCES manuscript_parts(id) ON DELETE SET NULL,
+  title            TEXT NOT NULL,
+  sort_order       REAL NOT NULL DEFAULT 0,
+  synopsis         TEXT,
+  pov_character_id TEXT,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  status           TEXT NOT NULL DEFAULT 'outline'
+                     CHECK(status IN ('outline','draft','revising','final')),
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT 0,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_chapters_deleted
+  ON manuscript_chapters(deleted);
+CREATE INDEX IF NOT EXISTS idx_manuscript_chapters_project
+  ON manuscript_chapters(project_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_manuscript_chapters_part
+  ON manuscript_chapters(part_id, sort_order);
+
+/* ── manuscript_scenes ─────────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_scenes (
+  id               TEXT PRIMARY KEY,
+  chapter_id       TEXT NOT NULL REFERENCES manuscript_chapters(id) ON DELETE CASCADE,
+  project_id       TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title            TEXT,
+  sort_order       REAL NOT NULL DEFAULT 0,
+  content_json     TEXT,
+  content_plain    TEXT,
+  synopsis         TEXT,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  pov_character_id TEXT,
+  status           TEXT NOT NULL DEFAULT 'outline'
+                     CHECK(status IN ('outline','draft','revising','final')),
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT 0,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_scenes_deleted
+  ON manuscript_scenes(deleted);
+CREATE INDEX IF NOT EXISTS idx_manuscript_scenes_chapter
+  ON manuscript_scenes(chapter_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_manuscript_scenes_project
+  ON manuscript_scenes(project_id);
+
+/* ── manuscript_scenes FTS5 ────────────────────────────────── */
+CREATE VIRTUAL TABLE IF NOT EXISTS manuscript_scenes_fts
+USING fts5(
+  title, content_plain, synopsis,
+  content='manuscript_scenes',
+  content_rowid='rowid'
+);
+
+DROP TRIGGER IF EXISTS manuscript_scenes_ai;
+DROP TRIGGER IF EXISTS manuscript_scenes_au;
+DROP TRIGGER IF EXISTS manuscript_scenes_ad;
+
+CREATE TRIGGER manuscript_scenes_ai
+AFTER INSERT ON manuscript_scenes BEGIN
+  INSERT INTO manuscript_scenes_fts(rowid, title, content_plain, synopsis)
+  SELECT new.rowid, new.title, new.content_plain, new.synopsis
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER manuscript_scenes_au
+AFTER UPDATE ON manuscript_scenes BEGIN
+  INSERT INTO manuscript_scenes_fts(manuscript_scenes_fts, rowid, title, content_plain, synopsis)
+  SELECT 'delete', old.rowid, old.title, old.content_plain, old.synopsis
+  WHERE old.deleted = 0;
+
+  INSERT INTO manuscript_scenes_fts(rowid, title, content_plain, synopsis)
+  SELECT new.rowid, new.title, new.content_plain, new.synopsis
+  WHERE new.deleted = 0;
+END;
+
+CREATE TRIGGER manuscript_scenes_ad
+AFTER DELETE ON manuscript_scenes BEGIN
+  INSERT INTO manuscript_scenes_fts(manuscript_scenes_fts, rowid, title, content_plain, synopsis)
+  VALUES('delete', old.rowid, old.title, old.content_plain, old.synopsis);
+END;
+
+/* ── sync triggers: manuscript_projects ────────────────────── */
+DROP TRIGGER IF EXISTS manuscript_projects_sync_create;
+DROP TRIGGER IF EXISTS manuscript_projects_sync_update;
+DROP TRIGGER IF EXISTS manuscript_projects_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_projects_sync_undelete;
+
+CREATE TRIGGER manuscript_projects_sync_create
+AFTER INSERT ON manuscript_projects BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_projects', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'subtitle',NEW.subtitle,'author',NEW.author,
+                     'genre',NEW.genre,'status',NEW.status,'synopsis',NEW.synopsis,
+                     'target_word_count',NEW.target_word_count,'word_count',NEW.word_count,
+                     'settings_json',NEW.settings_json,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_projects_sync_update
+AFTER UPDATE ON manuscript_projects
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.subtitle IS NOT NEW.subtitle OR
+     OLD.author IS NOT NEW.author OR
+     OLD.genre IS NOT NEW.genre OR
+     OLD.status IS NOT NEW.status OR
+     OLD.synopsis IS NOT NEW.synopsis OR
+     OLD.target_word_count IS NOT NEW.target_word_count OR
+     OLD.word_count IS NOT NEW.word_count OR
+     OLD.settings_json IS NOT NEW.settings_json OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_projects', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'subtitle',NEW.subtitle,'author',NEW.author,
+                     'genre',NEW.genre,'status',NEW.status,'synopsis',NEW.synopsis,
+                     'target_word_count',NEW.target_word_count,'word_count',NEW.word_count,
+                     'settings_json',NEW.settings_json,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_projects_sync_delete
+AFTER UPDATE ON manuscript_projects
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_projects', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_projects_sync_undelete
+AFTER UPDATE ON manuscript_projects
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_projects', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'title',NEW.title,'subtitle',NEW.subtitle,'author',NEW.author,
+                     'genre',NEW.genre,'status',NEW.status,'synopsis',NEW.synopsis,
+                     'target_word_count',NEW.target_word_count,'word_count',NEW.word_count,
+                     'settings_json',NEW.settings_json,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_parts ───────────────────────── */
+DROP TRIGGER IF EXISTS manuscript_parts_sync_create;
+DROP TRIGGER IF EXISTS manuscript_parts_sync_update;
+DROP TRIGGER IF EXISTS manuscript_parts_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_parts_sync_undelete;
+
+CREATE TRIGGER manuscript_parts_sync_create
+AFTER INSERT ON manuscript_parts BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_parts', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'sort_order',NEW.sort_order,'synopsis',NEW.synopsis,'word_count',NEW.word_count,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_parts_sync_update
+AFTER UPDATE ON manuscript_parts
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.synopsis IS NOT NEW.synopsis OR
+     OLD.word_count IS NOT NEW.word_count OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_parts', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'sort_order',NEW.sort_order,'synopsis',NEW.synopsis,'word_count',NEW.word_count,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_parts_sync_delete
+AFTER UPDATE ON manuscript_parts
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_parts', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_parts_sync_undelete
+AFTER UPDATE ON manuscript_parts
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_parts', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'sort_order',NEW.sort_order,'synopsis',NEW.synopsis,'word_count',NEW.word_count,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_chapters ────────────────────── */
+DROP TRIGGER IF EXISTS manuscript_chapters_sync_create;
+DROP TRIGGER IF EXISTS manuscript_chapters_sync_update;
+DROP TRIGGER IF EXISTS manuscript_chapters_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_chapters_sync_undelete;
+
+CREATE TRIGGER manuscript_chapters_sync_create
+AFTER INSERT ON manuscript_chapters BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_chapters', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'part_id',NEW.part_id,
+                     'title',NEW.title,'sort_order',NEW.sort_order,'synopsis',NEW.synopsis,
+                     'pov_character_id',NEW.pov_character_id,'word_count',NEW.word_count,
+                     'status',NEW.status,'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_chapters_sync_update
+AFTER UPDATE ON manuscript_chapters
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.part_id IS NOT NEW.part_id OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.synopsis IS NOT NEW.synopsis OR
+     OLD.pov_character_id IS NOT NEW.pov_character_id OR
+     OLD.word_count IS NOT NEW.word_count OR
+     OLD.status IS NOT NEW.status OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_chapters', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'part_id',NEW.part_id,
+                     'title',NEW.title,'sort_order',NEW.sort_order,'synopsis',NEW.synopsis,
+                     'pov_character_id',NEW.pov_character_id,'word_count',NEW.word_count,
+                     'status',NEW.status,'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_chapters_sync_delete
+AFTER UPDATE ON manuscript_chapters
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_chapters', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_chapters_sync_undelete
+AFTER UPDATE ON manuscript_chapters
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_chapters', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'part_id',NEW.part_id,
+                     'title',NEW.title,'sort_order',NEW.sort_order,'synopsis',NEW.synopsis,
+                     'pov_character_id',NEW.pov_character_id,'word_count',NEW.word_count,
+                     'status',NEW.status,'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_scenes ──────────────────────── */
+DROP TRIGGER IF EXISTS manuscript_scenes_sync_create;
+DROP TRIGGER IF EXISTS manuscript_scenes_sync_update;
+DROP TRIGGER IF EXISTS manuscript_scenes_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_scenes_sync_undelete;
+
+CREATE TRIGGER manuscript_scenes_sync_create
+AFTER INSERT ON manuscript_scenes BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scenes', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'chapter_id',NEW.chapter_id,'project_id',NEW.project_id,
+                     'title',NEW.title,'sort_order',NEW.sort_order,
+                     'content_json',NEW.content_json,'content_plain',NEW.content_plain,
+                     'synopsis',NEW.synopsis,
+                     'word_count',NEW.word_count,'pov_character_id',NEW.pov_character_id,
+                     'status',NEW.status,'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_scenes_sync_update
+AFTER UPDATE ON manuscript_scenes
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.chapter_id IS NOT NEW.chapter_id OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.content_json IS NOT NEW.content_json OR
+     OLD.content_plain IS NOT NEW.content_plain OR
+     OLD.synopsis IS NOT NEW.synopsis OR
+     OLD.word_count IS NOT NEW.word_count OR
+     OLD.pov_character_id IS NOT NEW.pov_character_id OR
+     OLD.status IS NOT NEW.status OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scenes', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'chapter_id',NEW.chapter_id,'project_id',NEW.project_id,
+                     'title',NEW.title,'sort_order',NEW.sort_order,
+                     'content_json',NEW.content_json,'content_plain',NEW.content_plain,
+                     'synopsis',NEW.synopsis,
+                     'word_count',NEW.word_count,'pov_character_id',NEW.pov_character_id,
+                     'status',NEW.status,'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_scenes_sync_delete
+AFTER UPDATE ON manuscript_scenes
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scenes', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_scenes_sync_undelete
+AFTER UPDATE ON manuscript_scenes
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scenes', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'chapter_id',NEW.chapter_id,'project_id',NEW.project_id,
+                     'title',NEW.title,'sort_order',NEW.sort_order,
+                     'content_json',NEW.content_json,'content_plain',NEW.content_plain,
+                     'synopsis',NEW.synopsis,
+                     'word_count',NEW.word_count,'pov_character_id',NEW.pov_character_id,
+                     'status',NEW.status,'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── FK consistency triggers: parent project_id must match ─── */
+DROP TRIGGER IF EXISTS manuscript_chapters_check_project;
+DROP TRIGGER IF EXISTS manuscript_chapters_check_project_update;
+DROP TRIGGER IF EXISTS manuscript_scenes_check_project;
+DROP TRIGGER IF EXISTS manuscript_scenes_check_project_update;
+
+CREATE TRIGGER manuscript_chapters_check_project
+BEFORE INSERT ON manuscript_chapters
+WHEN NEW.part_id IS NOT NULL
+BEGIN
+  SELECT CASE
+    WHEN (SELECT project_id FROM manuscript_parts WHERE id = NEW.part_id) != NEW.project_id
+    THEN RAISE(ABORT, 'chapter project_id must match its parent part project_id')
+  END;
+END;
+
+CREATE TRIGGER manuscript_chapters_check_project_update
+BEFORE UPDATE ON manuscript_chapters
+WHEN NEW.part_id IS NOT NULL
+BEGIN
+  SELECT CASE
+    WHEN (SELECT project_id FROM manuscript_parts WHERE id = NEW.part_id) != NEW.project_id
+    THEN RAISE(ABORT, 'chapter project_id must match its parent part project_id')
+  END;
+END;
+
+CREATE TRIGGER manuscript_scenes_check_project
+BEFORE INSERT ON manuscript_scenes
+BEGIN
+  SELECT CASE
+    WHEN (SELECT project_id FROM manuscript_chapters WHERE id = NEW.chapter_id) != NEW.project_id
+    THEN RAISE(ABORT, 'scene project_id must match its parent chapter project_id')
+  END;
+END;
+
+CREATE TRIGGER manuscript_scenes_check_project_update
+BEFORE UPDATE ON manuscript_scenes
+BEGIN
+  SELECT CASE
+    WHEN (SELECT project_id FROM manuscript_chapters WHERE id = NEW.chapter_id) != NEW.project_id
+    THEN RAISE(ABORT, 'scene project_id must match its parent chapter project_id')
+  END;
+END;
+
+UPDATE db_schema_version
+   SET version = 41
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 41;
+"""
+
+    _MIGRATION_SQL_V40_TO_V41_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 41 - Manuscript management tables (2026-04-03) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+/* ── manuscript_projects ───────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_projects (
+  id               TEXT PRIMARY KEY,
+  title            TEXT NOT NULL,
+  subtitle         TEXT,
+  author           TEXT,
+  genre            TEXT,
+  status           TEXT NOT NULL DEFAULT 'draft'
+                     CHECK(status IN ('draft','outlining','writing','revising','complete','archived')),
+  synopsis         TEXT,
+  target_word_count INTEGER,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  settings_json    TEXT NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT FALSE,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_projects_deleted
+  ON manuscript_projects(deleted);
+
+/* ── manuscript_parts ──────────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_parts (
+  id               TEXT PRIMARY KEY,
+  project_id       TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title            TEXT NOT NULL,
+  sort_order       REAL NOT NULL DEFAULT 0,
+  synopsis         TEXT,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT FALSE,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_parts_deleted
+  ON manuscript_parts(deleted);
+CREATE INDEX IF NOT EXISTS idx_manuscript_parts_project
+  ON manuscript_parts(project_id, sort_order);
+
+/* ── manuscript_chapters ───────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_chapters (
+  id               TEXT PRIMARY KEY,
+  project_id       TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  part_id          TEXT REFERENCES manuscript_parts(id) ON DELETE SET NULL,
+  title            TEXT NOT NULL,
+  sort_order       REAL NOT NULL DEFAULT 0,
+  synopsis         TEXT,
+  pov_character_id TEXT,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  status           TEXT NOT NULL DEFAULT 'outline'
+                     CHECK(status IN ('outline','draft','revising','final')),
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT FALSE,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_chapters_deleted
+  ON manuscript_chapters(deleted);
+CREATE INDEX IF NOT EXISTS idx_manuscript_chapters_project
+  ON manuscript_chapters(project_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_manuscript_chapters_part
+  ON manuscript_chapters(part_id, sort_order);
+
+/* ── manuscript_scenes ─────────────────────────────────────── */
+CREATE TABLE IF NOT EXISTS manuscript_scenes (
+  id               TEXT PRIMARY KEY,
+  chapter_id       TEXT NOT NULL REFERENCES manuscript_chapters(id) ON DELETE CASCADE,
+  project_id       TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title            TEXT,
+  sort_order       REAL NOT NULL DEFAULT 0,
+  content_json     TEXT,
+  content_plain    TEXT,
+  synopsis         TEXT,
+  word_count       INTEGER NOT NULL DEFAULT 0,
+  pov_character_id TEXT,
+  status           TEXT NOT NULL DEFAULT 'outline'
+                     CHECK(status IN ('outline','draft','revising','final')),
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN  NOT NULL DEFAULT FALSE,
+  client_id        TEXT     NOT NULL,
+  version          INTEGER  NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_manuscript_scenes_deleted
+  ON manuscript_scenes(deleted);
+CREATE INDEX IF NOT EXISTS idx_manuscript_scenes_chapter
+  ON manuscript_scenes(chapter_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_manuscript_scenes_project
+  ON manuscript_scenes(project_id);
+
+/* Note: FTS5 is SQLite-only; Postgres would use tsvector/GIN instead.
+   Sync triggers also use SQLite-specific json_object(); Postgres equivalent
+   would use jsonb_build_object(). Skipped for now — only tables + indexes. */
+
+-- Postgres v40→v41 adds manuscript tables only (FTS5 and sync triggers are SQLite-specific)
+-- Version stays at 40 until Postgres equivalents (tsvector search, NOTIFY-based sync) are added
+UPDATE db_schema_version
+   SET version = 40
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 40;
+"""
+
+    # --- Migration: V41 -> V42 (Characters, world info, plot, citations) ---
+    _MIGRATION_SQL_V41_TO_V42 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 42 — Characters, world info, plot, citations (2026-04-XX)
+───────────────────────────────────────────────────────────────*/
+
+-- CHARACTERS
+CREATE TABLE IF NOT EXISTS manuscript_characters (
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  role            TEXT NOT NULL DEFAULT 'supporting'
+                    CHECK(role IN ('protagonist','antagonist','supporting','minor','mentioned')),
+  cast_group      TEXT,
+  full_name       TEXT,
+  age             TEXT,
+  gender          TEXT,
+  appearance      TEXT,
+  personality     TEXT,
+  backstory       TEXT,
+  motivation      TEXT,
+  arc_summary     TEXT,
+  notes           TEXT,
+  custom_fields_json TEXT NOT NULL DEFAULT '{}',
+  sort_order      REAL NOT NULL DEFAULT 0,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted         BOOLEAN NOT NULL DEFAULT 0,
+  client_id       TEXT NOT NULL DEFAULT 'unknown',
+  version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mchr_project ON manuscript_characters(project_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_mchr_role ON manuscript_characters(project_id, role);
+CREATE INDEX IF NOT EXISTS idx_mchr_deleted ON manuscript_characters(deleted);
+
+-- CHARACTER RELATIONSHIPS
+CREATE TABLE IF NOT EXISTS manuscript_character_relationships (
+  id                TEXT PRIMARY KEY,
+  project_id        TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  from_character_id TEXT NOT NULL REFERENCES manuscript_characters(id) ON DELETE CASCADE,
+  to_character_id   TEXT NOT NULL REFERENCES manuscript_characters(id) ON DELETE CASCADE,
+  relationship_type TEXT NOT NULL,
+  description       TEXT,
+  bidirectional     BOOLEAN NOT NULL DEFAULT 1,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted           BOOLEAN NOT NULL DEFAULT 0,
+  client_id         TEXT NOT NULL DEFAULT 'unknown',
+  version           INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mcrel_project ON manuscript_character_relationships(project_id);
+CREATE INDEX IF NOT EXISTS idx_mcrel_from ON manuscript_character_relationships(from_character_id);
+CREATE INDEX IF NOT EXISTS idx_mcrel_to ON manuscript_character_relationships(to_character_id);
+CREATE INDEX IF NOT EXISTS idx_mcrel_deleted ON manuscript_character_relationships(deleted);
+
+-- WORLD INFO
+CREATE TABLE IF NOT EXISTS manuscript_world_info (
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL CHECK(kind IN ('location','item','faction','concept','event','custom')),
+  name            TEXT NOT NULL,
+  description     TEXT,
+  parent_id       TEXT REFERENCES manuscript_world_info(id) ON DELETE SET NULL,
+  properties_json TEXT NOT NULL DEFAULT '{}',
+  tags_json       TEXT NOT NULL DEFAULT '[]',
+  sort_order      REAL NOT NULL DEFAULT 0,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted         BOOLEAN NOT NULL DEFAULT 0,
+  client_id       TEXT NOT NULL DEFAULT 'unknown',
+  version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mwi_project_kind ON manuscript_world_info(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_mwi_parent ON manuscript_world_info(parent_id);
+CREATE INDEX IF NOT EXISTS idx_mwi_deleted ON manuscript_world_info(deleted);
+
+-- PLOT LINES
+CREATE TABLE IF NOT EXISTS manuscript_plot_lines (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  description   TEXT,
+  status        TEXT NOT NULL DEFAULT 'active'
+                  CHECK(status IN ('active','resolved','abandoned','dormant')),
+  color         TEXT,
+  sort_order    REAL NOT NULL DEFAULT 0,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT 0,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mpl_project ON manuscript_plot_lines(project_id);
+CREATE INDEX IF NOT EXISTS idx_mpl_deleted ON manuscript_plot_lines(deleted);
+
+-- PLOT EVENTS
+CREATE TABLE IF NOT EXISTS manuscript_plot_events (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  plot_line_id  TEXT NOT NULL REFERENCES manuscript_plot_lines(id) ON DELETE CASCADE,
+  scene_id      TEXT REFERENCES manuscript_scenes(id) ON DELETE SET NULL,
+  chapter_id    TEXT REFERENCES manuscript_chapters(id) ON DELETE SET NULL,
+  title         TEXT NOT NULL,
+  description   TEXT,
+  event_type    TEXT NOT NULL DEFAULT 'plot'
+                  CHECK(event_type IN ('setup','conflict','action','emotional','plot','resolution')),
+  sort_order    REAL NOT NULL DEFAULT 0,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT 0,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mpe_plot_line ON manuscript_plot_events(plot_line_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_mpe_scene ON manuscript_plot_events(scene_id);
+CREATE INDEX IF NOT EXISTS idx_mpe_deleted ON manuscript_plot_events(deleted);
+
+-- PLOT HOLES
+CREATE TABLE IF NOT EXISTS manuscript_plot_holes (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  description   TEXT,
+  severity      TEXT NOT NULL DEFAULT 'medium'
+                  CHECK(severity IN ('low','medium','high','critical')),
+  status        TEXT NOT NULL DEFAULT 'open'
+                  CHECK(status IN ('open','investigating','resolved','wontfix')),
+  scene_id      TEXT REFERENCES manuscript_scenes(id) ON DELETE SET NULL,
+  chapter_id    TEXT REFERENCES manuscript_chapters(id) ON DELETE SET NULL,
+  plot_line_id  TEXT REFERENCES manuscript_plot_lines(id) ON DELETE SET NULL,
+  resolution    TEXT,
+  detected_by   TEXT NOT NULL DEFAULT 'manual'
+                  CHECK(detected_by IN ('manual','ai')),
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT 0,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mph_project ON manuscript_plot_holes(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_mph_deleted ON manuscript_plot_holes(deleted);
+
+-- SCENE-CHARACTER LINKING (no soft delete, no version — simple join table)
+CREATE TABLE IF NOT EXISTS manuscript_scene_characters (
+  scene_id      TEXT NOT NULL REFERENCES manuscript_scenes(id) ON DELETE CASCADE,
+  character_id  TEXT NOT NULL REFERENCES manuscript_characters(id) ON DELETE CASCADE,
+  is_pov        BOOLEAN NOT NULL DEFAULT 0,
+  last_modified TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
+  deleted       BOOLEAN NOT NULL DEFAULT 0,
+  client_id     TEXT,
+  version       INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (scene_id, character_id)
+);
+
+-- SCENE-WORLD_INFO LINKING
+CREATE TABLE IF NOT EXISTS manuscript_scene_world_info (
+  scene_id        TEXT NOT NULL REFERENCES manuscript_scenes(id) ON DELETE CASCADE,
+  world_info_id   TEXT NOT NULL REFERENCES manuscript_world_info(id) ON DELETE CASCADE,
+  last_modified   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
+  deleted         BOOLEAN NOT NULL DEFAULT 0,
+  client_id       TEXT,
+  version         INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (scene_id, world_info_id)
+);
+
+-- CITATIONS (references from RAG into manuscript)
+CREATE TABLE IF NOT EXISTS manuscript_citations (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  scene_id      TEXT NOT NULL REFERENCES manuscript_scenes(id) ON DELETE CASCADE,
+  source_type   TEXT NOT NULL,
+  source_id     TEXT,
+  source_title  TEXT,
+  excerpt       TEXT,
+  query_used    TEXT,
+  anchor_offset INTEGER,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT 0,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mcit_scene ON manuscript_citations(scene_id);
+CREATE INDEX IF NOT EXISTS idx_mcit_project ON manuscript_citations(project_id);
+CREATE INDEX IF NOT EXISTS idx_mcit_deleted ON manuscript_citations(deleted);
+
+/* ── sync triggers: manuscript_characters ─────────────────── */
+DROP TRIGGER IF EXISTS manuscript_characters_sync_create;
+DROP TRIGGER IF EXISTS manuscript_characters_sync_update;
+DROP TRIGGER IF EXISTS manuscript_characters_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_characters_sync_undelete;
+
+CREATE TRIGGER manuscript_characters_sync_create
+AFTER INSERT ON manuscript_characters BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_characters', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'name',NEW.name,'role',NEW.role,
+                     'cast_group',NEW.cast_group,'full_name',NEW.full_name,
+                     'age',NEW.age,'gender',NEW.gender,
+                     'appearance',NEW.appearance,'personality',NEW.personality,
+                     'backstory',NEW.backstory,'motivation',NEW.motivation,
+                     'arc_summary',NEW.arc_summary,'notes',NEW.notes,
+                     'custom_fields_json',NEW.custom_fields_json,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_characters_sync_update
+AFTER UPDATE ON manuscript_characters
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.name IS NOT NEW.name OR
+     OLD.role IS NOT NEW.role OR
+     OLD.cast_group IS NOT NEW.cast_group OR
+     OLD.full_name IS NOT NEW.full_name OR
+     OLD.age IS NOT NEW.age OR
+     OLD.gender IS NOT NEW.gender OR
+     OLD.appearance IS NOT NEW.appearance OR
+     OLD.personality IS NOT NEW.personality OR
+     OLD.backstory IS NOT NEW.backstory OR
+     OLD.motivation IS NOT NEW.motivation OR
+     OLD.arc_summary IS NOT NEW.arc_summary OR
+     OLD.notes IS NOT NEW.notes OR
+     OLD.custom_fields_json IS NOT NEW.custom_fields_json OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.age IS NOT NEW.age OR
+     OLD.gender IS NOT NEW.gender OR
+     OLD.notes IS NOT NEW.notes OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_characters', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'name',NEW.name,'role',NEW.role,
+                     'cast_group',NEW.cast_group,'full_name',NEW.full_name,
+                     'age',NEW.age,'gender',NEW.gender,
+                     'appearance',NEW.appearance,'personality',NEW.personality,
+                     'backstory',NEW.backstory,'motivation',NEW.motivation,
+                     'arc_summary',NEW.arc_summary,'notes',NEW.notes,
+                     'custom_fields_json',NEW.custom_fields_json,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_characters_sync_delete
+AFTER UPDATE ON manuscript_characters
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_characters', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_characters_sync_undelete
+AFTER UPDATE ON manuscript_characters
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_characters', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'name',NEW.name,'role',NEW.role,
+                     'cast_group',NEW.cast_group,'full_name',NEW.full_name,
+                     'age',NEW.age,'gender',NEW.gender,
+                     'appearance',NEW.appearance,'personality',NEW.personality,
+                     'backstory',NEW.backstory,'motivation',NEW.motivation,
+                     'arc_summary',NEW.arc_summary,'notes',NEW.notes,
+                     'custom_fields_json',NEW.custom_fields_json,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_character_relationships ─────── */
+DROP TRIGGER IF EXISTS manuscript_character_relationships_sync_create;
+DROP TRIGGER IF EXISTS manuscript_character_relationships_sync_update;
+DROP TRIGGER IF EXISTS manuscript_character_relationships_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_character_relationships_sync_undelete;
+
+CREATE TRIGGER manuscript_character_relationships_sync_create
+AFTER INSERT ON manuscript_character_relationships BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_character_relationships', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,
+                     'from_character_id',NEW.from_character_id,'to_character_id',NEW.to_character_id,
+                     'relationship_type',NEW.relationship_type,'description',NEW.description,
+                     'bidirectional',NEW.bidirectional,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_character_relationships_sync_update
+AFTER UPDATE ON manuscript_character_relationships
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.relationship_type IS NOT NEW.relationship_type OR
+     OLD.description IS NOT NEW.description OR
+     OLD.bidirectional IS NOT NEW.bidirectional OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_character_relationships', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,
+                     'from_character_id',NEW.from_character_id,'to_character_id',NEW.to_character_id,
+                     'relationship_type',NEW.relationship_type,'description',NEW.description,
+                     'bidirectional',NEW.bidirectional,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_character_relationships_sync_delete
+AFTER UPDATE ON manuscript_character_relationships
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_character_relationships', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_character_relationships_sync_undelete
+AFTER UPDATE ON manuscript_character_relationships
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_character_relationships', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,
+                     'from_character_id',NEW.from_character_id,'to_character_id',NEW.to_character_id,
+                     'relationship_type',NEW.relationship_type,'description',NEW.description,
+                     'bidirectional',NEW.bidirectional,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_world_info ─────────────────── */
+DROP TRIGGER IF EXISTS manuscript_world_info_sync_create;
+DROP TRIGGER IF EXISTS manuscript_world_info_sync_update;
+DROP TRIGGER IF EXISTS manuscript_world_info_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_world_info_sync_undelete;
+
+CREATE TRIGGER manuscript_world_info_sync_create
+AFTER INSERT ON manuscript_world_info BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_world_info', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'kind',NEW.kind,'name',NEW.name,
+                     'description',NEW.description,'parent_id',NEW.parent_id,
+                     'properties_json',NEW.properties_json,'tags_json',NEW.tags_json,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_world_info_sync_update
+AFTER UPDATE ON manuscript_world_info
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.kind IS NOT NEW.kind OR
+     OLD.name IS NOT NEW.name OR
+     OLD.description IS NOT NEW.description OR
+     OLD.parent_id IS NOT NEW.parent_id OR
+     OLD.properties_json IS NOT NEW.properties_json OR
+     OLD.tags_json IS NOT NEW.tags_json OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_world_info', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'kind',NEW.kind,'name',NEW.name,
+                     'description',NEW.description,'parent_id',NEW.parent_id,
+                     'properties_json',NEW.properties_json,'tags_json',NEW.tags_json,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_world_info_sync_delete
+AFTER UPDATE ON manuscript_world_info
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_world_info', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_world_info_sync_undelete
+AFTER UPDATE ON manuscript_world_info
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_world_info', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'kind',NEW.kind,'name',NEW.name,
+                     'description',NEW.description,'parent_id',NEW.parent_id,
+                     'properties_json',NEW.properties_json,'tags_json',NEW.tags_json,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_plot_lines ─────────────────── */
+DROP TRIGGER IF EXISTS manuscript_plot_lines_sync_create;
+DROP TRIGGER IF EXISTS manuscript_plot_lines_sync_update;
+DROP TRIGGER IF EXISTS manuscript_plot_lines_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_plot_lines_sync_undelete;
+
+CREATE TRIGGER manuscript_plot_lines_sync_create
+AFTER INSERT ON manuscript_plot_lines BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_lines', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'description',NEW.description,'status',NEW.status,'color',NEW.color,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_plot_lines_sync_update
+AFTER UPDATE ON manuscript_plot_lines
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.description IS NOT NEW.description OR
+     OLD.status IS NOT NEW.status OR
+     OLD.color IS NOT NEW.color OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_lines', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'description',NEW.description,'status',NEW.status,'color',NEW.color,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_plot_lines_sync_delete
+AFTER UPDATE ON manuscript_plot_lines
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_lines', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_plot_lines_sync_undelete
+AFTER UPDATE ON manuscript_plot_lines
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_lines', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'description',NEW.description,'status',NEW.status,'color',NEW.color,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_plot_events ─────────────────── */
+DROP TRIGGER IF EXISTS manuscript_plot_events_sync_create;
+DROP TRIGGER IF EXISTS manuscript_plot_events_sync_update;
+DROP TRIGGER IF EXISTS manuscript_plot_events_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_plot_events_sync_undelete;
+
+CREATE TRIGGER manuscript_plot_events_sync_create
+AFTER INSERT ON manuscript_plot_events BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_events', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'plot_line_id',NEW.plot_line_id,
+                     'scene_id',NEW.scene_id,'chapter_id',NEW.chapter_id,
+                     'title',NEW.title,'description',NEW.description,'event_type',NEW.event_type,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_plot_events_sync_update
+AFTER UPDATE ON manuscript_plot_events
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.description IS NOT NEW.description OR
+     OLD.event_type IS NOT NEW.event_type OR
+     OLD.scene_id IS NOT NEW.scene_id OR
+     OLD.chapter_id IS NOT NEW.chapter_id OR
+     OLD.plot_line_id IS NOT NEW.plot_line_id OR
+     OLD.sort_order IS NOT NEW.sort_order OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_events', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'plot_line_id',NEW.plot_line_id,
+                     'scene_id',NEW.scene_id,'chapter_id',NEW.chapter_id,
+                     'title',NEW.title,'description',NEW.description,'event_type',NEW.event_type,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_plot_events_sync_delete
+AFTER UPDATE ON manuscript_plot_events
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_events', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_plot_events_sync_undelete
+AFTER UPDATE ON manuscript_plot_events
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_events', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'plot_line_id',NEW.plot_line_id,
+                     'scene_id',NEW.scene_id,'chapter_id',NEW.chapter_id,
+                     'title',NEW.title,'description',NEW.description,'event_type',NEW.event_type,
+                     'sort_order',NEW.sort_order,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_plot_holes ──────────────────── */
+DROP TRIGGER IF EXISTS manuscript_plot_holes_sync_create;
+DROP TRIGGER IF EXISTS manuscript_plot_holes_sync_update;
+DROP TRIGGER IF EXISTS manuscript_plot_holes_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_plot_holes_sync_undelete;
+
+CREATE TRIGGER manuscript_plot_holes_sync_create
+AFTER INSERT ON manuscript_plot_holes BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_holes', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'description',NEW.description,'severity',NEW.severity,'status',NEW.status,
+                     'scene_id',NEW.scene_id,'chapter_id',NEW.chapter_id,'plot_line_id',NEW.plot_line_id,
+                     'resolution',NEW.resolution,'detected_by',NEW.detected_by,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_plot_holes_sync_update
+AFTER UPDATE ON manuscript_plot_holes
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.title IS NOT NEW.title OR
+     OLD.description IS NOT NEW.description OR
+     OLD.severity IS NOT NEW.severity OR
+     OLD.status IS NOT NEW.status OR
+     OLD.resolution IS NOT NEW.resolution OR
+     OLD.scene_id IS NOT NEW.scene_id OR
+     OLD.chapter_id IS NOT NEW.chapter_id OR
+     OLD.plot_line_id IS NOT NEW.plot_line_id OR
+     OLD.detected_by IS NOT NEW.detected_by OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_holes', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'description',NEW.description,'severity',NEW.severity,'status',NEW.status,
+                     'scene_id',NEW.scene_id,'chapter_id',NEW.chapter_id,'plot_line_id',NEW.plot_line_id,
+                     'resolution',NEW.resolution,'detected_by',NEW.detected_by,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_plot_holes_sync_delete
+AFTER UPDATE ON manuscript_plot_holes
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_holes', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_plot_holes_sync_undelete
+AFTER UPDATE ON manuscript_plot_holes
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_plot_holes', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'title',NEW.title,
+                     'description',NEW.description,'severity',NEW.severity,'status',NEW.status,
+                     'scene_id',NEW.scene_id,'chapter_id',NEW.chapter_id,'plot_line_id',NEW.plot_line_id,
+                     'resolution',NEW.resolution,'detected_by',NEW.detected_by,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+/* ── sync triggers: manuscript_citations ───────────────────── */
+DROP TRIGGER IF EXISTS manuscript_citations_sync_create;
+DROP TRIGGER IF EXISTS manuscript_citations_sync_update;
+DROP TRIGGER IF EXISTS manuscript_citations_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_citations_sync_undelete;
+
+CREATE TRIGGER manuscript_citations_sync_create
+AFTER INSERT ON manuscript_citations BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_citations', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'scene_id',NEW.scene_id,
+                     'source_type',NEW.source_type,'source_id',NEW.source_id,
+                     'source_title',NEW.source_title,'excerpt',NEW.excerpt,
+                     'query_used',NEW.query_used,'anchor_offset',NEW.anchor_offset,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_citations_sync_update
+AFTER UPDATE ON manuscript_citations
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.source_type IS NOT NEW.source_type OR
+     OLD.source_id IS NOT NEW.source_id OR
+     OLD.source_title IS NOT NEW.source_title OR
+     OLD.excerpt IS NOT NEW.excerpt OR
+     OLD.query_used IS NOT NEW.query_used OR
+     OLD.anchor_offset IS NOT NEW.anchor_offset OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_citations', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'scene_id',NEW.scene_id,
+                     'source_type',NEW.source_type,'source_id',NEW.source_id,
+                     'source_title',NEW.source_title,'excerpt',NEW.excerpt,
+                     'query_used',NEW.query_used,'anchor_offset',NEW.anchor_offset,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_citations_sync_delete
+AFTER UPDATE ON manuscript_citations
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_citations', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_citations_sync_undelete
+AFTER UPDATE ON manuscript_citations
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_citations', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'scene_id',NEW.scene_id,
+                     'source_type',NEW.source_type,'source_id',NEW.source_id,
+                     'source_title',NEW.source_title,'excerpt',NEW.excerpt,
+                     'query_used',NEW.query_used,'anchor_offset',NEW.anchor_offset,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+UPDATE db_schema_version
+   SET version = 42
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 42;
+"""
+
+    _MIGRATION_SQL_V41_TO_V42_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 42 — Characters, world info, plot, citations (2026-04-XX) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS manuscript_characters (
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  role            TEXT NOT NULL DEFAULT 'supporting'
+                    CHECK(role IN ('protagonist','antagonist','supporting','minor','mentioned')),
+  cast_group      TEXT,
+  full_name       TEXT,
+  age             TEXT,
+  gender          TEXT,
+  appearance      TEXT,
+  personality     TEXT,
+  backstory       TEXT,
+  motivation      TEXT,
+  arc_summary     TEXT,
+  notes           TEXT,
+  custom_fields_json TEXT NOT NULL DEFAULT '{}',
+  sort_order      REAL NOT NULL DEFAULT 0,
+  created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted         BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id       TEXT NOT NULL DEFAULT 'unknown',
+  version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mchr_project ON manuscript_characters(project_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_mchr_role ON manuscript_characters(project_id, role);
+CREATE INDEX IF NOT EXISTS idx_mchr_deleted ON manuscript_characters(deleted);
+
+CREATE TABLE IF NOT EXISTS manuscript_character_relationships (
+  id                TEXT PRIMARY KEY,
+  project_id        TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  from_character_id TEXT NOT NULL REFERENCES manuscript_characters(id) ON DELETE CASCADE,
+  to_character_id   TEXT NOT NULL REFERENCES manuscript_characters(id) ON DELETE CASCADE,
+  relationship_type TEXT NOT NULL,
+  description       TEXT,
+  bidirectional     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted           BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id         TEXT NOT NULL DEFAULT 'unknown',
+  version           INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mcrel_project ON manuscript_character_relationships(project_id);
+CREATE INDEX IF NOT EXISTS idx_mcrel_from ON manuscript_character_relationships(from_character_id);
+CREATE INDEX IF NOT EXISTS idx_mcrel_to ON manuscript_character_relationships(to_character_id);
+CREATE INDEX IF NOT EXISTS idx_mcrel_deleted ON manuscript_character_relationships(deleted);
+
+CREATE TABLE IF NOT EXISTS manuscript_world_info (
+  id              TEXT PRIMARY KEY,
+  project_id      TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL CHECK(kind IN ('location','item','faction','concept','event','custom')),
+  name            TEXT NOT NULL,
+  description     TEXT,
+  parent_id       TEXT REFERENCES manuscript_world_info(id) ON DELETE SET NULL,
+  properties_json TEXT NOT NULL DEFAULT '{}',
+  tags_json       TEXT NOT NULL DEFAULT '[]',
+  sort_order      REAL NOT NULL DEFAULT 0,
+  created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted         BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id       TEXT NOT NULL DEFAULT 'unknown',
+  version         INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mwi_project_kind ON manuscript_world_info(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_mwi_parent ON manuscript_world_info(parent_id);
+CREATE INDEX IF NOT EXISTS idx_mwi_deleted ON manuscript_world_info(deleted);
+
+CREATE TABLE IF NOT EXISTS manuscript_plot_lines (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  description   TEXT,
+  status        TEXT NOT NULL DEFAULT 'active'
+                  CHECK(status IN ('active','resolved','abandoned','dormant')),
+  color         TEXT,
+  sort_order    REAL NOT NULL DEFAULT 0,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mpl_project ON manuscript_plot_lines(project_id);
+CREATE INDEX IF NOT EXISTS idx_mpl_deleted ON manuscript_plot_lines(deleted);
+
+CREATE TABLE IF NOT EXISTS manuscript_plot_events (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  plot_line_id  TEXT NOT NULL REFERENCES manuscript_plot_lines(id) ON DELETE CASCADE,
+  scene_id      TEXT REFERENCES manuscript_scenes(id) ON DELETE SET NULL,
+  chapter_id    TEXT REFERENCES manuscript_chapters(id) ON DELETE SET NULL,
+  title         TEXT NOT NULL,
+  description   TEXT,
+  event_type    TEXT NOT NULL DEFAULT 'plot'
+                  CHECK(event_type IN ('setup','conflict','action','emotional','plot','resolution')),
+  sort_order    REAL NOT NULL DEFAULT 0,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mpe_plot_line ON manuscript_plot_events(plot_line_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_mpe_scene ON manuscript_plot_events(scene_id);
+CREATE INDEX IF NOT EXISTS idx_mpe_deleted ON manuscript_plot_events(deleted);
+
+CREATE TABLE IF NOT EXISTS manuscript_plot_holes (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  description   TEXT,
+  severity      TEXT NOT NULL DEFAULT 'medium'
+                  CHECK(severity IN ('low','medium','high','critical')),
+  status        TEXT NOT NULL DEFAULT 'open'
+                  CHECK(status IN ('open','investigating','resolved','wontfix')),
+  scene_id      TEXT REFERENCES manuscript_scenes(id) ON DELETE SET NULL,
+  chapter_id    TEXT REFERENCES manuscript_chapters(id) ON DELETE SET NULL,
+  plot_line_id  TEXT REFERENCES manuscript_plot_lines(id) ON DELETE SET NULL,
+  resolution    TEXT,
+  detected_by   TEXT NOT NULL DEFAULT 'manual'
+                  CHECK(detected_by IN ('manual','ai')),
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mph_project ON manuscript_plot_holes(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_mph_deleted ON manuscript_plot_holes(deleted);
+
+CREATE TABLE IF NOT EXISTS manuscript_scene_characters (
+  scene_id      TEXT NOT NULL REFERENCES manuscript_scenes(id) ON DELETE CASCADE,
+  character_id  TEXT NOT NULL REFERENCES manuscript_characters(id) ON DELETE CASCADE,
+  is_pov        BOOLEAN NOT NULL DEFAULT FALSE,
+  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id     TEXT,
+  version       INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (scene_id, character_id)
+);
+
+CREATE TABLE IF NOT EXISTS manuscript_scene_world_info (
+  scene_id        TEXT NOT NULL REFERENCES manuscript_scenes(id) ON DELETE CASCADE,
+  world_info_id   TEXT NOT NULL REFERENCES manuscript_world_info(id) ON DELETE CASCADE,
+  last_modified   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted         BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id       TEXT,
+  version         INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (scene_id, world_info_id)
+);
+
+CREATE TABLE IF NOT EXISTS manuscript_citations (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  scene_id      TEXT NOT NULL REFERENCES manuscript_scenes(id) ON DELETE CASCADE,
+  source_type   TEXT NOT NULL,
+  source_id     TEXT,
+  source_title  TEXT,
+  excerpt       TEXT,
+  query_used    TEXT,
+  anchor_offset INTEGER,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mcit_scene ON manuscript_citations(scene_id);
+CREATE INDEX IF NOT EXISTS idx_mcit_project ON manuscript_citations(project_id);
+CREATE INDEX IF NOT EXISTS idx_mcit_deleted ON manuscript_citations(deleted);
+
+UPDATE db_schema_version
+   SET version = 42
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 42;
+"""
+
+    # --- Migration: V42 -> V43 (AI Analyses) ---
+    _MIGRATION_SQL_V42_TO_V43 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 43 — Manuscript AI Analyses (2026-04-XX)
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS manuscript_ai_analyses (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  scope_type    TEXT NOT NULL CHECK(scope_type IN ('scene','chapter','part','project')),
+  scope_id      TEXT NOT NULL,
+  analysis_type TEXT NOT NULL,
+  provider      TEXT,
+  model         TEXT,
+  result_json   TEXT NOT NULL DEFAULT '{}',
+  score         REAL,
+  stale         BOOLEAN NOT NULL DEFAULT 0,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT 0,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_maa_scope ON manuscript_ai_analyses(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_maa_project_type ON manuscript_ai_analyses(project_id, analysis_type);
+CREATE INDEX IF NOT EXISTS idx_maa_stale ON manuscript_ai_analyses(stale);
+CREATE INDEX IF NOT EXISTS idx_maa_deleted ON manuscript_ai_analyses(deleted);
+
+/* ── sync triggers: manuscript_ai_analyses ─────────────────── */
+DROP TRIGGER IF EXISTS manuscript_ai_analyses_sync_create;
+DROP TRIGGER IF EXISTS manuscript_ai_analyses_sync_update;
+DROP TRIGGER IF EXISTS manuscript_ai_analyses_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_ai_analyses_sync_undelete;
+
+CREATE TRIGGER manuscript_ai_analyses_sync_create
+AFTER INSERT ON manuscript_ai_analyses BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_ai_analyses', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'scope_type',NEW.scope_type,
+                     'scope_id',NEW.scope_id,'analysis_type',NEW.analysis_type,
+                     'result_json',NEW.result_json,
+                     'provider',NEW.provider,'model',NEW.model,'score',NEW.score,
+                     'stale',NEW.stale,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_ai_analyses_sync_update
+AFTER UPDATE ON manuscript_ai_analyses
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.analysis_type IS NOT NEW.analysis_type OR
+     OLD.result_json IS NOT NEW.result_json OR
+     OLD.score IS NOT NEW.score OR
+     OLD.stale IS NOT NEW.stale OR
+     OLD.provider IS NOT NEW.provider OR
+     OLD.model IS NOT NEW.model OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_ai_analyses', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'scope_type',NEW.scope_type,
+                     'scope_id',NEW.scope_id,'analysis_type',NEW.analysis_type,
+                     'result_json',NEW.result_json,
+                     'provider',NEW.provider,'model',NEW.model,'score',NEW.score,
+                     'stale',NEW.stale,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_ai_analyses_sync_delete
+AFTER UPDATE ON manuscript_ai_analyses
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_ai_analyses', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_ai_analyses_sync_undelete
+AFTER UPDATE ON manuscript_ai_analyses
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_ai_analyses', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'scope_type',NEW.scope_type,
+                     'scope_id',NEW.scope_id,'analysis_type',NEW.analysis_type,
+                     'provider',NEW.provider,'model',NEW.model,'result_json',NEW.result_json,'score',NEW.score,
+                     'stale',NEW.stale,
+                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+UPDATE db_schema_version
+   SET version = 43
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 43;
+"""
+
+    _MIGRATION_SQL_V42_TO_V43_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 43 — Manuscript AI Analyses (2026-04-XX) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS manuscript_ai_analyses (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  scope_type    TEXT NOT NULL CHECK(scope_type IN ('scene','chapter','part','project')),
+  scope_id      TEXT NOT NULL,
+  analysis_type TEXT NOT NULL,
+  provider      TEXT,
+  model         TEXT,
+  result_json   TEXT NOT NULL DEFAULT '{}',
+  score         REAL,
+  stale         BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted       BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id     TEXT NOT NULL DEFAULT 'unknown',
+  version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_maa_scope ON manuscript_ai_analyses(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_maa_project_type ON manuscript_ai_analyses(project_id, analysis_type);
+CREATE INDEX IF NOT EXISTS idx_maa_stale ON manuscript_ai_analyses(stale);
+CREATE INDEX IF NOT EXISTS idx_maa_deleted ON manuscript_ai_analyses(deleted);
+
+UPDATE db_schema_version
+   SET version = 43
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 43;
+"""
+
+    _MIGRATION_SQL_V43_TO_V44 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 44 — Sync metadata on scene-link tables (2026-04-XX)
+  NOTE: ALTER TABLE ADD COLUMN is handled in _migrate_from_v43_to_v44()
+  to avoid errors on fresh databases that already have the columns.
+───────────────────────────────────────────────────────────────*/
+
+-- Backfill last_modified for existing rows (no-op on fresh DBs)
+UPDATE manuscript_scene_characters SET last_modified = strftime('%Y-%m-%dT%H:%M:%f','now') WHERE last_modified = '';
+UPDATE manuscript_scene_world_info SET last_modified = strftime('%Y-%m-%dT%H:%M:%f','now') WHERE last_modified = '';
+
+/* ── sync triggers: manuscript_scene_characters ────────────── */
+DROP TRIGGER IF EXISTS msc_sync_create;
+DROP TRIGGER IF EXISTS msc_sync_update;
+DROP TRIGGER IF EXISTS msc_sync_delete;
+
+CREATE TRIGGER msc_sync_create
+AFTER INSERT ON manuscript_scene_characters BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scene_characters', NEW.scene_id || ':' || NEW.character_id, 'create',
+         NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('scene_id',NEW.scene_id,'character_id',NEW.character_id,
+                     'is_pov',NEW.is_pov,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER msc_sync_update
+AFTER UPDATE ON manuscript_scene_characters
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.is_pov IS NOT NEW.is_pov OR
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scene_characters', NEW.scene_id || ':' || NEW.character_id, 'update',
+         NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('scene_id',NEW.scene_id,'character_id',NEW.character_id,
+                     'is_pov',NEW.is_pov,'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER msc_sync_delete
+AFTER UPDATE ON manuscript_scene_characters
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scene_characters', NEW.scene_id || ':' || NEW.character_id, 'delete',
+         NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('scene_id',NEW.scene_id,'character_id',NEW.character_id,
+                     'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+/* ── sync triggers: manuscript_scene_world_info ────────────── */
+DROP TRIGGER IF EXISTS mswi_sync_create;
+DROP TRIGGER IF EXISTS mswi_sync_update;
+DROP TRIGGER IF EXISTS mswi_sync_delete;
+
+CREATE TRIGGER mswi_sync_create
+AFTER INSERT ON manuscript_scene_world_info BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scene_world_info', NEW.scene_id || ':' || NEW.world_info_id, 'create',
+         NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('scene_id',NEW.scene_id,'world_info_id',NEW.world_info_id,
+                     'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER mswi_sync_update
+AFTER UPDATE ON manuscript_scene_world_info
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.last_modified IS NOT NEW.last_modified OR
+     OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scene_world_info', NEW.scene_id || ':' || NEW.world_info_id, 'update',
+         NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('scene_id',NEW.scene_id,'world_info_id',NEW.world_info_id,
+                     'last_modified',NEW.last_modified,
+                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER mswi_sync_delete
+AFTER UPDATE ON manuscript_scene_world_info
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_scene_world_info', NEW.scene_id || ':' || NEW.world_info_id, 'delete',
+         NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('scene_id',NEW.scene_id,'world_info_id',NEW.world_info_id,
+                     'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                     'version',NEW.version,'client_id',NEW.client_id));
+END;
+
+UPDATE db_schema_version
+   SET version = 44
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 44;
+"""
+
+    _MIGRATION_SQL_V43_TO_V44_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 44 — Sync metadata on scene-link tables (2026-04-XX) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+ALTER TABLE manuscript_scene_characters ADD COLUMN IF NOT EXISTS last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE manuscript_scene_characters ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE manuscript_scene_characters ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE manuscript_scene_characters ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE manuscript_scene_world_info ADD COLUMN IF NOT EXISTS last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE manuscript_scene_world_info ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE manuscript_scene_world_info ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE manuscript_scene_world_info ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+UPDATE db_schema_version
+   SET version = 44
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 44;
+"""
+
+    _MIGRATION_SQL_V44_TO_V45 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 45 — Persona visual packs (2026-05-09)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS persona_visual_packs (
+  id               TEXT PRIMARY KEY,
+  persona_id       TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  renderer_type    TEXT NOT NULL DEFAULT 'sprite_frames'
+                   CHECK(renderer_type IN ('sprite_frames','sprite_sheet','static_image','live2d')),
+  status           TEXT NOT NULL DEFAULT 'draft'
+                   CHECK(status IN ('draft','review','active','archived','failed')),
+  manifest_version INTEGER NOT NULL DEFAULT 1,
+  manifest_json    TEXT NOT NULL DEFAULT '{}',
+  parent_pack_id   TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  revision_number  INTEGER NOT NULL DEFAULT 1,
+  provenance       TEXT NOT NULL DEFAULT 'uploaded'
+                   CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  active_at        TEXT,
+  created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN NOT NULL DEFAULT 0,
+  version          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_packs_one_active
+  ON persona_visual_packs(user_id, persona_id)
+  WHERE status = 'active' AND deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_persona_visual_packs_persona
+  ON persona_visual_packs(user_id, persona_id, deleted, status);
+
+CREATE TABLE IF NOT EXISTS persona_visual_assets (
+  id                 TEXT PRIMARY KEY,
+  pack_id            TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id         TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id            TEXT NOT NULL,
+  asset_role         TEXT NOT NULL
+                     CHECK(asset_role IN ('frame','still_pose','sprite_sheet','preview','generated_candidate')),
+  storage_key        TEXT NOT NULL,
+  original_filename  TEXT,
+  mime_type          TEXT NOT NULL,
+  byte_size          INTEGER NOT NULL,
+  checksum_sha256    TEXT NOT NULL,
+  width              INTEGER,
+  height             INTEGER,
+  duration_ms        INTEGER,
+  provenance         TEXT NOT NULL DEFAULT 'uploaded'
+                     CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted            BOOLEAN NOT NULL DEFAULT 0,
+  version            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_assets_pack
+  ON persona_visual_assets(user_id, pack_id, deleted);
+
+CREATE TABLE IF NOT EXISTS persona_visual_candidates (
+  id                           TEXT PRIMARY KEY,
+  pack_id                      TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id                   TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id                      TEXT NOT NULL,
+  job_id                       TEXT,
+  status                       TEXT NOT NULL DEFAULT 'review'
+                               CHECK(status IN ('review','accepted','rejected','failed')),
+  proposed_manifest_patch_json TEXT NOT NULL DEFAULT '{}',
+  generated_asset_ids_json     TEXT NOT NULL DEFAULT '[]',
+  prompt                       TEXT,
+  failure_reason               TEXT,
+  created_at                   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                      BOOLEAN NOT NULL DEFAULT 0,
+  version                      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_candidates_pack
+  ON persona_visual_candidates(user_id, pack_id, status, deleted);
+
+UPDATE db_schema_version
+   SET version = 45
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 45;
+"""
+
+    _MIGRATION_SQL_V44_TO_V45_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 45 — Persona visual packs (2026-05-09) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS persona_visual_packs (
+  id               TEXT PRIMARY KEY,
+  persona_id       TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  renderer_type    TEXT NOT NULL DEFAULT 'sprite_frames'
+                   CHECK(renderer_type IN ('sprite_frames','sprite_sheet','static_image','live2d')),
+  status           TEXT NOT NULL DEFAULT 'draft'
+                   CHECK(status IN ('draft','review','active','archived','failed')),
+  manifest_version INTEGER NOT NULL DEFAULT 1,
+  manifest_json    TEXT NOT NULL DEFAULT '{}',
+  parent_pack_id   TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  revision_number  INTEGER NOT NULL DEFAULT 1,
+  provenance       TEXT NOT NULL DEFAULT 'uploaded'
+                   CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  active_at        TEXT,
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted          BOOLEAN NOT NULL DEFAULT FALSE,
+  version          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_packs_one_active
+  ON persona_visual_packs(user_id, persona_id)
+  WHERE status = 'active' AND deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_persona_visual_packs_persona
+  ON persona_visual_packs(user_id, persona_id, deleted, status);
+
+CREATE TABLE IF NOT EXISTS persona_visual_assets (
+  id                 TEXT PRIMARY KEY,
+  pack_id            TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id         TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id            TEXT NOT NULL,
+  asset_role         TEXT NOT NULL
+                     CHECK(asset_role IN ('frame','still_pose','sprite_sheet','preview','generated_candidate')),
+  storage_key        TEXT NOT NULL,
+  original_filename  TEXT,
+  mime_type          TEXT NOT NULL,
+  byte_size          INTEGER NOT NULL,
+  checksum_sha256    TEXT NOT NULL,
+  width              INTEGER,
+  height             INTEGER,
+  duration_ms        INTEGER,
+  provenance         TEXT NOT NULL DEFAULT 'uploaded'
+                     CHECK(provenance IN ('uploaded','generated','imported','mixed')),
+  created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted            BOOLEAN NOT NULL DEFAULT FALSE,
+  version            INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_assets_pack
+  ON persona_visual_assets(user_id, pack_id, deleted);
+
+CREATE TABLE IF NOT EXISTS persona_visual_candidates (
+  id                           TEXT PRIMARY KEY,
+  pack_id                      TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  persona_id                   TEXT NOT NULL REFERENCES persona_profiles(id) ON DELETE CASCADE,
+  user_id                      TEXT NOT NULL,
+  job_id                       TEXT,
+  status                       TEXT NOT NULL DEFAULT 'review'
+                               CHECK(status IN ('review','accepted','rejected','failed')),
+  proposed_manifest_patch_json TEXT NOT NULL DEFAULT '{}',
+  generated_asset_ids_json     TEXT NOT NULL DEFAULT '[]',
+  prompt                       TEXT,
+  failure_reason               TEXT,
+  created_at                   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                      BOOLEAN NOT NULL DEFAULT FALSE,
+  version                      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_candidates_pack
+  ON persona_visual_candidates(user_id, pack_id, status, deleted);
+
+UPDATE db_schema_version
+   SET version = 45
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 45;
+"""
+
+    _MIGRATION_SQL_V45_TO_V46 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 46 — Persona visual personal library (2026-05-09)
+───────────────────────────────────────────────────────────────*/
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS persona_visual_library_items (
+  id                            TEXT PRIMARY KEY,
+  user_id                       TEXT NOT NULL,
+  source_persona_id             TEXT REFERENCES persona_profiles(id) ON DELETE SET NULL,
+  source_pack_id                TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  title                         TEXT NOT NULL,
+  notes                         TEXT,
+  tags_json                     TEXT NOT NULL DEFAULT '[]',
+  source_pack_version           INTEGER,
+  created_at                    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                 DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                       BOOLEAN NOT NULL DEFAULT 0,
+  version                       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_library_items_user_time
+  ON persona_visual_library_items(user_id, deleted, last_modified);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_library_items_live_source
+  ON persona_visual_library_items(user_id, source_persona_id, source_pack_id)
+  WHERE deleted = 0 AND source_persona_id IS NOT NULL AND source_pack_id IS NOT NULL;
+
+UPDATE db_schema_version
+   SET version = 46
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 46;
+"""
+
+    _MIGRATION_SQL_V45_TO_V46_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 46 — Persona visual personal library (2026-05-09) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+CREATE TABLE IF NOT EXISTS persona_visual_library_items (
+  id                            TEXT PRIMARY KEY,
+  user_id                       TEXT NOT NULL,
+  source_persona_id             TEXT REFERENCES persona_profiles(id) ON DELETE SET NULL,
+  source_pack_id                TEXT REFERENCES persona_visual_packs(id) ON DELETE SET NULL,
+  title                         TEXT NOT NULL,
+  notes                         TEXT,
+  tags_json                     TEXT NOT NULL DEFAULT '[]',
+  source_pack_version           INTEGER,
+  created_at                    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted                       BOOLEAN NOT NULL DEFAULT FALSE,
+  version                       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_persona_visual_library_items_user_time
+  ON persona_visual_library_items(user_id, deleted, last_modified);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_visual_library_items_live_source
+  ON persona_visual_library_items(user_id, source_persona_id, source_pack_id)
+  WHERE deleted = FALSE AND source_persona_id IS NOT NULL AND source_pack_id IS NOT NULL;
+
+UPDATE db_schema_version
+   SET version = 46
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 46;
+"""
+
+    _MIGRATION_SQL_V46_TO_V47_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 47 — Persona visual candidate provenance (2026-05-16) [Postgres]
+───────────────────────────────────────────────────────────────*/
+
+ALTER TABLE persona_visual_candidates
+  ADD COLUMN IF NOT EXISTS generation_provenance_json TEXT NOT NULL DEFAULT '{}';
+
+UPDATE db_schema_version
+   SET version = 47
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 47;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -3425,9 +5448,42 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
         self.client_id = client_id
+        self._local = threading.local()
+        self._schema_lock = threading.RLock()
+        self._bootstrapped_backend_targets: set[str] = set()
+        self._backend_refresh_suspended = False
+        # Ownership marker for backend lifecycle:
+        # - True: this wrapper directly owns the backend lifecycle and cleanup.
+        # - False: lifecycle is managed externally (factory-managed shared backend or injected backend).
+        self._owner_managed_backend = False
+        self._uses_shared_content_backend = False
+        self._backend, self._uses_shared_content_backend = self._resolve_backend(
+            backend=backend,
+            config=config,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
+            CharacterStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
+            ConversationStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import (
+            KeywordStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
+            MessageStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+        from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
+            PersonaStateStore,
+        )
 
-        self.backend = self._resolve_backend(backend=backend, config=config)
-        self.backend_type = self.backend.backend_type
+        self.character_store = CharacterStore(self)
+        self.conversation_store = ConversationStore(self)
+        self.message_store = MessageStore(self)
+        self.note_store = NoteStore(self)
+        self.keyword_store = KeywordStore(self)
+        self.persona_state_store = PersonaStateStore(self)
 
         if self.backend_type != BackendType.SQLITE:
             self.is_memory_db = False
@@ -3450,10 +5506,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             f"Initializing CharactersRAGDB for path: {self.db_path_str} "
             f"[Client ID: {self.client_id}] (backend={self.backend_type.value})"
         )
-        self._local = threading.local()
-        self._schema_lock = threading.RLock()
         try:
             self._initialize_schema()
+            self._mark_backend_bootstrapped(self._backend)
             logger.debug(f"CharactersRAGDB initialization completed successfully for {self.db_path_str}")
         except (CharactersRAGDBError, sqlite3.Error) as e:
             logger.critical(f"FATAL: DB Initialization failed for {self.db_path_str}: {e}", exc_info=True)
@@ -3471,10 +5526,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         backend: DatabaseBackend | None,
         config: ConfigParser | None,
-    ) -> DatabaseBackend:
+    ) -> tuple[DatabaseBackend, bool]:
         """Select the database backend instance for this content store."""
         if backend is not None:
-            return backend
+            self._owner_managed_backend = False
+            return backend, False
 
         parser: ConfigParser | None = config
         if parser is None:
@@ -3486,13 +5542,97 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if parser is not None:
             candidate = get_content_backend(parser)
             if candidate and candidate.backend_type == BackendType.POSTGRESQL:
-                return candidate
+                self._owner_managed_backend = False
+                return candidate, True
 
         fallback_config = DatabaseConfig(
             backend_type=BackendType.SQLITE,
             sqlite_path=self.db_path_str,
         )
-        return DatabaseBackendFactory.create_backend(fallback_config)
+        if not self.is_memory_db:
+            # Contract: default file-backed SQLite for CharactersRAGDB is intentionally
+            # isolated from the global factory registry. This wrapper owns cleanup for
+            # that backend and it is not affected by factory-wide reset/close calls.
+            self._owner_managed_backend = True
+            return SQLiteBackend(fallback_config), False
+        self._owner_managed_backend = False
+        return DatabaseBackendFactory.create_backend(fallback_config), False
+
+    def _backend_target_key(self, backend: DatabaseBackend | None) -> str | None:
+        if backend is None:
+            return None
+        config = getattr(backend, "config", None)
+        if backend.backend_type == BackendType.POSTGRESQL:
+            if config and getattr(config, "connection_string", None):
+                return str(config.connection_string)
+            if config:
+                host = getattr(config, "pg_host", None) or "localhost"
+                port = getattr(config, "pg_port", None) or 5432
+                database = getattr(config, "pg_database", None) or "<postgres>"
+                return f"{host}:{port}/{database}"
+            return f"postgres:{id(backend)}"
+        if config and getattr(config, "sqlite_path", None):
+            return str(config.sqlite_path)
+        return f"sqlite:{id(backend)}"
+
+    def _get_pinned_backend(self) -> DatabaseBackend | None:
+        return getattr(self._local, "backend_ref", None)
+
+    def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
+        key = self._backend_target_key(backend)
+        if key:
+            self._bootstrapped_backend_targets.add(key)
+
+    def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
+        if backend.backend_type != BackendType.POSTGRESQL:
+            return
+        key = self._backend_target_key(backend)
+        if key in self._bootstrapped_backend_targets:
+            return
+        previous_suspend = self._backend_refresh_suspended
+        self._backend_refresh_suspended = True
+        try:
+            self._backend = backend
+            self._initialize_schema()
+        finally:
+            self._backend_refresh_suspended = previous_suspend
+        if key:
+            self._bootstrapped_backend_targets.add(key)
+
+    @property
+    def backend(self) -> DatabaseBackend:
+        pinned_backend = self._get_pinned_backend()
+        if pinned_backend is not None:
+            return pinned_backend
+        if not self._uses_shared_content_backend:
+            return self._backend
+        if self._backend_refresh_suspended:
+            return self._backend
+        with self._schema_lock:
+            pinned_backend = self._get_pinned_backend()
+            if pinned_backend is not None:
+                return pinned_backend
+            if not self._uses_shared_content_backend:
+                return self._backend
+            if self._backend_refresh_suspended:
+                return self._backend
+
+            current_key = self._backend_target_key(self._backend)
+            refreshed_backend, uses_shared_backend = self._resolve_backend(backend=None, config=None)
+            self._uses_shared_content_backend = uses_shared_backend
+            self._backend = refreshed_backend
+            refreshed_key = self._backend_target_key(refreshed_backend)
+            if (
+                uses_shared_backend
+                and refreshed_backend.backend_type == BackendType.POSTGRESQL
+                and refreshed_key != current_key
+            ):
+                self._ensure_bootstrap_for_backend(refreshed_backend)
+            return self._backend
+
+    @property
+    def backend_type(self) -> BackendType:
+        return self.backend.backend_type
 
 
     def _prepare_backend_statement(
@@ -3538,18 +5678,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return transform_sqlite_query_for_postgres(query)
 
 
-    def _open_new_connection(self):
+    def _open_new_connection(self, backend: DatabaseBackend | None = None) -> RawBackendConnection:
+        active_backend = backend or self.backend
         try:
-            pool = self.backend.get_pool()
+            pool = active_backend.get_pool()
             conn = pool.get_connection()
             # Apply per-tenant session guard for PostgreSQL (RLS via current_setting('app.current_user_id'))
-            if self.backend_type == BackendType.POSTGRESQL and self.client_id:
+            if active_backend.backend_type == BackendType.POSTGRESQL and self.client_id:
                 conn = self._apply_postgres_client_scope(conn, pool)
             return conn  # noqa: TRY300
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Failed to acquire database connection: {exc}") from exc  # noqa: TRY003
 
-    def _apply_postgres_client_scope(self, conn, pool):
+    def _apply_postgres_client_scope(
+        self,
+        conn: RawBackendConnection,
+        pool,
+    ) -> RawBackendConnection:
         """Best-effort helper to set session-scoped client_id in PostgreSQL.
 
         Ensures failed SET/COMMIT attempts do not leave pooled connections in a
@@ -3570,7 +5715,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (user_value,),
                 )
 
-        def _replace_connection(bad_conn) -> Any:
+        def _replace_connection(bad_conn: RawBackendConnection) -> RawBackendConnection:
             with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
                 bad_conn.close()
             with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
@@ -3627,12 +5772,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     _safe_rollback(conn, "retry failure")
         return conn
 
-    def _release_connection(self, connection) -> None:
+    def _release_connection(
+        self,
+        connection: RawBackendConnection,
+        backend: DatabaseBackend | None = None,
+    ) -> None:
+        active_backend = backend or self._get_pinned_backend() or self._backend
         try:
-            if self.backend_type == BackendType.SQLITE:
+            if active_backend.backend_type == BackendType.SQLITE:
                 thread_id = threading.get_ident()
                 try:
-                    pool = self.backend.get_pool()
+                    pool = active_backend.get_pool()
                     pool._connections[thread_id] = None  # type: ignore[attr-defined]
                     if hasattr(pool._local, 'connection'):  # type: ignore[attr-defined]
                         pool._local.connection = None  # type: ignore[attr-defined]
@@ -3641,7 +5791,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 with contextlib.suppress(sqlite3.Error):
                     connection.close()
             else:
-                self.backend.get_pool().return_connection(connection)
+                active_backend.get_pool().return_connection(connection)
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
             logger.warning("Error while releasing connection: {}", exc)
 
@@ -3666,9 +5816,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: If acquiring a connection from the backend fails.
         """
         conn = getattr(self._local, 'conn', None)
+        backend = self._get_pinned_backend() or self.backend
 
-        if self.backend_type == BackendType.SQLITE:
-            pool = self.backend.get_pool()
+        if backend.backend_type == BackendType.SQLITE:
+            pool = backend.get_pool()
             if conn is not None:
                 try:
                     conn.execute("SELECT 1")
@@ -3693,7 +5844,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._local.conn = None
 
             if conn is None:
-                conn = self._open_new_connection()
+                conn = self._open_new_connection(backend)
                 self._local.conn = conn
                 logger.debug(
                     'Opened/Reopened SQLite connection to {} for thread {}',
@@ -3704,16 +5855,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Non-SQLite backend: reuse connection if still open, otherwise borrow anew.
         if conn is not None and getattr(conn, "closed", False):
-            self._release_connection(conn)
+            self._release_connection(conn, backend=backend)
             conn = None
             self._local.conn = None
+            self._local.backend_ref = None
+            backend = self.backend
 
         if conn is None:
-            conn = self._open_new_connection()
+            conn = self._open_new_connection(backend)
             self._local.conn = conn
+            self._local.backend_ref = backend
             logger.debug(
                 'Acquired backend connection ({}) for thread {}',
-                self.backend_type.value,
+                backend.backend_type.value,
                 threading.get_ident(),
             )
         return conn
@@ -3721,9 +5875,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_connection(self) -> Any:
         """Return the active connection wrapper for the current thread."""
         raw_conn = self._get_thread_connection()
-        if self.backend_type == BackendType.SQLITE:
+        backend = self._get_pinned_backend() or self.backend
+        if backend.backend_type == BackendType.SQLITE:
             return raw_conn
-        return BackendConnectionWrapper(self, raw_conn)
+        return BackendConnectionWrapper(self, raw_conn, backend)
 
     def close_connection(self):
         """
@@ -3738,9 +5893,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conn = getattr(self._local, 'conn', None)
         if conn is None:
             return
+        backend = self._get_pinned_backend() or self._backend
 
         try:
-            if self.backend_type == BackendType.SQLITE:
+            if backend.backend_type == BackendType.SQLITE:
                 if not self.is_memory_db:
                     if conn.in_transaction:
                         try:
@@ -3777,10 +5933,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self.db_path_str,
                 )
             else:
-                self.backend.get_pool().return_connection(conn)
+                backend.get_pool().return_connection(conn)
                 logger.debug(
                     'Returned backend connection ({}) for thread {}.',
-                    self.backend_type.value,
+                    backend.backend_type.value,
                     threading.get_ident(),
                 )
         except sqlite3.Error as exc:
@@ -3793,9 +5949,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         finally:
             if hasattr(self._local, 'conn'):
                 self._local.conn = None
-            if self.backend_type == BackendType.SQLITE:
+            if hasattr(self._local, 'backend_ref'):
+                self._local.backend_ref = None
+            if backend.backend_type == BackendType.SQLITE:
                 try:
-                    pool = self.backend.get_pool()
+                    pool = backend.get_pool()
                     if hasattr(pool, 'clear_thread_local_connection'):
                         pool.clear_thread_local_connection()  # type: ignore[attr-defined]
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
@@ -3807,6 +5965,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Primarily used in tests/shutdown to ensure no background SQLite threads remain.
         """
+        self.close_connection()
+
+        if (
+            self.backend_type == BackendType.SQLITE
+            and is_factory_managed_backend(self.backend)
+        ):
+            release_managed_backend(self.backend)
+            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+                self._local = threading.local()
+            return
+
         try:
             pool = self.backend.get_pool()
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
@@ -5152,6 +7321,172 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V39->V40: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V40 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v40_to_v41(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V40 to V41 (manuscript management tables)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V40 to V41 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V40_TO_V41)
+            final_version = self._get_db_version(conn)
+            if final_version != 41:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V40->V41 failed version check. Expected 41, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V41 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V40->V41 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V40->V41 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V40->V41: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V41 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v41_to_v42(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V41 to V42 (characters, world info, plot, citations)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V41 to V42 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V41_TO_V42)
+            final_version = self._get_db_version(conn)
+            if final_version != 42:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V41->V42 failed version check. Expected 42, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V42 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V41->V42 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V41->V42 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V41->V42: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V42 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v42_to_v43(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V42 to V43 (manuscript AI analyses)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V42 to V43 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V42_TO_V43)
+            final_version = self._get_db_version(conn)
+            if final_version != 43:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V42->V43 failed version check. Expected 43, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V43 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V42->V43 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V42->V43 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V42->V43: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V43 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v43_to_v44(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V43 to V44 (sync metadata on scene-link tables)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V43 to V44 for DB: {self.db_path_str}...")
+        try:
+            # Only add columns if they don't exist (fresh DBs already have them).
+            for table in ("manuscript_scene_characters", "manuscript_scene_world_info"):
+                existing_cols = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
+                for col, coldef in (
+                    ("last_modified", "TEXT NOT NULL DEFAULT ''"),
+                    ("deleted", "BOOLEAN NOT NULL DEFAULT 0"),
+                    ("client_id", "TEXT"),
+                    ("version", "INTEGER NOT NULL DEFAULT 1"),
+                ):
+                    if col not in existing_cols:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")  # nosec B608
+
+            # Backfill and create triggers (idempotent via IF EXISTS/IF NOT EXISTS).
+            conn.executescript(self._MIGRATION_SQL_V43_TO_V44)
+            final_version = self._get_db_version(conn)
+            if final_version != 44:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V43->V44 failed version check. Expected 44, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V44 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V43->V44 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V43->V44 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V43->V44: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V44 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v44_to_v45(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V44 to V45 (persona visual packs)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V44 to V45 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V44_TO_V45)
+            final_version = self._get_db_version(conn)
+            if final_version != 45:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V44->V45 failed version check. Expected 45, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V45 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V44->V45 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V44->V45 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V44->V45: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V45 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v45_to_v46(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V45 to V46 (persona visual library items)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V45 to V46 for DB: {self.db_path_str}...")
+        try:
+            conn.executescript(self._MIGRATION_SQL_V45_TO_V46)
+            final_version = self._get_db_version(conn)
+            if final_version != 46:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V45->V46 failed version check. Expected 46, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V46 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V45->V46 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V45->V46 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V45->V46: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V46 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _migrate_from_v46_to_v47(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V46 to V47 (persona visual candidate provenance)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V46 to V47 for DB: {self.db_path_str}...")
+        try:
+            candidate_cols = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info('persona_visual_candidates')").fetchall()
+            }
+            if "generation_provenance_json" not in candidate_cols:
+                conn.execute(
+                    "ALTER TABLE persona_visual_candidates "
+                    "ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            conn.execute(
+                "UPDATE db_schema_version SET version = 47 "
+                "WHERE schema_name = ? AND version < 47",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 47:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V46->V47 failed version check. Expected 47, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V47 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V46->V47 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V46->V47 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V46->V47: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V47 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill recent persona schema columns after version-number collisions."""
         profile_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_profiles')").fetchall()}
@@ -5633,6 +7968,388 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
 
+    def _ensure_web_clipper_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure the web clipper sidecar tables exist for SQLite deployments."""
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS note_clipper_documents(
+                  clip_id               TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  note_id               TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  clip_type             TEXT NOT NULL,
+                  source_url            TEXT,
+                  source_title          TEXT,
+                  capture_metadata_json TEXT NOT NULL DEFAULT '{}',
+                  analysis_json         TEXT NOT NULL DEFAULT '{}',
+                  content_budget_json   TEXT NOT NULL DEFAULT '{}',
+                  source_note_version   INTEGER,
+                  created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted               BOOLEAN NOT NULL DEFAULT 0,
+                  CHECK(clip_id = note_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_note_clipper_documents_note_id ON note_clipper_documents(note_id)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS note_clipper_workspace_placements(
+                  clip_id             TEXT NOT NULL REFERENCES note_clipper_documents(clip_id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  workspace_note_id   INTEGER,
+                  source_note_id      TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  source_note_version INTEGER,
+                  created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted             BOOLEAN NOT NULL DEFAULT 0,
+                  PRIMARY KEY (clip_id, workspace_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_workspace ON note_clipper_workspace_placements(workspace_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_source_note ON note_clipper_workspace_placements(source_note_id)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite web clipper schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_web_clipper_schema_postgres(self, conn: Any) -> None:
+        """Ensure the web clipper sidecar tables exist for PostgreSQL deployments."""
+        if not hasattr(self.backend, "execute"):
+            return
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS note_clipper_documents(
+              clip_id               TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              note_id               TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              clip_type             TEXT NOT NULL,
+              source_url            TEXT,
+              source_title          TEXT,
+              capture_metadata_json TEXT NOT NULL DEFAULT '{}',
+              analysis_json         TEXT NOT NULL DEFAULT '{}',
+              content_budget_json   TEXT NOT NULL DEFAULT '{}',
+              source_note_version   INTEGER,
+              created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted               BOOLEAN NOT NULL DEFAULT FALSE,
+              CHECK(clip_id = note_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_documents_note_id ON note_clipper_documents(note_id)",
+            """
+            CREATE TABLE IF NOT EXISTS note_clipper_workspace_placements(
+              clip_id             TEXT NOT NULL REFERENCES note_clipper_documents(clip_id) ON DELETE CASCADE ON UPDATE CASCADE,
+              workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              workspace_note_id   INTEGER,
+              source_note_id      TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              source_note_version INTEGER,
+              created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted             BOOLEAN NOT NULL DEFAULT FALSE,
+              PRIMARY KEY (clip_id, workspace_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_workspace ON note_clipper_workspace_placements(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_source_note ON note_clipper_workspace_placements(source_note_id)",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
+    @staticmethod
+    def _serialize_note_clipper_json_field(value: Any, field_name: str) -> str:
+        if value is None:
+            return "{}"
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError(f"{field_name} must be valid JSON when provided as a string.") from exc  # noqa: TRY003
+            return value
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value)
+            except TypeError as exc:
+                raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
+        raise InputError(f"{field_name} must be a mapping, list, JSON string, or None.")  # noqa: TRY003
+
+    def _fetch_note_clipper_document_row(
+        self,
+        *,
+        column: str,
+        value: str,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        if column not in {"clip_id", "note_id"}:
+            raise InputError("Unsupported note clipper document lookup column.")  # noqa: TRY003
+        query = f"SELECT * FROM note_clipper_documents WHERE {column} = ?"  # nosec B608
+        params: list[Any] = [value]
+        if not include_deleted:
+            query += " AND deleted = ?"
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if conn is None:
+            cursor = self.execute_query(query, tuple(params))
+        else:
+            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+            cursor = conn.execute(prepared_query, prepared_params or ())
+        row = cursor.fetchone()
+        return self._deserialize_row_fields(
+            row,
+            ["capture_metadata_json", "analysis_json", "content_budget_json"],
+        ) if row else None
+
+    def get_note_clipper_document_by_clip_id(self, clip_id: str) -> dict[str, Any] | None:
+        """Return the active clipper document for a clip id."""
+        return self._fetch_note_clipper_document_row(column="clip_id", value=clip_id)
+
+    def get_note_clipper_document_by_note_id(self, note_id: str) -> dict[str, Any] | None:
+        """Return the active clipper document for a note id."""
+        return self._fetch_note_clipper_document_row(column="note_id", value=note_id)
+
+    def list_note_clipper_workspace_placements(self, clip_id: str) -> list[dict[str, Any]]:
+        """Return active workspace placements for a clip."""
+        query = (
+            "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
+            "FROM note_clipper_workspace_placements WHERE clip_id = ? AND deleted = ? "
+            "ORDER BY workspace_id"
+        )
+        params = (clip_id, False if self.backend_type == BackendType.POSTGRESQL else 0)
+        cursor = self.execute_query(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def _invalidate_note_clipper_sidecars(
+        self,
+        note_id: str,
+        *,
+        conn: sqlite3.Connection,
+        deleted: bool,
+    ) -> None:
+        deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        flag_value = deleted_value if deleted else active_value
+        now = self._get_current_utc_timestamp_iso()
+
+        document = conn.execute(
+            "SELECT clip_id FROM note_clipper_documents WHERE note_id = ?",
+            (note_id,),
+        ).fetchone()
+        if document is None:
+            return
+        clip_id = document["clip_id"]
+        conn.execute(
+            "UPDATE note_clipper_documents SET deleted = ?, last_modified = ? WHERE clip_id = ?",
+            (flag_value, now, clip_id),
+        )
+        conn.execute(
+            "UPDATE note_clipper_workspace_placements SET deleted = ?, last_modified = ? WHERE clip_id = ?",
+            (flag_value, now, clip_id),
+        )
+
+    def _delete_note_clipper_sidecars(self, note_id: str, *, conn: sqlite3.Connection) -> None:
+        document = conn.execute(
+            "SELECT clip_id FROM note_clipper_documents WHERE note_id = ?",
+            (note_id,),
+        ).fetchone()
+        if document is None:
+            conn.execute("DELETE FROM note_clipper_workspace_placements WHERE source_note_id = ?", (note_id,))
+            return
+        clip_id = document["clip_id"]
+        conn.execute("DELETE FROM note_clipper_workspace_placements WHERE clip_id = ?", (clip_id,))
+        conn.execute("DELETE FROM note_clipper_documents WHERE clip_id = ?", (clip_id,))
+
+    def upsert_note_clipper_document(
+        self,
+        *,
+        clip_id: str,
+        note_id: str,
+        clip_type: str,
+        source_url: str | None = None,
+        source_title: str | None = None,
+        capture_metadata: dict[str, Any] | list[Any] | str | None = None,
+        enrichments: dict[str, Any] | list[Any] | str | None = None,
+        content_budget: dict[str, Any] | list[Any] | str | None = None,
+        source_note_version: int | None = None,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        normalized_clip_id = str(clip_id).strip()
+        normalized_note_id = str(note_id).strip()
+        normalized_clip_type = str(clip_type).strip()
+        if not normalized_clip_id or not normalized_note_id:
+            raise InputError("clip_id and note_id are required.")  # noqa: TRY003
+        if normalized_clip_id != normalized_note_id:
+            raise InputError("clip_id and note_id must match for the canonical clip record.")  # noqa: TRY003
+        if not normalized_clip_type:
+            raise InputError("clip_type cannot be empty.")  # noqa: TRY003
+        if source_note_version is not None and (not isinstance(source_note_version, int) or source_note_version < 1):
+            raise InputError("source_note_version must be an integer >= 1 when provided.")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        capture_metadata_json = self._serialize_note_clipper_json_field(capture_metadata, "capture_metadata")
+        analysis_json = self._serialize_note_clipper_json_field(enrichments, "enrichments")
+        content_budget_json = self._serialize_note_clipper_json_field(content_budget, "content_budget")
+        deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = (
+            "INSERT INTO note_clipper_documents ("
+            "clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
+            "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(clip_id) DO UPDATE SET "
+            "note_id = excluded.note_id, "
+            "clip_type = excluded.clip_type, "
+            "source_url = excluded.source_url, "
+            "source_title = excluded.source_title, "
+            "capture_metadata_json = excluded.capture_metadata_json, "
+            "analysis_json = excluded.analysis_json, "
+            "content_budget_json = excluded.content_budget_json, "
+            "source_note_version = excluded.source_note_version, "
+            "last_modified = excluded.last_modified, "
+            "deleted = excluded.deleted"
+        )
+        params = (
+            normalized_clip_id,
+            normalized_note_id,
+            normalized_clip_type,
+            source_url,
+            source_title,
+            capture_metadata_json,
+            analysis_json,
+            content_budget_json,
+            source_note_version,
+            now,
+            now,
+            deleted_value,
+        )
+
+        def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            note_row = inner_conn.execute(
+                "SELECT id FROM notes WHERE id = ? AND deleted = ?",
+                (
+                    normalized_note_id,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                ),
+            ).fetchone()
+            if note_row is None:
+                raise ConflictError(
+                    "Canonical note not found or deleted.",
+                    entity="notes",
+                    entity_id=normalized_note_id,
+                )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            inner_conn.execute(prepared_query, prepared_params or ())
+            document = self._fetch_note_clipper_document_row(
+                column="clip_id",
+                value=normalized_clip_id,
+                conn=inner_conn if isinstance(inner_conn, sqlite3.Connection) else None,
+            )
+            if document is None:
+                raise CharactersRAGDBError(
+                    f"Failed to read web clipper document for clip ID '{normalized_clip_id}'."
+                )
+            return document
+
+        if conn is None:
+            with self.transaction() as transaction_conn:
+                return _execute(transaction_conn)
+        return _execute(conn)
+
+    def upsert_note_clipper_workspace_placement(
+        self,
+        *,
+        clip_id: str,
+        workspace_id: str,
+        workspace_note_id: int | None = None,
+        source_note_id: str | None = None,
+        source_note_version: int | None = None,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        normalized_clip_id = str(clip_id).strip()
+        normalized_workspace_id = str(workspace_id).strip()
+        normalized_source_note_id = str(source_note_id).strip() if source_note_id is not None else normalized_clip_id
+        if not normalized_clip_id or not normalized_workspace_id:
+            raise InputError("clip_id and workspace_id are required.")  # noqa: TRY003
+        if normalized_source_note_id != normalized_clip_id:
+            raise InputError("source_note_id must match clip_id for the canonical clip placement.")  # noqa: TRY003
+        if source_note_version is not None and (not isinstance(source_note_version, int) or source_note_version < 1):
+            raise InputError("source_note_version must be an integer >= 1 when provided.")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        query = (
+            "INSERT INTO note_clipper_workspace_placements ("
+            "clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
+            "created_at, last_modified, deleted"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(clip_id, workspace_id) DO UPDATE SET "
+            "workspace_note_id = excluded.workspace_note_id, "
+            "source_note_id = excluded.source_note_id, "
+            "source_note_version = excluded.source_note_version, "
+            "last_modified = excluded.last_modified, "
+            "deleted = excluded.deleted"
+        )
+        params = (
+            normalized_clip_id,
+            normalized_workspace_id,
+            workspace_note_id,
+            normalized_source_note_id,
+            source_note_version,
+            now,
+            now,
+            deleted_value,
+        )
+
+        def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            workspace_row = inner_conn.execute(
+                "SELECT id FROM workspaces WHERE id = ? AND deleted = ?",
+                (
+                    normalized_workspace_id,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                ),
+            ).fetchone()
+            if workspace_row is None:
+                raise ConflictError(
+                    "Workspace not found or deleted.",
+                    entity="workspaces",
+                    entity_id=normalized_workspace_id,
+                )
+            clip_row = inner_conn.execute(
+                "SELECT clip_id FROM note_clipper_documents WHERE clip_id = ? AND deleted = ?",
+                (
+                    normalized_clip_id,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                ),
+            ).fetchone()
+            if clip_row is None:
+                raise ConflictError(
+                    "Canonical clip document not found or deleted.",
+                    entity="note_clipper_documents",
+                    entity_id=normalized_clip_id,
+                )
+            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+            inner_conn.execute(prepared_query, prepared_params or ())
+            result = inner_conn.execute(
+                "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
+                "FROM note_clipper_workspace_placements WHERE clip_id = ? AND workspace_id = ? AND deleted = ?",
+                (
+                    normalized_clip_id,
+                    normalized_workspace_id,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                ),
+            ).fetchone()
+            if result is None:
+                raise CharactersRAGDBError(
+                    f"Failed to read workspace placement for clip ID '{normalized_clip_id}' and workspace '{normalized_workspace_id}'."
+                )
+            return dict(result)
+
+        if conn is None:
+            with self.transaction() as transaction_conn:
+                return _execute(transaction_conn)
+        return _execute(conn)
+
     def _ensure_workspace_subresource_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure workspace settings columns and sub-resource tables exist for SQLite."""
         try:
@@ -5683,11 +8400,80 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     completed_at    DATETIME,
                     version         INTEGER NOT NULL DEFAULT 1,
+                    content_type    TEXT NOT NULL DEFAULT 'text/markdown',
+                    preview_text    TEXT,
+                    summary         TEXT,
+                    review_state    TEXT NOT NULL DEFAULT 'draft',
+                    owner_scope     TEXT NOT NULL DEFAULT 'user',
+                    owner_id        TEXT,
+                    project_id      TEXT,
+                    task_id         TEXT,
+                    source_collection_id TEXT,
+                    root_artifact_id TEXT,
+                    artifact_version_id TEXT,
+                    previous_version_id TEXT,
+                    producer_metadata_json TEXT,
+                    source_lineage_json TEXT,
+                    review_metadata_json TEXT,
+                    version_metadata_json TEXT,
+                    export_refs_json TEXT,
+                    redaction_json TEXT,
+                    schema_version INTEGER NOT NULL DEFAULT 1,
                     PRIMARY KEY (workspace_id, id)
                 )
             """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ws_artifacts_workspace ON workspace_artifacts(workspace_id)"
+            )
+            artifact_cols = {row[1] for row in conn.execute("PRAGMA table_info('workspace_artifacts')").fetchall()}
+            new_artifact_col_ddls = {
+                "content_type": "ALTER TABLE workspace_artifacts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'text/markdown'",
+                "preview_text": "ALTER TABLE workspace_artifacts ADD COLUMN preview_text TEXT",
+                "summary": "ALTER TABLE workspace_artifacts ADD COLUMN summary TEXT",
+                "review_state": "ALTER TABLE workspace_artifacts ADD COLUMN review_state TEXT NOT NULL DEFAULT 'draft'",
+                "owner_scope": "ALTER TABLE workspace_artifacts ADD COLUMN owner_scope TEXT NOT NULL DEFAULT 'user'",
+                "owner_id": "ALTER TABLE workspace_artifacts ADD COLUMN owner_id TEXT",
+                "project_id": "ALTER TABLE workspace_artifacts ADD COLUMN project_id TEXT",
+                "task_id": "ALTER TABLE workspace_artifacts ADD COLUMN task_id TEXT",
+                "source_collection_id": "ALTER TABLE workspace_artifacts ADD COLUMN source_collection_id TEXT",
+                "root_artifact_id": "ALTER TABLE workspace_artifacts ADD COLUMN root_artifact_id TEXT",
+                "artifact_version_id": "ALTER TABLE workspace_artifacts ADD COLUMN artifact_version_id TEXT",
+                "previous_version_id": "ALTER TABLE workspace_artifacts ADD COLUMN previous_version_id TEXT",
+                "producer_metadata_json": "ALTER TABLE workspace_artifacts ADD COLUMN producer_metadata_json TEXT",
+                "source_lineage_json": "ALTER TABLE workspace_artifacts ADD COLUMN source_lineage_json TEXT",
+                "review_metadata_json": "ALTER TABLE workspace_artifacts ADD COLUMN review_metadata_json TEXT",
+                "version_metadata_json": "ALTER TABLE workspace_artifacts ADD COLUMN version_metadata_json TEXT",
+                "export_refs_json": "ALTER TABLE workspace_artifacts ADD COLUMN export_refs_json TEXT",
+                "redaction_json": "ALTER TABLE workspace_artifacts ADD COLUMN redaction_json TEXT",
+                "schema_version": "ALTER TABLE workspace_artifacts ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1",
+            }
+            for col_name, ddl in new_artifact_col_ddls.items():
+                if col_name not in artifact_cols:
+                    conn.execute(ddl)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_artifact_versions (
+                    workspace_id    TEXT NOT NULL,
+                    artifact_id     TEXT NOT NULL,
+                    artifact_version_id TEXT NOT NULL,
+                    root_artifact_id TEXT NOT NULL,
+                    previous_version_id TEXT,
+                    version         INTEGER NOT NULL,
+                    review_state    TEXT NOT NULL,
+                    title           TEXT NOT NULL,
+                    content         TEXT,
+                    producer_metadata_json TEXT,
+                    source_lineage_json TEXT,
+                    review_metadata_json TEXT,
+                    version_metadata_json TEXT,
+                    export_refs_json TEXT,
+                    redaction_json TEXT,
+                    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (workspace_id, artifact_version_id)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_artifact_versions_artifact "
+                "ON workspace_artifact_versions(workspace_id, artifact_id, version)"
             )
 
             conn.execute("""
@@ -5751,10 +8537,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 completed_at    TIMESTAMP,
                 version         INTEGER NOT NULL DEFAULT 1,
+                content_type    TEXT NOT NULL DEFAULT 'text/markdown',
+                preview_text    TEXT,
+                summary         TEXT,
+                review_state    TEXT NOT NULL DEFAULT 'draft',
+                owner_scope     TEXT NOT NULL DEFAULT 'user',
+                owner_id        TEXT,
+                project_id      TEXT,
+                task_id         TEXT,
+                source_collection_id TEXT,
+                root_artifact_id TEXT,
+                artifact_version_id TEXT,
+                previous_version_id TEXT,
+                producer_metadata_json TEXT,
+                source_lineage_json TEXT,
+                review_metadata_json TEXT,
+                version_metadata_json TEXT,
+                export_refs_json TEXT,
+                redaction_json TEXT,
+                schema_version INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (workspace_id, id)
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_ws_artifacts_workspace ON workspace_artifacts(workspace_id)",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'text/markdown'",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS preview_text TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS summary TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'draft'",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS owner_scope TEXT NOT NULL DEFAULT 'user'",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS owner_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS project_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS task_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS source_collection_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS root_artifact_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS artifact_version_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS previous_version_id TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS producer_metadata_json TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS source_lineage_json TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS review_metadata_json TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS version_metadata_json TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS export_refs_json TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS redaction_json TEXT",
+            "ALTER TABLE workspace_artifacts ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_artifact_versions (
+                workspace_id    TEXT NOT NULL,
+                artifact_id     TEXT NOT NULL,
+                artifact_version_id TEXT NOT NULL,
+                root_artifact_id TEXT NOT NULL,
+                previous_version_id TEXT,
+                version         INTEGER NOT NULL,
+                review_state    TEXT NOT NULL,
+                title           TEXT NOT NULL,
+                content         TEXT,
+                producer_metadata_json TEXT,
+                source_lineage_json TEXT,
+                review_metadata_json TEXT,
+                version_metadata_json TEXT,
+                export_refs_json TEXT,
+                redaction_json TEXT,
+                created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (workspace_id, artifact_version_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_artifact_versions_artifact ON workspace_artifact_versions(workspace_id, artifact_id, version)",
             """
             CREATE TABLE IF NOT EXISTS workspace_notes (
                 id            SERIAL PRIMARY KEY,
@@ -5975,7 +8821,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._verify_required_fts_tables_sqlite(conn)
                     self._ensure_workspace_subresource_schema_sqlite(conn)
                     self._ensure_flashcard_asset_schema_sqlite(conn)
+                    self._ensure_flashcard_template_schema_sqlite(conn)
                     self._ensure_flashcard_scheduler_schema_sqlite(conn)
+                    self._ensure_study_pack_schema_sqlite(conn)
                     self._ensure_study_assistant_schema_sqlite(conn)
                     self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
                     self._ensure_flashcard_fts_triggers_sqlite(conn)
@@ -6104,6 +8952,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 40 and current_db_version == 39:
                         self._migrate_from_v39_to_v40(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 41 and current_db_version == 40:
+                        self._migrate_from_v40_to_v41(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 42 and current_db_version == 41:
+                        self._migrate_from_v41_to_v42(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 43 and current_db_version == 42:
+                        self._migrate_from_v42_to_v43(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 44 and current_db_version == 43:
+                        self._migrate_from_v43_to_v44(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 45 and current_db_version == 44:
+                        self._migrate_from_v44_to_v45(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 46 and current_db_version == 45:
+                        self._migrate_from_v45_to_v46(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 47 and current_db_version == 46:
+                        self._migrate_from_v46_to_v47(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -6440,6 +9309,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                                 self._migrate_from_v38_to_v39(conn)
                             elif fallback_version == 39:
                                 self._migrate_from_v39_to_v40(conn)
+                            elif fallback_version == 40:
+                                self._migrate_from_v40_to_v41(conn)
+                            elif fallback_version == 41:
+                                self._migrate_from_v41_to_v42(conn)
+                            elif fallback_version == 42:
+                                self._migrate_from_v42_to_v43(conn)
+                            elif fallback_version == 43:
+                                self._migrate_from_v43_to_v44(conn)
+                            elif fallback_version == 44:
+                                self._migrate_from_v44_to_v45(conn)
+                            elif fallback_version == 45:
+                                self._migrate_from_v45_to_v46(conn)
+                            elif fallback_version == 46:
+                                self._migrate_from_v46_to_v47(conn)
                             else:
                                 raise SchemaError(  # noqa: TRY003, TRY301
                                     f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
@@ -6536,11 +9419,33 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 40 and current_db_version == 39:
                     self._migrate_from_v39_to_v40(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 41 and current_db_version == 40:
+                    self._migrate_from_v40_to_v41(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 42 and current_db_version == 41:
+                    self._migrate_from_v41_to_v42(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 43 and current_db_version == 42:
+                    self._migrate_from_v42_to_v43(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 44 and current_db_version == 43:
+                    self._migrate_from_v43_to_v44(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 45 and current_db_version == 44:
+                    self._migrate_from_v44_to_v45(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 46 and current_db_version == 45:
+                    self._migrate_from_v45_to_v46(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 47 and current_db_version == 46:
+                    self._migrate_from_v46_to_v47(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
+                self._ensure_web_clipper_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -6551,9 +9456,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_workspace_subresource_schema_sqlite(conn)
                 self._ensure_workspace_study_material_schema_sqlite(conn)
                 self._ensure_flashcard_asset_schema_sqlite(conn)
+                self._ensure_flashcard_template_schema_sqlite(conn)
                 self._ensure_flashcard_scheduler_schema_sqlite(conn)
+                self._ensure_flashcard_deck_sharing_schema_sqlite(conn)
+                self._ensure_study_pack_schema_sqlite(conn)
                 self._ensure_study_assistant_schema_sqlite(conn)
                 self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
+                self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_flashcard_fts_triggers_sqlite(conn)
                 self._ensure_character_cards_fts_triggers_sqlite(conn)
                 self._ensure_notes_fts_triggers_sqlite(conn)
@@ -6895,6 +9804,186 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed backfilling flashcard search shadow columns: {exc}") from exc  # noqa: TRY003
 
+    def _ensure_flashcard_template_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure flashcard template storage exists for SQLite."""
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS flashcard_templates(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL,
+                  model_type TEXT NOT NULL CHECK(model_type IN ('basic','basic_reverse','cloze')),
+                  front_template TEXT NOT NULL,
+                  back_template TEXT,
+                  notes_template TEXT,
+                  extra_template TEXT,
+                  placeholder_definitions_json TEXT NOT NULL DEFAULT '[]',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT 0,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_flashcard_templates_name_active "
+                "ON flashcard_templates(name) WHERE deleted = 0"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_templates_deleted ON flashcard_templates(deleted)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_templates_last_modified ON flashcard_templates(last_modified)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring flashcard_templates table: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_flashcard_template_schema_postgres(self, conn) -> None:
+        """Ensure flashcard template storage exists for PostgreSQL."""
+        try:
+            self.backend.execute(
+                """
+                CREATE TABLE IF NOT EXISTS flashcard_templates(
+                  id SERIAL PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  model_type TEXT NOT NULL CHECK(model_type IN ('basic','basic_reverse','cloze')),
+                  front_template TEXT NOT NULL,
+                  back_template TEXT,
+                  notes_template TEXT,
+                  extra_template TEXT,
+                  placeholder_definitions_json TEXT NOT NULL DEFAULT '[]',
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_flashcard_templates_name_active "
+                "ON flashcard_templates(name) WHERE deleted = FALSE",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_templates_deleted ON flashcard_templates(deleted)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_templates_last_modified ON flashcard_templates(last_modified)",
+                connection=conn,
+            )
+        except BackendDatabaseError as exc:
+            raise SchemaError(f"Failed ensuring flashcard_templates table: {exc}") from exc  # noqa: TRY003
+
+        try:
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION flashcard_templates_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'flashcard_templates',
+                      CAST(NEW.id AS TEXT),
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'name', NEW.name,
+                        'model_type', NEW.model_type,
+                        'front_template', NEW.front_template,
+                        'back_template', NEW.back_template,
+                        'notes_template', NEW.notes_template,
+                        'extra_template', NEW.extra_template,
+                        'placeholder_definitions_json', NEW.placeholder_definitions_json,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'flashcard_templates',
+                      CAST(NEW.id AS TEXT),
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.deleted IS DISTINCT FROM NEW.deleted OR
+                    OLD.name IS DISTINCT FROM NEW.name OR
+                    OLD.model_type IS DISTINCT FROM NEW.model_type OR
+                    OLD.front_template IS DISTINCT FROM NEW.front_template OR
+                    OLD.back_template IS DISTINCT FROM NEW.back_template OR
+                    OLD.notes_template IS DISTINCT FROM NEW.notes_template OR
+                    OLD.extra_template IS DISTINCT FROM NEW.extra_template OR
+                    OLD.placeholder_definitions_json IS DISTINCT FROM NEW.placeholder_definitions_json OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'flashcard_templates',
+                      CAST(NEW.id AS TEXT),
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'name', NEW.name,
+                        'model_type', NEW.model_type,
+                        'front_template', NEW.front_template,
+                        'back_template', NEW.back_template,
+                        'notes_template', NEW.notes_template,
+                        'extra_template', NEW.extra_template,
+                        'placeholder_definitions_json', NEW.placeholder_definitions_json,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                "DROP TRIGGER IF EXISTS flashcard_templates_sync_log ON flashcard_templates",
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE TRIGGER flashcard_templates_sync_log
+                AFTER INSERT OR UPDATE ON flashcard_templates
+                FOR EACH ROW EXECUTE FUNCTION flashcard_templates_sync_log_fn()
+                """,
+                connection=conn,
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL flashcard template sync triggers: {exc}") from exc  # noqa: TRY003
+
     def _infer_queue_state_for_row(self, row: Mapping[str, Any]) -> str:
         queue_state = str(row.get("queue_state") or "").strip().lower()
         if queue_state in ("new", "learning", "review", "relearning", "suspended"):
@@ -6913,9 +10002,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         decks_exists: bool = True,
         flashcards_exists: bool = True,
+        flashcard_templates_exists: bool = True,
         sync_log_exists: bool = True,
     ) -> None:
-        """Ensure deck and flashcard sync triggers include scheduler fields."""
+        """Ensure flashcard-domain SQLite sync triggers exist with scheduler/template fields."""
         if not sync_log_exists:
             return
 
@@ -6927,6 +10017,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'parent_deck_id',NEW.parent_deck_id,
+                                     'visibility',NEW.visibility,
+                                     'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
                                      'scheduler_settings_json',NEW.scheduler_settings_json,
                                      'created_at',NEW.created_at,'last_modified',NEW.last_modified,
@@ -6938,6 +10031,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 WHEN OLD.deleted = NEW.deleted AND (
                      OLD.name IS NOT NEW.name OR
                      OLD.description IS NOT NEW.description OR
+                     OLD.parent_deck_id IS NOT NEW.parent_deck_id OR
+                     OLD.visibility IS NOT NEW.visibility OR
+                     OLD.review_prompt_side IS NOT NEW.review_prompt_side OR
                      OLD.scheduler_type IS NOT NEW.scheduler_type OR
                      OLD.scheduler_settings_json IS NOT NEW.scheduler_settings_json OR
                      OLD.last_modified IS NOT NEW.last_modified OR
@@ -6946,6 +10042,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'parent_deck_id',NEW.parent_deck_id,
+                                     'visibility',NEW.visibility,
+                                     'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
                                      'scheduler_settings_json',NEW.scheduler_settings_json,
                                      'created_at',NEW.created_at,'last_modified',NEW.last_modified,
@@ -6969,6 +10068,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
                   VALUES('decks',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
                          json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+                                     'parent_deck_id',NEW.parent_deck_id,
+                                     'visibility',NEW.visibility,
+                                     'review_prompt_side',NEW.review_prompt_side,
                                      'scheduler_type',NEW.scheduler_type,
                                      'scheduler_settings_json',NEW.scheduler_settings_json,
                                      'created_at',NEW.created_at,'last_modified',NEW.last_modified,
@@ -7070,6 +10172,69 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 END;
             """
 
+        flashcard_template_script = ""
+        if flashcard_templates_exists:
+            flashcard_template_script = """
+                CREATE TRIGGER flashcard_templates_sync_create
+                AFTER INSERT ON flashcard_templates BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_templates',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'name',NEW.name,'model_type',NEW.model_type,
+                                     'front_template',NEW.front_template,'back_template',NEW.back_template,
+                                     'notes_template',NEW.notes_template,'extra_template',NEW.extra_template,
+                                     'placeholder_definitions_json',NEW.placeholder_definitions_json,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER flashcard_templates_sync_update
+                AFTER UPDATE ON flashcard_templates
+                WHEN OLD.deleted = NEW.deleted AND (
+                     OLD.name IS NOT NEW.name OR
+                     OLD.model_type IS NOT NEW.model_type OR
+                     OLD.front_template IS NOT NEW.front_template OR
+                     OLD.back_template IS NOT NEW.back_template OR
+                     OLD.notes_template IS NOT NEW.notes_template OR
+                     OLD.extra_template IS NOT NEW.extra_template OR
+                     OLD.placeholder_definitions_json IS NOT NEW.placeholder_definitions_json OR
+                     OLD.last_modified IS NOT NEW.last_modified OR
+                     OLD.version IS NOT NEW.version)
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_templates',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'name',NEW.name,'model_type',NEW.model_type,
+                                     'front_template',NEW.front_template,'back_template',NEW.back_template,
+                                     'notes_template',NEW.notes_template,'extra_template',NEW.extra_template,
+                                     'placeholder_definitions_json',NEW.placeholder_definitions_json,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER flashcard_templates_sync_delete
+                AFTER UPDATE ON flashcard_templates
+                WHEN OLD.deleted = 0 AND NEW.deleted = 1
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_templates',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                                     'version',NEW.version,'client_id',NEW.client_id));
+                END;
+
+                CREATE TRIGGER flashcard_templates_sync_undelete
+                AFTER UPDATE ON flashcard_templates
+                WHEN OLD.deleted = 1 AND NEW.deleted = 0
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_templates',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'name',NEW.name,'model_type',NEW.model_type,
+                                     'front_template',NEW.front_template,'back_template',NEW.back_template,
+                                     'notes_template',NEW.notes_template,'extra_template',NEW.extra_template,
+                                     'placeholder_definitions_json',NEW.placeholder_definitions_json,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+            """
+
         try:
             conn.executescript(
                 f"""
@@ -7083,6 +10248,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 DROP TRIGGER IF EXISTS flashcards_sync_delete;
                 DROP TRIGGER IF EXISTS flashcards_sync_undelete;
                 {flashcard_script}
+                DROP TRIGGER IF EXISTS flashcard_templates_sync_create;
+                DROP TRIGGER IF EXISTS flashcard_templates_sync_update;
+                DROP TRIGGER IF EXISTS flashcard_templates_sync_delete;
+                DROP TRIGGER IF EXISTS flashcard_templates_sync_undelete;
+                {flashcard_template_script}
                 """
             )
         except sqlite3.Error as exc:
@@ -7103,6 +10273,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         decks_exists = "decks" in existing_tables
         flashcards_exists = "flashcards" in existing_tables
+        flashcard_templates_exists = "flashcard_templates" in existing_tables
         flashcard_reviews_exists = "flashcard_reviews" in existing_tables
         sync_log_exists = "sync_log" in existing_tables
 
@@ -7112,12 +10283,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             if decks_exists:
                 deck_cols = {str(row[1]): row for row in conn.execute("PRAGMA table_info('decks')").fetchall()}
+                if "parent_deck_id" not in deck_cols:
+                    conn.execute(
+                        "ALTER TABLE decks ADD COLUMN parent_deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL"
+                    )
                 if "scheduler_settings_json" not in deck_cols:
                     conn.execute(
                         f"ALTER TABLE decks ADD COLUMN scheduler_settings_json TEXT NOT NULL DEFAULT '{default_settings_json}'"
                     )
                 if "scheduler_type" not in deck_cols:
                     conn.execute("ALTER TABLE decks ADD COLUMN scheduler_type TEXT NOT NULL DEFAULT 'sm2_plus'")
+                if "review_prompt_side" not in deck_cols:
+                    conn.execute("ALTER TABLE decks ADD COLUMN review_prompt_side TEXT NOT NULL DEFAULT 'front'")
+                if "visibility" not in deck_cols:
+                    conn.execute("ALTER TABLE decks ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'")
                 conn.execute(
                     """
                     UPDATE decks
@@ -7133,8 +10312,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      WHERE scheduler_type IS NULL OR trim(scheduler_type) = ''
                     """
                 )
+                conn.execute(
+                    """
+                    UPDATE decks
+                       SET review_prompt_side = 'front'
+                     WHERE review_prompt_side IS NULL OR trim(review_prompt_side) = ''
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE decks
+                       SET visibility = 'private'
+                     WHERE visibility IS NULL OR trim(visibility) = ''
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_visibility ON decks(visibility)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_parent_deck_id ON decks(parent_deck_id)")
         except sqlite3.Error as exc:
-            raise SchemaError(f"Failed ensuring decks.scheduler_settings_json: {exc}") from exc  # noqa: TRY003
+            raise SchemaError(f"Failed ensuring decks review-orientation schema: {exc}") from exc  # noqa: TRY003
 
         try:
             if flashcards_exists:
@@ -7258,15 +10453,87 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conn.execute("ALTER TABLE flashcard_reviews ADD COLUMN previous_due_at DATETIME")
                 if "next_due_at" not in review_cols:
                     conn.execute("ALTER TABLE flashcard_reviews ADD COLUMN next_due_at DATETIME")
+                if "review_session_id" not in review_cols:
+                    conn.execute("ALTER TABLE flashcard_reviews ADD COLUMN review_session_id INTEGER")
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring flashcard review scheduler columns: {exc}") from exc  # noqa: TRY003
+
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS flashcard_review_sessions(
+                  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                  deck_id          INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+                  review_mode      TEXT NOT NULL DEFAULT 'due',
+                  tag_filter       TEXT,
+                  scope_key        TEXT NOT NULL,
+                  status           TEXT NOT NULL DEFAULT 'active',
+                  started_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_activity_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  completed_at     DATETIME,
+                  cards_reviewed   INTEGER DEFAULT 0,
+                  correct_count    INTEGER DEFAULT 0,
+                  source_bundle_json TEXT,
+                  study_pack_id    INTEGER,
+                  client_id        TEXT NOT NULL DEFAULT 'unknown'
+                )
+                """
+            )
+            session_cols = {
+                str(row[1]): row for row in conn.execute("PRAGMA table_info('flashcard_review_sessions')").fetchall()
+            }
+            if "cards_reviewed" not in session_cols:
+                conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN cards_reviewed INTEGER DEFAULT 0")
+            if "correct_count" not in session_cols:
+                conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN correct_count INTEGER DEFAULT 0")
+            if "source_bundle_json" not in session_cols:
+                conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN source_bundle_json TEXT")
+            if "study_pack_id" not in session_cols:
+                conn.execute("ALTER TABLE flashcard_review_sessions ADD COLUMN study_pack_id INTEGER")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_scope ON flashcard_review_sessions(scope_key)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_status ON flashcard_review_sessions(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_deck ON flashcard_review_sessions(deck_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_activity ON flashcard_review_sessions(last_activity_at)")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring flashcard review session schema: {exc}") from exc  # noqa: TRY003
 
         self._ensure_flashcard_scheduler_sync_triggers_sqlite(
             conn,
             decks_exists=decks_exists,
             flashcards_exists=flashcards_exists,
+            flashcard_templates_exists=flashcard_templates_exists,
             sync_log_exists=sync_log_exists,
         )
+
+    def _ensure_flashcard_deck_sharing_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure owner-side flashcard deck sharing metadata exists for SQLite."""
+        try:
+            existing_tables = {
+                str(row[0])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            if "decks" not in existing_tables:
+                return
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deck_shares(
+                  deck_id       INTEGER NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                  user_id       INTEGER NOT NULL,
+                  role          TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
+                  shared_by     INTEGER NOT NULL,
+                  shared_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  client_id     TEXT NOT NULL DEFAULT 'unknown',
+                  version       INTEGER NOT NULL DEFAULT 1,
+                  PRIMARY KEY(deck_id, user_id)
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_shares_user ON deck_shares(user_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_shares_role ON deck_shares(role)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_deck_shares_shared_by ON deck_shares(shared_by)")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring flashcard deck sharing schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_flashcard_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Rebuild flashcard FTS around sanitized search shadow columns."""
@@ -7401,11 +10668,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         default_settings_json = scheduler_settings_to_json(None)
         try:
             self.backend.execute(
+                "ALTER TABLE decks ADD COLUMN IF NOT EXISTS parent_deck_id BIGINT REFERENCES decks(id) ON DELETE SET NULL",
+                connection=conn,
+            )
+            self.backend.execute(
                 "ALTER TABLE decks ADD COLUMN IF NOT EXISTS scheduler_settings_json TEXT NOT NULL DEFAULT '{}'",
                 connection=conn,
             )
             self.backend.execute(
                 "ALTER TABLE decks ADD COLUMN IF NOT EXISTS scheduler_type TEXT NOT NULL DEFAULT 'sm2_plus'",
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE decks ADD COLUMN IF NOT EXISTS review_prompt_side TEXT NOT NULL DEFAULT 'front'",
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE decks ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'",
                 connection=conn,
             )
             self.backend.execute(
@@ -7415,6 +10694,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             self.backend.execute(
                 "UPDATE decks SET scheduler_type = 'sm2_plus' WHERE scheduler_type IS NULL OR btrim(scheduler_type) = ''",
+                connection=conn,
+            )
+            self.backend.execute(
+                "UPDATE decks SET review_prompt_side = 'front' WHERE review_prompt_side IS NULL OR btrim(review_prompt_side) = ''",
+                connection=conn,
+            )
+            self.backend.execute(
+                "UPDATE decks SET visibility = 'private' WHERE visibility IS NULL OR btrim(visibility) = ''",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decks_visibility ON decks(visibility)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decks_parent_deck_id ON decks(parent_deck_id)",
                 connection=conn,
             )
             self.backend.execute(
@@ -7457,8 +10752,99 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "ALTER TABLE flashcard_reviews ADD COLUMN IF NOT EXISTS next_due_at TIMESTAMPTZ",
                 connection=conn,
             )
+            self.backend.execute(
+                "ALTER TABLE flashcard_reviews ADD COLUMN IF NOT EXISTS review_session_id INTEGER",
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE TABLE IF NOT EXISTS flashcard_review_sessions(
+                  id BIGSERIAL PRIMARY KEY,
+                  deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+                  review_mode TEXT NOT NULL DEFAULT 'due',
+                  tag_filter TEXT,
+                  scope_key TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'active',
+                  started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_activity_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  completed_at TIMESTAMPTZ,
+                  cards_reviewed INTEGER DEFAULT 0,
+                  correct_count INTEGER DEFAULT 0,
+                  source_bundle_json TEXT,
+                  study_pack_id BIGINT,
+                  client_id TEXT NOT NULL DEFAULT 'unknown'
+                )
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE flashcard_review_sessions ADD COLUMN IF NOT EXISTS cards_reviewed INTEGER DEFAULT 0",
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE flashcard_review_sessions ADD COLUMN IF NOT EXISTS correct_count INTEGER DEFAULT 0",
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE flashcard_review_sessions ADD COLUMN IF NOT EXISTS source_bundle_json TEXT",
+                connection=conn,
+            )
+            self.backend.execute(
+                "ALTER TABLE flashcard_review_sessions ADD COLUMN IF NOT EXISTS study_pack_id BIGINT",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_scope ON flashcard_review_sessions(scope_key)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_status ON flashcard_review_sessions(status)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_deck ON flashcard_review_sessions(deck_id)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_flashcard_review_sessions_activity ON flashcard_review_sessions(last_activity_at)",
+                connection=conn,
+            )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL flashcard scheduler schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_flashcard_deck_sharing_schema_postgres(self, conn: Any) -> None:
+        """Ensure owner-side flashcard deck sharing metadata exists for PostgreSQL."""
+        try:
+            self.backend.execute(
+                """
+                CREATE TABLE IF NOT EXISTS deck_shares(
+                  deck_id BIGINT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                  user_id BIGINT NOT NULL,
+                  role TEXT NOT NULL CHECK(role IN ('owner', 'editor', 'viewer')),
+                  shared_by BIGINT NOT NULL,
+                  shared_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1,
+                  PRIMARY KEY(deck_id, user_id)
+                )
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deck_shares_user ON deck_shares(user_id)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deck_shares_role ON deck_shares(role)",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deck_shares_shared_by ON deck_shares(shared_by)",
+                connection=conn,
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL flashcard deck sharing schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_study_assistant_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure study assistant thread/message tables exist for SQLite."""
@@ -7597,6 +10983,1984 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL study assistant schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_study_pack_sync_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure SQLite sync-log triggers exist for study pack tables."""
+        try:
+            table_names = {
+                str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed reading SQLite table inventory for study pack triggers: {exc}") from exc  # noqa: TRY003
+
+        if "sync_log" not in table_names:
+            return
+
+        study_packs_script = ""
+        if "study_packs" in table_names:
+            study_packs_script = """
+                CREATE TRIGGER study_packs_sync_create
+                AFTER INSERT ON study_packs BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_packs',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'workspace_id',NEW.workspace_id,'title',NEW.title,'deck_id',NEW.deck_id,
+                                     'source_bundle_json',NEW.source_bundle_json,'generation_options_json',NEW.generation_options_json,
+                                     'status',NEW.status,'superseded_by_pack_id',NEW.superseded_by_pack_id,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER study_packs_sync_update
+                AFTER UPDATE ON study_packs
+                WHEN OLD.deleted = NEW.deleted AND (
+                     OLD.workspace_id IS NOT NEW.workspace_id OR
+                     OLD.title IS NOT NEW.title OR
+                     OLD.deck_id IS NOT NEW.deck_id OR
+                     OLD.source_bundle_json IS NOT NEW.source_bundle_json OR
+                     OLD.generation_options_json IS NOT NEW.generation_options_json OR
+                     OLD.status IS NOT NEW.status OR
+                     OLD.superseded_by_pack_id IS NOT NEW.superseded_by_pack_id OR
+                     OLD.last_modified IS NOT NEW.last_modified OR
+                     OLD.version IS NOT NEW.version)
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_packs',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'workspace_id',NEW.workspace_id,'title',NEW.title,'deck_id',NEW.deck_id,
+                                     'source_bundle_json',NEW.source_bundle_json,'generation_options_json',NEW.generation_options_json,
+                                     'status',NEW.status,'superseded_by_pack_id',NEW.superseded_by_pack_id,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER study_packs_sync_delete
+                AFTER UPDATE ON study_packs
+                WHEN OLD.deleted = 0 AND NEW.deleted = 1
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_packs',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                                     'version',NEW.version,'client_id',NEW.client_id));
+                END;
+
+                CREATE TRIGGER study_packs_sync_undelete
+                AFTER UPDATE ON study_packs
+                WHEN OLD.deleted = 1 AND NEW.deleted = 0
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_packs',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'workspace_id',NEW.workspace_id,'title',NEW.title,'deck_id',NEW.deck_id,
+                                     'source_bundle_json',NEW.source_bundle_json,'generation_options_json',NEW.generation_options_json,
+                                     'status',NEW.status,'superseded_by_pack_id',NEW.superseded_by_pack_id,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+            """
+
+        study_pack_cards_script = ""
+        if "study_pack_cards" in table_names:
+            study_pack_cards_script = """
+                CREATE TRIGGER study_pack_cards_sync_create
+                AFTER INSERT ON study_pack_cards BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_pack_cards',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'study_pack_id',NEW.study_pack_id,'flashcard_uuid',NEW.flashcard_uuid,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER study_pack_cards_sync_update
+                AFTER UPDATE ON study_pack_cards
+                WHEN OLD.deleted = NEW.deleted AND (
+                     OLD.study_pack_id IS NOT NEW.study_pack_id OR
+                     OLD.flashcard_uuid IS NOT NEW.flashcard_uuid OR
+                     OLD.last_modified IS NOT NEW.last_modified OR
+                     OLD.version IS NOT NEW.version)
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_pack_cards',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'study_pack_id',NEW.study_pack_id,'flashcard_uuid',NEW.flashcard_uuid,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER study_pack_cards_sync_delete
+                AFTER UPDATE ON study_pack_cards
+                WHEN OLD.deleted = 0 AND NEW.deleted = 1
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_pack_cards',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                                     'version',NEW.version,'client_id',NEW.client_id));
+                END;
+
+                CREATE TRIGGER study_pack_cards_sync_undelete
+                AFTER UPDATE ON study_pack_cards
+                WHEN OLD.deleted = 1 AND NEW.deleted = 0
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('study_pack_cards',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'study_pack_id',NEW.study_pack_id,'flashcard_uuid',NEW.flashcard_uuid,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+            """
+
+        flashcard_citations_script = ""
+        if "flashcard_citations" in table_names:
+            flashcard_citations_script = """
+                CREATE TRIGGER flashcard_citations_sync_create
+                AFTER INSERT ON flashcard_citations BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_citations',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'flashcard_uuid',NEW.flashcard_uuid,'source_type',NEW.source_type,'source_id',NEW.source_id,
+                                     'citation_text',NEW.citation_text,'locator',NEW.locator,'ordinal',NEW.ordinal,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER flashcard_citations_sync_update
+                AFTER UPDATE ON flashcard_citations
+                WHEN OLD.deleted = NEW.deleted AND (
+                     OLD.flashcard_uuid IS NOT NEW.flashcard_uuid OR
+                     OLD.source_type IS NOT NEW.source_type OR
+                     OLD.source_id IS NOT NEW.source_id OR
+                     OLD.citation_text IS NOT NEW.citation_text OR
+                     OLD.locator IS NOT NEW.locator OR
+                     OLD.ordinal IS NOT NEW.ordinal OR
+                     OLD.last_modified IS NOT NEW.last_modified OR
+                     OLD.version IS NOT NEW.version)
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_citations',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'flashcard_uuid',NEW.flashcard_uuid,'source_type',NEW.source_type,'source_id',NEW.source_id,
+                                     'citation_text',NEW.citation_text,'locator',NEW.locator,'ordinal',NEW.ordinal,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER flashcard_citations_sync_delete
+                AFTER UPDATE ON flashcard_citations
+                WHEN OLD.deleted = 0 AND NEW.deleted = 1
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_citations',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                                     'version',NEW.version,'client_id',NEW.client_id));
+                END;
+
+                CREATE TRIGGER flashcard_citations_sync_undelete
+                AFTER UPDATE ON flashcard_citations
+                WHEN OLD.deleted = 1 AND NEW.deleted = 0
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('flashcard_citations',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'flashcard_uuid',NEW.flashcard_uuid,'source_type',NEW.source_type,'source_id',NEW.source_id,
+                                     'citation_text',NEW.citation_text,'locator',NEW.locator,'ordinal',NEW.ordinal,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+            """
+
+        suggestion_snapshots_script = ""
+        if "suggestion_snapshots" in table_names:
+            suggestion_snapshots_script = """
+                CREATE TRIGGER suggestion_snapshots_sync_create
+                AFTER INSERT ON suggestion_snapshots BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_snapshots',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'service',NEW.service,'activity_type',NEW.activity_type,
+                                     'anchor_type',NEW.anchor_type,'anchor_id',NEW.anchor_id,
+                                     'suggestion_type',NEW.suggestion_type,'status',NEW.status,
+                                     'payload_json',NEW.payload_json,'user_selection_json',NEW.user_selection_json,
+                                     'refreshed_from_snapshot_id',NEW.refreshed_from_snapshot_id,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER suggestion_snapshots_sync_update
+                AFTER UPDATE ON suggestion_snapshots
+                WHEN OLD.deleted = NEW.deleted AND (
+                     OLD.service IS NOT NEW.service OR
+                     OLD.activity_type IS NOT NEW.activity_type OR
+                     OLD.anchor_type IS NOT NEW.anchor_type OR
+                     OLD.anchor_id IS NOT NEW.anchor_id OR
+                     OLD.suggestion_type IS NOT NEW.suggestion_type OR
+                     OLD.status IS NOT NEW.status OR
+                     OLD.payload_json IS NOT NEW.payload_json OR
+                     OLD.user_selection_json IS NOT NEW.user_selection_json OR
+                     OLD.refreshed_from_snapshot_id IS NOT NEW.refreshed_from_snapshot_id OR
+                     OLD.last_modified IS NOT NEW.last_modified OR
+                     OLD.version IS NOT NEW.version)
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_snapshots',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'service',NEW.service,'activity_type',NEW.activity_type,
+                                     'anchor_type',NEW.anchor_type,'anchor_id',NEW.anchor_id,
+                                     'suggestion_type',NEW.suggestion_type,'status',NEW.status,
+                                     'payload_json',NEW.payload_json,'user_selection_json',NEW.user_selection_json,
+                                     'refreshed_from_snapshot_id',NEW.refreshed_from_snapshot_id,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER suggestion_snapshots_sync_delete
+                AFTER UPDATE ON suggestion_snapshots
+                WHEN OLD.deleted = 0 AND NEW.deleted = 1
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_snapshots',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                                     'version',NEW.version,'client_id',NEW.client_id));
+                END;
+
+                CREATE TRIGGER suggestion_snapshots_sync_undelete
+                AFTER UPDATE ON suggestion_snapshots
+                WHEN OLD.deleted = 1 AND NEW.deleted = 0
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_snapshots',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'service',NEW.service,'activity_type',NEW.activity_type,
+                                     'anchor_type',NEW.anchor_type,'anchor_id',NEW.anchor_id,
+                                     'suggestion_type',NEW.suggestion_type,'status',NEW.status,
+                                     'payload_json',NEW.payload_json,'user_selection_json',NEW.user_selection_json,
+                                     'refreshed_from_snapshot_id',NEW.refreshed_from_snapshot_id,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+            """
+
+        suggestion_generation_links_script = ""
+        if "suggestion_generation_links" in table_names:
+            suggestion_generation_links_script = """
+                CREATE TRIGGER suggestion_generation_links_sync_create
+                AFTER INSERT ON suggestion_generation_links BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_generation_links',CAST(NEW.id AS TEXT),'create',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'snapshot_id',NEW.snapshot_id,'target_service',NEW.target_service,
+                                     'target_type',NEW.target_type,'target_id',NEW.target_id,
+                                     'selection_fingerprint',NEW.selection_fingerprint,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER suggestion_generation_links_sync_update
+                AFTER UPDATE ON suggestion_generation_links
+                WHEN OLD.deleted = NEW.deleted AND (
+                     OLD.snapshot_id IS NOT NEW.snapshot_id OR
+                     OLD.target_service IS NOT NEW.target_service OR
+                     OLD.target_type IS NOT NEW.target_type OR
+                     OLD.target_id IS NOT NEW.target_id OR
+                     OLD.selection_fingerprint IS NOT NEW.selection_fingerprint OR
+                     OLD.last_modified IS NOT NEW.last_modified OR
+                     OLD.version IS NOT NEW.version)
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_generation_links',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'snapshot_id',NEW.snapshot_id,'target_service',NEW.target_service,
+                                     'target_type',NEW.target_type,'target_id',NEW.target_id,
+                                     'selection_fingerprint',NEW.selection_fingerprint,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+
+                CREATE TRIGGER suggestion_generation_links_sync_delete
+                AFTER UPDATE ON suggestion_generation_links
+                WHEN OLD.deleted = 0 AND NEW.deleted = 1
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_generation_links',CAST(NEW.id AS TEXT),'delete',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'deleted',NEW.deleted,'last_modified',NEW.last_modified,
+                                     'version',NEW.version,'client_id',NEW.client_id));
+                END;
+
+                CREATE TRIGGER suggestion_generation_links_sync_undelete
+                AFTER UPDATE ON suggestion_generation_links
+                WHEN OLD.deleted = 1 AND NEW.deleted = 0
+                BEGIN
+                  INSERT INTO sync_log(entity,entity_id,operation,timestamp,client_id,version,payload)
+                  VALUES('suggestion_generation_links',CAST(NEW.id AS TEXT),'update',NEW.last_modified,NEW.client_id,NEW.version,
+                         json_object('id',NEW.id,'snapshot_id',NEW.snapshot_id,'target_service',NEW.target_service,
+                                     'target_type',NEW.target_type,'target_id',NEW.target_id,
+                                     'selection_fingerprint',NEW.selection_fingerprint,
+                                     'created_at',NEW.created_at,'last_modified',NEW.last_modified,
+                                     'deleted',NEW.deleted,'client_id',NEW.client_id,'version',NEW.version));
+                END;
+            """
+
+        try:
+            conn.executescript(
+                f"""
+                DROP TRIGGER IF EXISTS study_packs_sync_create;
+                DROP TRIGGER IF EXISTS study_packs_sync_update;
+                DROP TRIGGER IF EXISTS study_packs_sync_delete;
+                DROP TRIGGER IF EXISTS study_packs_sync_undelete;
+                {study_packs_script}
+                DROP TRIGGER IF EXISTS study_pack_cards_sync_create;
+                DROP TRIGGER IF EXISTS study_pack_cards_sync_update;
+                DROP TRIGGER IF EXISTS study_pack_cards_sync_delete;
+                DROP TRIGGER IF EXISTS study_pack_cards_sync_undelete;
+                {study_pack_cards_script}
+                DROP TRIGGER IF EXISTS flashcard_citations_sync_create;
+                DROP TRIGGER IF EXISTS flashcard_citations_sync_update;
+                DROP TRIGGER IF EXISTS flashcard_citations_sync_delete;
+                DROP TRIGGER IF EXISTS flashcard_citations_sync_undelete;
+                {flashcard_citations_script}
+                DROP TRIGGER IF EXISTS suggestion_snapshots_sync_create;
+                DROP TRIGGER IF EXISTS suggestion_snapshots_sync_update;
+                DROP TRIGGER IF EXISTS suggestion_snapshots_sync_delete;
+                DROP TRIGGER IF EXISTS suggestion_snapshots_sync_undelete;
+                {suggestion_snapshots_script}
+                DROP TRIGGER IF EXISTS suggestion_generation_links_sync_create;
+                DROP TRIGGER IF EXISTS suggestion_generation_links_sync_update;
+                DROP TRIGGER IF EXISTS suggestion_generation_links_sync_delete;
+                DROP TRIGGER IF EXISTS suggestion_generation_links_sync_undelete;
+                {suggestion_generation_links_script}
+                """
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite study pack sync triggers: {exc}") from exc  # noqa: TRY003
+
+    def _dedupe_suggestion_generation_links_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Collapse legacy duplicate active generation links before enforcing the v2 unique index."""
+        conn.execute(
+            """
+            WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY snapshot_id, target_service, target_type, selection_fingerprint
+                           ORDER BY CASE WHEN target_id LIKE 'pending:%' THEN 1 ELSE 0 END ASC, id DESC
+                       ) AS row_rank
+                  FROM suggestion_generation_links
+                 WHERE deleted = 0
+            )
+            UPDATE suggestion_generation_links
+               SET deleted = 1,
+                   last_modified = CURRENT_TIMESTAMP,
+                   client_id = COALESCE(NULLIF(TRIM(client_id), ''), 'migration'),
+                   version = version + 1
+             WHERE id IN (SELECT id FROM ranked WHERE row_rank > 1)
+            """
+        )
+
+    def _dedupe_suggestion_generation_links_postgres(self, conn) -> None:
+        """Collapse legacy duplicate active generation links before enforcing the v2 unique index."""
+        self.backend.execute(
+            """
+            WITH ranked AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY snapshot_id, target_service, target_type, selection_fingerprint
+                           ORDER BY CASE WHEN target_id LIKE 'pending:%' THEN 1 ELSE 0 END ASC, id DESC
+                       ) AS row_rank
+                  FROM suggestion_generation_links
+                 WHERE deleted = FALSE
+            )
+            UPDATE suggestion_generation_links AS links
+               SET deleted = TRUE,
+                   last_modified = CURRENT_TIMESTAMP,
+                   client_id = COALESCE(NULLIF(BTRIM(client_id), ''), 'migration'),
+                   version = version + 1
+              FROM ranked
+             WHERE links.id = ranked.id
+               AND ranked.row_rank > 1
+            """,
+            connection=conn,
+        )
+
+    def _ensure_study_pack_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure study pack tables exist for SQLite."""
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS study_packs(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+                  title TEXT NOT NULL,
+                  deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+                  source_bundle_json TEXT NOT NULL,
+                  generation_options_json TEXT,
+                  status TEXT NOT NULL CHECK(status IN ('active', 'superseded')) DEFAULT 'active',
+                  superseded_by_pack_id INTEGER REFERENCES study_packs(id) ON DELETE SET NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT 0,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS study_pack_cards(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  study_pack_id INTEGER NOT NULL REFERENCES study_packs(id) ON DELETE CASCADE,
+                  flashcard_uuid TEXT NOT NULL REFERENCES flashcards(uuid) ON DELETE CASCADE,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT 0,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS flashcard_citations(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  flashcard_uuid TEXT NOT NULL REFERENCES flashcards(uuid) ON DELETE CASCADE,
+                  source_type TEXT NOT NULL CHECK(source_type IN ('note', 'media', 'message')),
+                  source_id TEXT NOT NULL,
+                  citation_text TEXT,
+                  locator TEXT,
+                  ordinal INTEGER NOT NULL DEFAULT 0,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT 0,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS suggestion_snapshots(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  service TEXT NOT NULL,
+                  activity_type TEXT NOT NULL,
+                  anchor_type TEXT NOT NULL,
+                  anchor_id INTEGER NOT NULL,
+                  suggestion_type TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK(status IN ('active', 'superseded')) DEFAULT 'active',
+                  payload_json TEXT NOT NULL,
+                  user_selection_json TEXT,
+                  refreshed_from_snapshot_id INTEGER REFERENCES suggestion_snapshots(id) ON DELETE SET NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT 0,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS suggestion_generation_links(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  snapshot_id INTEGER NOT NULL REFERENCES suggestion_snapshots(id) ON DELETE CASCADE,
+                  target_service TEXT NOT NULL,
+                  target_type TEXT NOT NULL,
+                  target_id TEXT NOT NULL,
+                  selection_fingerprint TEXT NOT NULL,
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted BOOLEAN NOT NULL DEFAULT 0,
+                  client_id TEXT NOT NULL DEFAULT 'unknown',
+                  version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_packs_workspace_id ON study_packs(workspace_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_packs_deck_id ON study_packs(deck_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_packs_status ON study_packs(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_packs_deleted ON study_packs(deleted)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_pack_cards_pack_id ON study_pack_cards(study_pack_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_pack_cards_flashcard_uuid ON study_pack_cards(flashcard_uuid)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_study_pack_cards_deleted ON study_pack_cards(deleted)")
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_study_pack_cards_unique_active
+                    ON study_pack_cards(study_pack_id, flashcard_uuid)
+                 WHERE deleted = 0
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_citations_flashcard_uuid ON flashcard_citations(flashcard_uuid)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_citations_ordinal ON flashcard_citations(flashcard_uuid, ordinal)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcard_citations_deleted ON flashcard_citations(deleted)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestion_snapshots_anchor ON suggestion_snapshots(anchor_type, anchor_id)"
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_suggestion_snapshots_status ON suggestion_snapshots(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_suggestion_snapshots_deleted ON suggestion_snapshots(deleted)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestion_generation_links_snapshot_id ON suggestion_generation_links(snapshot_id)"
+            )
+            self._dedupe_suggestion_generation_links_sqlite(conn)
+            conn.execute("DROP INDEX IF EXISTS idx_suggestion_generation_links_unique_active")
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestion_generation_links_unique_active
+                    ON suggestion_generation_links(snapshot_id, target_service, target_type, selection_fingerprint)
+                 WHERE deleted = 0
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestion_generation_links_deleted ON suggestion_generation_links(deleted)"
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite study pack schema: {exc}") from exc  # noqa: TRY003
+
+        self._ensure_study_pack_sync_triggers_sqlite(conn)
+
+    def _ensure_study_pack_schema_postgres(self, conn) -> None:
+        """Ensure study pack tables exist for PostgreSQL."""
+        statements = [
+            """
+            CREATE TABLE IF NOT EXISTS study_packs(
+              id BIGSERIAL PRIMARY KEY,
+              workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+              title TEXT NOT NULL,
+              deck_id INTEGER REFERENCES decks(id) ON DELETE SET NULL,
+              source_bundle_json TEXT NOT NULL,
+              generation_options_json TEXT,
+              status TEXT NOT NULL CHECK(status IN ('active', 'superseded')) DEFAULT 'active',
+              superseded_by_pack_id BIGINT REFERENCES study_packs(id) ON DELETE SET NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS study_pack_cards(
+              id BIGSERIAL PRIMARY KEY,
+              study_pack_id BIGINT NOT NULL REFERENCES study_packs(id) ON DELETE CASCADE,
+              flashcard_uuid TEXT NOT NULL REFERENCES flashcards(uuid) ON DELETE CASCADE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS flashcard_citations(
+              id BIGSERIAL PRIMARY KEY,
+              flashcard_uuid TEXT NOT NULL REFERENCES flashcards(uuid) ON DELETE CASCADE,
+              source_type TEXT NOT NULL CHECK(source_type IN ('note', 'media', 'message')),
+              source_id TEXT NOT NULL,
+              citation_text TEXT,
+              locator TEXT,
+              ordinal INTEGER NOT NULL DEFAULT 0,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS suggestion_snapshots(
+              id BIGSERIAL PRIMARY KEY,
+              service TEXT NOT NULL,
+              activity_type TEXT NOT NULL,
+              anchor_type TEXT NOT NULL,
+              anchor_id BIGINT NOT NULL,
+              suggestion_type TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('active', 'superseded')) DEFAULT 'active',
+              payload_json TEXT NOT NULL,
+              user_selection_json TEXT,
+              refreshed_from_snapshot_id BIGINT REFERENCES suggestion_snapshots(id) ON DELETE SET NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS suggestion_generation_links(
+              id BIGSERIAL PRIMARY KEY,
+              snapshot_id BIGINT NOT NULL REFERENCES suggestion_snapshots(id) ON DELETE CASCADE,
+              target_service TEXT NOT NULL,
+              target_type TEXT NOT NULL,
+              target_id TEXT NOT NULL,
+              selection_fingerprint TEXT NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              client_id TEXT NOT NULL DEFAULT 'unknown',
+              version INTEGER NOT NULL DEFAULT 1
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_study_packs_workspace_id ON study_packs(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS idx_study_packs_deck_id ON study_packs(deck_id)",
+            "CREATE INDEX IF NOT EXISTS idx_study_packs_status ON study_packs(status)",
+            "CREATE INDEX IF NOT EXISTS idx_study_packs_deleted ON study_packs(deleted)",
+            "CREATE INDEX IF NOT EXISTS idx_study_pack_cards_pack_id ON study_pack_cards(study_pack_id)",
+            "CREATE INDEX IF NOT EXISTS idx_study_pack_cards_flashcard_uuid ON study_pack_cards(flashcard_uuid)",
+            "CREATE INDEX IF NOT EXISTS idx_study_pack_cards_deleted ON study_pack_cards(deleted)",
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_study_pack_cards_unique_active
+                ON study_pack_cards(study_pack_id, flashcard_uuid)
+             WHERE deleted = FALSE
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_flashcard_citations_flashcard_uuid ON flashcard_citations(flashcard_uuid)",
+            "CREATE INDEX IF NOT EXISTS idx_flashcard_citations_ordinal ON flashcard_citations(flashcard_uuid, ordinal)",
+            "CREATE INDEX IF NOT EXISTS idx_flashcard_citations_deleted ON flashcard_citations(deleted)",
+            "CREATE INDEX IF NOT EXISTS idx_suggestion_snapshots_anchor ON suggestion_snapshots(anchor_type, anchor_id)",
+            "CREATE INDEX IF NOT EXISTS idx_suggestion_snapshots_status ON suggestion_snapshots(status)",
+            "CREATE INDEX IF NOT EXISTS idx_suggestion_snapshots_deleted ON suggestion_snapshots(deleted)",
+            "CREATE INDEX IF NOT EXISTS idx_suggestion_generation_links_snapshot_id ON suggestion_generation_links(snapshot_id)",
+            "CREATE INDEX IF NOT EXISTS idx_suggestion_generation_links_deleted ON suggestion_generation_links(deleted)",
+        ]
+        try:
+            for statement in statements:
+                self.backend.execute(statement, connection=conn)
+            self._dedupe_suggestion_generation_links_postgres(conn)
+            self.backend.execute(
+                "DROP INDEX IF EXISTS idx_suggestion_generation_links_unique_active",
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestion_generation_links_unique_active
+                    ON suggestion_generation_links(snapshot_id, target_service, target_type, selection_fingerprint)
+                 WHERE deleted = FALSE
+                """,
+                connection=conn,
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL study pack schema: {exc}") from exc  # noqa: TRY003
+
+        try:
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION study_packs_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'study_packs',
+                      CAST(NEW.id AS TEXT),
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'workspace_id', NEW.workspace_id,
+                        'title', NEW.title,
+                        'deck_id', NEW.deck_id,
+                        'source_bundle_json', NEW.source_bundle_json,
+                        'generation_options_json', NEW.generation_options_json,
+                        'status', NEW.status,
+                        'superseded_by_pack_id', NEW.superseded_by_pack_id,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'study_packs',
+                      CAST(NEW.id AS TEXT),
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.deleted IS DISTINCT FROM NEW.deleted OR
+                    OLD.workspace_id IS DISTINCT FROM NEW.workspace_id OR
+                    OLD.title IS DISTINCT FROM NEW.title OR
+                    OLD.deck_id IS DISTINCT FROM NEW.deck_id OR
+                    OLD.source_bundle_json IS DISTINCT FROM NEW.source_bundle_json OR
+                    OLD.generation_options_json IS DISTINCT FROM NEW.generation_options_json OR
+                    OLD.status IS DISTINCT FROM NEW.status OR
+                    OLD.superseded_by_pack_id IS DISTINCT FROM NEW.superseded_by_pack_id OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'study_packs',
+                      CAST(NEW.id AS TEXT),
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'workspace_id', NEW.workspace_id,
+                        'title', NEW.title,
+                        'deck_id', NEW.deck_id,
+                        'source_bundle_json', NEW.source_bundle_json,
+                        'generation_options_json', NEW.generation_options_json,
+                        'status', NEW.status,
+                        'superseded_by_pack_id', NEW.superseded_by_pack_id,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION study_pack_cards_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'study_pack_cards',
+                      CAST(NEW.id AS TEXT),
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'study_pack_id', NEW.study_pack_id,
+                        'flashcard_uuid', NEW.flashcard_uuid,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'study_pack_cards',
+                      CAST(NEW.id AS TEXT),
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.deleted IS DISTINCT FROM NEW.deleted OR
+                    OLD.study_pack_id IS DISTINCT FROM NEW.study_pack_id OR
+                    OLD.flashcard_uuid IS DISTINCT FROM NEW.flashcard_uuid OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'study_pack_cards',
+                      CAST(NEW.id AS TEXT),
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'study_pack_id', NEW.study_pack_id,
+                        'flashcard_uuid', NEW.flashcard_uuid,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION flashcard_citations_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'flashcard_citations',
+                      CAST(NEW.id AS TEXT),
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'flashcard_uuid', NEW.flashcard_uuid,
+                        'source_type', NEW.source_type,
+                        'source_id', NEW.source_id,
+                        'citation_text', NEW.citation_text,
+                        'locator', NEW.locator,
+                        'ordinal', NEW.ordinal,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'flashcard_citations',
+                      CAST(NEW.id AS TEXT),
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.deleted IS DISTINCT FROM NEW.deleted OR
+                    OLD.flashcard_uuid IS DISTINCT FROM NEW.flashcard_uuid OR
+                    OLD.source_type IS DISTINCT FROM NEW.source_type OR
+                    OLD.source_id IS DISTINCT FROM NEW.source_id OR
+                    OLD.citation_text IS DISTINCT FROM NEW.citation_text OR
+                    OLD.locator IS DISTINCT FROM NEW.locator OR
+                    OLD.ordinal IS DISTINCT FROM NEW.ordinal OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'flashcard_citations',
+                      CAST(NEW.id AS TEXT),
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'flashcard_uuid', NEW.flashcard_uuid,
+                        'source_type', NEW.source_type,
+                        'source_id', NEW.source_id,
+                        'citation_text', NEW.citation_text,
+                        'locator', NEW.locator,
+                        'ordinal', NEW.ordinal,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION suggestion_snapshots_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'suggestion_snapshots',
+                      CAST(NEW.id AS TEXT),
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'service', NEW.service,
+                        'activity_type', NEW.activity_type,
+                        'anchor_type', NEW.anchor_type,
+                        'anchor_id', NEW.anchor_id,
+                        'suggestion_type', NEW.suggestion_type,
+                        'status', NEW.status,
+                        'payload_json', NEW.payload_json,
+                        'user_selection_json', NEW.user_selection_json,
+                        'refreshed_from_snapshot_id', NEW.refreshed_from_snapshot_id,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'suggestion_snapshots',
+                      CAST(NEW.id AS TEXT),
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.deleted IS DISTINCT FROM NEW.deleted OR
+                    OLD.service IS DISTINCT FROM NEW.service OR
+                    OLD.activity_type IS DISTINCT FROM NEW.activity_type OR
+                    OLD.anchor_type IS DISTINCT FROM NEW.anchor_type OR
+                    OLD.anchor_id IS DISTINCT FROM NEW.anchor_id OR
+                    OLD.suggestion_type IS DISTINCT FROM NEW.suggestion_type OR
+                    OLD.status IS DISTINCT FROM NEW.status OR
+                    OLD.payload_json IS DISTINCT FROM NEW.payload_json OR
+                    OLD.user_selection_json IS DISTINCT FROM NEW.user_selection_json OR
+                    OLD.refreshed_from_snapshot_id IS DISTINCT FROM NEW.refreshed_from_snapshot_id OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'suggestion_snapshots',
+                      CAST(NEW.id AS TEXT),
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'service', NEW.service,
+                        'activity_type', NEW.activity_type,
+                        'anchor_type', NEW.anchor_type,
+                        'anchor_id', NEW.anchor_id,
+                        'suggestion_type', NEW.suggestion_type,
+                        'status', NEW.status,
+                        'payload_json', NEW.payload_json,
+                        'user_selection_json', NEW.user_selection_json,
+                        'refreshed_from_snapshot_id', NEW.refreshed_from_snapshot_id,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION suggestion_generation_links_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'suggestion_generation_links',
+                      CAST(NEW.id AS TEXT),
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'snapshot_id', NEW.snapshot_id,
+                        'target_service', NEW.target_service,
+                        'target_type', NEW.target_type,
+                        'target_id', NEW.target_id,
+                        'selection_fingerprint', NEW.selection_fingerprint,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'suggestion_generation_links',
+                      CAST(NEW.id AS TEXT),
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.deleted IS DISTINCT FROM NEW.deleted OR
+                    OLD.snapshot_id IS DISTINCT FROM NEW.snapshot_id OR
+                    OLD.target_service IS DISTINCT FROM NEW.target_service OR
+                    OLD.target_type IS DISTINCT FROM NEW.target_type OR
+                    OLD.target_id IS DISTINCT FROM NEW.target_id OR
+                    OLD.selection_fingerprint IS DISTINCT FROM NEW.selection_fingerprint OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'suggestion_generation_links',
+                      CAST(NEW.id AS TEXT),
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'snapshot_id', NEW.snapshot_id,
+                        'target_service', NEW.target_service,
+                        'target_type', NEW.target_type,
+                        'target_id', NEW.target_id,
+                        'selection_fingerprint', NEW.selection_fingerprint,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+            self.backend.execute("DROP TRIGGER IF EXISTS study_packs_sync_log ON study_packs", connection=conn)
+            self.backend.execute(
+                "CREATE TRIGGER study_packs_sync_log AFTER INSERT OR UPDATE ON study_packs "
+                "FOR EACH ROW EXECUTE FUNCTION study_packs_sync_log_fn()",
+                connection=conn,
+            )
+            self.backend.execute("DROP TRIGGER IF EXISTS study_pack_cards_sync_log ON study_pack_cards", connection=conn)
+            self.backend.execute(
+                "CREATE TRIGGER study_pack_cards_sync_log AFTER INSERT OR UPDATE ON study_pack_cards "
+                "FOR EACH ROW EXECUTE FUNCTION study_pack_cards_sync_log_fn()",
+                connection=conn,
+            )
+            self.backend.execute("DROP TRIGGER IF EXISTS flashcard_citations_sync_log ON flashcard_citations", connection=conn)
+            self.backend.execute(
+                "CREATE TRIGGER flashcard_citations_sync_log AFTER INSERT OR UPDATE ON flashcard_citations "
+                "FOR EACH ROW EXECUTE FUNCTION flashcard_citations_sync_log_fn()",
+                connection=conn,
+            )
+            self.backend.execute("DROP TRIGGER IF EXISTS suggestion_snapshots_sync_log ON suggestion_snapshots", connection=conn)
+            self.backend.execute(
+                "CREATE TRIGGER suggestion_snapshots_sync_log AFTER INSERT OR UPDATE ON suggestion_snapshots "
+                "FOR EACH ROW EXECUTE FUNCTION suggestion_snapshots_sync_log_fn()",
+                connection=conn,
+            )
+            self.backend.execute(
+                "DROP TRIGGER IF EXISTS suggestion_generation_links_sync_log ON suggestion_generation_links",
+                connection=conn,
+            )
+            self.backend.execute(
+                "CREATE TRIGGER suggestion_generation_links_sync_log AFTER INSERT OR UPDATE ON suggestion_generation_links "
+                "FOR EACH ROW EXECUTE FUNCTION suggestion_generation_links_sync_log_fn()",
+                connection=conn,
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL study pack sync triggers: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_manuscript_phase2_sync_triggers_postgres(self, conn) -> None:
+        """Ensure PostgreSQL sync-log triggers for V42 manuscript tables."""
+        try:
+            # ── manuscript_characters ──────────────────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_characters_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_characters',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'name', NEW.name,
+                        'role', NEW.role,
+                        'cast_group', NEW.cast_group,
+                        'full_name', NEW.full_name,
+                        'age', NEW.age,
+                        'gender', NEW.gender,
+                        'appearance', NEW.appearance,
+                        'personality', NEW.personality,
+                        'backstory', NEW.backstory,
+                        'motivation', NEW.motivation,
+                        'arc_summary', NEW.arc_summary,
+                        'notes', NEW.notes,
+                        'custom_fields_json', NEW.custom_fields_json,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_characters',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_characters',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'name', NEW.name,
+                        'role', NEW.role,
+                        'cast_group', NEW.cast_group,
+                        'full_name', NEW.full_name,
+                        'age', NEW.age,
+                        'gender', NEW.gender,
+                        'appearance', NEW.appearance,
+                        'personality', NEW.personality,
+                        'backstory', NEW.backstory,
+                        'motivation', NEW.motivation,
+                        'arc_summary', NEW.arc_summary,
+                        'notes', NEW.notes,
+                        'custom_fields_json', NEW.custom_fields_json,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.name IS DISTINCT FROM NEW.name OR
+                    OLD.role IS DISTINCT FROM NEW.role OR
+                    OLD.cast_group IS DISTINCT FROM NEW.cast_group OR
+                    OLD.full_name IS DISTINCT FROM NEW.full_name OR
+                    OLD.age IS DISTINCT FROM NEW.age OR
+                    OLD.gender IS DISTINCT FROM NEW.gender OR
+                    OLD.appearance IS DISTINCT FROM NEW.appearance OR
+                    OLD.personality IS DISTINCT FROM NEW.personality OR
+                    OLD.backstory IS DISTINCT FROM NEW.backstory OR
+                    OLD.motivation IS DISTINCT FROM NEW.motivation OR
+                    OLD.arc_summary IS DISTINCT FROM NEW.arc_summary OR
+                    OLD.notes IS DISTINCT FROM NEW.notes OR
+                    OLD.custom_fields_json IS DISTINCT FROM NEW.custom_fields_json OR
+                    OLD.sort_order IS DISTINCT FROM NEW.sort_order OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_characters',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'name', NEW.name,
+                        'role', NEW.role,
+                        'cast_group', NEW.cast_group,
+                        'full_name', NEW.full_name,
+                        'age', NEW.age,
+                        'gender', NEW.gender,
+                        'appearance', NEW.appearance,
+                        'personality', NEW.personality,
+                        'backstory', NEW.backstory,
+                        'motivation', NEW.motivation,
+                        'arc_summary', NEW.arc_summary,
+                        'notes', NEW.notes,
+                        'custom_fields_json', NEW.custom_fields_json,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── manuscript_character_relationships ─────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_character_relationships_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_character_relationships',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'from_character_id', NEW.from_character_id,
+                        'to_character_id', NEW.to_character_id,
+                        'relationship_type', NEW.relationship_type,
+                        'description', NEW.description,
+                        'bidirectional', NEW.bidirectional,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_character_relationships',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_character_relationships',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'from_character_id', NEW.from_character_id,
+                        'to_character_id', NEW.to_character_id,
+                        'relationship_type', NEW.relationship_type,
+                        'description', NEW.description,
+                        'bidirectional', NEW.bidirectional,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.relationship_type IS DISTINCT FROM NEW.relationship_type OR
+                    OLD.description IS DISTINCT FROM NEW.description OR
+                    OLD.bidirectional IS DISTINCT FROM NEW.bidirectional OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_character_relationships',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'from_character_id', NEW.from_character_id,
+                        'to_character_id', NEW.to_character_id,
+                        'relationship_type', NEW.relationship_type,
+                        'description', NEW.description,
+                        'bidirectional', NEW.bidirectional,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── manuscript_world_info ──────────────────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_world_info_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_world_info',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'kind', NEW.kind,
+                        'name', NEW.name,
+                        'description', NEW.description,
+                        'parent_id', NEW.parent_id,
+                        'properties_json', NEW.properties_json,
+                        'tags_json', NEW.tags_json,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_world_info',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_world_info',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'kind', NEW.kind,
+                        'name', NEW.name,
+                        'description', NEW.description,
+                        'parent_id', NEW.parent_id,
+                        'properties_json', NEW.properties_json,
+                        'tags_json', NEW.tags_json,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.kind IS DISTINCT FROM NEW.kind OR
+                    OLD.name IS DISTINCT FROM NEW.name OR
+                    OLD.description IS DISTINCT FROM NEW.description OR
+                    OLD.parent_id IS DISTINCT FROM NEW.parent_id OR
+                    OLD.properties_json IS DISTINCT FROM NEW.properties_json OR
+                    OLD.tags_json IS DISTINCT FROM NEW.tags_json OR
+                    OLD.sort_order IS DISTINCT FROM NEW.sort_order OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_world_info',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'kind', NEW.kind,
+                        'name', NEW.name,
+                        'description', NEW.description,
+                        'parent_id', NEW.parent_id,
+                        'properties_json', NEW.properties_json,
+                        'tags_json', NEW.tags_json,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── manuscript_plot_lines ──────────────────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_plot_lines_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_lines',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'status', NEW.status,
+                        'color', NEW.color,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_lines',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_lines',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'status', NEW.status,
+                        'color', NEW.color,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.title IS DISTINCT FROM NEW.title OR
+                    OLD.description IS DISTINCT FROM NEW.description OR
+                    OLD.status IS DISTINCT FROM NEW.status OR
+                    OLD.color IS DISTINCT FROM NEW.color OR
+                    OLD.sort_order IS DISTINCT FROM NEW.sort_order OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_lines',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'status', NEW.status,
+                        'color', NEW.color,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── manuscript_plot_events ─────────────────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_plot_events_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_events',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'plot_line_id', NEW.plot_line_id,
+                        'scene_id', NEW.scene_id,
+                        'chapter_id', NEW.chapter_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'event_type', NEW.event_type,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_events',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_events',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'plot_line_id', NEW.plot_line_id,
+                        'scene_id', NEW.scene_id,
+                        'chapter_id', NEW.chapter_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'event_type', NEW.event_type,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.title IS DISTINCT FROM NEW.title OR
+                    OLD.description IS DISTINCT FROM NEW.description OR
+                    OLD.event_type IS DISTINCT FROM NEW.event_type OR
+                    OLD.scene_id IS DISTINCT FROM NEW.scene_id OR
+                    OLD.chapter_id IS DISTINCT FROM NEW.chapter_id OR
+                    OLD.sort_order IS DISTINCT FROM NEW.sort_order OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_events',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'plot_line_id', NEW.plot_line_id,
+                        'scene_id', NEW.scene_id,
+                        'chapter_id', NEW.chapter_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'event_type', NEW.event_type,
+                        'sort_order', NEW.sort_order,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── manuscript_plot_holes ──────────────────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_plot_holes_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_holes',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'severity', NEW.severity,
+                        'status', NEW.status,
+                        'scene_id', NEW.scene_id,
+                        'chapter_id', NEW.chapter_id,
+                        'plot_line_id', NEW.plot_line_id,
+                        'resolution', NEW.resolution,
+                        'detected_by', NEW.detected_by,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_holes',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_holes',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'severity', NEW.severity,
+                        'status', NEW.status,
+                        'scene_id', NEW.scene_id,
+                        'chapter_id', NEW.chapter_id,
+                        'plot_line_id', NEW.plot_line_id,
+                        'resolution', NEW.resolution,
+                        'detected_by', NEW.detected_by,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.title IS DISTINCT FROM NEW.title OR
+                    OLD.description IS DISTINCT FROM NEW.description OR
+                    OLD.severity IS DISTINCT FROM NEW.severity OR
+                    OLD.status IS DISTINCT FROM NEW.status OR
+                    OLD.resolution IS DISTINCT FROM NEW.resolution OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_plot_holes',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'title', NEW.title,
+                        'description', NEW.description,
+                        'severity', NEW.severity,
+                        'status', NEW.status,
+                        'scene_id', NEW.scene_id,
+                        'chapter_id', NEW.chapter_id,
+                        'plot_line_id', NEW.plot_line_id,
+                        'resolution', NEW.resolution,
+                        'detected_by', NEW.detected_by,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── manuscript_citations ───────────────────────────────────
+            self.backend.execute(
+                """
+                CREATE OR REPLACE FUNCTION manuscript_citations_sync_log_fn()
+                RETURNS trigger AS $$
+                BEGIN
+                  IF TG_OP = 'INSERT' THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_citations',
+                      NEW.id,
+                      'create',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'scene_id', NEW.scene_id,
+                        'source_type', NEW.source_type,
+                        'source_id', NEW.source_id,
+                        'source_title', NEW.source_title,
+                        'excerpt', NEW.excerpt,
+                        'query_used', NEW.query_used,
+                        'anchor_offset', NEW.anchor_offset,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_citations',
+                      NEW.id,
+                      'delete',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'deleted', NEW.deleted,
+                        'last_modified', NEW.last_modified,
+                        'version', NEW.version,
+                        'client_id', NEW.client_id
+                      )::text
+                    );
+                  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_citations',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'scene_id', NEW.scene_id,
+                        'source_type', NEW.source_type,
+                        'source_id', NEW.source_id,
+                        'source_title', NEW.source_title,
+                        'excerpt', NEW.excerpt,
+                        'query_used', NEW.query_used,
+                        'anchor_offset', NEW.anchor_offset,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  ELSIF (
+                    OLD.source_type IS DISTINCT FROM NEW.source_type OR
+                    OLD.source_id IS DISTINCT FROM NEW.source_id OR
+                    OLD.source_title IS DISTINCT FROM NEW.source_title OR
+                    OLD.excerpt IS DISTINCT FROM NEW.excerpt OR
+                    OLD.query_used IS DISTINCT FROM NEW.query_used OR
+                    OLD.anchor_offset IS DISTINCT FROM NEW.anchor_offset OR
+                    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+                    OLD.version IS DISTINCT FROM NEW.version
+                  ) THEN
+                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    VALUES(
+                      'manuscript_citations',
+                      NEW.id,
+                      'update',
+                      NEW.last_modified,
+                      NEW.client_id,
+                      NEW.version,
+                      json_build_object(
+                        'id', NEW.id,
+                        'project_id', NEW.project_id,
+                        'scene_id', NEW.scene_id,
+                        'source_type', NEW.source_type,
+                        'source_id', NEW.source_id,
+                        'source_title', NEW.source_title,
+                        'excerpt', NEW.excerpt,
+                        'query_used', NEW.query_used,
+                        'anchor_offset', NEW.anchor_offset,
+                        'created_at', NEW.created_at,
+                        'last_modified', NEW.last_modified,
+                        'deleted', NEW.deleted,
+                        'client_id', NEW.client_id,
+                        'version', NEW.version
+                      )::text
+                    );
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """,
+                connection=conn,
+            )
+
+            # ── Create triggers (drop first to allow re-run) ──────────
+            for table in (
+                "manuscript_characters",
+                "manuscript_character_relationships",
+                "manuscript_world_info",
+                "manuscript_plot_lines",
+                "manuscript_plot_events",
+                "manuscript_plot_holes",
+                "manuscript_citations",
+            ):
+                self.backend.execute(
+                    f"DROP TRIGGER IF EXISTS {table}_sync_log ON {table}",
+                    connection=conn,
+                )
+                self.backend.execute(
+                    f"CREATE TRIGGER {table}_sync_log AFTER INSERT OR UPDATE ON {table} "
+                    f"FOR EACH ROW EXECUTE FUNCTION {table}_sync_log_fn()",
+                    connection=conn,
+                )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL manuscript phase-2 sync triggers: {exc}") from exc  # noqa: TRY003
 
     def _ensure_quiz_remediation_conversion_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure quiz remediation conversion storage exists for SQLite."""
@@ -7877,6 +13241,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 40:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V39_TO_V40_POSTGRES, conn, expected_version=40)
                 current_version = 40
+            if current_version < 41:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V40_TO_V41_POSTGRES, conn, expected_version=41)
+                current_version = 41
+            if current_version < 42:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V41_TO_V42_POSTGRES, conn, expected_version=42)
+                current_version = 42
+            if current_version < 43:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V42_TO_V43_POSTGRES, conn, expected_version=43)
+                current_version = 43
+            if current_version < 44:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V43_TO_V44_POSTGRES, conn, expected_version=44)
+                current_version = 44
+            if current_version < 45:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V44_TO_V45_POSTGRES, conn, expected_version=45)
+                current_version = 45
+            if current_version < 46:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V45_TO_V46_POSTGRES, conn, expected_version=46)
+                current_version = 46
+            if current_version < 47:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V46_TO_V47_POSTGRES, conn, expected_version=47)
+                current_version = 47
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -7884,7 +13269,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
             self._ensure_flashcard_asset_schema_postgres(conn)
+            self._ensure_flashcard_template_schema_postgres(conn)
             self._ensure_flashcard_scheduler_schema_postgres(conn)
+            self._ensure_flashcard_deck_sharing_schema_postgres(conn)
+            self._ensure_study_pack_schema_postgres(conn)
             self._ensure_study_assistant_schema_postgres(conn)
             self._ensure_workspace_study_material_schema_postgres(conn)
             self._ensure_quiz_remediation_conversion_schema_postgres(conn)
@@ -7893,7 +13281,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_recent_voice_command_schema_postgres(conn)
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
+            self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
+            self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
 
             if current_version < target_version:
                 logger.warning(
@@ -8141,3908 +13531,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             f"message_metadata table creation not supported for backend {self.backend_type.value}"
         )
 
-    def add_message_metadata(self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None) -> bool:
-        """Upsert per-message metadata such as tool calls.
+    # Message metadata CRUD methods are delegated to MessageStore at module bottom.
 
-        Stores JSON-serialized metadata in an auxiliary table `message_metadata`.
-        The table is created on-demand if missing.
-        """
-        try:
-            self._ensure_message_metadata_table()
-            if self.backend_type == BackendType.SQLITE:
-                query = (
-                    "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
-                    "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP"
-                )
-                self.execute_query(
-                    query,
-                    (
-                        message_id,
-                        json.dumps(tool_calls) if tool_calls is not None else None,
-                        json.dumps(extra) if extra is not None else None,
-                    ),
-                    commit=True,
-                )
-                return True
-
-            upsert = (
-                "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                "VALUES (%s, %s, %s, NOW()) "
-                "ON CONFLICT (message_id) DO UPDATE SET tool_calls_json = EXCLUDED.tool_calls_json, "
-                "extra_json = EXCLUDED.extra_json, last_modified = NOW()"
-            )
-            self.backend.execute(
-                upsert,
-                (
-                    message_id,
-                    json.dumps(tool_calls) if tool_calls is not None else None,
-                    json.dumps(extra) if extra is not None else None,
-                ),
-            )
-            return True  # noqa: TRY300
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"add_message_metadata failed for message {message_id}: {e}")
-            return False
-
-    def get_message_metadata(self, message_id: str) -> dict[str, Any] | None:
-        """Fetch metadata for a message if present."""
-        try:
-            self._ensure_message_metadata_table()
-            if self.backend_type == BackendType.SQLITE:
-                cursor = self.execute_query(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = ?",
-                    (message_id,),
-                )
-                row = cursor.fetchone()
-                if not row:
-                    return None
-                tc, ex, lm = row
-            else:
-                result = self.backend.execute(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = %s",
-                    (message_id,)
-                )
-                r = result.fetchone()
-                if not r:
-                    return None
-                tc, ex, lm = r
-            return {
-                "tool_calls": json.loads(tc) if tc else None,
-                "extra": json.loads(ex) if ex else None,
-                "last_modified": lm,
-            }
-        except _CHACHA_NONCRITICAL_EXCEPTIONS:
-            return None
-
-    def _ensure_persona_live_voice_session_summaries_table(self) -> None:
-        """Ensure persona live-voice session summaries exist for analytics feedback."""
-        if self.backend_type == BackendType.SQLITE:
-            self.execute_query(
-                """
-                CREATE TABLE IF NOT EXISTS persona_live_voice_session_summaries(
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER NOT NULL,
-                  persona_id TEXT NOT NULL,
-                  session_id TEXT NOT NULL,
-                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  started_at TEXT,
-                  ended_at TEXT,
-                  auto_commit_enabled INTEGER,
-                  vad_threshold REAL,
-                  min_silence_ms INTEGER,
-                  turn_stop_secs REAL,
-                  min_utterance_secs REAL,
-                  turn_detection_changed_during_session INTEGER NOT NULL DEFAULT 0,
-                  total_committed_turns INTEGER NOT NULL DEFAULT 0,
-                  vad_auto_commit_count INTEGER NOT NULL DEFAULT 0,
-                  manual_commit_count INTEGER NOT NULL DEFAULT 0,
-                  manual_mode_required_count INTEGER NOT NULL DEFAULT 0,
-                  text_only_tts_count INTEGER NOT NULL DEFAULT 0,
-                  listening_recovery_count INTEGER NOT NULL DEFAULT 0,
-                  thinking_recovery_count INTEGER NOT NULL DEFAULT 0,
-                  UNIQUE(user_id, persona_id, session_id)
-                )
-                """,
-                script=False,
-                commit=True,
-            )
-            self.execute_query(
-                """
-                CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
-                ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
-                """,
-                script=False,
-                commit=True,
-            )
-            return
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS persona_live_voice_session_summaries(
-                  id BIGSERIAL PRIMARY KEY,
-                  user_id BIGINT NOT NULL,
-                  persona_id TEXT NOT NULL,
-                  session_id TEXT NOT NULL,
-                  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                  started_at TEXT,
-                  ended_at TEXT,
-                  auto_commit_enabled BOOLEAN,
-                  vad_threshold DOUBLE PRECISION,
-                  min_silence_ms INTEGER,
-                  turn_stop_secs DOUBLE PRECISION,
-                  min_utterance_secs DOUBLE PRECISION,
-                  turn_detection_changed_during_session BOOLEAN NOT NULL DEFAULT FALSE,
-                  total_committed_turns INTEGER NOT NULL DEFAULT 0,
-                  vad_auto_commit_count INTEGER NOT NULL DEFAULT 0,
-                  manual_commit_count INTEGER NOT NULL DEFAULT 0,
-                  manual_mode_required_count INTEGER NOT NULL DEFAULT 0,
-                  text_only_tts_count INTEGER NOT NULL DEFAULT 0,
-                  listening_recovery_count INTEGER NOT NULL DEFAULT 0,
-                  thinking_recovery_count INTEGER NOT NULL DEFAULT 0,
-                  UNIQUE(user_id, persona_id, session_id)
-                )
-                """
-            )
-            self.backend.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
-                ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
-                """
-            )
-            return
-
-        raise NotImplementedError(
-            "persona_live_voice_session_summaries table creation not supported "
-            f"for backend {self.backend_type.value}"
-        )
-
-    def upsert_persona_live_voice_session_summary(
-        self,
-        *,
-        user_id: int,
-        persona_id: str,
-        session_id: str,
-        started_at: str | None = None,
-        ended_at: str | None = None,
-        auto_commit_enabled: bool | None = None,
-        vad_threshold: float | None = None,
-        min_silence_ms: int | None = None,
-        turn_stop_secs: float | None = None,
-        min_utterance_secs: float | None = None,
-        commit_source: str | None = None,
-        manual_mode_required_increment: int = 0,
-        text_only_tts_increment: int = 0,
-        listening_recovery_count: int | None = None,
-        thinking_recovery_count: int | None = None,
-        finalize: bool = False,
-    ) -> bool:
-        """Create or update one persona live-voice session summary row."""
-        self._ensure_persona_live_voice_session_summaries_table()
-
-        now = self._get_current_utc_timestamp_iso()
-
-        def _bool_for_db(value: bool | None) -> bool | int | None:
-            if value is None:
-                return None
-            if self.backend_type == BackendType.POSTGRESQL:
-                return bool(value)
-            return int(bool(value))
-
-        snapshot_values = {
-            "auto_commit_enabled": _bool_for_db(auto_commit_enabled),
-            "vad_threshold": float(vad_threshold) if vad_threshold is not None else None,
-            "min_silence_ms": int(min_silence_ms) if min_silence_ms is not None else None,
-            "turn_stop_secs": float(turn_stop_secs) if turn_stop_secs is not None else None,
-            "min_utterance_secs": (
-                float(min_utterance_secs) if min_utterance_secs is not None else None
-            ),
-        }
-        snapshot_provided = any(value is not None for value in snapshot_values.values())
-
-        with self.transaction():
-            row = self.execute_query(
-                """
-                SELECT *
-                FROM persona_live_voice_session_summaries
-                WHERE user_id = ? AND persona_id = ? AND session_id = ?
-                """,
-                (user_id, persona_id, session_id),
-            ).fetchone()
-
-            if row is None:
-                total_committed_turns = 1 if commit_source in {"vad_auto", "manual"} else 0
-                vad_auto_commit_count = 1 if commit_source == "vad_auto" else 0
-                manual_commit_count = 1 if commit_source == "manual" else 0
-                normalized_started_at = started_at or now
-                normalized_ended_at = ended_at or (now if finalize else None)
-                self.execute_query(
-                    """
-                    INSERT INTO persona_live_voice_session_summaries(
-                        user_id, persona_id, session_id, created_at, updated_at,
-                        started_at, ended_at, auto_commit_enabled, vad_threshold,
-                        min_silence_ms, turn_stop_secs, min_utterance_secs,
-                        turn_detection_changed_during_session, total_committed_turns,
-                        vad_auto_commit_count, manual_commit_count,
-                        manual_mode_required_count, text_only_tts_count,
-                        listening_recovery_count, thinking_recovery_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        user_id,
-                        persona_id,
-                        session_id,
-                        now,
-                        now,
-                        normalized_started_at,
-                        normalized_ended_at,
-                        snapshot_values["auto_commit_enabled"],
-                        snapshot_values["vad_threshold"],
-                        snapshot_values["min_silence_ms"],
-                        snapshot_values["turn_stop_secs"],
-                        snapshot_values["min_utterance_secs"],
-                        _bool_for_db(False),
-                        total_committed_turns,
-                        vad_auto_commit_count,
-                        manual_commit_count,
-                        max(0, int(manual_mode_required_increment or 0)),
-                        max(0, int(text_only_tts_increment or 0)),
-                        max(0, int(listening_recovery_count or 0)),
-                        max(0, int(thinking_recovery_count or 0)),
-                    ),
-                )
-                return True
-
-            existing = dict(row)
-            updates: list[str] = ["updated_at = ?"]
-            params: list[Any] = [now]
-
-            existing_snapshot_values = {
-                "auto_commit_enabled": existing.get("auto_commit_enabled"),
-                "vad_threshold": existing.get("vad_threshold"),
-                "min_silence_ms": existing.get("min_silence_ms"),
-                "turn_stop_secs": existing.get("turn_stop_secs"),
-                "min_utterance_secs": existing.get("min_utterance_secs"),
-            }
-            existing_snapshot_missing = all(
-                value is None for value in existing_snapshot_values.values()
-            )
-            if snapshot_provided and existing_snapshot_missing:
-                for field_name, value in snapshot_values.items():
-                    updates.append(f"{field_name} = ?")
-                    params.append(value)
-            elif snapshot_provided:
-                snapshot_changed = any(
-                    snapshot_values[field_name] is not None
-                    and snapshot_values[field_name] != existing_snapshot_values[field_name]
-                    for field_name in snapshot_values
-                )
-                if snapshot_changed and not bool(
-                    existing.get("turn_detection_changed_during_session")
-                ):
-                    updates.append("turn_detection_changed_during_session = ?")
-                    params.append(_bool_for_db(True))
-
-            if started_at and not existing.get("started_at"):
-                updates.append("started_at = ?")
-                params.append(started_at)
-
-            if commit_source == "vad_auto":
-                updates.extend(
-                    [
-                        "total_committed_turns = total_committed_turns + 1",
-                        "vad_auto_commit_count = vad_auto_commit_count + 1",
-                    ]
-                )
-            elif commit_source == "manual":
-                updates.extend(
-                    [
-                        "total_committed_turns = total_committed_turns + 1",
-                        "manual_commit_count = manual_commit_count + 1",
-                    ]
-                )
-
-            if manual_mode_required_increment:
-                updates.append(
-                    "manual_mode_required_count = manual_mode_required_count + ?"
-                )
-                params.append(max(0, int(manual_mode_required_increment)))
-
-            if text_only_tts_increment:
-                updates.append("text_only_tts_count = text_only_tts_count + ?")
-                params.append(max(0, int(text_only_tts_increment)))
-
-            if listening_recovery_count is not None:
-                updates.append("listening_recovery_count = ?")
-                params.append(max(0, int(listening_recovery_count)))
-
-            if thinking_recovery_count is not None:
-                updates.append("thinking_recovery_count = ?")
-                params.append(max(0, int(thinking_recovery_count)))
-
-            if ended_at:
-                updates.append("ended_at = ?")
-                params.append(ended_at)
-            elif finalize:
-                updates.append("ended_at = ?")
-                params.append(now)
-
-            params.extend([user_id, persona_id, session_id])
-            self.execute_query(
-                f"""
-                UPDATE persona_live_voice_session_summaries
-                SET {", ".join(updates)}
-                WHERE user_id = ? AND persona_id = ? AND session_id = ?
-                """,  # nosec B608
-                tuple(params),
-            )
-            return True
-
-    def list_persona_live_voice_session_summaries(
-        self,
-        *,
-        user_id: int,
-        persona_id: str,
-        days: int = 7,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        """List recent persona live-voice session summaries for analytics feedback."""
-        self._ensure_persona_live_voice_session_summaries_table()
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
-        ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        cursor = self.execute_query(
-            """
-            SELECT *
-            FROM persona_live_voice_session_summaries
-            WHERE user_id = ? AND persona_id = ?
-              AND COALESCE(started_at, created_at) >= ?
-            ORDER BY COALESCE(started_at, created_at) DESC, updated_at DESC
-            LIMIT ?
-            """,
-            (user_id, persona_id, cutoff, max(1, int(limit))),
-        )
-        return [dict(row) for row in cursor.fetchall() if row]
-
-    def get_persona_live_voice_session_summary(
-        self,
-        *,
-        user_id: int,
-        persona_id: str,
-        session_id: str,
-    ) -> dict[str, Any] | None:
-        """Fetch one persona live-voice session summary by session id."""
-        self._ensure_persona_live_voice_session_summaries_table()
-        row = self.execute_query(
-            """
-            SELECT *
-            FROM persona_live_voice_session_summaries
-            WHERE user_id = ? AND persona_id = ? AND session_id = ?
-            """,
-            (user_id, persona_id, session_id),
-        ).fetchone()
-        return dict(row) if row else None
-
-    def _ensure_persona_setup_events_table(self) -> None:
-        """Ensure append-only persona setup analytics events exist."""
-        if self.backend_type == BackendType.SQLITE:
-            self.execute_query(
-                """
-                CREATE TABLE IF NOT EXISTS persona_setup_events(
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  event_id TEXT NOT NULL UNIQUE,
-                  user_id INTEGER NOT NULL,
-                  persona_id TEXT NOT NULL,
-                  run_id TEXT NOT NULL,
-                  event_type TEXT NOT NULL,
-                  event_key TEXT,
-                  step TEXT,
-                  completion_type TEXT,
-                  detour_source TEXT,
-                  action_target TEXT,
-                  metadata_json TEXT,
-                  created_at TEXT NOT NULL
-                )
-                """,
-                script=False,
-                commit=True,
-            )
-            self.execute_query(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_setup_events_event_key
-                ON persona_setup_events(user_id, persona_id, run_id, event_key)
-                WHERE event_key IS NOT NULL
-                """,
-                script=False,
-                commit=True,
-            )
-            self.execute_query(
-                """
-                CREATE INDEX IF NOT EXISTS idx_persona_setup_events_persona_created
-                ON persona_setup_events(user_id, persona_id, created_at, id)
-                """,
-                script=False,
-                commit=True,
-            )
-            return
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS persona_setup_events(
-                  id BIGSERIAL PRIMARY KEY,
-                  event_id TEXT NOT NULL UNIQUE,
-                  user_id BIGINT NOT NULL,
-                  persona_id TEXT NOT NULL,
-                  run_id TEXT NOT NULL,
-                  event_type TEXT NOT NULL,
-                  event_key TEXT,
-                  step TEXT,
-                  completion_type TEXT,
-                  detour_source TEXT,
-                  action_target TEXT,
-                  metadata_json TEXT,
-                  created_at TEXT NOT NULL
-                )
-                """
-            )
-            self.backend.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_setup_events_event_key
-                ON persona_setup_events(user_id, persona_id, run_id, event_key)
-                WHERE event_key IS NOT NULL
-                """
-            )
-            self.backend.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_persona_setup_events_persona_created
-                ON persona_setup_events(user_id, persona_id, created_at, id)
-                """
-            )
-            return
-
-        raise NotImplementedError(
-            "persona_setup_events table creation not supported "
-            f"for backend {self.backend_type.value}"
-        )
-
-    def _persona_setup_event_row_to_dict(self, row: Any) -> dict[str, Any]:
-        item = dict(row)
-        event_label = str(item.get("event_id") or item.get("id") or "unknown")
-        item["metadata"] = self._decode_persona_json_object(
-            item.get("metadata_json"),
-            field_name="metadata_json",
-            context_label=f"persona setup event {event_label}",
-        )
-        return item
-
-    def _decode_persona_json_object(
-        self,
-        raw_value: Any,
-        *,
-        field_name: str,
-        context_label: str,
-    ) -> dict[str, Any]:
-        """Decode one persona JSON column into a dictionary with warning logs on invalid data."""
-        if isinstance(raw_value, dict):
-            return raw_value
-        if not isinstance(raw_value, str):
-            return {}
-
-        try:
-            decoded_value = json.loads(raw_value)
-        except json.JSONDecodeError as exc:
-            logger.warning(
-                "Invalid JSON in {} for {}: {}",
-                field_name,
-                context_label,
-                exc,
-            )
-            return {}
-
-        if isinstance(decoded_value, dict):
-            return decoded_value
-
-        logger.warning(
-            "Expected JSON object in {} for {}, got {}.",
-            field_name,
-            context_label,
-            type(decoded_value).__name__,
-        )
-        return {}
-
-    def record_persona_setup_event(
-        self,
-        *,
-        user_id: int,
-        persona_id: str,
-        event_id: str,
-        run_id: str,
-        event_type: str,
-        event_key: str | None = None,
-        step: str | None = None,
-        completion_type: str | None = None,
-        detour_source: str | None = None,
-        action_target: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Insert one persona setup analytics event with optional once-only dedupe."""
-        self._ensure_persona_setup_events_table()
-        now = self._get_current_utc_timestamp_iso()
-        metadata_json = self._ensure_json_string(metadata if isinstance(metadata, dict) else {})
-
-        with self.transaction():
-            row = self.execute_query(
-                """
-                SELECT *
-                FROM persona_setup_events
-                WHERE user_id = ? AND persona_id = ? AND event_id = ?
-                """,
-                (user_id, persona_id, event_id),
-            ).fetchone()
-            if row:
-                item = self._persona_setup_event_row_to_dict(row)
-                item["deduped"] = True
-                return item
-
-            if event_key:
-                row = self.execute_query(
-                    """
-                    SELECT *
-                    FROM persona_setup_events
-                    WHERE user_id = ? AND persona_id = ? AND run_id = ? AND event_key = ?
-                    """,
-                    (user_id, persona_id, run_id, event_key),
-                ).fetchone()
-                if row:
-                    item = self._persona_setup_event_row_to_dict(row)
-                    item["deduped"] = True
-                    return item
-
-            self.execute_query(
-                """
-                INSERT INTO persona_setup_events(
-                    event_id, user_id, persona_id, run_id, event_type, event_key,
-                    step, completion_type, detour_source, action_target,
-                    metadata_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    user_id,
-                    persona_id,
-                    run_id,
-                    event_type,
-                    event_key,
-                    step,
-                    completion_type,
-                    detour_source,
-                    action_target,
-                    metadata_json,
-                    now,
-                ),
-            )
-            row = self.execute_query(
-                """
-                SELECT *
-                FROM persona_setup_events
-                WHERE user_id = ? AND persona_id = ? AND event_id = ?
-                """,
-                (user_id, persona_id, event_id),
-            ).fetchone()
-            if not row:
-                error_message = "Failed to load inserted persona setup event."
-                raise CharactersRAGDBError(error_message)
-            item = self._persona_setup_event_row_to_dict(row)
-            item["deduped"] = False
-            return item
-
-    def list_persona_setup_events(
-        self,
-        *,
-        user_id: int,
-        persona_id: str,
-        days: int = 30,
-        run_id: str | None = None,
-        limit: int = 500,
-    ) -> list[dict[str, Any]]:
-        """List recent persona setup events for one persona."""
-        self._ensure_persona_setup_events_table()
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
-        ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-        params: list[Any] = [user_id, persona_id, cutoff]
-        query = """
-            SELECT *
-            FROM persona_setup_events
-            WHERE user_id = ? AND persona_id = ? AND created_at >= ?
-        """
-        if run_id:
-            query += " AND run_id = ?"
-            params.append(run_id)
-        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
-        params.append(max(1, int(limit)))
-
-        cursor = self.execute_query(query, tuple(params))
-        return [
-            self._persona_setup_event_row_to_dict(row)
-            for row in cursor.fetchall()
-            if row
-        ]
-
-    def get_persona_setup_analytics_summary(
-        self,
-        *,
-        user_id: int,
-        persona_id: str,
-        days: int = 30,
-        recent_run_limit: int = 10,
-    ) -> dict[str, Any]:
-        """Aggregate recent persona setup analytics runs and summary rates."""
-        events = self.list_persona_setup_events(
-            user_id=user_id,
-            persona_id=persona_id,
-            days=days,
-            limit=5000,
-        )
-        runs: dict[str, dict[str, Any]] = {}
-        detour_started_counts: dict[str, int] = {}
-        detour_returned_counts: dict[str, int] = {}
-
-        for event in events:
-            run_id = str(event.get("run_id") or "").strip()
-            if not run_id:
-                continue
-            run = runs.setdefault(
-                run_id,
-                {
-                    "run_id": run_id,
-                    "started_at": None,
-                    "completed_at": None,
-                    "completion_type": None,
-                    "terminal_step": None,
-                    "handoff_clicked": False,
-                    "handoff_target_reached": False,
-                    "handoff_dismissed": False,
-                    "first_post_setup_action": False,
-                    "_reached_targets": set(),
-                    "_latest_id": -1,
-                    "_earliest_created_at": None,
-                    "_latest_step_id": -1,
-                },
-            )
-            event_id_value = int(event.get("id") or 0)
-            created_at = str(event.get("created_at") or "").strip() or None
-            event_type = str(event.get("event_type") or "").strip()
-            step = str(event.get("step") or "").strip() or None
-            detour_source = str(event.get("detour_source") or "").strip() or None
-
-            if event_id_value > int(run["_latest_id"]):
-                run["_latest_id"] = event_id_value
-            if created_at and (
-                run["_earliest_created_at"] is None
-                or created_at < str(run["_earliest_created_at"])
-            ):
-                run["_earliest_created_at"] = created_at
-            if event_type == "setup_started" and created_at and (
-                run["started_at"] is None or created_at < str(run["started_at"])
-            ):
-                run["started_at"] = created_at
-            if event_type == "setup_completed" and created_at and (
-                run["completed_at"] is None or created_at > str(run["completed_at"])
-            ):
-                run["completed_at"] = created_at
-                run["completion_type"] = (
-                    str(event.get("completion_type") or "").strip() or None
-                )
-            if step and event_id_value >= int(run["_latest_step_id"]):
-                run["_latest_step_id"] = event_id_value
-                run["terminal_step"] = step
-            if event_type == "handoff_action_clicked":
-                run["handoff_clicked"] = True
-            elif event_type == "handoff_target_reached":
-                run["handoff_target_reached"] = True
-                action_target = str(event.get("action_target") or "").strip()
-                if action_target:
-                    reached_targets = run["_reached_targets"]
-                    if isinstance(reached_targets, set):
-                        reached_targets.add(action_target)
-            elif event_type == "handoff_dismissed":
-                run["handoff_dismissed"] = True
-            elif event_type == "first_post_setup_action":
-                run["first_post_setup_action"] = True
-            elif event_type == "detour_started" and detour_source:
-                detour_started_counts[detour_source] = (
-                    detour_started_counts.get(detour_source, 0) + 1
-                )
-            elif event_type == "detour_returned" and detour_source:
-                detour_returned_counts[detour_source] = (
-                    detour_returned_counts.get(detour_source, 0) + 1
-                )
-
-        recent_runs: list[dict[str, Any]] = []
-        completed_runs = 0
-        dry_run_completion_count = 0
-        live_session_completion_count = 0
-        handoff_clicked_runs = 0
-        handoff_target_reached_runs = 0
-        first_post_setup_action_runs = 0
-        handoff_target_reached_counts: dict[str, int] = {}
-        dropoff_counts: dict[str, int] = {}
-
-        for run in sorted(
-            runs.values(),
-            key=lambda item: int(item["_latest_id"]),
-            reverse=True,
-        ):
-            if run["started_at"] is None:
-                run["started_at"] = run["_earliest_created_at"]
-            completion_type = str(run.get("completion_type") or "").strip() or None
-            if completion_type:
-                completed_runs += 1
-                if completion_type == "dry_run":
-                    dry_run_completion_count += 1
-                elif completion_type == "live_session":
-                    live_session_completion_count += 1
-            else:
-                terminal_step = str(run.get("terminal_step") or "").strip() or None
-                if terminal_step:
-                    dropoff_counts[terminal_step] = dropoff_counts.get(terminal_step, 0) + 1
-
-            if bool(run.get("handoff_clicked")):
-                handoff_clicked_runs += 1
-            if bool(run.get("handoff_target_reached")):
-                handoff_target_reached_runs += 1
-            if bool(run.get("first_post_setup_action")):
-                first_post_setup_action_runs += 1
-            reached_targets = run.get("_reached_targets")
-            if isinstance(reached_targets, set):
-                for action_target in reached_targets:
-                    handoff_target_reached_counts[action_target] = (
-                        handoff_target_reached_counts.get(action_target, 0) + 1
-                    )
-
-            recent_runs.append(
-                {
-                    "run_id": run["run_id"],
-                    "started_at": run["started_at"],
-                    "completed_at": run["completed_at"],
-                    "completion_type": completion_type,
-                    "terminal_step": run["terminal_step"],
-                    "handoff_clicked": bool(run["handoff_clicked"]),
-                    "handoff_target_reached": bool(run["handoff_target_reached"]),
-                    "handoff_dismissed": bool(run["handoff_dismissed"]),
-                    "first_post_setup_action": bool(run["first_post_setup_action"]),
-                }
-            )
-
-        total_runs = len(runs)
-        most_common_dropoff_step = None
-        if dropoff_counts:
-            most_common_dropoff_step = max(
-                dropoff_counts.items(),
-                key=lambda item: (item[1], item[0]),
-            )[0]
-
-        return {
-            "summary": {
-                "total_runs": total_runs,
-                "completed_runs": completed_runs,
-                "completion_rate": (
-                    float(completed_runs) / float(total_runs)
-                    if total_runs
-                    else 0.0
-                ),
-                "dry_run_completion_count": dry_run_completion_count,
-                "live_session_completion_count": live_session_completion_count,
-                "most_common_dropoff_step": most_common_dropoff_step,
-                "handoff_click_rate": (
-                    float(handoff_clicked_runs) / float(total_runs)
-                    if total_runs
-                    else 0.0
-                ),
-                "handoff_target_reach_rate": (
-                    float(handoff_target_reached_runs) / float(handoff_clicked_runs)
-                    if handoff_clicked_runs
-                    else 0.0
-                ),
-                "first_post_setup_action_rate": (
-                    float(first_post_setup_action_runs) / float(total_runs)
-                    if total_runs
-                    else 0.0
-                ),
-                "handoff_target_reached_counts": handoff_target_reached_counts,
-                "detour_started_counts": detour_started_counts,
-                "detour_returned_counts": detour_returned_counts,
-            },
-            "recent_runs": recent_runs[: max(1, int(recent_run_limit))],
-        }
-
-    def upsert_voice_command(
-        self,
-        *,
-        command_id: str,
-        user_id: int,
-        persona_id: str | None,
-        connection_id: str | None,
-        name: str,
-        phrases: list[str],
-        action_type: str,
-        action_config: dict[str, Any],
-        priority: int,
-        enabled: bool,
-        requires_confirmation: bool,
-        description: str | None,
-        created_at: str | None = None,
-        updated_at: str | None = None,
-    ) -> str:
-        """Insert or update a voice command record in the DB layer."""
-        final_command_id = str(command_id).strip()
-        if not final_command_id:
-            raise InputError("Voice command ID cannot be empty.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        created_timestamp = str(created_at or now)
-        updated_timestamp = str(updated_at or now)
-        phrases_json = self._serialize_json_payload(list(phrases), "Voice command phrases")
-        action_config_json = self._serialize_json_payload(
-            dict(action_config or {}),
-            "Voice command action config",
-        )
-        query = """
-            INSERT INTO voice_commands (
-                id, user_id, persona_id, connection_id, name, phrases, action_type, action_config,
-                priority, enabled, requires_confirmation, description,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                persona_id = excluded.persona_id,
-                connection_id = excluded.connection_id,
-                name = excluded.name,
-                phrases = excluded.phrases,
-                action_type = excluded.action_type,
-                action_config = excluded.action_config,
-                priority = excluded.priority,
-                enabled = excluded.enabled,
-                requires_confirmation = excluded.requires_confirmation,
-                description = excluded.description,
-                updated_at = excluded.updated_at
-        """
-        params = (
-            final_command_id,
-            int(user_id),
-            str(persona_id) if persona_id is not None else None,
-            str(connection_id) if connection_id is not None else None,
-            str(name),
-            phrases_json,
-            str(action_type),
-            action_config_json,
-            int(priority),
-            1 if enabled else 0,
-            1 if requires_confirmation else 0,
-            description,
-            created_timestamp,
-            updated_timestamp,
-        )
-        try:
-            with self.transaction():
-                self.execute_query(query, params)
-            return final_command_id
-        except CharactersRAGDBError:
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            raise CharactersRAGDBError(f"Failed to save voice command: {exc}") from exc  # noqa: TRY003
-
-    # ----------------------
-    # Conversation settings
-    # ----------------------
-    def _ensure_conversation_settings_table(self) -> None:
-        """Ensure the conversation_settings table exists for the active backend."""
-        if self.backend_type == BackendType.SQLITE:
-            self.execute_query(
-                """
-                CREATE TABLE IF NOT EXISTS conversation_settings(
-                  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-                  settings_json TEXT NOT NULL,
-                  last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """,
-                script=False,
-                commit=True,
-            )
-            return
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS conversation_settings(
-                  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-                  settings_json TEXT NOT NULL,
-                  last_modified TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            return
-
-        raise NotImplementedError(
-            f"conversation_settings table creation not supported for backend {self.backend_type.value}"
-        )
-
-    def upsert_conversation_settings(self, conversation_id: str, settings: dict[str, Any]) -> bool:
-        """Upsert per-conversation settings JSON.
-
-        Also bumps ``conversations.version`` and ``conversations.last_modified``
-        so that clients using optimistic-locking can detect the change.
-        """
-        try:
-            self._ensure_conversation_settings_table()
-            payload = json.dumps(settings)
-            if self.backend_type == BackendType.SQLITE:
-                query = (
-                    "INSERT INTO conversation_settings(conversation_id, settings_json, last_modified) "
-                    "VALUES (?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(conversation_id) DO UPDATE SET settings_json=excluded.settings_json, "
-                    "last_modified=CURRENT_TIMESTAMP"
-                )
-                self.execute_query(query, (conversation_id, payload), commit=True)
-                # Bump parent conversation version + last_modified (best-effort).
-                self.execute_query(
-                    "UPDATE conversations SET version = version + 1, last_modified = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND deleted = 0",
-                    (conversation_id,),
-                    commit=True,
-                )
-                return True
-
-            upsert = (
-                "INSERT INTO conversation_settings(conversation_id, settings_json, last_modified) "
-                "VALUES (%s, %s, NOW()) "
-                "ON CONFLICT (conversation_id) DO UPDATE SET settings_json = EXCLUDED.settings_json, "
-                "last_modified = NOW()"
-            )
-            self.backend.execute(upsert, (conversation_id, payload))
-            # Bump parent conversation version + last_modified (best-effort).
-            self.backend.execute(
-                "UPDATE conversations SET version = version + 1, last_modified = NOW() "
-                "WHERE id = %s AND deleted = 0",
-                (conversation_id,),
-            )
-            return True  # noqa: TRY300
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"upsert_conversation_settings failed for {conversation_id}: {exc}")
-            return False
-
-    def get_conversation_settings(self, conversation_id: str) -> dict[str, Any] | None:
-        """Fetch settings for a conversation if present."""
-        try:
-            self._ensure_conversation_settings_table()
-            if self.backend_type == BackendType.SQLITE:
-                cursor = self.execute_query(
-                    "SELECT settings_json, last_modified FROM conversation_settings WHERE conversation_id = ?",
-                    (conversation_id,),
-                )
-                row = cursor.fetchone()
-                if not row:
-                    return None
-                settings_json, last_modified = row
-            else:
-                result = self.backend.execute(
-                    "SELECT settings_json, last_modified FROM conversation_settings WHERE conversation_id = %s",
-                    (conversation_id,),
-                )
-                r = result.fetchone()
-                if not r:
-                    return None
-                settings_json, last_modified = r
-
-            settings = json.loads(settings_json) if settings_json else {}
-            return {"settings": settings, "last_modified": last_modified}  # noqa: TRY300
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"get_conversation_settings failed for {conversation_id}: {exc}")
-            return None
-
-    # ----------------------
-    # Prompt presets
-    # ----------------------
-    def _ensure_prompt_presets_table(self) -> None:
-        """Ensure the prompt_presets table exists."""
-        if self.backend_type == BackendType.SQLITE:
-            self.execute_query(
-                """
-                CREATE TABLE IF NOT EXISTS prompt_presets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    preset_id TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL,
-                    section_order TEXT NOT NULL DEFAULT '[]',
-                    section_templates TEXT NOT NULL DEFAULT '{}',
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """,
-                commit=True,
-            )
-        else:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS prompt_presets (
-                    id SERIAL PRIMARY KEY,
-                    preset_id TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL,
-                    section_order TEXT NOT NULL DEFAULT '[]',
-                    section_templates TEXT NOT NULL DEFAULT '{}',
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-
-    def upsert_prompt_preset(
-        self,
-        preset_id: str,
-        name: str,
-        section_order: list[str],
-        section_templates: dict[str, str],
-    ) -> bool:
-        """Create or update a prompt preset."""
-        try:
-            self._ensure_prompt_presets_table()
-            order_json = json.dumps(section_order)
-            templates_json = json.dumps(section_templates)
-            if self.backend_type == BackendType.SQLITE:
-                self.execute_query(
-                    "INSERT INTO prompt_presets(preset_id, name, section_order, section_templates, updated_at) "
-                    "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(preset_id) DO UPDATE SET name=excluded.name, "
-                    "section_order=excluded.section_order, section_templates=excluded.section_templates, "
-                    "updated_at=CURRENT_TIMESTAMP",
-                    (preset_id, name, order_json, templates_json),
-                    commit=True,
-                )
-            else:
-                self.backend.execute(
-                    "INSERT INTO prompt_presets(preset_id, name, section_order, section_templates, updated_at) "
-                    "VALUES (%s, %s, %s, %s, NOW()) "
-                    "ON CONFLICT (preset_id) DO UPDATE SET name = EXCLUDED.name, "
-                    "section_order = EXCLUDED.section_order, section_templates = EXCLUDED.section_templates, "
-                    "updated_at = NOW()",
-                    (preset_id, name, order_json, templates_json),
-                )
-            return True  # noqa: TRY300
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"upsert_prompt_preset failed for {preset_id}: {exc}")
-            return False
-
-    def get_prompt_preset(self, preset_id: str) -> dict[str, Any] | None:
-        """Fetch a single prompt preset by ID."""
-        try:
-            self._ensure_prompt_presets_table()
-            if self.backend_type == BackendType.SQLITE:
-                cursor = self.execute_query(
-                    "SELECT preset_id, name, section_order, section_templates, created_at, updated_at "
-                    "FROM prompt_presets WHERE preset_id = ?",
-                    (preset_id,),
-                )
-                row = cursor.fetchone()
-            else:
-                result = self.backend.execute(
-                    "SELECT preset_id, name, section_order, section_templates, created_at, updated_at "
-                    "FROM prompt_presets WHERE preset_id = %s",
-                    (preset_id,),
-                )
-                row = result.fetchone()
-            if not row:
-                return None
-            return {
-                "preset_id": row[0],
-                "name": row[1],
-                "section_order": json.loads(row[2]) if row[2] else [],
-                "section_templates": json.loads(row[3]) if row[3] else {},
-                "created_at": str(row[4]) if row[4] else None,
-                "updated_at": str(row[5]) if row[5] else None,
-            }
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"get_prompt_preset failed for {preset_id}: {exc}")
-            return None
-
-    def list_prompt_presets(self) -> list[dict[str, Any]]:
-        """List all user-defined prompt presets."""
-        try:
-            self._ensure_prompt_presets_table()
-            if self.backend_type == BackendType.SQLITE:
-                cursor = self.execute_query(
-                    "SELECT preset_id, name, section_order, section_templates, created_at, updated_at "
-                    "FROM prompt_presets ORDER BY name",
-                )
-                rows = cursor.fetchall()
-            else:
-                result = self.backend.execute(
-                    "SELECT preset_id, name, section_order, section_templates, created_at, updated_at "
-                    "FROM prompt_presets ORDER BY name",
-                )
-                rows = result.fetchall()
-            return [
-                {
-                    "preset_id": r[0],
-                    "name": r[1],
-                    "section_order": json.loads(r[2]) if r[2] else [],
-                    "section_templates": json.loads(r[3]) if r[3] else {},
-                    "created_at": str(r[4]) if r[4] else None,
-                    "updated_at": str(r[5]) if r[5] else None,
-                }
-                for r in rows
-            ]
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"list_prompt_presets failed: {exc}")
-            return []
-
-    def delete_prompt_preset(self, preset_id: str) -> bool:
-        """Delete a prompt preset by ID."""
-        try:
-            self._ensure_prompt_presets_table()
-            if self.backend_type == BackendType.SQLITE:
-                self.execute_query(
-                    "DELETE FROM prompt_presets WHERE preset_id = ?",
-                    (preset_id,),
-                    commit=True,
-                )
-            else:
-                self.backend.execute(
-                    "DELETE FROM prompt_presets WHERE preset_id = %s",
-                    (preset_id,),
-                )
-            return True  # noqa: TRY300
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"delete_prompt_preset failed for {preset_id}: {exc}")
-            return False
-
-    # ----------------------
-    # Skill registry
-    # ----------------------
-    def _ensure_skill_registry_table(self) -> None:
-        """Ensure the skill_registry table exists for the active backend."""
-        if self.backend_type == BackendType.SQLITE:
-            self.execute_query(
-                """
-                CREATE TABLE IF NOT EXISTS skill_registry (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT,
-                    argument_hint TEXT,
-                    disable_model_invocation BOOLEAN DEFAULT 0,
-                    user_invocable BOOLEAN DEFAULT 1,
-                    allowed_tools TEXT,
-                    model TEXT,
-                    context TEXT DEFAULT 'inline',
-                    directory_path TEXT NOT NULL,
-                    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    file_hash TEXT,
-                    uuid TEXT UNIQUE NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    deleted BOOLEAN DEFAULT 0,
-                    version INTEGER NOT NULL DEFAULT 1
-                )
-                """,
-                script=False,
-                commit=True,
-            )
-            self.execute_query(
-                "CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)",
-                script=False,
-                commit=True,
-            )
-            self.execute_query(
-                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)",
-                script=False,
-                commit=True,
-            )
-            self.execute_query(
-                "CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)",
-                script=False,
-                commit=True,
-            )
-            return
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS skill_registry (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT,
-                    argument_hint TEXT,
-                    disable_model_invocation BOOLEAN DEFAULT FALSE,
-                    user_invocable BOOLEAN DEFAULT TRUE,
-                    allowed_tools TEXT,
-                    model TEXT,
-                    context TEXT DEFAULT 'inline',
-                    directory_path TEXT NOT NULL,
-                    last_modified TIMESTAMP NOT NULL DEFAULT NOW(),
-                    file_hash TEXT,
-                    uuid TEXT UNIQUE NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    deleted BOOLEAN DEFAULT FALSE,
-                    version INTEGER NOT NULL DEFAULT 1
-                )
-                """
-            )
-            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)")
-            self.backend.execute(
-                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)"
-            )
-            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)")
-            return
-
-        raise NotImplementedError(
-            f"skill_registry table creation not supported for backend {self.backend_type.value}"
-        )
-
-    def _coerce_skill_datetime(self, value: Any) -> datetime | None:
-        """Best-effort conversion of database timestamps to datetime."""
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                return None
-        return None
-
-    def _skill_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a skill_registry row to a dict with JSON fields decoded."""
-        if not row:
-            return None
-        item = dict(row)
-        allowed_tools = item.get("allowed_tools")
-        if isinstance(allowed_tools, str):
-            try:
-                item["allowed_tools"] = json.loads(allowed_tools)
-            except json.JSONDecodeError:
-                item["allowed_tools"] = [t.strip() for t in allowed_tools.split(",") if t.strip()]
-        elif allowed_tools is None:
-            item["allowed_tools"] = None
-        else:
-            item["allowed_tools"] = allowed_tools
-
-        item["disable_model_invocation"] = bool(item.get("disable_model_invocation", False))
-        item["user_invocable"] = bool(item.get("user_invocable", True))
-        item["deleted"] = bool(item.get("deleted", False))
-
-        item["created_at"] = self._coerce_skill_datetime(item.get("created_at"))
-        item["last_modified"] = self._coerce_skill_datetime(item.get("last_modified"))
-        return item
-
-    def list_skill_registry(
-        self,
-        *,
-        include_hidden: bool = False,
-        include_deleted: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List skill registry entries with optional filters."""
-        self._ensure_skill_registry_table()
-        clauses = []
-        params: list[Any] = []
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        if not include_hidden:
-            clauses.append("user_invocable = 1")
-        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query = (
-            "SELECT * FROM skill_registry "  # nosec B608
-            f"{where_sql} "
-            "ORDER BY name ASC LIMIT ? OFFSET ?"
-        )
-        params.extend([limit, offset])
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            return [self._skill_row_to_dict(row) for row in cursor.fetchall() if row]
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error listing skills: {exc}")
-            raise
-
-    def count_skill_registry(
-        self,
-        *,
-        include_hidden: bool = False,
-        include_deleted: bool = False,
-    ) -> int:
-        """Return count of skills in registry."""
-        self._ensure_skill_registry_table()
-        clauses = []
-        params: list[Any] = []
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        if not include_hidden:
-            clauses.append("user_invocable = 1")
-        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query = f"SELECT COUNT(*) AS cnt FROM skill_registry {where_sql}"  # nosec B608
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            return int(row["cnt"]) if row else 0
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error counting skills: {exc}")
-            raise
-
-    def get_skill_registry(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
-        """Fetch a skill registry entry by name."""
-        self._ensure_skill_registry_table()
-        query = "SELECT * FROM skill_registry WHERE name = ?"
-        params: list[Any] = [name]
-        if not include_deleted:
-            query += " AND deleted = 0"
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            return self._skill_row_to_dict(row)
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error fetching skill '{name}': {exc}")
-            raise
-
-    def insert_skill_registry(self, skill_data: dict[str, Any]) -> str:
-        """Insert a new skill registry row and return its UUID."""
-        self._ensure_skill_registry_table()
-        name = str(skill_data.get("name") or "").strip().lower()
-        if not name:
-            raise InputError("Skill name is required.")  # noqa: TRY003
-        directory_path = str(skill_data.get("directory_path") or "")
-        if not directory_path:
-            raise InputError("directory_path is required for skill registry.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        skill_uuid = str(skill_data.get("uuid") or self._generate_uuid())
-        allowed_tools_json = self._ensure_json_string(skill_data.get("allowed_tools"))
-
-        query = (
-            "INSERT INTO skill_registry ("
-            "name, description, argument_hint, disable_model_invocation, user_invocable, "
-            "allowed_tools, model, context, directory_path, last_modified, file_hash, uuid, "
-            "created_at, deleted, version"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        params = (
-            name,
-            skill_data.get("description"),
-            skill_data.get("argument_hint"),
-            int(bool(skill_data.get("disable_model_invocation", False))),
-            int(bool(skill_data.get("user_invocable", True))),
-            allowed_tools_json,
-            skill_data.get("model"),
-            skill_data.get("context", "inline"),
-            directory_path,
-            now,
-            skill_data.get("file_hash"),
-            skill_uuid,
-            skill_data.get("created_at") or now,
-            int(bool(skill_data.get("deleted", False))),
-            int(skill_data.get("version", 1)),
-        )
-        try:
-            self.execute_query(query, params, commit=True)
-            return skill_uuid  # noqa: TRY300
-        except sqlite3.IntegrityError as e:
-            if "unique constraint failed: skill_registry.name" in str(e).lower():
-                raise ConflictError(  # noqa: TRY003
-                    f"Skill '{name}' already exists.",
-                    entity="skill_registry",
-                    entity_id=name,
-                ) from e
-            if "unique constraint failed: skill_registry.uuid" in str(e).lower():
-                raise ConflictError(  # noqa: TRY003
-                    "Skill UUID already exists.",
-                    entity="skill_registry",
-                    entity_id=skill_uuid,
-                ) from e
-            raise CharactersRAGDBError(f"Database integrity error adding skill '{name}': {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            if self._is_unique_violation(e):
-                raise ConflictError(  # noqa: TRY003
-                    f"Skill '{name}' already exists.",
-                    entity="skill_registry",
-                    entity_id=name,
-                ) from e
-            raise CharactersRAGDBError(f"Database integrity error adding skill '{name}': {e}") from e  # noqa: TRY003
-
-    def update_skill_registry(
-        self,
-        name: str,
-        update_data: dict[str, Any],
-        expected_version: int,
-    ) -> bool:
-        """Update a skill registry row using optimistic locking."""
-        if not update_data:
-            raise InputError(f"No data provided for update of skill '{name}'.")  # noqa: TRY003
-
-        self._ensure_skill_registry_table()
-        now = self._get_current_utc_timestamp_iso()
-        allowed_fields = {
-            "description",
-            "argument_hint",
-            "disable_model_invocation",
-            "user_invocable",
-            "allowed_tools",
-            "model",
-            "context",
-            "directory_path",
-            "file_hash",
-            "deleted",
-        }
-
-        set_parts: list[str] = []
-        params: list[Any] = []
-        for key, value in update_data.items():
-            if key not in allowed_fields:
-                continue
-            if key == "allowed_tools":
-                params.append(self._ensure_json_string(value))
-                set_parts.append("allowed_tools = ?")
-            elif key in {"disable_model_invocation", "user_invocable", "deleted"}:
-                params.append(int(bool(value)))
-                set_parts.append(f"{key} = ?")
-            else:
-                params.append(value)
-                set_parts.append(f"{key} = ?")
-
-        set_parts.extend(["last_modified = ?", "version = version + 1"])
-        params.append(now)
-        params.extend([name, expected_version])
-        query = (
-            f"UPDATE skill_registry SET {', '.join(set_parts)} "  # nosec B608
-            "WHERE name = ? AND version = ? AND deleted = 0"
-        )
-
-        try:
-            with self.transaction() as conn:
-                current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Skill '{name}' was modified (db has {current_db_version}, expected {expected_version}).",
-                        entity="skill_registry",
-                        entity_id=name,
-                    )
-
-                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-                cursor = conn.execute(prepared_query, prepared_params)
-                if cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Skill '{name}' update affected 0 rows.",
-                        entity="skill_registry",
-                        entity_id=name,
-                    )
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error updating skill '{name}': {exc}")
-            raise
-
-    def mark_skill_registry_deleted(self, name: str, expected_version: int) -> bool:
-        """Soft-delete a skill registry row using optimistic locking."""
-        self._ensure_skill_registry_table()
-        now = self._get_current_utc_timestamp_iso()
-        next_version = expected_version + 1
-
-        query = (
-            "UPDATE skill_registry SET deleted = 1, last_modified = ?, version = ? "
-            "WHERE name = ? AND version = ? AND deleted = 0"
-        )
-        params = (now, next_version, name, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                try:
-                    current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
-                except ConflictError:
-                    check_deleted = conn.execute(
-                        "SELECT deleted, version FROM skill_registry WHERE name = ?", (name,)
-                    ).fetchone()
-                    if check_deleted and check_deleted["deleted"]:
-                        logger.info("Skill '{}' already deleted; soft-delete is idempotent.", name)
-                        return True
-                    raise
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Skill '{name}' version mismatch (db has {current_db_version}, expected {expected_version}).",
-                        entity="skill_registry",
-                        entity_id=name,
-                    )
-
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                cursor = conn.execute(prepared_query, prepared_params)
-                if cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Skill '{name}' delete affected 0 rows.",
-                        entity="skill_registry",
-                        entity_id=name,
-                    )
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error deleting skill '{name}': {exc}")
-            raise
-
-    # ----------------------
-    # Chat grammar library
-    # ----------------------
-    def ensure_chat_grammars_table(self) -> None:
-        """Ensure the chat_grammars table exists for the active backend."""
-        self._ensure_chat_grammars_table()
-
-    def _ensure_chat_grammars_table(self) -> None:
-        """Create the user-scoped grammar-library table and indexes when missing."""
-        if self.backend_type == BackendType.SQLITE:
-            self.execute_query(
-                """
-                CREATE TABLE IF NOT EXISTS chat_grammars (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    grammar_text TEXT NOT NULL,
-                    validation_status TEXT NOT NULL DEFAULT 'unchecked',
-                    validation_error TEXT,
-                    last_validated_at DATETIME,
-                    is_archived BOOLEAN NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    deleted BOOLEAN NOT NULL DEFAULT 0,
-                    version INTEGER NOT NULL DEFAULT 1,
-                    UNIQUE(user_id, name)
-                )
-                """,
-                script=False,
-                commit=True,
-            )
-            self._migrate_sqlite_chat_grammars_table()
-            self._ensure_chat_grammars_indexes()
-            return
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            self.backend.execute(
-                """
-                CREATE TABLE IF NOT EXISTS chat_grammars (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    grammar_text TEXT NOT NULL,
-                    validation_status TEXT NOT NULL DEFAULT 'unchecked',
-                    validation_error TEXT,
-                    last_validated_at TIMESTAMP,
-                    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    deleted BOOLEAN NOT NULL DEFAULT FALSE,
-                    version INTEGER NOT NULL DEFAULT 1,
-                    CONSTRAINT uq_chat_grammars_user_name UNIQUE (user_id, name)
-                )
-                """
-            )
-            self._migrate_postgres_chat_grammars_table()
-            self._ensure_chat_grammars_indexes()
-            return
-
-        raise NotImplementedError(
-            f"chat_grammars table creation not supported for backend {self.backend_type.value}"
-        )
-
-    def _chat_grammar_owner_id(self) -> str:
-        """Return the effective owner identifier for grammar-library rows."""
-        owner_id = str(self.client_id or "").strip()
-        return owner_id or "unknown"
-
-    def _chat_grammar_column_names(self, conn: Any | None = None) -> set[str]:
-        """Return the current chat_grammars column names for the active backend."""
-        return {
-            str(column.get("name"))
-            for column in self.backend.get_table_info("chat_grammars", connection=conn)
-            if column.get("name")
-        }
-
-    def _ensure_chat_grammars_indexes(self) -> None:
-        """Create the owner-scoped lookup indexes used by grammar-library CRUD."""
-        index_statements = (
-            "CREATE INDEX IF NOT EXISTS idx_chat_grammars_user_name ON chat_grammars(user_id, name)",
-            "CREATE INDEX IF NOT EXISTS idx_chat_grammars_user_archived_deleted "
-            "ON chat_grammars(user_id, is_archived, deleted)",
-        )
-        for statement in index_statements:
-            if self.backend_type == BackendType.POSTGRESQL:
-                self.backend.execute(statement)
-            else:
-                self.execute_query(statement, script=False, commit=True)
-
-    def _migrate_sqlite_chat_grammars_table(self) -> None:
-        """Rebuild legacy SQLite chat_grammars tables so rows are owner-scoped."""
-        with self.transaction() as conn:
-            existing_cols = self._chat_grammar_column_names(conn)
-            if "user_id" in existing_cols:
-                return
-
-            owner_id = self._chat_grammar_owner_id()
-            conn.execute("ALTER TABLE chat_grammars RENAME TO chat_grammars_legacy")
-            conn.execute(
-                """
-                CREATE TABLE chat_grammars (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    grammar_text TEXT NOT NULL,
-                    validation_status TEXT NOT NULL DEFAULT 'unchecked',
-                    validation_error TEXT,
-                    last_validated_at DATETIME,
-                    is_archived BOOLEAN NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    deleted BOOLEAN NOT NULL DEFAULT 0,
-                    version INTEGER NOT NULL DEFAULT 1,
-                    UNIQUE(user_id, name)
-                )
-                """
-            )
-            conn.execute(
-                """
-                INSERT INTO chat_grammars (
-                    id,
-                    user_id,
-                    name,
-                    description,
-                    grammar_text,
-                    validation_status,
-                    validation_error,
-                    last_validated_at,
-                    is_archived,
-                    created_at,
-                    updated_at,
-                    deleted,
-                    version
-                )
-                SELECT
-                    id,
-                    ?,
-                    name,
-                    description,
-                    grammar_text,
-                    validation_status,
-                    validation_error,
-                    last_validated_at,
-                    is_archived,
-                    created_at,
-                    updated_at,
-                    deleted,
-                    version
-                FROM chat_grammars_legacy
-                """,
-                (owner_id,),
-            )
-            conn.execute("DROP TABLE chat_grammars_legacy")
-
-    def _migrate_postgres_chat_grammars_table(self) -> None:
-        """Backfill owner scoping for legacy PostgreSQL chat_grammars tables."""
-        owner_id = self._chat_grammar_owner_id()
-        existing_cols = self._chat_grammar_column_names()
-        if "user_id" not in existing_cols:
-            self.backend.execute("ALTER TABLE chat_grammars ADD COLUMN IF NOT EXISTS user_id TEXT")
-        self.backend.execute(
-            "UPDATE chat_grammars SET user_id = %s WHERE user_id IS NULL OR BTRIM(user_id) = ''",
-            (owner_id,),
-        )
-        self.backend.execute("ALTER TABLE chat_grammars ALTER COLUMN user_id SET NOT NULL")
-        self.backend.execute("ALTER TABLE chat_grammars DROP CONSTRAINT IF EXISTS chat_grammars_name_key")
-        self.backend.execute("ALTER TABLE chat_grammars DROP CONSTRAINT IF EXISTS uq_chat_grammars_user_name")
-        self.backend.execute(
-            "ALTER TABLE chat_grammars ADD CONSTRAINT uq_chat_grammars_user_name UNIQUE (user_id, name)"
-        )
-
-    def _coerce_chat_grammar_datetime(self, value: Any) -> datetime | None:
-        """Best-effort conversion of stored chat-grammar timestamps."""
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                return None
-        return None
-
-    def _chat_grammar_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a chat_grammars row into a normalized dict."""
-        if not row:
-            return None
-        item = dict(row)
-        item.pop("user_id", None)
-        item["validation_status"] = str(item.get("validation_status") or "unchecked").strip().lower()
-        item["is_archived"] = bool(item.get("is_archived", False))
-        item["deleted"] = bool(item.get("deleted", False))
-        item["version"] = int(item.get("version") or 1)
-        item["created_at"] = self._coerce_chat_grammar_datetime(item.get("created_at"))
-        item["updated_at"] = self._coerce_chat_grammar_datetime(item.get("updated_at"))
-        item["last_validated_at"] = self._coerce_chat_grammar_datetime(item.get("last_validated_at"))
-        return item
-
-    def list_chat_grammars(
-        self,
-        *,
-        include_archived: bool = False,
-        include_deleted: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List saved grammars for the current user."""
-        self._ensure_chat_grammars_table()
-        clauses: list[str] = ["user_id = ?"]
-        params: list[Any] = [self._chat_grammar_owner_id()]
-        if not include_deleted:
-            clauses.append("deleted = ?")
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        if not include_archived:
-            clauses.append("is_archived = ?")
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query = (
-            "SELECT * FROM chat_grammars "  # nosec B608
-            f"{where_sql} "
-            "ORDER BY name ASC LIMIT ? OFFSET ?"
-        )
-        params.extend([limit, offset])
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            return [self._chat_grammar_row_to_dict(row) for row in cursor.fetchall() if row]
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error listing chat grammars: {exc}")
-            raise
-
-    def count_chat_grammars(
-        self,
-        *,
-        include_archived: bool = False,
-        include_deleted: bool = False,
-    ) -> int:
-        """Return the number of saved grammars for the current user."""
-        self._ensure_chat_grammars_table()
-        clauses: list[str] = ["user_id = ?"]
-        params: list[Any] = [self._chat_grammar_owner_id()]
-        if not include_deleted:
-            clauses.append("deleted = ?")
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        if not include_archived:
-            clauses.append("is_archived = ?")
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query = f"SELECT COUNT(*) AS cnt FROM chat_grammars {where_sql}"  # nosec B608
-        try:
-            cursor = self.execute_query(query, tuple(params) if params else None)
-            row = cursor.fetchone()
-            return int(row["cnt"]) if row else 0
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error counting chat grammars: {exc}")
-            raise
-
-    def get_chat_grammar(
-        self,
-        grammar_id: str,
-        *,
-        include_archived: bool = False,
-        include_deleted: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch a saved grammar by identifier."""
-        self._ensure_chat_grammars_table()
-        grammar_id = str(grammar_id or "").strip()
-        if not grammar_id:
-            raise InputError("grammar_id is required.")  # noqa: TRY003
-        query = "SELECT * FROM chat_grammars WHERE id = ? AND user_id = ?"
-        params: list[Any] = [grammar_id, self._chat_grammar_owner_id()]
-        if not include_deleted:
-            query += " AND deleted = ?"
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        if not include_archived:
-            query += " AND is_archived = ?"
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            return self._chat_grammar_row_to_dict(row)
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error fetching chat grammar '{grammar_id}': {exc}")
-            raise
-
-    def insert_chat_grammar(self, grammar_data: dict[str, Any]) -> str:
-        """Insert a new saved grammar and return its identifier."""
-        self._ensure_chat_grammars_table()
-        name = str(grammar_data.get("name") or "").strip()
-        if not name:
-            raise InputError("Grammar name is required.")  # noqa: TRY003
-        grammar_text = str(grammar_data.get("grammar_text") or "")
-        if not grammar_text.strip():
-            raise InputError("grammar_text is required.")  # noqa: TRY003
-
-        validation_status = str(grammar_data.get("validation_status") or "unchecked").strip().lower()
-        if validation_status not in _CHAT_GRAMMAR_VALIDATION_STATUSES:
-            raise InputError("validation_status must be one of unchecked, valid, invalid.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        grammar_id = str(grammar_data.get("id") or f"grammar_{self._generate_uuid().replace('-', '')}")
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        owner_id = self._chat_grammar_owner_id()
-
-        query = (
-            "INSERT INTO chat_grammars ("
-            "id, user_id, name, description, grammar_text, validation_status, validation_error, "
-            "last_validated_at, is_archived, created_at, updated_at, deleted, version"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        params = (
-            grammar_id,
-            owner_id,
-            name,
-            grammar_data.get("description"),
-            grammar_text,
-            validation_status,
-            grammar_data.get("validation_error"),
-            grammar_data.get("last_validated_at"),
-            bool_cast(bool(grammar_data.get("is_archived", False))),
-            grammar_data.get("created_at") or now,
-            grammar_data.get("updated_at") or now,
-            bool_cast(bool(grammar_data.get("deleted", False))),
-            int(grammar_data.get("version", 1)),
-        )
-        try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                conn.execute(prepared_query, prepared_params)
-                return grammar_id  # noqa: TRY300
-        except sqlite3.IntegrityError as exc:
-            lowered = str(exc).lower()
-            if "unique constraint failed: chat_grammars.user_id, chat_grammars.name" in lowered or (
-                "unique constraint failed: chat_grammars.name" in lowered
-            ):
-                raise ConflictError(  # noqa: TRY003
-                    f"Grammar '{name}' already exists.",
-                    entity="chat_grammars",
-                    entity_id=name,
-                ) from exc
-            if "unique constraint failed: chat_grammars.id" in str(exc).lower():
-                raise ConflictError(  # noqa: TRY003
-                    "Grammar ID already exists.",
-                    entity="chat_grammars",
-                    entity_id=grammar_id,
-                ) from exc
-            raise CharactersRAGDBError(f"Database integrity error adding grammar '{name}': {exc}") from exc  # noqa: TRY003
-        except BackendDatabaseError as exc:
-            if self._is_unique_violation(exc):
-                raise ConflictError(  # noqa: TRY003
-                    f"Grammar '{name}' already exists.",
-                    entity="chat_grammars",
-                    entity_id=name,
-                ) from exc
-            raise CharactersRAGDBError(f"Database integrity error adding grammar '{name}': {exc}") from exc  # noqa: TRY003
-
-    def update_chat_grammar(
-        self,
-        grammar_id: str,
-        update_data: dict[str, Any],
-        *,
-        expected_version: int,
-    ) -> bool:
-        """Update a saved grammar using optimistic locking."""
-        if not update_data:
-            raise InputError(f"No data provided for grammar update '{grammar_id}'.")  # noqa: TRY003
-
-        self._ensure_chat_grammars_table()
-        now = self._get_current_utc_timestamp_iso()
-        allowed_fields = {
-            "name",
-            "description",
-            "grammar_text",
-            "validation_status",
-            "validation_error",
-            "last_validated_at",
-            "is_archived",
-        }
-
-        set_parts: list[str] = []
-        params: list[Any] = []
-        grammar_text_updated = False
-        for key, value in update_data.items():
-            if key not in allowed_fields:
-                continue
-            if key == "name":
-                normalized = str(value or "").strip()
-                if not normalized:
-                    raise InputError("Grammar name cannot be empty.")  # noqa: TRY003
-                params.append(normalized)
-                set_parts.append("name = ?")
-            elif key == "grammar_text":
-                normalized_text = str(value or "")
-                if not normalized_text.strip():
-                    raise InputError("grammar_text cannot be empty.")  # noqa: TRY003
-                params.append(normalized_text)
-                set_parts.append("grammar_text = ?")
-                grammar_text_updated = True
-            elif key == "validation_status":
-                normalized_status = str(value or "").strip().lower()
-                if normalized_status not in _CHAT_GRAMMAR_VALIDATION_STATUSES:
-                    raise InputError("validation_status must be one of unchecked, valid, invalid.")  # noqa: TRY003
-                params.append(normalized_status)
-                set_parts.append("validation_status = ?")
-            elif key == "is_archived":
-                params.append(bool(value) if self.backend_type == BackendType.POSTGRESQL else int(bool(value)))
-                set_parts.append("is_archived = ?")
-            else:
-                params.append(value)
-                set_parts.append(f"{key} = ?")
-
-        if not set_parts:
-            raise InputError(f"No supported data provided for grammar update '{grammar_id}'.")  # noqa: TRY003
-
-        if grammar_text_updated and "validation_status" not in update_data:
-            params.append("unchecked")
-            set_parts.append("validation_status = ?")
-        if grammar_text_updated and "validation_error" not in update_data:
-            params.append(None)
-            set_parts.append("validation_error = ?")
-        if grammar_text_updated and "last_validated_at" not in update_data:
-            params.append(None)
-            set_parts.append("last_validated_at = ?")
-
-        owner_id = self._chat_grammar_owner_id()
-        next_version = expected_version + 1
-        set_parts.extend(["updated_at = ?", "version = ?"])
-        params.extend([now, next_version, grammar_id, owner_id, expected_version])
-        query = (
-            f"UPDATE chat_grammars SET {', '.join(set_parts)} "  # nosec B608
-            "WHERE id = ? AND user_id = ? AND version = ? AND deleted = 0"
-        )
-
-        try:
-            with self.transaction() as conn:
-                lookup_query, lookup_params = self._prepare_backend_statement(
-                    "SELECT version FROM chat_grammars WHERE id = ? AND user_id = ? AND deleted = 0",
-                    (grammar_id, owner_id),
-                )
-                current_row = conn.execute(lookup_query, lookup_params).fetchone()
-                current_db_version = int(current_row["version"]) if current_row else None
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Version mismatch. Expected {expected_version}, found {current_db_version}. Please refresh and try again.",
-                        entity="chat_grammars",
-                        entity_id=grammar_id,
-                    )
-
-                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-                cursor = conn.execute(prepared_query, prepared_params)
-                if cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Grammar '{grammar_id}' update affected 0 rows.",
-                        entity="chat_grammars",
-                        entity_id=grammar_id,
-                    )
-                return True
-        except sqlite3.IntegrityError as exc:
-            if "unique constraint failed: chat_grammars.name" in str(exc).lower():
-                raise ConflictError(  # noqa: TRY003
-                    f"Grammar '{update_data.get('name')}' already exists.",
-                    entity="chat_grammars",
-                    entity_id=update_data.get("name"),
-                ) from exc
-            raise CharactersRAGDBError(f"Database error updating grammar '{grammar_id}': {exc}") from exc  # noqa: TRY003
-        except BackendDatabaseError as exc:
-            if self._is_unique_violation(exc):
-                raise ConflictError(  # noqa: TRY003
-                    f"Grammar '{update_data.get('name')}' already exists.",
-                    entity="chat_grammars",
-                    entity_id=update_data.get("name"),
-                ) from exc
-            raise CharactersRAGDBError(f"Database error updating grammar '{grammar_id}': {exc}") from exc  # noqa: TRY003
-
-    def archive_chat_grammar(self, grammar_id: str, *, expected_version: int) -> bool:
-        """Archive a saved grammar using optimistic locking."""
-        self._ensure_chat_grammars_table()
-        now = self._get_current_utc_timestamp_iso()
-        next_version = expected_version + 1
-        query = (
-            "UPDATE chat_grammars SET is_archived = ?, updated_at = ?, version = ? "
-            "WHERE id = ? AND user_id = ? AND version = ? AND deleted = 0"
-        )
-        owner_id = self._chat_grammar_owner_id()
-        params = (
-            True if self.backend_type == BackendType.POSTGRESQL else 1,
-            now,
-            next_version,
-            grammar_id,
-            owner_id,
-            expected_version,
-        )
-
-        try:
-            with self.transaction() as conn:
-                lookup_query, lookup_params = self._prepare_backend_statement(
-                    "SELECT version FROM chat_grammars WHERE id = ? AND user_id = ? AND deleted = 0",
-                    (grammar_id, owner_id),
-                )
-                current_row = conn.execute(lookup_query, lookup_params).fetchone()
-                current_db_version = int(current_row["version"]) if current_row else None
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Version mismatch. Expected {expected_version}, found {current_db_version}. Please refresh and try again.",
-                        entity="chat_grammars",
-                        entity_id=grammar_id,
-                    )
-
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                cursor = conn.execute(prepared_query, prepared_params)
-                if cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Grammar '{grammar_id}' archive affected 0 rows.",
-                        entity="chat_grammars",
-                        entity_id=grammar_id,
-                    )
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error archiving grammar '{grammar_id}': {exc}")
-            raise
-
-    def delete_chat_grammar(
-        self,
-        grammar_id: str,
-        *,
-        expected_version: int,
-        hard_delete: bool = False,
-    ) -> bool:
-        """Delete a saved grammar using optimistic locking."""
-        self._ensure_chat_grammars_table()
-        now = self._get_current_utc_timestamp_iso()
-        owner_id = self._chat_grammar_owner_id()
-
-        try:
-            with self.transaction() as conn:
-                lookup_query, lookup_params = self._prepare_backend_statement(
-                    "SELECT version FROM chat_grammars WHERE id = ? AND user_id = ?",
-                    (grammar_id, owner_id),
-                )
-                current_row = conn.execute(lookup_query, lookup_params).fetchone()
-                current_db_version = int(current_row["version"]) if current_row else None
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Version mismatch. Expected {expected_version}, found {current_db_version}. Please refresh and try again.",
-                        entity="chat_grammars",
-                        entity_id=grammar_id,
-                    )
-
-                if hard_delete:
-                    prepared_query, prepared_params = self._prepare_backend_statement(
-                        "DELETE FROM chat_grammars WHERE id = ? AND user_id = ? AND version = ?",
-                        (grammar_id, owner_id, expected_version),
-                    )
-                else:
-                    prepared_query, prepared_params = self._prepare_backend_statement(
-                        "UPDATE chat_grammars SET deleted = ?, updated_at = ?, version = ? "
-                        "WHERE id = ? AND user_id = ? AND version = ? AND deleted = 0",
-                        (
-                            True if self.backend_type == BackendType.POSTGRESQL else 1,
-                            now,
-                            expected_version + 1,
-                            grammar_id,
-                            owner_id,
-                            expected_version,
-                        ),
-                    )
-                cursor = conn.execute(prepared_query, prepared_params)
-                if cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Grammar '{grammar_id}' delete affected 0 rows.",
-                        entity="chat_grammars",
-                        entity_id=grammar_id,
-                    )
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as exc:
-            logger.error(f"Database error deleting grammar '{grammar_id}': {exc}")
-            raise
-
-    # ----------------------
-    # Persona persistence
-    # ----------------------
-    @staticmethod
-    def _as_bool(value: Any) -> bool:
-        """Coerce `value: Any` into a boolean for persona persistence fields.
-
-        Returns bool; handles bool/numeric/string inputs explicitly and falls back to `bool(value)` for other types.
-        """
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-        return bool(value)
-
-    @staticmethod
-    def _normalize_deleted_input(value: Any) -> bool:
-        """Normalize soft-delete input for persona profile/session writes."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, int):
-            return value != 0
-        if isinstance(value, str):
-            return value.strip().lower() not in {"false", "0"}
-        return bool(value)
-
-    @staticmethod
-    def _parse_version_input(value: Any) -> int:
-        """Parse and validate optimistic-lock version values (must be >= 1)."""
-        try:
-            version = int(value)
-        except (TypeError, ValueError) as exc:
-            raise InputError("version must be an integer >= 1.") from exc  # noqa: TRY003
-        if version < 1:
-            raise InputError("version must be >= 1.")  # noqa: TRY003
-        return version
-
-    def _normalize_persona_mode(self, value: Any) -> str:
-        """Normalize persona mode from `value: Any` to a validated lowercase string.
-
-        Returns a mode in `_ALLOWED_PERSONA_MODES`; raises `InputError` when the value is invalid.
-        """
-        mode = str(value or self._DEFAULT_PERSONA_MODE).strip().lower()
-        if mode not in self._ALLOWED_PERSONA_MODES:
-            allowed = ", ".join(self._ALLOWED_PERSONA_MODES)
-            raise InputError(f"Invalid persona mode '{mode}'. Allowed: {allowed}.")  # noqa: TRY003
-        return mode
-
-    def _normalize_persona_scope_rule_type(self, value: Any) -> str:
-        """Normalize scope rule type from `value: Any` to a validated lowercase string.
-
-        Returns a rule type in `_ALLOWED_PERSONA_SCOPE_RULE_TYPES`; raises `InputError` for unsupported values.
-        """
-        rule_type = str(value or "").strip().lower()
-        if rule_type not in self._ALLOWED_PERSONA_SCOPE_RULE_TYPES:
-            allowed = ", ".join(self._ALLOWED_PERSONA_SCOPE_RULE_TYPES)
-            raise InputError(f"Invalid persona scope rule_type '{rule_type}'. Allowed: {allowed}.")  # noqa: TRY003
-        return rule_type
-
-    def _normalize_persona_policy_rule_kind(self, value: Any) -> str:
-        """Normalize policy rule kind from `value: Any` to a validated lowercase string.
-
-        Returns a rule kind in `_ALLOWED_PERSONA_POLICY_RULE_KINDS`; raises `InputError` for invalid input.
-        """
-        rule_kind = str(value or "").strip().lower()
-        if rule_kind not in self._ALLOWED_PERSONA_POLICY_RULE_KINDS:
-            allowed = ", ".join(self._ALLOWED_PERSONA_POLICY_RULE_KINDS)
-            raise InputError(f"Invalid persona policy rule_kind '{rule_kind}'. Allowed: {allowed}.")  # noqa: TRY003
-        return rule_kind
-
-    def _normalize_persona_session_status(self, value: Any) -> str:
-        """Normalize session status from `value: Any` to a validated lowercase string.
-
-        Returns a status in `_ALLOWED_PERSONA_SESSION_STATUSES`; raises `InputError` when value is unsupported.
-        """
-        status = str(value or "active").strip().lower()
-        if status not in self._ALLOWED_PERSONA_SESSION_STATUSES:
-            allowed = ", ".join(self._ALLOWED_PERSONA_SESSION_STATUSES)
-            raise InputError(f"Invalid persona session status '{status}'. Allowed: {allowed}.")  # noqa: TRY003
-        return status
-
-    def _persona_profile_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a persona profile DB `row: Any` to an API-safe dict.
-
-        Returns `dict[str, Any]` with boolean normalization, or `None` when `row` is empty/invalid.
-        """
-        if not row:
-            return None
-        item = dict(row)
-        persona_label = str(item.get("id") or item.get("name") or "unknown")
-        item["voice_defaults"] = self._decode_persona_json_object(
-            item.get("voice_defaults_json"),
-            field_name="voice_defaults_json",
-            context_label=f"persona profile {persona_label}",
-        )
-        item["setup"] = self._decode_persona_json_object(
-            item.get("setup_json"),
-            field_name="setup_json",
-            context_label=f"persona profile {persona_label}",
-        )
-        item["is_active"] = self._as_bool(item.get("is_active"))
-        item["use_persona_state_context_default"] = self._as_bool(
-            item.get("use_persona_state_context_default", True)
-        )
-        item["deleted"] = self._as_bool(item.get("deleted"))
-        return item
-
-    def _persona_buddy_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a persona buddy DB `row: Any` to an API-safe dict."""
-        if not row:
-            return None
-        item = dict(row)
-        buddy_label = str(item.get("persona_id") or "unknown")
-        item["derived_core"] = self._decode_persona_json_object(
-            item.get("derived_core_json"),
-            field_name="derived_core_json",
-            context_label=f"persona buddy {buddy_label}",
-        )
-        item["overlay_preferences"] = self._decode_persona_json_object(
-            item.get("overlay_preferences_json"),
-            field_name="overlay_preferences_json",
-            context_label=f"persona buddy {buddy_label}",
-        )
-        try:
-            item["resolved_profile"] = resolve_persona_buddy_profile(
-                derived_core=item["derived_core"],
-                overlay_preferences=item["overlay_preferences"],
-            )
-        except (TypeError, KeyError, ValueError):
-            logger.warning(
-                "Unable to resolve persona buddy profile for persona_id={}.",
-                buddy_label,
-            )
-            item["resolved_profile"] = None
-        return item
-
-    def _persona_scope_rule_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a scope rule DB `row: Any` to an API-safe dict.
-
-        Returns `dict[str, Any]` with boolean normalization, or `None` when `row` is empty/invalid.
-        """
-        if not row:
-            return None
-        item = dict(row)
-        item["include"] = self._as_bool(item.get("include"))
-        item["deleted"] = self._as_bool(item.get("deleted"))
-        return item
-
-    def _persona_policy_rule_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a policy rule DB `row: Any` to an API-safe dict.
-
-        Returns `dict[str, Any]` or `None`; invalid `max_calls_per_turn` values are coerced to `None`.
-        """
-        if not row:
-            return None
-        item = dict(row)
-        item["allowed"] = self._as_bool(item.get("allowed"))
-        item["require_confirmation"] = self._as_bool(item.get("require_confirmation"))
-        item["deleted"] = self._as_bool(item.get("deleted"))
-        max_calls = item.get("max_calls_per_turn")
-        if max_calls is not None:
-            try:
-                item["max_calls_per_turn"] = int(max_calls)
-            except (TypeError, ValueError):
-                item["max_calls_per_turn"] = None
-        return item
-
-    def _persona_session_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a persona session DB `row: Any` to an API-safe dict.
-
-        Returns `dict[str, Any]` or `None`; invalid/non-dict snapshot payloads yield an empty `scope_snapshot`.
-        """
-        if not row:
-            return None
-        item = dict(row)
-        row_id = item.get("id") or item.get("session_id") or item.get("uuid") or "N/A"
-        item["reuse_allowed"] = self._as_bool(item.get("reuse_allowed"))
-        item["deleted"] = self._as_bool(item.get("deleted"))
-        item["activity_surface"] = self._normalize_persona_session_activity_surface(item.get("activity_surface"))
-        raw_preferences = item.get("preferences_json")
-        if isinstance(raw_preferences, str):
-            try:
-                decoded_preferences = json.loads(raw_preferences)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Failed to decode JSON for field '{}' in persona session row {}. Falling back to empty object. Value preview: {}",
-                    "preferences_json",
-                    row_id,
-                    raw_preferences[:100] + ("..." if len(raw_preferences) > 100 else ""),
-                )
-                decoded_preferences = {}
-            item["preferences"] = decoded_preferences if isinstance(decoded_preferences, dict) else {}
-        elif isinstance(raw_preferences, dict):
-            item["preferences"] = raw_preferences
-        else:
-            item["preferences"] = {}
-        raw_snapshot = item.get("scope_snapshot_json")
-        if isinstance(raw_snapshot, str):
-            try:
-                item["scope_snapshot"] = json.loads(raw_snapshot)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Failed to decode JSON for field '{}' in persona session row {}. Falling back to empty object. Value preview: {}",
-                    "scope_snapshot_json",
-                    row_id,
-                    raw_snapshot[:100] + ("..." if len(raw_snapshot) > 100 else ""),
-                )
-                item["scope_snapshot"] = {}
-        elif isinstance(raw_snapshot, dict):
-            item["scope_snapshot"] = raw_snapshot
-        else:
-            item["scope_snapshot"] = {}
-        return item
-
-    @staticmethod
-    def _normalize_persona_session_activity_surface(value: Any) -> str:
-        from tldw_Server_API.app.core.Personalization.companion_activity import (
-            normalize_persona_activity_surface,
-        )
-
-        return normalize_persona_activity_surface(value)
-
-    def _persona_memory_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a persona memory DB `row: Any` to an API-safe dict.
-
-        Returns `dict[str, Any]` or `None`; invalid `salience` values are coerced to `0.0`.
-        """
-        if not row:
-            return None
-        item = dict(row)
-        item["archived"] = self._as_bool(item.get("archived"))
-        item["deleted"] = self._as_bool(item.get("deleted"))
-        salience = item.get("salience")
-        if salience is not None:
-            try:
-                item["salience"] = float(salience)
-            except (TypeError, ValueError):
-                item["salience"] = 0.0
-        return item
-
-    def _persona_exemplar_row_to_dict(self, row: Any) -> dict[str, Any] | None:
-        """Convert a persona exemplar DB row to an API-safe dict."""
-        if not row:
-            return None
-        item = self._deserialize_row_fields(row, self._PERSONA_EXEMPLAR_JSON_FIELDS)
-        if not item:
-            return None
-        item["enabled"] = self._as_bool(item.get("enabled", True))
-        item["deleted"] = self._as_bool(item.get("deleted"))
-        try:
-            item["priority"] = int(item.get("priority", 0) or 0)
-        except (TypeError, ValueError):
-            item["priority"] = 0
-        item["scenario_tags"] = self._normalize_persona_exemplar_tags(
-            item.pop("scenario_tags_json", []),
-            "scenario_tags",
-        )
-        item["capability_tags"] = self._normalize_persona_exemplar_tags(
-            item.pop("capability_tags_json", []),
-            "capability_tags",
-        )
-        return item
-
-    def _require_active_persona_profile_owner(self, conn: Any, *, persona_id: str, user_id: str) -> dict[str, Any]:
-        """Require an active persona profile owned by `user_id` using DB `conn`.
-
-        Returns the profile row dict for (`persona_id`, `user_id`); raises `ConflictError` if missing or soft-deleted.
-        """
-        row = conn.execute(
-            "SELECT id, user_id, mode, deleted FROM persona_profiles WHERE id = ? AND user_id = ?",
-            (persona_id, user_id),
-        ).fetchone()
-        if not row:
-            raise ConflictError(  # noqa: TRY003
-                "Persona profile not found for user.",
-                entity="persona_profiles",
-                entity_id=persona_id,
-            )
-        item = dict(row)
-        if self._as_bool(item.get("deleted")):
-            raise ConflictError(  # noqa: TRY003
-                "Persona profile is soft-deleted.",
-                entity="persona_profiles",
-                entity_id=persona_id,
-            )
-        return item
-
-    def _normalize_persona_exemplar_tone(self, value: Any) -> str | None:
-        tone = self._normalize_nullable_text(value)
-        if tone is None:
-            return None
-        normalized = tone.strip().lower()
-        return normalized or None
-
-    def create_persona_exemplar(self, exemplar_data: dict[str, Any]) -> str:
-        """Create a persona-owned exemplar and return its ID."""
-        persona_id = str(exemplar_data.get("persona_id") or "").strip()
-        user_id = str(exemplar_data.get("user_id") or "").strip()
-        if not persona_id:
-            raise InputError("persona_id is required for persona exemplar creation.")  # noqa: TRY003
-        if not user_id:
-            raise InputError("user_id is required for persona exemplar creation.")  # noqa: TRY003
-
-        kind = self._normalize_exemplar_enum(
-            exemplar_data.get("kind"),
-            allowed=self._ALLOWED_PERSONA_EXEMPLAR_KINDS,
-            field_name="kind",
-            default="style",
-        )
-        content = self._normalize_nullable_text(exemplar_data.get("content"))
-        if not content:
-            raise InputError("content is required for persona exemplar creation.")  # noqa: TRY003
-
-        tone = self._normalize_persona_exemplar_tone(exemplar_data.get("tone"))
-        scenario_tags = self._normalize_persona_exemplar_tags(
-            exemplar_data.get("scenario_tags"),
-            "scenario_tags",
-        )
-        capability_tags = self._normalize_persona_exemplar_tags(
-            exemplar_data.get("capability_tags"),
-            "capability_tags",
-        )
-        try:
-            priority = int(exemplar_data.get("priority", 0) or 0)
-        except (TypeError, ValueError) as exc:
-            raise InputError("priority must be an integer.") from exc  # noqa: TRY003
-        enabled = self._as_bool(exemplar_data.get("enabled", True))
-        source_type = self._normalize_exemplar_enum(
-            exemplar_data.get("source_type"),
-            allowed=self._ALLOWED_PERSONA_EXEMPLAR_SOURCE_TYPES,
-            field_name="source_type",
-            default="manual",
-        )
-        source_ref = self._normalize_nullable_text(exemplar_data.get("source_ref"))
-        notes = self._normalize_nullable_text(exemplar_data.get("notes"))
-        exemplar_id = str(exemplar_data.get("id") or self._generate_uuid()).strip()
-        now = self._get_current_utc_timestamp_iso()
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        deleted = self._normalize_deleted_input(exemplar_data.get("deleted", False))
-        version = self._parse_version_input(exemplar_data.get("version", 1))
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            query = (
-                "INSERT INTO persona_exemplars("
-                "id, persona_id, user_id, kind, content, tone, scenario_tags_json, capability_tags_json, "
-                "priority, enabled, source_type, source_ref, notes, created_at, last_modified, deleted, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-            params = (
-                exemplar_id,
-                persona_id,
-                user_id,
-                kind,
-                content,
-                tone,
-                self._ensure_json_string(scenario_tags) or "[]",
-                self._ensure_json_string(capability_tags) or "[]",
-                priority,
-                bool_cast(enabled),
-                source_type,
-                source_ref,
-                notes,
-                exemplar_data.get("created_at") or now,
-                exemplar_data.get("last_modified") or now,
-                bool_cast(deleted),
-                version,
-            )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            conn.execute(prepared_query, prepared_params or ())
-        return exemplar_id
-
-    def get_persona_exemplar(
-        self,
-        *,
-        exemplar_id: str,
-        persona_id: str,
-        user_id: str,
-        include_disabled: bool = False,
-        include_deleted: bool = False,
-        include_deleted_personas: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch a persona exemplar owned by a user."""
-        query = """
-            SELECT pe.*
-              FROM persona_exemplars pe
-              JOIN persona_profiles pp
-                ON pp.id = pe.persona_id
-               AND pp.user_id = pe.user_id
-             WHERE pe.id = ?
-               AND pe.persona_id = ?
-               AND pe.user_id = ?
-               AND (? OR pe.enabled = 1)
-               AND (? OR pe.deleted = 0)
-               AND (? OR pp.deleted = 0)
-             LIMIT 1
-        """
-        params = (
-            exemplar_id,
-            persona_id,
-            user_id,
-            bool(include_disabled),
-            bool(include_deleted),
-            bool(include_deleted_personas),
-        )
-        cursor = self.execute_query(query, params)
-        return self._persona_exemplar_row_to_dict(cursor.fetchone())
-
-    def list_persona_exemplars(
-        self,
-        *,
-        user_id: str,
-        persona_id: str | None = None,
-        include_disabled: bool = False,
-        include_deleted: bool = False,
-        include_deleted_personas: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List persona exemplars for a user, optionally filtered to a persona."""
-        query = """
-            SELECT pe.*
-              FROM persona_exemplars pe
-              JOIN persona_profiles pp
-                ON pp.id = pe.persona_id
-               AND pp.user_id = pe.user_id
-             WHERE pe.user_id = ?
-               AND (? IS NULL OR pe.persona_id = ?)
-               AND (? OR pe.enabled = 1)
-               AND (? OR pe.deleted = 0)
-               AND (? OR pp.deleted = 0)
-             ORDER BY pe.priority DESC, pe.last_modified DESC, pe.id ASC
-             LIMIT ? OFFSET ?
-        """
-        params = (
-            user_id,
-            persona_id,
-            persona_id,
-            bool(include_disabled),
-            bool(include_deleted),
-            bool(include_deleted_personas),
-            max(1, int(limit)),
-            max(0, int(offset)),
-        )
-        cursor = self.execute_query(query, params)
-        return [self._persona_exemplar_row_to_dict(row) for row in cursor.fetchall() if row]
-
-    def update_persona_exemplar(
-        self,
-        *,
-        exemplar_id: str,
-        persona_id: str,
-        user_id: str,
-        update_data: dict[str, Any],
-    ) -> bool:
-        """Update mutable persona exemplar fields."""
-        if not update_data:
-            raise InputError("No exemplar fields provided for update.")  # noqa: TRY003
-
-        allowed_fields = {
-            "kind",
-            "content",
-            "tone",
-            "scenario_tags",
-            "capability_tags",
-            "priority",
-            "enabled",
-            "source_type",
-            "source_ref",
-            "notes",
-            "deleted",
-        }
-        normalized_updates: dict[str, Any] = {}
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-
-        for key, value in update_data.items():
-            if key not in allowed_fields:
-                continue
-            if key == "kind":
-                normalized_updates["kind"] = self._normalize_exemplar_enum(
-                    value,
-                    allowed=self._ALLOWED_PERSONA_EXEMPLAR_KINDS,
-                    field_name="kind",
-                    default="style",
-                )
-            elif key == "content":
-                content = self._normalize_nullable_text(value)
-                if not content:
-                    raise InputError("content cannot be empty.")  # noqa: TRY003
-                normalized_updates["content"] = content
-            elif key == "tone":
-                normalized_updates["tone"] = self._normalize_persona_exemplar_tone(value)
-            elif key == "scenario_tags":
-                normalized_updates["scenario_tags_json"] = (
-                    self._ensure_json_string(self._normalize_persona_exemplar_tags(value, "scenario_tags")) or "[]"
-                )
-            elif key == "capability_tags":
-                normalized_updates["capability_tags_json"] = (
-                    self._ensure_json_string(self._normalize_persona_exemplar_tags(value, "capability_tags")) or "[]"
-                )
-            elif key == "priority":
-                try:
-                    normalized_updates["priority"] = int(value)
-                except (TypeError, ValueError) as exc:
-                    raise InputError("priority must be an integer.") from exc  # noqa: TRY003
-            elif key == "enabled":
-                normalized_updates["enabled"] = bool_cast(self._as_bool(value))
-            elif key == "source_type":
-                normalized_updates["source_type"] = self._normalize_exemplar_enum(
-                    value,
-                    allowed=self._ALLOWED_PERSONA_EXEMPLAR_SOURCE_TYPES,
-                    field_name="source_type",
-                    default="manual",
-                )
-            elif key == "source_ref":
-                normalized_updates["source_ref"] = self._normalize_nullable_text(value)
-            elif key == "notes":
-                normalized_updates["notes"] = self._normalize_nullable_text(value)
-            elif key == "deleted":
-                normalized_updates["deleted"] = bool_cast(self._normalize_deleted_input(value))
-
-        if not normalized_updates:
-            raise InputError("No valid exemplar fields provided for update.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        query = """
-            UPDATE persona_exemplars
-               SET kind = CASE WHEN ? THEN ? ELSE kind END,
-                   content = CASE WHEN ? THEN ? ELSE content END,
-                   tone = CASE WHEN ? THEN ? ELSE tone END,
-                   scenario_tags_json = CASE WHEN ? THEN ? ELSE scenario_tags_json END,
-                   capability_tags_json = CASE WHEN ? THEN ? ELSE capability_tags_json END,
-                   priority = CASE WHEN ? THEN ? ELSE priority END,
-                   enabled = CASE WHEN ? THEN ? ELSE enabled END,
-                   source_type = CASE WHEN ? THEN ? ELSE source_type END,
-                   source_ref = CASE WHEN ? THEN ? ELSE source_ref END,
-                   notes = CASE WHEN ? THEN ? ELSE notes END,
-                   deleted = CASE WHEN ? THEN ? ELSE deleted END,
-                   last_modified = ?,
-                   version = version + 1
-             WHERE id = ? AND persona_id = ? AND user_id = ? AND deleted = 0
-        """
-        params = (
-            "kind" in normalized_updates,
-            normalized_updates.get("kind"),
-            "content" in normalized_updates,
-            normalized_updates.get("content"),
-            "tone" in normalized_updates,
-            normalized_updates.get("tone"),
-            "scenario_tags_json" in normalized_updates,
-            normalized_updates.get("scenario_tags_json"),
-            "capability_tags_json" in normalized_updates,
-            normalized_updates.get("capability_tags_json"),
-            "priority" in normalized_updates,
-            normalized_updates.get("priority"),
-            "enabled" in normalized_updates,
-            normalized_updates.get("enabled"),
-            "source_type" in normalized_updates,
-            normalized_updates.get("source_type"),
-            "source_ref" in normalized_updates,
-            normalized_updates.get("source_ref"),
-            "notes" in normalized_updates,
-            normalized_updates.get("notes"),
-            "deleted" in normalized_updates,
-            normalized_updates.get("deleted"),
-            now,
-            exemplar_id,
-            persona_id,
-            user_id,
-        )
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            return cursor.rowcount > 0
-
-    def soft_delete_persona_exemplar(
-        self,
-        *,
-        exemplar_id: str,
-        persona_id: str,
-        user_id: str,
-    ) -> bool:
-        """Soft-delete a persona exemplar owned by a user."""
-        now = self._get_current_utc_timestamp_iso()
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            query = (
-                "UPDATE persona_exemplars "
-                "SET deleted = ?, enabled = ?, last_modified = ?, version = version + 1 "
-                "WHERE id = ? AND persona_id = ? AND user_id = ? AND deleted = 0"
-            )
-            params = (
-                bool_cast(True),
-                bool_cast(False),
-                now,
-                exemplar_id,
-                persona_id,
-                user_id,
-            )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            return cursor.rowcount > 0
-
-    def create_persona_profile(self, profile_data: dict[str, Any]) -> str:
-        """Create a persona profile and return its UUID."""
-        user_id = str(profile_data.get("user_id") or "").strip()
-        name = str(profile_data.get("name") or "").strip()
-        if not user_id:
-            raise InputError("user_id is required for persona profile creation.")  # noqa: TRY003
-        if not name:
-            raise InputError("name is required for persona profile creation.")  # noqa: TRY003
-
-        persona_id = str(profile_data.get("id") or self._generate_uuid())
-        mode = self._normalize_persona_mode(profile_data.get("mode"))
-        system_prompt = profile_data.get("system_prompt")
-        is_active = self._as_bool(profile_data.get("is_active", True))
-        use_persona_state_context_default = self._as_bool(
-            profile_data.get("use_persona_state_context_default", True)
-        )
-        voice_defaults_json = self._ensure_json_string(
-            profile_data.get("voice_defaults")
-            if isinstance(profile_data.get("voice_defaults"), dict)
-            else None
-        )
-        setup_json = self._ensure_json_string(
-            profile_data.get("setup") if isinstance(profile_data.get("setup"), dict) else None
-        )
-        now = self._get_current_utc_timestamp_iso()
-
-        character_card_id = profile_data.get("character_card_id")
-        if character_card_id is not None:
-            try:
-                character_card_id = int(character_card_id)
-            except (TypeError, ValueError) as exc:
-                raise InputError("character_card_id must be an integer when provided.") from exc  # noqa: TRY003
-
-        origin_character_id = profile_data.get("origin_character_id")
-        origin_character_name = profile_data.get("origin_character_name")
-        origin_character_snapshot_at = profile_data.get("origin_character_snapshot_at")
-        if character_card_id is not None:
-            source_character = self.get_character_card_by_id(character_card_id)
-            if source_character is None:
-                raise InputError(  # noqa: TRY003
-                    f"character_card_id '{character_card_id}' must reference an existing active character."
-                )
-            origin_character_id = source_character.get("id") or character_card_id
-            source_character_name = str(source_character.get("name") or "").strip()
-            origin_character_name = source_character_name or None
-            origin_character_snapshot_at = origin_character_snapshot_at or now
-
-        if origin_character_id is not None:
-            try:
-                origin_character_id = int(origin_character_id)
-            except (TypeError, ValueError) as exc:
-                raise InputError("origin_character_id must be an integer when provided.") from exc  # noqa: TRY003
-        if origin_character_name is not None:
-            origin_character_name = str(origin_character_name).strip() or None
-        if origin_character_snapshot_at is not None:
-            origin_character_snapshot_at = str(origin_character_snapshot_at)
-
-        deleted_value = self._normalize_deleted_input(profile_data.get("deleted", False))
-        version = self._parse_version_input(profile_data.get("version", 1))
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            is_active_db = bool(is_active)
-            use_persona_state_context_default_db = bool(use_persona_state_context_default)
-            deleted_db = bool(deleted_value)
-        else:
-            is_active_db = int(is_active)
-            use_persona_state_context_default_db = int(use_persona_state_context_default)
-            deleted_db = int(deleted_value)
-
-        query = (
-            "INSERT INTO persona_profiles("
-            "id, user_id, name, character_card_id, origin_character_id, origin_character_name, "
-            "origin_character_snapshot_at, mode, system_prompt, voice_defaults_json, setup_json, "
-            "is_active, use_persona_state_context_default, created_at, last_modified, deleted, version"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        params = (
-            persona_id,
-            user_id,
-            name,
-            character_card_id,
-            origin_character_id,
-            origin_character_name,
-            origin_character_snapshot_at,
-            mode,
-            system_prompt,
-            voice_defaults_json,
-            setup_json,
-            is_active_db,
-            use_persona_state_context_default_db,
-            profile_data.get("created_at") or now,
-            profile_data.get("last_modified") or now,
-            deleted_db,
-            version,
-        )
-
-        try:
-            self.execute_query(query, params, commit=True)
-            return persona_id  # noqa: TRY300
-        except sqlite3.IntegrityError as exc:
-            msg = str(exc).lower()
-            if "unique constraint failed" in msg and "persona_profiles.user_id, persona_profiles.name" in msg:
-                raise ConflictError(  # noqa: TRY003
-                    f"Persona profile name '{name}' already exists for user '{user_id}'.",
-                    entity="persona_profiles",
-                    entity_id=persona_id,
-                ) from exc
-            if "unique constraint failed" in msg and "persona_profiles.id" in msg:
-                raise ConflictError(  # noqa: TRY003
-                    f"Persona profile '{persona_id}' already exists.",
-                    entity="persona_profiles",
-                    entity_id=persona_id,
-                ) from exc
-            raise
-        except BackendDatabaseError as exc:
-            if self._is_unique_violation(exc):
-                raise ConflictError(  # noqa: TRY003
-                    f"Persona profile name '{name}' already exists for user '{user_id}'.",
-                    entity="persona_profiles",
-                    entity_id=persona_id,
-                ) from exc
-            raise CharactersRAGDBError(f"Failed creating persona profile: {exc}") from exc  # noqa: TRY003
-
-    def get_persona_profile(
-        self,
-        persona_id: str,
-        *,
-        user_id: str,
-        include_deleted: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch a single persona profile owned by a user."""
-        query = "SELECT * FROM persona_profiles WHERE id = ? AND user_id = ?"
-        params: list[Any] = [persona_id, user_id]
-        if not include_deleted:
-            query += " AND deleted = 0"
-        cursor = self.execute_query(query, tuple(params))
-        return self._persona_profile_row_to_dict(cursor.fetchone())
-
-    def list_persona_profiles(
-        self,
-        *,
-        user_id: str,
-        include_deleted: bool = False,
-        active_only: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List persona profiles for a user."""
-        clauses = ["user_id = ?"]
-        params: list[Any] = [user_id]
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        if active_only:
-            clauses.append("is_active = 1")
-        where_sql = " AND ".join(clauses)
-        query = (
-            "SELECT * FROM persona_profiles "  # nosec B608
-            f"WHERE {where_sql} "
-            "ORDER BY last_modified DESC, name ASC LIMIT ? OFFSET ?"
-        )
-        params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
-        return [self._persona_profile_row_to_dict(row) for row in cursor.fetchall() if row]
-
-    def update_persona_profile(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        update_data: dict[str, Any],
-        expected_version: int | None = None,
-    ) -> bool:
-        """Update persona profile fields for an owned profile."""
-        if not update_data:
-            raise InputError("No profile fields provided for update.")  # noqa: TRY003
-
-        allowed_fields = {
-            "name",
-            "character_card_id",
-            "mode",
-            "system_prompt",
-            "voice_defaults",
-            "setup",
-            "is_active",
-            "use_persona_state_context_default",
-            "deleted",
-        }
-        set_parts: list[str] = []
-        params: list[Any] = []
-
-        for key, value in update_data.items():
-            if key not in allowed_fields:
-                continue
-            if key == "mode":
-                params.append(self._normalize_persona_mode(value))
-                set_parts.append("mode = ?")
-            elif key in {"is_active", "use_persona_state_context_default", "deleted"}:
-                cast_value = bool(self._as_bool(value)) if self.backend_type == BackendType.POSTGRESQL else int(
-                    self._as_bool(value)
-                )
-                params.append(cast_value)
-                set_parts.append(f"{key} = ?")
-            elif key == "character_card_id":
-                if value is None:
-                    params.append(None)
-                else:
-                    try:
-                        params.append(int(value))
-                    except (TypeError, ValueError) as exc:
-                        raise InputError("character_card_id must be an integer when provided.") from exc  # noqa: TRY003
-                set_parts.append("character_card_id = ?")
-            elif key == "voice_defaults":
-                params.append(self._ensure_json_string(value if isinstance(value, dict) else {}))
-                set_parts.append("voice_defaults_json = ?")
-            elif key == "setup":
-                params.append(self._ensure_json_string(value if isinstance(value, dict) else {}))
-                set_parts.append("setup_json = ?")
-            else:
-                params.append(value)
-                set_parts.append(f"{key} = ?")
-
-        if not set_parts:
-            raise InputError("No valid profile fields provided for update.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        set_parts.extend(["last_modified = ?", "version = version + 1"])
-        params.append(now)
-
-        where_sql = "id = ? AND user_id = ? AND deleted = 0"
-        params.extend([persona_id, user_id])
-        if expected_version is not None:
-            where_sql += " AND version = ?"
-            params.append(int(expected_version))
-
-        query = f"UPDATE persona_profiles SET {', '.join(set_parts)} WHERE {where_sql}"  # nosec B608
-        with self.transaction() as conn:
-            existing = conn.execute(
-                "SELECT version, deleted FROM persona_profiles WHERE id = ? AND user_id = ?",
-                (persona_id, user_id),
-            ).fetchone()
-            if not existing:
-                return False
-            if self._as_bool(existing["deleted"]):
-                return False
-            if expected_version is not None and int(existing["version"]) != int(expected_version):
-                raise ConflictError(  # noqa: TRY003
-                    f"Persona profile version mismatch (db has {existing['version']}, expected {expected_version}).",
-                    entity="persona_profiles",
-                    entity_id=persona_id,
-                )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            return cursor.rowcount > 0
-
-    def soft_delete_persona_profile(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        expected_version: int | None = None,
-    ) -> bool:
-        """Soft-delete a persona profile and mark it inactive."""
-        update_data: dict[str, Any] = {"deleted": True, "is_active": False}
-        return self.update_persona_profile(
-            persona_id=persona_id,
-            user_id=user_id,
-            update_data=update_data,
-            expected_version=expected_version,
-        )
-
-    def restore_persona_profile(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        expected_version: int,
-    ) -> bool:
-        """Restore a soft-deleted persona profile using optimistic locking."""
-        now = self._get_current_utc_timestamp_iso()
-        expected_version_value = self._parse_version_input(expected_version)
-        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
-        deleted_true = True if self.backend_type == BackendType.POSTGRESQL else 1
-        is_active_true = True if self.backend_type == BackendType.POSTGRESQL else 1
-
-        with self.transaction() as conn:
-            row = conn.execute(
-                "SELECT version, deleted FROM persona_profiles WHERE id = ? AND user_id = ?",
-                (persona_id, user_id),
-            ).fetchone()
-            if not row:
-                return False
-
-            if not self._as_bool(row["deleted"]):
-                return True
-
-            current_db_version = int(row["version"])
-            if current_db_version != expected_version_value:
-                raise ConflictError(  # noqa: TRY003
-                    (
-                        f"Restore for persona profile {persona_id} failed: "
-                        f"version mismatch (db has {current_db_version}, expected {expected_version_value})."
-                    ),
-                    entity="persona_profiles",
-                    entity_id=persona_id,
-                )
-
-            query = (
-                "UPDATE persona_profiles "
-                "SET deleted = ?, is_active = ?, last_modified = ?, version = version + 1 "
-                "WHERE id = ? AND user_id = ? AND version = ? AND deleted = ?"
-            )
-            params = (
-                deleted_false,
-                is_active_true,
-                now,
-                persona_id,
-                user_id,
-                expected_version_value,
-                deleted_true,
-            )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            if cursor.rowcount > 0:
-                return True
-
-            final_state = conn.execute(
-                "SELECT version, deleted FROM persona_profiles WHERE id = ? AND user_id = ?",
-                (persona_id, user_id),
-            ).fetchone()
-            return bool(final_state and not self._as_bool(final_state["deleted"]))
-
-    def get_persona_buddy(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        include_deleted_personas: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch one persona buddy row for a user-owned persona profile."""
-        deleted_false = False if self.backend_type == BackendType.POSTGRESQL else 0
-        query = """
-            SELECT pb.*
-              FROM persona_buddies pb
-              JOIN persona_profiles pp
-                ON pp.id = pb.persona_id
-               AND pp.user_id = pb.user_id
-             WHERE pb.persona_id = ?
-               AND pb.user_id = ?
-               AND (? OR pp.deleted = ?)
-             LIMIT 1
-        """
-        params = (
-            persona_id,
-            user_id,
-            bool(include_deleted_personas),
-            deleted_false,
-        )
-        cursor = self.execute_query(query, params)
-        return self._persona_buddy_row_to_dict(cursor.fetchone())
-
-    def upsert_persona_buddy(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        derivation_version: int,
-        source_fingerprint: str,
-        derived_core: dict[str, Any] | None,
-        overlay_preferences: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        """Insert or update one persona buddy row keyed by persona_id."""
-        if not source_fingerprint:
-            raise InputError("source_fingerprint is required for persona buddy upsert.")  # noqa: TRY003
-        try:
-            derivation_version_value = int(derivation_version)
-        except (TypeError, ValueError) as exc:
-            raise InputError("derivation_version must be an integer >= 1.") from exc  # noqa: TRY003
-        if derivation_version_value < 1:
-            raise InputError("derivation_version must be an integer >= 1.")  # noqa: TRY003
-
-        derived_core_json = self._ensure_json_string(derived_core if isinstance(derived_core, dict) else {}) or "{}"
-        overlay_preferences_json = (
-            self._ensure_json_string(overlay_preferences if isinstance(overlay_preferences, dict) else {}) or "{}"
-        )
-        now = self._get_current_utc_timestamp_iso()
-        update_query = (
-            "UPDATE persona_buddies "
-            "SET user_id = ?, derivation_version = ?, source_fingerprint = ?, derived_core_json = ?, "
-            "overlay_preferences_json = ?, last_modified = ?, version = version + 1 "
-            "WHERE persona_id = ? AND ("
-            "user_id <> ? OR derivation_version <> ? OR source_fingerprint <> ? OR "
-            "derived_core_json <> ? OR overlay_preferences_json <> ?"
-            ")"
-        )
-        update_params = (
-            user_id,
-            derivation_version_value,
-            source_fingerprint,
-            derived_core_json,
-            overlay_preferences_json,
-            now,
-            persona_id,
-            user_id,
-            derivation_version_value,
-            source_fingerprint,
-            derived_core_json,
-            overlay_preferences_json,
-        )
-        insert_query = (
-            "INSERT INTO persona_buddies("
-            "persona_id, user_id, derivation_version, source_fingerprint, derived_core_json, "
-            "overlay_preferences_json, created_at, last_modified, version"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        insert_params = (
-            persona_id,
-            user_id,
-            derivation_version_value,
-            source_fingerprint,
-            derived_core_json,
-            overlay_preferences_json,
-            now,
-            now,
-            1,
-        )
-
-        def _load_persisted_item(connection: Any) -> dict[str, Any]:
-            row = connection.execute(
-                "SELECT * FROM persona_buddies WHERE persona_id = ? LIMIT 1",
-                (persona_id,),
-            ).fetchone()
-            item = self._persona_buddy_row_to_dict(row)
-            if not item:
-                raise CharactersRAGDBError("Failed to load persona buddy after upsert.")  # noqa: TRY003
-            return item
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            prepared_update, prepared_update_params = self._prepare_backend_statement(update_query, update_params)
-            update_cursor = conn.execute(prepared_update, prepared_update_params or ())
-
-            if update_cursor.rowcount == 0:
-                existing_row = conn.execute(
-                    "SELECT 1 FROM persona_buddies WHERE persona_id = ? LIMIT 1",
-                    (persona_id,),
-                ).fetchone()
-                if existing_row:
-                    return _load_persisted_item(conn)
-
-                prepared_insert, prepared_insert_params = self._prepare_backend_statement(insert_query, insert_params)
-                try:
-                    conn.execute(prepared_insert, prepared_insert_params or ())
-                except sqlite3.IntegrityError as exc:
-                    msg = str(exc).lower()
-                    if "unique constraint failed" not in msg:
-                        raise
-                    update_cursor = conn.execute(prepared_update, prepared_update_params or ())
-                    if update_cursor.rowcount == 0:
-                        return _load_persisted_item(conn)
-                except BackendDatabaseError as exc:
-                    if not self._is_unique_violation(exc):
-                        raise
-                    update_cursor = conn.execute(prepared_update, prepared_update_params or ())
-                    if update_cursor.rowcount == 0:
-                        return _load_persisted_item(conn)
-
-            return _load_persisted_item(conn)
-
-    def list_persona_scope_rules(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        include_deleted: bool = False,
-    ) -> list[dict[str, Any]]:
-        """List scope rules for a user-owned persona profile."""
-        self.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
-        query = "SELECT * FROM persona_scope_rules WHERE persona_id = ? AND user_id = ?"
-        params: list[Any] = [persona_id, user_id]
-        if not include_deleted:
-            query += " AND deleted = 0"
-        query += " ORDER BY rule_type ASC, rule_value ASC, id ASC"
-        cursor = self.execute_query(query, tuple(params))
-        return [self._persona_scope_rule_row_to_dict(row) for row in cursor.fetchall() if row]
-
-    def replace_persona_scope_rules(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        rules: list[dict[str, Any]],
-    ) -> int:
-        """Replace active scope rules for a user-owned persona profile."""
-        if rules is None:
-            rules = []
-        now = self._get_current_utc_timestamp_iso()
-        include_true = bool if self.backend_type == BackendType.POSTGRESQL else int
-
-        normalized_rules: list[tuple[str, str, bool]] = []
-        seen: set[tuple[str, str, bool]] = set()
-        for rule in rules:
-            if not isinstance(rule, dict):
-                continue
-            rule_type = self._normalize_persona_scope_rule_type(rule.get("rule_type"))
-            rule_value = str(rule.get("rule_value") or "").strip()
-            if not rule_value:
-                raise InputError("persona scope rule_value is required.")  # noqa: TRY003
-            include = self._as_bool(rule.get("include", True))
-            key = (rule_type, rule_value, include)
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized_rules.append(key)
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            prepared_update, update_params = self._prepare_backend_statement(
-                (
-                    "UPDATE persona_scope_rules "
-                    "SET deleted = ?, last_modified = ?, version = version + 1 "
-                    "WHERE persona_id = ? AND user_id = ? AND deleted = 0"
-                ),
-                (
-                    include_true(True),
-                    now,
-                    persona_id,
-                    user_id,
-                ),
-            )
-            conn.execute(prepared_update, update_params or ())
-            if not normalized_rules:
-                return 0
-
-            insert_query = (
-                "INSERT INTO persona_scope_rules("
-                "persona_id, user_id, rule_type, rule_value, include, created_at, last_modified, deleted, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-            inserted = 0
-            for rule_type, rule_value, include in normalized_rules:
-                insert_params = (
-                    persona_id,
-                    user_id,
-                    rule_type,
-                    rule_value,
-                    include_true(include),
-                    now,
-                    now,
-                    include_true(False),
-                    1,
-                )
-                prepared_insert, prepared_params = self._prepare_backend_statement(insert_query, insert_params)
-                conn.execute(prepared_insert, prepared_params or ())
-                inserted += 1
-            return inserted
-
-    def list_persona_policy_rules(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        include_deleted: bool = False,
-    ) -> list[dict[str, Any]]:
-        """List policy rules for a user-owned persona profile."""
-        self.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
-        query = "SELECT * FROM persona_policy_rules WHERE persona_id = ? AND user_id = ?"
-        params: list[Any] = [persona_id, user_id]
-        if not include_deleted:
-            query += " AND deleted = 0"
-        query += " ORDER BY rule_kind ASC, rule_name ASC, id ASC"
-        cursor = self.execute_query(query, tuple(params))
-        return [self._persona_policy_rule_row_to_dict(row) for row in cursor.fetchall() if row]
-
-    def replace_persona_policy_rules(
-        self,
-        *,
-        persona_id: str,
-        user_id: str,
-        rules: list[dict[str, Any]],
-    ) -> int:
-        """Replace active policy rules for a user-owned persona profile."""
-        if rules is None:
-            rules = []
-        now = self._get_current_utc_timestamp_iso()
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-
-        normalized_rules: list[tuple[str, str, bool, bool, int | None]] = []
-        seen: set[tuple[str, str, bool, bool, int | None]] = set()
-        for rule in rules:
-            if not isinstance(rule, dict):
-                continue
-            rule_kind = self._normalize_persona_policy_rule_kind(rule.get("rule_kind"))
-            rule_name = str(rule.get("rule_name") or "").strip()
-            if not rule_name:
-                raise InputError("persona policy rule_name is required.")  # noqa: TRY003
-            allowed = self._as_bool(rule.get("allowed", True))
-            require_confirmation = self._as_bool(rule.get("require_confirmation", False))
-            max_calls = rule.get("max_calls_per_turn")
-            if max_calls is not None:
-                try:
-                    max_calls = int(max_calls)
-                except (TypeError, ValueError) as exc:
-                    raise InputError("max_calls_per_turn must be an integer when provided.") from exc  # noqa: TRY003
-                if max_calls < 1:
-                    raise InputError("max_calls_per_turn must be >= 1 when provided.")  # noqa: TRY003
-            key = (rule_kind, rule_name, allowed, require_confirmation, max_calls)
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized_rules.append(key)
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            prepared_update, update_params = self._prepare_backend_statement(
-                (
-                    "UPDATE persona_policy_rules "
-                    "SET deleted = ?, last_modified = ?, version = version + 1 "
-                    "WHERE persona_id = ? AND user_id = ? AND deleted = 0"
-                ),
-                (
-                    bool_cast(True),
-                    now,
-                    persona_id,
-                    user_id,
-                ),
-            )
-            conn.execute(prepared_update, update_params or ())
-            if not normalized_rules:
-                return 0
-
-            insert_query = (
-                "INSERT INTO persona_policy_rules("
-                "persona_id, user_id, rule_kind, rule_name, allowed, require_confirmation, "
-                "max_calls_per_turn, created_at, last_modified, deleted, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-            inserted = 0
-            for rule_kind, rule_name, allowed, require_confirmation, max_calls in normalized_rules:
-                insert_params = (
-                    persona_id,
-                    user_id,
-                    rule_kind,
-                    rule_name,
-                    bool_cast(allowed),
-                    bool_cast(require_confirmation),
-                    max_calls,
-                    now,
-                    now,
-                    bool_cast(False),
-                    1,
-                )
-                prepared_insert, prepared_params = self._prepare_backend_statement(insert_query, insert_params)
-                conn.execute(prepared_insert, prepared_params or ())
-                inserted += 1
-            return inserted
-
-    def create_persona_session(self, session_data: dict[str, Any]) -> str:
-        """Create a persona runtime session and return its session ID."""
-        persona_id = str(session_data.get("persona_id") or "").strip()
-        user_id = str(session_data.get("user_id") or "").strip()
-        if not persona_id:
-            raise InputError("persona_id is required for persona session creation.")  # noqa: TRY003
-        if not user_id:
-            raise InputError("user_id is required for persona session creation.")  # noqa: TRY003
-
-        session_id = str(session_data.get("id") or self._generate_uuid())
-        scope_snapshot = session_data.get("scope_snapshot_json")
-        if isinstance(scope_snapshot, str):
-            scope_snapshot_json = scope_snapshot.strip() or "{}"
-        else:
-            scope_snapshot_json = self._ensure_json_string(scope_snapshot) or "{}"
-        raw_preferences = session_data.get("preferences_json")
-        if isinstance(raw_preferences, str):
-            preferences_json = raw_preferences.strip() or "{}"
-        else:
-            preferences_json = self._ensure_json_string(raw_preferences) or "{}"
-
-        now = self._get_current_utc_timestamp_iso()
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        activity_surface = self._normalize_persona_session_activity_surface(session_data.get("activity_surface"))
-
-        with self.transaction() as conn:
-            persona_row = self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            mode = self._normalize_persona_mode(session_data.get("mode") or persona_row.get("mode"))
-            reuse_allowed_default = mode == "persistent_scoped"
-            reuse_allowed = self._as_bool(session_data.get("reuse_allowed", reuse_allowed_default))
-            status = self._normalize_persona_session_status(session_data.get("status") or "active")
-            conversation_id = session_data.get("conversation_id")
-            deleted_value = self._normalize_deleted_input(session_data.get("deleted", False))
-            version = self._parse_version_input(session_data.get("version", 1))
-
-            query = (
-                "INSERT INTO persona_sessions("
-                "id, persona_id, user_id, conversation_id, mode, reuse_allowed, status, "
-                "scope_snapshot_json, preferences_json, activity_surface, created_at, last_modified, deleted, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-            params = (
-                session_id,
-                persona_id,
-                user_id,
-                conversation_id,
-                mode,
-                bool_cast(reuse_allowed),
-                status,
-                scope_snapshot_json,
-                preferences_json,
-                activity_surface,
-                session_data.get("created_at") or now,
-                session_data.get("last_modified") or now,
-                bool_cast(deleted_value),
-                version,
-            )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            conn.execute(prepared_query, prepared_params or ())
-        return session_id
-
-    def get_persona_session(
-        self,
-        session_id: str,
-        *,
-        user_id: str,
-        include_deleted: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch a single persona session owned by a user."""
-        query = "SELECT * FROM persona_sessions WHERE id = ? AND user_id = ?"
-        params: list[Any] = [session_id, user_id]
-        if not include_deleted:
-            query += " AND deleted = 0"
-        cursor = self.execute_query(query, tuple(params))
-        return self._persona_session_row_to_dict(cursor.fetchone())
-
-    def list_persona_sessions(
-        self,
-        *,
-        user_id: str,
-        persona_id: str | None = None,
-        activity_surface: str | None = None,
-        status: str | None = None,
-        include_deleted: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List persona sessions for a user."""
-        clauses = ["user_id = ?"]
-        params: list[Any] = [user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if activity_surface is not None:
-            clauses.append("activity_surface = ?")
-            params.append(self._normalize_persona_session_activity_surface(activity_surface))
-        if status is not None:
-            normalized_status = self._normalize_persona_session_status(status)
-            clauses.append("status = ?")
-            params.append(normalized_status)
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        where_sql = " AND ".join(clauses)
-        query = (
-            "SELECT * FROM persona_sessions "  # nosec B608
-            f"WHERE {where_sql} "
-            "ORDER BY last_modified DESC, id ASC LIMIT ? OFFSET ?"
-        )
-        params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
-        return [self._persona_session_row_to_dict(row) for row in cursor.fetchall() if row]
-
-    def update_persona_session(
-        self,
-        *,
-        session_id: str,
-        user_id: str,
-        update_data: dict[str, Any],
-        expected_version: int | None = None,
-    ) -> bool:
-        """Update persona session fields for an owned session."""
-        if not update_data:
-            raise InputError("No session fields provided for update.")  # noqa: TRY003
-        allowed_fields = {
-            "conversation_id",
-            "mode",
-            "reuse_allowed",
-            "status",
-            "scope_snapshot_json",
-            "preferences_json",
-            "activity_surface",
-            "deleted",
-        }
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        set_parts: list[str] = []
-        params: list[Any] = []
-
-        for key, value in update_data.items():
-            if key not in allowed_fields:
-                continue
-            if key == "mode":
-                params.append(self._normalize_persona_mode(value))
-                set_parts.append("mode = ?")
-            elif key == "status":
-                params.append(self._normalize_persona_session_status(value))
-                set_parts.append("status = ?")
-            elif key in {"reuse_allowed", "deleted"}:
-                params.append(bool_cast(self._as_bool(value)))
-                set_parts.append(f"{key} = ?")
-            elif key == "scope_snapshot_json":
-                if isinstance(value, str):
-                    params.append(value.strip() or "{}")
-                else:
-                    params.append(self._ensure_json_string(value) or "{}")
-                set_parts.append("scope_snapshot_json = ?")
-            elif key == "preferences_json":
-                if isinstance(value, str):
-                    params.append(value.strip() or "{}")
-                else:
-                    params.append(self._ensure_json_string(value) or "{}")
-                set_parts.append("preferences_json = ?")
-            elif key == "activity_surface":
-                params.append(self._normalize_persona_session_activity_surface(value))
-                set_parts.append("activity_surface = ?")
-            else:
-                params.append(value)
-                set_parts.append("conversation_id = ?")
-
-        if not set_parts:
-            raise InputError("No valid session fields provided for update.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        set_parts.extend(["last_modified = ?", "version = version + 1"])
-        params.append(now)
-        where_sql = "id = ? AND user_id = ? AND deleted = 0"
-        params.extend([session_id, user_id])
-        if expected_version is not None:
-            where_sql += " AND version = ?"
-            params.append(int(expected_version))
-
-        query = f"UPDATE persona_sessions SET {', '.join(set_parts)} WHERE {where_sql}"  # nosec B608
-        with self.transaction() as conn:
-            existing = conn.execute(
-                "SELECT version, deleted FROM persona_sessions WHERE id = ? AND user_id = ?",
-                (session_id, user_id),
-            ).fetchone()
-            if not existing:
-                return False
-            if self._as_bool(existing["deleted"]):
-                return False
-            if expected_version is not None and int(existing["version"]) != int(expected_version):
-                raise ConflictError(  # noqa: TRY003
-                    f"Persona session version mismatch (db has {existing['version']}, expected {expected_version}).",
-                    entity="persona_sessions",
-                    entity_id=session_id,
-                )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            return cursor.rowcount > 0
-
-    def add_persona_memory_entry(self, entry_data: dict[str, Any]) -> str:
-        """Create a persona memory entry and return its ID."""
-        persona_id = str(entry_data.get("persona_id") or "").strip()
-        user_id = str(entry_data.get("user_id") or "").strip()
-        memory_type = str(entry_data.get("memory_type") or "").strip()
-        content = str(entry_data.get("content") or "").strip()
-        if not persona_id:
-            raise InputError("persona_id is required for persona memory creation.")  # noqa: TRY003
-        if not user_id:
-            raise InputError("user_id is required for persona memory creation.")  # noqa: TRY003
-        if not memory_type:
-            raise InputError("memory_type is required for persona memory creation.")  # noqa: TRY003
-        if not content:
-            raise InputError("content is required for persona memory creation.")  # noqa: TRY003
-
-        entry_id = str(entry_data.get("id") or self._generate_uuid())
-        source_conversation_id = entry_data.get("source_conversation_id")
-        scope_snapshot_id_raw = entry_data.get("scope_snapshot_id")
-        session_id_raw = entry_data.get("session_id")
-        scope_snapshot_id = str(scope_snapshot_id_raw).strip() if scope_snapshot_id_raw is not None else None
-        if scope_snapshot_id == "":
-            scope_snapshot_id = None
-        session_id = str(session_id_raw).strip() if session_id_raw is not None else None
-        if session_id == "":
-            session_id = None
-        try:
-            salience = float(entry_data.get("salience", 0.0))
-        except (TypeError, ValueError) as exc:
-            raise InputError("salience must be a numeric value.") from exc  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        archived = self._as_bool(entry_data.get("archived", False))
-        deleted = self._as_bool(entry_data.get("deleted", False))
-        version = int(entry_data.get("version", 1))
-        if version < 1:
-            raise InputError("version must be >= 1.")  # noqa: TRY003
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            query = (
-                "INSERT INTO persona_memory_entries("
-                "id, persona_id, user_id, memory_type, content, source_conversation_id, "
-                "scope_snapshot_id, session_id, salience, archived, created_at, last_modified, deleted, version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-            params = (
-                entry_id,
-                persona_id,
-                user_id,
-                memory_type,
-                content,
-                source_conversation_id,
-                scope_snapshot_id,
-                session_id,
-                salience,
-                bool_cast(archived),
-                entry_data.get("created_at") or now,
-                entry_data.get("last_modified") or now,
-                bool_cast(deleted),
-                version,
-            )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            conn.execute(prepared_query, prepared_params or ())
-        return entry_id
-
-    def list_persona_memory_entries(
-        self,
-        *,
-        user_id: str,
-        persona_id: str | None = None,
-        memory_type: str | None = None,
-        scope_snapshot_id: str | None = None,
-        session_id: str | None = None,
-        include_archived: bool = False,
-        include_deleted: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict[str, Any]]:
-        """List persona memory entries for a user (optionally scoped to persona)."""
-        clauses = ["user_id = ?"]
-        params: list[Any] = [user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if memory_type is not None:
-            clauses.append("memory_type = ?")
-            params.append(str(memory_type).strip())
-        if scope_snapshot_id is not None:
-            clauses.append("scope_snapshot_id = ?")
-            params.append(str(scope_snapshot_id).strip())
-        if session_id is not None:
-            clauses.append("session_id = ?")
-            params.append(str(session_id).strip())
-        if not include_archived:
-            clauses.append("archived = 0")
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        where_sql = " AND ".join(clauses)
-        query = (
-            "SELECT * FROM persona_memory_entries "  # nosec B608
-            f"WHERE {where_sql} "
-            "ORDER BY last_modified DESC, id ASC LIMIT ? OFFSET ?"
-        )
-        params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
-        return [self._persona_memory_row_to_dict(row) for row in cursor.fetchall() if row]
-
-    def get_persona_memory_entry_by_id(
-        self,
-        *,
-        entry_id: str,
-        user_id: str,
-        persona_id: str | None = None,
-        include_deleted: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch a single persona memory entry by ID, owned by user."""
-        clauses = ["id = ?", "user_id = ?"]
-        params: list[Any] = [entry_id, user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        query = f"SELECT * FROM persona_memory_entries WHERE {' AND '.join(clauses)}"  # nosec B608
-        cursor = self.execute_query(query, tuple(params))
-        return self._persona_memory_row_to_dict(cursor.fetchone())
-
-    def count_persona_memory_entries(
-        self,
-        *,
-        user_id: str,
-        persona_id: str | None = None,
-        memory_type: str | None = None,
-        include_archived: bool = False,
-        include_deleted: bool = False,
-    ) -> int:
-        """Count persona memory entries matching the given filters."""
-        clauses = ["user_id = ?"]
-        params: list[Any] = [user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        if memory_type is not None:
-            clauses.append("memory_type = ?")
-            params.append(str(memory_type).strip())
-        if not include_archived:
-            clauses.append("archived = 0")
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        query = f"SELECT COUNT(*) FROM persona_memory_entries WHERE {' AND '.join(clauses)}"  # nosec B608
-        cursor = self.execute_query(query, tuple(params))
-        row = cursor.fetchone()
-        return row[0] if row else 0
-
-    def set_persona_memory_archived(
-        self,
-        *,
-        entry_id: str,
-        user_id: str,
-        archived: bool = True,
-        persona_id: str | None = None,
-    ) -> bool:
-        """Archive/unarchive a persona memory entry owned by user."""
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        now = self._get_current_utc_timestamp_iso()
-        clauses = ["id = ?", "user_id = ?", "deleted = 0"]
-        params: list[Any] = [entry_id, user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        where_sql = " AND ".join(clauses)
-        query = (
-            "UPDATE persona_memory_entries "
-            "SET archived = ?, last_modified = ?, version = version + 1 "
-            f"WHERE {where_sql}"  # nosec B608
-        )
-        update_params = [bool_cast(archived), now, *params]
-        cursor = self.execute_query(query, tuple(update_params), commit=True)
-        return bool(cursor.rowcount and cursor.rowcount > 0)
-
-    def update_persona_memory_entry(
-        self,
-        *,
-        entry_id: str,
-        user_id: str,
-        persona_id: str,
-        update_data: dict[str, Any],
-    ) -> bool:
-        """Update mutable persona memory entry fields."""
-        if not update_data:
-            raise InputError("No persona memory fields provided for update.")  # noqa: TRY003
-
-        allowed_fields = {
-            "content",
-            "memory_type",
-            "salience",
-            "source_conversation_id",
-            "scope_snapshot_id",
-            "session_id",
-            "archived",
-            "deleted",
-        }
-        set_parts: list[str] = []
-        params: list[Any] = []
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-
-        for key, value in update_data.items():
-            if key not in allowed_fields:
-                continue
-            if key == "content":
-                content = str(value or "").strip()
-                if not content:
-                    raise InputError("content cannot be empty.")  # noqa: TRY003
-                params.append(content)
-                set_parts.append("content = ?")
-            elif key == "memory_type":
-                mt = str(value or "").strip()
-                if not mt:
-                    raise InputError("memory_type cannot be empty.")  # noqa: TRY003
-                params.append(mt)
-                set_parts.append("memory_type = ?")
-            elif key == "salience":
-                try:
-                    params.append(float(value))
-                except (TypeError, ValueError) as exc:
-                    raise InputError("salience must be a numeric value.") from exc  # noqa: TRY003
-                set_parts.append("salience = ?")
-            elif key in {"archived", "deleted"}:
-                params.append(bool_cast(self._as_bool(value)))
-                set_parts.append(f"{key} = ?")
-            else:
-                normalized = None if value is None else str(value).strip() or None
-                params.append(normalized)
-                set_parts.append(f"{key} = ?")
-
-        if not set_parts:
-            raise InputError("No valid persona memory fields provided for update.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        set_parts.extend(["last_modified = ?", "version = version + 1"])
-        params.append(now)
-
-        with self.transaction() as conn:
-            self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
-            query = (
-                "UPDATE persona_memory_entries "
-                f"SET {', '.join(set_parts)} "
-                "WHERE id = ? AND persona_id = ? AND user_id = ? AND deleted = 0"  # nosec B608
-            )
-            params.extend([entry_id, persona_id, user_id])
-            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-            cursor = conn.execute(prepared_query, prepared_params or ())
-            return cursor.rowcount > 0
-
-    def backfill_persona_memory_scope_namespace(
-        self,
-        *,
-        user_id: str,
-        persona_id: str,
-        scope_snapshot_id: str,
-        require_missing_session_id: bool = True,
-        include_archived: bool = False,
-        include_deleted: bool = False,
-    ) -> int:
-        """
-        Backfill missing scope namespace for persona memory entries.
-
-        This updates entries owned by (`user_id`, `persona_id`) that currently have no
-        `scope_snapshot_id` (NULL/empty string), setting them to `scope_snapshot_id`
-        and bumping `version/last_modified`.
-        """
-        scope_value = str(scope_snapshot_id or "").strip()
-        if not scope_value:
-            raise InputError("scope_snapshot_id is required for namespace backfill.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        clauses = [
-            "user_id = ?",
-            "persona_id = ?",
-            "(scope_snapshot_id IS NULL OR scope_snapshot_id = '')",
-        ]
-        params: list[Any] = [user_id, persona_id]
-        if require_missing_session_id:
-            clauses.append("(session_id IS NULL OR session_id = '')")
-        if not include_archived:
-            clauses.append("archived = 0")
-        if not include_deleted:
-            clauses.append("deleted = 0")
-        where_sql = " AND ".join(clauses)
-        query = (
-            "UPDATE persona_memory_entries "
-            "SET scope_snapshot_id = ?, last_modified = ?, version = version + 1 "
-            f"WHERE {where_sql}"  # nosec B608
-        )
-        update_params = [scope_value, now, *params]
-        cursor = self.execute_query(query, tuple(update_params), commit=True)
-        return int(cursor.rowcount or 0)
-
-    def soft_delete_persona_memory_entry(
-        self,
-        *,
-        entry_id: str,
-        user_id: str,
-        persona_id: str | None = None,
-    ) -> bool:
-        """Soft-delete a persona memory entry owned by user."""
-        bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
-        now = self._get_current_utc_timestamp_iso()
-        clauses = ["id = ?", "user_id = ?", "deleted = 0"]
-        params: list[Any] = [entry_id, user_id]
-        if persona_id is not None:
-            clauses.append("persona_id = ?")
-            params.append(persona_id)
-        where_sql = " AND ".join(clauses)
-        query = (
-            "UPDATE persona_memory_entries "
-            "SET deleted = ?, archived = ?, last_modified = ?, version = version + 1 "
-            f"WHERE {where_sql}"  # nosec B608
-        )
-        update_params = [bool_cast(True), bool_cast(True), now, *params]
-        cursor = self.execute_query(query, tuple(update_params), commit=True)
-        return bool(cursor.rowcount and cursor.rowcount > 0)
+    # Persona state CRUD/analytics methods are delegated to PersonaStateStore at module bottom.
 
     def _convert_sqlite_schema_to_postgres_statements(self, sql: str) -> list[str]:
         """Convert SQLite schema SQL into individual Postgres-compatible statements."""
@@ -12121,159 +13612,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         return statements
 
-    # ----------------------
-    # Message metadata helpers (structured extras + backfill)
-    # ----------------------
-    def set_message_metadata_extra(self, message_id: str, extra: dict[str, Any], merge: bool = True) -> bool:
-        """Set or merge structured extra metadata for a message.
-
-        Expected shape for `extra`:
-          {
-            "tool_results": { "<tool_call_id>": <any-json-serializable> },
-            ... other namespaced keys ...,
-            "version": 1
-          }
-
-        If merge=True and existing extra exists, perform a shallow merge; nested maps like
-        tool_results are merged key-wise.
-        """
-        try:
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-            if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
-                merged = dict(current_extra)
-                # Merge tool_results specially
-                tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
-                tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
-                if tr_existing or tr_incoming:
-                    merged['tool_results'] = {**tr_existing, **tr_incoming}
-                # Merge top-level keys (favor incoming)
-                for k, v in extra.items():
-                    if k == 'tool_results':
-                        continue
-                    merged[k] = v
-                new_extra = merged
-            else:
-                new_extra = extra
-            return self.add_message_metadata(message_id, tool_calls=current.get('tool_calls'), extra=new_extra)
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"set_message_metadata_extra failed for {message_id}: {e}")
-            return False
-
-    def set_message_rag_context(
-        self,
-        message_id: str,
-        rag_context: dict[str, Any],
-        merge: bool = True
-    ) -> bool:
-        """
-        Store RAG context (citations, retrieved documents, search settings) with a message.
-
-        This persists RAG search results and citations in message_metadata.extra_json
-        under the 'rag_context' key for later retrieval and export.
-
-        Args:
-            message_id: The message ID to attach RAG context to
-            rag_context: Dict containing:
-                - search_query: The original search query
-                - search_mode: Search mode used (fts/vector/hybrid)
-                - settings_snapshot: Key RAG settings used
-                - retrieved_documents: List of retrieved docs with scores/excerpts
-                - generated_answer: AI-generated answer (if any)
-                - citations: Citation metadata
-                - claims_verified: Verification results (if any)
-                - timestamp: ISO timestamp
-                - feedback_id: Analytics ID
-            merge: If True, merge with existing extra data; if False, replace entire extra
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            # Get current metadata to preserve other extra fields
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-
-            if merge and isinstance(current_extra, dict):
-                # Merge: preserve existing extra fields, update rag_context
-                new_extra = dict(current_extra)
-                new_extra['rag_context'] = rag_context
-            else:
-                # Replace: only keep rag_context
-                new_extra = {'rag_context': rag_context}
-
-            return self.add_message_metadata(
-                message_id,
-                tool_calls=current.get('tool_calls'),
-                extra=new_extra
-            )
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"set_message_rag_context failed for {message_id}: {e}")
-            return False
-
-    def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None:
-        """
-        Retrieve RAG context stored with a message.
-
-        Returns the rag_context dict from message_metadata.extra_json,
-        or None if no RAG context is stored.
-        """
-        try:
-            metadata = self.get_message_metadata(message_id)
-            if not metadata:
-                return None
-            extra = metadata.get('extra')
-            if not isinstance(extra, dict):
-                return None
-            return extra.get('rag_context')
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"get_message_rag_context failed for {message_id}: {e}")
-            return None
-
-    def get_messages_with_rag_context(
-        self,
-        conversation_id: str,
-        limit: int = 100,
-        offset: int = 0,
-        include_rag_context: bool = True
-    ) -> list[dict[str, Any]]:
-        """
-        Retrieve messages for a conversation with optional RAG context attached.
-
-        This is optimized for the Knowledge QA page to load conversation history
-        with full citation data.
-
-        Args:
-            conversation_id: The conversation to fetch messages from
-            limit: Maximum number of messages to return
-            offset: Number of messages to skip
-            include_rag_context: If True, attach rag_context to each message
-
-        Returns:
-            List of message dicts, each optionally including 'rag_context' key
-        """
-        try:
-            messages = self.get_messages_for_conversation(
-                conversation_id,
-                limit=limit,
-                offset=offset
-            )
-
-            if not include_rag_context:
-                return messages
-
-            # Attach RAG context to each message
-            for msg in messages:
-                msg_id = msg.get('id')
-                if msg_id:
-                    rag_context = self.get_message_rag_context(msg_id)
-                    if rag_context:
-                        msg['rag_context'] = rag_context
-
-            return messages  # noqa: TRY300
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"get_messages_with_rag_context failed for conversation {conversation_id}: {e}")
-            return []
+    # Message metadata extra / RAG helpers are delegated to MessageStore at module bottom.
 
     def get_conversation_citations(self, conversation_id: str) -> list[dict[str, Any]]:
         """
@@ -12854,98 +14193,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 results.append(r)
         return results
 
-    def get_notes_batch(self, note_ids: list[str], include_deleted: bool = True) -> list[dict[str, Any]]:
-        """Return note rows for the given IDs. Batches in groups of 900."""
-        if not note_ids:
-            return []
-        results: list[dict[str, Any]] = []
-        for batch in self._chunk_list(note_ids, self._SQLITE_PARAM_LIMIT):
-            ph = ",".join(["?"] * len(batch))
-            deleted_clause = "" if include_deleted else " AND deleted = 0"
-            query = (
-                f"SELECT id, title, content, created_at, last_modified, deleted, conversation_id "  # nosec B608
-                f"FROM notes WHERE id IN ({ph}){deleted_clause}"
-            )
-            cur = self.execute_query(query, tuple(batch))
-            for row in cur.fetchall():
-                r = dict(row) if hasattr(row, "keys") else {
-                    "id": row[0], "title": row[1], "content": row[2],
-                    "created_at": row[3], "last_modified": row[4],
-                    "deleted": row[5], "conversation_id": row[6],
-                }
-                results.append(r)
-        return results
-
-    def get_all_note_ids_for_graph(self, include_deleted: bool = True, limit: int = 500) -> list[str]:
-        """Return note IDs ordered by last_modified DESC, id ASC. For seedless graph."""
-        deleted_clause = "" if include_deleted else " WHERE deleted = 0"
-        query = f"SELECT id FROM notes{deleted_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
-        cur = self.execute_query(query, (limit,))
-        return [row[0] for row in cur.fetchall()]
-
-    def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
-        """Return (note_id, keyword_id, keyword) for notes with active keywords."""
-        if not note_ids:
-            return []
-        results: list[dict[str, Any]] = []
-        for batch in self._chunk_list(note_ids, self._SQLITE_PARAM_LIMIT):
-            ph = ",".join(["?"] * len(batch))
-            query = (
-                f"SELECT nk.note_id, k.id AS keyword_id, k.keyword "  # nosec B608
-                f"FROM note_keywords nk "
-                f"JOIN keywords k ON k.id = nk.keyword_id "
-                f"WHERE nk.note_id IN ({ph}) AND k.deleted = 0"
-            )
-            cur = self.execute_query(query, tuple(batch))
-            for row in cur.fetchall():
-                r = dict(row) if hasattr(row, "keys") else {
-                    "note_id": row[0], "keyword_id": row[1], "keyword": row[2],
-                }
-                results.append(r)
-        return results
-
-    def count_notes_per_tag(self) -> dict[int, int]:
-        """Return {keyword_id: note_count} for popularity cutoff."""
-        query = (
-            "SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt "
-            "FROM note_keywords nk "
-            "JOIN notes n ON n.id = nk.note_id AND n.deleted = 0 "
-            "JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = 0 "
-            "GROUP BY nk.keyword_id"
-        )
-        cur = self.execute_query(query)
-        return {row[0]: row[1] for row in cur.fetchall()}
-
-    def get_note_source_info(self, note_ids: list[str]) -> list[dict[str, Any]]:
-        """Return source info for notes that have a conversation with source set."""
-        if not note_ids:
-            return []
-        results: list[dict[str, Any]] = []
-        for batch in self._chunk_list(note_ids, self._SQLITE_PARAM_LIMIT):
-            ph = ",".join(["?"] * len(batch))
-            query = (
-                f"SELECT n.id AS note_id, c.id AS conversation_id, c.source, c.external_ref "  # nosec B608
-                f"FROM notes n "
-                f"JOIN conversations c ON c.id = n.conversation_id "
-                f"WHERE n.id IN ({ph}) AND c.source IS NOT NULL"
-            )
-            cur = self.execute_query(query, tuple(batch))
-            for row in cur.fetchall():
-                r = dict(row) if hasattr(row, "keys") else {
-                    "note_id": row[0], "conversation_id": row[1],
-                    "source": row[2], "external_ref": row[3],
-                }
-                results.append(r)
-        return results
-
-    def count_user_notes(self, include_deleted: bool = True) -> int:
-        """Count total notes for seedless query gate."""
-        if include_deleted:
-            query = "SELECT COUNT(*) FROM notes"
-        else:
-            query = "SELECT COUNT(*) FROM notes WHERE deleted = 0"
-        cur = self.execute_query(query)
-        return cur.fetchone()[0]
+    # Note graph helper methods are delegated to NoteStore at module bottom.
 
     @staticmethod
     def _chunk_list(lst: list, size: int) -> list[list]:
@@ -13012,6 +14260,395 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         message = str(error).lower()
         return "unique constraint" in message or "duplicate key" in message
 
+    # ----------------------
+    # Skill registry
+    # ----------------------
+    def _ensure_skill_registry_table(self) -> None:
+        """Ensure the skill_registry table exists for the active backend."""
+        if self.backend_type == BackendType.SQLITE:
+            self.execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS skill_registry (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    argument_hint TEXT,
+                    disable_model_invocation BOOLEAN DEFAULT 0,
+                    user_invocable BOOLEAN DEFAULT 1,
+                    allowed_tools TEXT,
+                    model TEXT,
+                    context TEXT DEFAULT 'inline',
+                    directory_path TEXT NOT NULL,
+                    last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    file_hash TEXT,
+                    uuid TEXT UNIQUE NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    deleted BOOLEAN DEFAULT 0,
+                    version INTEGER NOT NULL DEFAULT 1
+                )
+                """,
+                script=False,
+                commit=True,
+            )
+            self.execute_query(
+                "CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)",
+                script=False,
+                commit=True,
+            )
+            self.execute_query(
+                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)",
+                script=False,
+                commit=True,
+            )
+            self.execute_query(
+                "CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)",
+                script=False,
+                commit=True,
+            )
+            return
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            self.backend.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_registry (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    argument_hint TEXT,
+                    disable_model_invocation BOOLEAN DEFAULT FALSE,
+                    user_invocable BOOLEAN DEFAULT TRUE,
+                    allowed_tools TEXT,
+                    model TEXT,
+                    context TEXT DEFAULT 'inline',
+                    directory_path TEXT NOT NULL,
+                    last_modified TIMESTAMP NOT NULL DEFAULT NOW(),
+                    file_hash TEXT,
+                    uuid TEXT UNIQUE NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    deleted BOOLEAN DEFAULT FALSE,
+                    version INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_name ON skill_registry(name)")
+            self.backend.execute(
+                "CREATE INDEX IF NOT EXISTS idx_skill_user_invocable ON skill_registry(user_invocable)"
+            )
+            self.backend.execute("CREATE INDEX IF NOT EXISTS idx_skill_deleted ON skill_registry(deleted)")
+            return
+
+        raise NotImplementedError(
+            f"skill_registry table creation not supported for backend {self.backend_type.value}"
+        )
+
+    def _coerce_skill_datetime(self, value: Any) -> datetime | None:
+        """Best-effort conversion of database timestamps to datetime."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
+
+    def _skill_row_to_dict(self, row: Any) -> dict[str, Any] | None:
+        """Convert a skill_registry row to a dict with JSON fields decoded."""
+        if not row:
+            return None
+        item = dict(row)
+        allowed_tools = item.get("allowed_tools")
+        if isinstance(allowed_tools, str):
+            try:
+                item["allowed_tools"] = json.loads(allowed_tools)
+            except json.JSONDecodeError:
+                item["allowed_tools"] = [tool.strip() for tool in allowed_tools.split(",") if tool.strip()]
+        elif allowed_tools is None:
+            item["allowed_tools"] = None
+        else:
+            item["allowed_tools"] = allowed_tools
+
+        item["disable_model_invocation"] = bool(item.get("disable_model_invocation", False))
+        item["user_invocable"] = bool(item.get("user_invocable", True))
+        item["deleted"] = bool(item.get("deleted", False))
+        item["created_at"] = self._coerce_skill_datetime(item.get("created_at"))
+        item["last_modified"] = self._coerce_skill_datetime(item.get("last_modified"))
+        return item
+
+    def _skill_bool_value(self, value: bool) -> bool | int:
+        return value if self.backend_type == BackendType.POSTGRESQL else int(value)
+
+    def list_skill_registry(
+        self,
+        *,
+        include_hidden: bool = False,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List skill registry entries with optional filters."""
+        self._ensure_skill_registry_table()
+        clauses = []
+        params: list[Any] = []
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._skill_bool_value(False))
+        if not include_hidden:
+            clauses.append("user_invocable = ?")
+            params.append(self._skill_bool_value(True))
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = (
+            "SELECT * FROM skill_registry "  # nosec B608
+            f"{where_sql} "
+            "ORDER BY name ASC LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            return [item for row in cursor.fetchall() if (item := self._skill_row_to_dict(row))]
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error listing skills: {exc}")
+            raise
+
+    def count_skill_registry(
+        self,
+        *,
+        include_hidden: bool = False,
+        include_deleted: bool = False,
+    ) -> int:
+        """Return count of skills in registry."""
+        self._ensure_skill_registry_table()
+        clauses = []
+        params: list[Any] = []
+        if not include_deleted:
+            clauses.append("deleted = ?")
+            params.append(self._skill_bool_value(False))
+        if not include_hidden:
+            clauses.append("user_invocable = ?")
+            params.append(self._skill_bool_value(True))
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"SELECT COUNT(*) AS cnt FROM skill_registry {where_sql}"  # nosec B608
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row else 0
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error counting skills: {exc}")
+            raise
+
+    def get_skill_registry(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
+        """Fetch a skill registry entry by name."""
+        self._ensure_skill_registry_table()
+        query = "SELECT * FROM skill_registry WHERE name = ?"
+        params: list[Any] = [name]
+        if not include_deleted:
+            query += " AND deleted = ?"
+            params.append(self._skill_bool_value(False))
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            return self._skill_row_to_dict(cursor.fetchone())
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error fetching skill '{name}': {exc}")
+            raise
+
+    def insert_skill_registry(self, skill_data: dict[str, Any]) -> str:
+        """Insert a new skill registry row and return its UUID."""
+        self._ensure_skill_registry_table()
+        name = str(skill_data.get("name") or "").strip().lower()
+        if not name:
+            raise InputError("Skill name is required.")  # noqa: TRY003
+        directory_path = str(skill_data.get("directory_path") or "")
+        if not directory_path:
+            raise InputError("directory_path is required for skill registry.")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        skill_uuid = str(skill_data.get("uuid") or self._generate_uuid())
+        allowed_tools_json = self._ensure_json_string(skill_data.get("allowed_tools"))
+
+        query = (
+            "INSERT INTO skill_registry ("
+            "name, description, argument_hint, disable_model_invocation, user_invocable, "
+            "allowed_tools, model, context, directory_path, last_modified, file_hash, uuid, "
+            "created_at, deleted, version"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            name,
+            skill_data.get("description"),
+            skill_data.get("argument_hint"),
+            self._skill_bool_value(bool(skill_data.get("disable_model_invocation", False))),
+            self._skill_bool_value(bool(skill_data.get("user_invocable", True))),
+            allowed_tools_json,
+            skill_data.get("model"),
+            skill_data.get("context", "inline"),
+            directory_path,
+            now,
+            skill_data.get("file_hash"),
+            skill_uuid,
+            skill_data.get("created_at") or now,
+            self._skill_bool_value(bool(skill_data.get("deleted", False))),
+            int(skill_data.get("version", 1)),
+        )
+        try:
+            self.execute_query(query, params, commit=True)
+            return skill_uuid
+        except sqlite3.IntegrityError as exc:
+            if "unique constraint failed: skill_registry.name" in str(exc).lower():
+                raise ConflictError(
+                    f"Skill '{name}' already exists.",
+                    entity="skill_registry",
+                    entity_id=name,
+                ) from exc
+            if "unique constraint failed: skill_registry.uuid" in str(exc).lower():
+                raise ConflictError(
+                    "Skill UUID already exists.",
+                    entity="skill_registry",
+                    entity_id=skill_uuid,
+                ) from exc
+            raise CharactersRAGDBError(f"Database integrity error adding skill '{name}': {exc}") from exc
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    f"Skill '{name}' already exists.",
+                    entity="skill_registry",
+                    entity_id=name,
+                ) from exc
+            raise CharactersRAGDBError(f"Database integrity error adding skill '{name}': {exc}") from exc
+
+    def update_skill_registry(
+        self,
+        name: str,
+        update_data: dict[str, Any],
+        expected_version: int,
+    ) -> bool:
+        """Update a skill registry row using optimistic locking."""
+        if not update_data:
+            raise InputError(f"No data provided for update of skill '{name}'.")  # noqa: TRY003
+
+        self._ensure_skill_registry_table()
+        now = self._get_current_utc_timestamp_iso()
+        allowed_fields = {
+            "description",
+            "argument_hint",
+            "disable_model_invocation",
+            "user_invocable",
+            "allowed_tools",
+            "model",
+            "context",
+            "directory_path",
+            "file_hash",
+            "deleted",
+        }
+
+        set_parts: list[str] = []
+        params: list[Any] = []
+        for key, value in update_data.items():
+            if key not in allowed_fields:
+                continue
+            if key == "allowed_tools":
+                params.append(self._ensure_json_string(value))
+                set_parts.append("allowed_tools = ?")
+            elif key in {"disable_model_invocation", "user_invocable", "deleted"}:
+                params.append(self._skill_bool_value(bool(value)))
+                set_parts.append(f"{key} = ?")
+            else:
+                params.append(value)
+                set_parts.append(f"{key} = ?")
+
+        if not set_parts:
+            raise InputError(f"No supported data provided for update of skill '{name}'.")  # noqa: TRY003
+
+        set_parts.extend(["last_modified = ?", "version = version + 1"])
+        params.append(now)
+        params.extend([name, expected_version])
+        query = (
+            f"UPDATE skill_registry SET {', '.join(set_parts)} "  # nosec B608
+            "WHERE name = ? AND version = ? AND deleted = ?"
+        )
+        params.append(self._skill_bool_value(False))
+
+        try:
+            with self.transaction() as conn:
+                current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Skill '{name}' was modified (db has {current_db_version}, expected {expected_version}).",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+                cursor = conn.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Skill '{name}' update affected 0 rows.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error updating skill '{name}': {exc}")
+            raise
+
+    def mark_skill_registry_deleted(self, name: str, expected_version: int) -> bool:
+        """Soft-delete a skill registry row using optimistic locking."""
+        self._ensure_skill_registry_table()
+        now = self._get_current_utc_timestamp_iso()
+        next_version = expected_version + 1
+
+        query = (
+            "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
+            "WHERE name = ? AND version = ? AND deleted = ?"
+        )
+        params = (
+            self._skill_bool_value(True),
+            now,
+            next_version,
+            name,
+            expected_version,
+            self._skill_bool_value(False),
+        )
+
+        try:
+            with self.transaction() as conn:
+                try:
+                    current_db_version = self._get_current_db_version(conn, "skill_registry", "name", name)
+                except ConflictError:
+                    check_deleted = conn.execute(
+                        "SELECT deleted, version FROM skill_registry WHERE name = ?",
+                        (name,),
+                    ).fetchone()
+                    if check_deleted and check_deleted["deleted"]:
+                        logger.info("Skill '{}' already deleted; soft-delete is idempotent.", name)
+                        return True
+                    raise
+
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Skill '{name}' version mismatch (db has {current_db_version}, expected {expected_version}).",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+                cursor = conn.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Skill '{name}' delete affected 0 rows.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error deleting skill '{name}': {exc}")
+            raise
+
     def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: list[str]) -> dict[str, Any] | None:
         """
         Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
@@ -13044,6 +14681,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return item
 
     _CHARACTER_CARD_JSON_FIELDS = ['alternate_greetings', 'tags', 'extensions']
+    _STUDY_PACK_JSON_FIELDS = ['source_bundle_json', 'generation_options_json']
+    _SUGGESTION_SNAPSHOT_JSON_FIELDS = ('payload_json', 'user_selection_json')
     _CHARACTER_FOLDER_TAG_PREFIX = "__tldw_folder_id:"
     _CHARACTER_EXEMPLAR_JSON_FIELDS = ['rhetorical', 'safety_allowed', 'safety_blocked']
     _PERSONA_EXEMPLAR_JSON_FIELDS = ['scenario_tags_json', 'capability_tags_json']
@@ -13087,1844 +14726,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return json.dumps(new_data)
         return json.dumps(data)
 
-    def add_character_card(self, card_data: dict[str, Any]) -> int | None:
-        """
-        Adds a new character card to the database.
-
-        The `client_id` for the new record is taken from the `CharactersRAGDB` instance.
-        `version` defaults to 1. `created_at` and `last_modified` are set to the
-        current UTC time. Fields like `alternate_greetings`, `tags`, and `extensions`
-        (from `_CHARACTER_CARD_JSON_FIELDS`) are stored as JSON strings.
-
-        FTS updates (`character_cards_fts`) and `sync_log` entries for creations
-        are handled automatically by SQL triggers.
-
-        Args:
-            card_data: A dictionary containing the character card data.
-                       Required fields: 'name'.
-                       Optional fields include: 'description', 'personality', 'scenario', 'image',
-                       'post_history_instructions', 'first_message', 'message_example',
-                       'creator_notes', 'system_prompt', 'alternate_greetings' (list/set/JSON str),
-                       'tags' (list/set/JSON str), 'creator', 'character_version',
-                       'extensions' (dict/JSON str).
-
-        Returns:
-            The integer ID of the newly created character card.
-
-        Raises:
-            InputError: If required fields (e.g., 'name') are missing or empty.
-            ConflictError: If a character card with the same 'name' already exists.
-            CharactersRAGDBError: For other database-related errors during insertion.
-        """
-        required_fields = ['name']
-        for field in required_fields:
-            if field not in card_data or not card_data[field]:
-                raise InputError(f"Required field '{field}' is missing or empty.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-
-        # Ensure JSON fields are strings or None
-        def get_json_field_as_string(field_value):
-            if isinstance(field_value, str):
-                # Assume it's already a JSON string if it's a string
-                return field_value
-            return self._ensure_json_string(field_value)
-
-        alt_greetings_json = get_json_field_as_string(card_data.get('alternate_greetings'))
-        tags_field_value = card_data.get("tags")
-        if tags_field_value is not None:
-            if isinstance(tags_field_value, str):
-                raw_tags_value = tags_field_value
-                stripped_tags_value = raw_tags_value.strip()
-                if not stripped_tags_value:
-                    tags_field_value = []
-                else:
-                    try:
-                        parsed_tags = json.loads(stripped_tags_value)
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        # Preserve legacy behavior for invalid JSON tag strings.
-                        tags_field_value = raw_tags_value
-                    else:
-                        if isinstance(parsed_tags, list):
-                            tags_field_value = self._normalize_character_tags_for_operation(parsed_tags)
-                        else:
-                            tags_field_value = raw_tags_value
-            else:
-                tags_field_value = self._normalize_character_tags_for_operation(tags_field_value)
-        tags_json = get_json_field_as_string(tags_field_value)
-        extensions_json = get_json_field_as_string(card_data.get('extensions'))
-
-        base_query = """
-            INSERT INTO character_cards (
-                name, description, personality, scenario, image, post_history_instructions,
-                first_message, message_example, creator_notes, system_prompt,
-                alternate_greetings, tags, creator, character_version, extensions,
-                created_at, last_modified, client_id, version, deleted
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        params = (
-            card_data['name'], card_data.get('description'), card_data.get('personality'),
-            card_data.get('scenario'), card_data.get('image'), card_data.get('post_history_instructions'),
-            card_data.get('first_message'), card_data.get('message_example'), card_data.get('creator_notes'),
-            card_data.get('system_prompt'), alt_greetings_json, tags_json,
-            card_data.get('creator'), card_data.get('character_version'), extensions_json,
-            now, now, self.client_id, # created_at, last_modified, client_id
-        )
-        try:
-            with self.transaction() as conn:
-                cursor = conn.cursor()
-                if self.backend_type == BackendType.POSTGRESQL:
-                    query = base_query + " RETURNING id"
-                    exec_params = params + (1, False)
-                    prepared_query, prepared_params = self._prepare_backend_statement(query, exec_params)
-                    cursor.execute(prepared_query, prepared_params)
-                    row = cursor.fetchone()
-                    char_id = row['id'] if row else None
-                else:
-                    exec_params = params + (1, 0)
-                    cursor.execute(base_query, exec_params)
-                    char_id = cursor.lastrowid
-                logger.info(f"Added character card '{card_data['name']}' with ID: {char_id}.")
-                return char_id
-        except sqlite3.IntegrityError as e:
-            if "UNIQUE constraint failed: character_cards.name" in str(e):
-                logger.warning(f"Character card with name '{card_data['name']}' already exists.")
-                raise ConflictError(f"Character card with name '{card_data['name']}' already exists.",  # noqa: TRY003
-                                    entity="character_cards", entity_id=card_data['name']) from e
-            raise CharactersRAGDBError(f"Database integrity error adding character card: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            if self._is_unique_violation(e):
-                logger.warning(
-                    "Character card with name '{}' already exists (backend {}).",
-                    card_data['name'],
-                    self.backend_type.value,
-                )
-                raise ConflictError(  # noqa: TRY003
-                    f"Character card with name '{card_data['name']}' already exists.",
-                    entity="character_cards",
-                    entity_id=card_data['name'],
-                ) from e
-            raise CharactersRAGDBError(f"Database integrity error adding character card: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error adding character card '{card_data.get('name')}': {e}")
-            raise
-        return None # Should not be reached
-
-    def get_character_card_by_id(self, character_id: int) -> dict[str, Any] | None:
-        """
-        Retrieve a specific character card by its ID.
-
-        Only non-deleted cards are returned. JSON fields (alternate_greetings,
-        tags, extensions as defined in _CHARACTER_CARD_JSON_FIELDS)
-        are deserialized from strings to Python objects.
-
-        Args:
-            character_id: The integer ID of the character card.
-
-        Returns:
-            A dictionary containing the character card data if found and not deleted,
-            otherwise None.
-
-        Raises:
-            CharactersRAGDBError: For database errors during fetching.
-        """
-        query = "SELECT * FROM character_cards WHERE id = ? AND deleted = 0"
-        try:
-            cursor = self.execute_query(query, (character_id,))
-            row = cursor.fetchone()
-            return self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS)
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching character card ID {character_id}: {e}")
-            raise
-
-    def get_character_card_by_name(self, name: str) -> dict[str, Any] | None:
-        """
-        Retrieve a specific character card by its unique name.
-
-        Only non-deleted cards are returned. JSON fields (see `_CHARACTER_CARD_JSON_FIELDS`)
-        are deserialized. Name comparison is case-sensitive as per default SQLite behavior
-        because the schema column "name" does not specify `COLLATE NOCASE`.
-
-        Args:
-            name: The unique name of the character card.
-
-        Returns:
-            A dictionary containing character card data if found and not deleted,
-            otherwise None.
-
-        Raises:
-            CharactersRAGDBError: For database errors during fetching.
-        """
-        query = "SELECT * FROM character_cards WHERE name = ? AND deleted = 0"
-        try:
-            cursor = self.execute_query(query, (name,))
-            row = cursor.fetchone()
-            return self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS)
-        except CharactersRAGDBError as e:
-            if self._is_missing_character_table_error(e):
-                logger.warning(
-                    "Detected missing character_cards table while fetching by name; attempting schema recovery."
-                )
-                try:
-                    self.ensure_character_tables_ready()
-                    cursor = self.execute_query(query, (name,))
-                    row = cursor.fetchone()
-                    return self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS)
-                except (CharactersRAGDBError, SchemaError):
-                    logger.error(
-                        "Schema recovery failed while fetching character card by name '{}'.",
-                        name,
-                        exc_info=True,
-                    )
-                    raise
-            logger.error(f"Database error fetching character card by name '{name}': {e}")
-            raise
-
-    def list_character_cards(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """
-        Lists character cards, ordered by name.
-
-        Only non-deleted cards are returned. JSON fields (see `_CHARACTER_CARD_JSON_FIELDS`)
-        are deserialized.
-
-        Args:
-            limit: The maximum number of cards to return. Defaults to 100.
-            offset: The number of cards to skip before starting to return. Defaults to 0.
-
-        Returns:
-            A list of dictionaries, each representing a character card.
-            The list may be empty if no cards are found.
-
-        Raises:
-            CharactersRAGDBError: For database errors during listing.
-        """
-        query = "SELECT * FROM character_cards WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
-        try:
-            cursor = self.execute_query(query, (limit, offset))
-            rows = cursor.fetchall()
-            return [self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error listing character cards: {e}")
-            raise
-
-    def query_character_cards(
-        self,
-        *,
-        query: str | None = None,
-        tags: list[str] | None = None,
-        match_all_tags: bool = False,
-        creator: str | None = None,
-        has_conversations: bool | None = None,
-        favorite_only: bool = False,
-        created_from: str | None = None,
-        created_to: str | None = None,
-        updated_from: str | None = None,
-        updated_to: str | None = None,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        sort_by: str = "name",
-        sort_order: str = "asc",
-        limit: int = 25,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
-        """
-        Query character cards with server-side filtering, sorting, and pagination.
-
-        Returns:
-            tuple of (items, total_count)
-        """
-        normalized_limit = max(1, int(limit))
-        normalized_offset = max(0, int(offset))
-        normalized_query = (query or "").strip().lower()
-        normalized_creator = (creator or "").strip().lower()
-        normalized_tags = [
-            str(tag).strip().lower() for tag in (tags or []) if str(tag).strip()
-        ]
-        deleted_false = "FALSE" if self.backend_type == BackendType.POSTGRESQL else "0"
-        deleted_true = "TRUE" if self.backend_type == BackendType.POSTGRESQL else "1"
-        updated_expr = "COALESCE(cc.last_modified, cc.created_at)"
-        conversation_count_expr = (
-            "SELECT COUNT(1) FROM conversations conv "  # nosec B608
-            f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
-        )
-        last_used_expr = (
-            "COALESCE(("  # nosec B608
-            "SELECT MAX(conv.last_modified) FROM conversations conv "
-            f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
-            "), cc.created_at)"
-        )
-
-        filters: list[str] = []
-        params: list[Any] = []
-
-        if normalized_query:
-            like_value = f"%{normalized_query}%"
-            filters.append(
-                "("
-                "LOWER(COALESCE(cc.name, '')) LIKE ? OR "
-                "LOWER(COALESCE(cc.description, '')) LIKE ? OR "
-                "LOWER(COALESCE(cc.personality, '')) LIKE ? OR "
-                "LOWER(COALESCE(cc.scenario, '')) LIKE ? OR "
-                "LOWER(COALESCE(cc.system_prompt, '')) LIKE ?"
-                ")"
-            )
-            params.extend([like_value, like_value, like_value, like_value, like_value])
-
-        if normalized_tags:
-            tag_clauses: list[str] = []
-            for tag in normalized_tags:
-                if self.backend_type == BackendType.SQLITE:
-                    tag_clauses.append(
-                        "("
-                        "(json_valid(cc.tags) AND EXISTS ("
-                        "SELECT 1 FROM json_each(cc.tags) je "
-                        "WHERE LOWER(TRIM(COALESCE(je.value, ''))) = ?"
-                        ")) "
-                        "OR LOWER(COALESCE(cc.tags, '')) LIKE ?"
-                        ")"
-                    )
-                    params.append(tag)
-                    params.append(f'%"{tag}"%')
-                else:
-                    tag_clauses.append("LOWER(COALESCE(cc.tags, '')) LIKE ?")
-                    params.append(f'%"{tag}"%')
-            joiner = " AND " if match_all_tags else " OR "
-            filters.append("(" + joiner.join(tag_clauses) + ")")
-
-        if normalized_creator:
-            filters.append("LOWER(COALESCE(cc.creator, '')) = ?")
-            params.append(normalized_creator)
-
-        if has_conversations is True:
-            filters.append(
-                "EXISTS ("  # nosec B608
-                "SELECT 1 FROM conversations conv "
-                f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
-                ")"
-            )
-        elif has_conversations is False:
-            filters.append(
-                "NOT EXISTS ("  # nosec B608
-                "SELECT 1 FROM conversations conv "
-                f"WHERE conv.deleted = {deleted_false} AND conv.character_id = cc.id"
-                ")"
-            )
-
-        if favorite_only:
-            if self.backend_type == BackendType.SQLITE:
-                filters.append(
-                    "("
-                    "json_valid(cc.extensions) AND "
-                    "LOWER(COALESCE("
-                    "CAST(json_extract(cc.extensions, '$.tldw.favorite') AS TEXT), "
-                    "CAST(json_extract(cc.extensions, '$.favorite') AS TEXT), "
-                    "'false'"
-                    ")) IN ('1', 'true')"
-                    ")"
-                )
-            else:
-                filters.append(
-                    "("
-                    "LOWER(COALESCE("
-                    "cc.extensions::jsonb #>> '{tldw,favorite}', "
-                    "cc.extensions::jsonb ->> 'favorite', "
-                    "'false'"
-                    ")) IN ('1', 'true')"
-                    ")"
-                )
-
-        if created_from:
-            filters.append("cc.created_at >= ?")
-            params.append(created_from)
-        if created_to:
-            filters.append("cc.created_at <= ?")
-            params.append(created_to)
-        if updated_from:
-            filters.append(f"{updated_expr} >= ?")
-            params.append(updated_from)
-        if updated_to:
-            filters.append(f"{updated_expr} <= ?")
-            params.append(updated_to)
-
-        sort_key_map: dict[str, str] = {
-            "name": "LOWER(COALESCE(cc.name, ''))",
-            "creator": "LOWER(COALESCE(cc.creator, ''))",
-            "created_at": "cc.created_at",
-            "updated_at": updated_expr,
-            "last_used_at": last_used_expr,
-            "conversation_count": f"({conversation_count_expr})",
-        }
-        normalized_sort_by = sort_by if sort_by in sort_key_map else "name"
-        normalized_sort_order = "DESC" if str(sort_order).lower() == "desc" else "ASC"
-        sort_expr = sort_key_map[normalized_sort_by]
-
-        if deleted_only:
-            deleted_filter = f"cc.deleted = {deleted_true}"
-        elif include_deleted:
-            deleted_filter = "1=1"
-        else:
-            deleted_filter = f"cc.deleted = {deleted_false}"
-
-        base_query = f"FROM character_cards cc WHERE {deleted_filter}"
-        if filters:
-            base_query += " AND " + " AND ".join(filters)
-
-        total_query = f"SELECT COUNT(1) AS total {base_query}"
-        data_query = (
-            f"SELECT cc.* {base_query} "
-            f"ORDER BY {sort_expr} {normalized_sort_order}, cc.id {normalized_sort_order} "
-            "LIMIT ? OFFSET ?"
-        )
-
-        try:
-            total_cursor = self.execute_query(total_query, tuple(params))
-            total_row = total_cursor.fetchone()
-            if total_row is None:
-                total = 0
-            elif isinstance(total_row, dict):
-                total = int(total_row.get("total", 0))
-            else:
-                try:
-                    total = int(total_row["total"])  # sqlite Row / adapter row
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    total = int(total_row[0]) if len(total_row) > 0 else 0
-
-            data_params = list(params)
-            data_params.extend([normalized_limit, normalized_offset])
-            data_cursor = self.execute_query(data_query, tuple(data_params))
-            rows = data_cursor.fetchall()
-            items = [
-                self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS)
-                for row in rows
-                if row
-            ]
-            return items, total
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error querying character cards: {e}")
-            raise
-
-    @classmethod
-    def _normalize_character_tags_for_operation(cls, tags_value: Any) -> list[str]:
-        """Normalize tags and enforce a single reserved character-folder token."""
-        if tags_value is None:
-            return []
-
-        raw_tags: list[Any]
-        if isinstance(tags_value, (list, set, tuple)):
-            raw_tags = list(tags_value)
-        elif isinstance(tags_value, str):
-            if not tags_value.strip():
-                return []
-            try:
-                parsed = json.loads(tags_value)
-                if isinstance(parsed, list):
-                    raw_tags = parsed
-                else:
-                    raw_tags = [tags_value]
-            except (TypeError, ValueError, json.JSONDecodeError):
-                raw_tags = [tags_value]
-        else:
-            raw_tags = [tags_value]
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for tag in raw_tags:
-            tag_str = str(tag)
-            if not tag_str.strip() or tag_str in seen:
-                continue
-            seen.add(tag_str)
-            normalized.append(tag_str)
-
-        # Enforce single-folder assignment semantics for reserved folder tokens.
-        # If multiple folder tokens are provided, keep only the most recent one.
-        folder_tag: str | None = None
-        non_folder_tags: list[str] = []
-        for tag in normalized:
-            if tag.startswith(cls._CHARACTER_FOLDER_TAG_PREFIX):
-                folder_tag = tag
-                continue
-            non_folder_tags.append(tag)
-        if folder_tag:
-            non_folder_tags.append(folder_tag)
-        return non_folder_tags
-
-    @staticmethod
-    def _apply_character_tag_operation_to_list(
-        tags: list[str],
-        operation: str,
-        source_tag: str,
-        target_tag: str | None,
-    ) -> list[str]:
-        """Apply a rename/merge/delete operation to a normalized tag list."""
-        seen: set[str] = set()
-        next_tags: list[str] = []
-
-        for tag in tags:
-            if operation == "delete" and tag == source_tag:
-                continue
-            candidate = target_tag if operation in {"rename", "merge"} and tag == source_tag else tag
-            candidate = str(candidate or "").strip()
-            if not candidate or candidate in seen:
-                continue
-            seen.add(candidate)
-            next_tags.append(candidate)
-
-        return next_tags
-
-    def manage_character_tags(
-        self,
-        *,
-        operation: str,
-        source_tag: str,
-        target_tag: str | None = None,
-        limit: int = 10_000,
-    ) -> dict[str, Any]:
-        """
-        Apply rename/merge/delete tag operations across character cards.
-
-        Returns:
-            Summary dictionary with matched/updated/failed counts and affected IDs.
-        """
-        normalized_operation = str(operation or "").strip().lower()
-        if normalized_operation not in {"rename", "merge", "delete"}:
-            raise InputError(
-                f"Unsupported tag operation '{operation}'. Expected rename, merge, or delete."
-            )
-
-        normalized_source = str(source_tag or "").strip()
-        normalized_target = str(target_tag or "").strip() if target_tag is not None else None
-
-        if not normalized_source:
-            raise InputError("source_tag is required for tag operations")
-
-        if normalized_operation in {"rename", "merge"} and not normalized_target:
-            raise InputError("target_tag is required for rename and merge operations")
-
-        normalized_limit = max(1, int(limit))
-        all_cards: list[dict[str, Any]] = []
-        offset = 0
-        batch_size = min(500, normalized_limit)
-        while len(all_cards) < normalized_limit:
-            batch = self.list_character_cards(limit=batch_size, offset=offset)
-            if not batch:
-                break
-            all_cards.extend(batch)
-            if len(batch) < batch_size:
-                break
-            offset += len(batch)
-            remaining = normalized_limit - len(all_cards)
-            if remaining <= 0:
-                break
-            batch_size = min(500, remaining)
-
-        matched_count = 0
-        updated_character_ids: list[int] = []
-        failed_character_ids: list[int] = []
-
-        for card in all_cards:
-            card_id_raw = card.get("id")
-            card_version_raw = card.get("version")
-
-            try:
-                card_id = int(card_id_raw)
-                card_version = int(card_version_raw)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "Skipping character tag operation for record with invalid id/version: id={}, version={}",
-                    card_id_raw,
-                    card_version_raw,
-                )
-                continue
-
-            existing_tags = self._normalize_character_tags_for_operation(card.get("tags"))
-            if normalized_source not in existing_tags:
-                continue
-
-            matched_count += 1
-            next_tags = self._apply_character_tag_operation_to_list(
-                existing_tags,
-                normalized_operation,
-                normalized_source,
-                normalized_target,
-            )
-
-            if next_tags == existing_tags:
-                continue
-
-            try:
-                self.update_character_card(
-                    card_id,
-                    {"tags": next_tags},
-                    expected_version=card_version,
-                )
-                updated_character_ids.append(card_id)
-            except (ConflictError, InputError, CharactersRAGDBError) as exc:
-                logger.warning(
-                    "Failed to apply '{}' tag operation for character {}: {}",
-                    normalized_operation,
-                    card_id,
-                    exc,
-                )
-                failed_character_ids.append(card_id)
-
-        return {
-            "operation": normalized_operation,
-            "source_tag": normalized_source,
-            "target_tag": normalized_target if normalized_operation != "delete" else None,
-            "matched_count": matched_count,
-            "updated_count": len(updated_character_ids),
-            "failed_count": len(failed_character_ids),
-            "updated_character_ids": updated_character_ids,
-            "failed_character_ids": failed_character_ids,
-        }
-
-    def update_character_card(self, character_id: int, card_data: dict[str, Any], expected_version: int) -> bool | None:
-        """Update character card with optimistic locking."""
-        logger.debug(
-            f"Starting update_character_card for ID {character_id}, expected_version {expected_version} (SINGLE UPDATE STRATEGY)")
-
-        # If card_data is empty, treat as a no-op as per original behavior.
-        # No version check, no transaction, no version bump.
-        if not card_data:
-            logger.info(f"No data provided in card_data for character card update ID {character_id}. No-op.")
-            return True
-
-        now = self._get_current_utc_timestamp_iso()
-
-        try:
-            with self.transaction() as conn:
-                logger.debug(f"Transaction started. Connection object: {id(conn)}")
-
-                # Initial version check. This also confirms the record exists and is not deleted.
-                current_db_version_initial_check = self._get_current_db_version(conn, "character_cards", "id",
-                                                                                character_id)
-                logger.debug(
-                    f"Initial DB version: {current_db_version_initial_check}, Client expected: {expected_version}")
-
-                if current_db_version_initial_check != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Update failed: version mismatch (db has {current_db_version_initial_check}, client expected {expected_version}) for character_cards ID {character_id}.",
-                        entity="character_cards", entity_id=character_id
-                    )
-
-                set_clauses_sql = []
-                params_for_set_clause = []
-                fields_updated_log = []  # For logging which fields from payload were processed
-
-                # Define fields that can be directly updated and JSON fields
-                updatable_direct_fields = [
-                    "name", "description", "personality", "scenario", "image",
-                    "post_history_instructions", "first_message", "message_example",
-                    "creator_notes", "system_prompt", "creator", "character_version"
-                ]
-                # self._CHARACTER_CARD_JSON_FIELDS is already defined in your class
-
-                for key, value in card_data.items():
-                    if key in self._CHARACTER_CARD_JSON_FIELDS:
-                        set_clauses_sql.append(f"{key} = ?")
-                        normalized_value = value
-                        if key == "tags" and value is not None:
-                            normalized_value = self._normalize_character_tags_for_operation(value)
-                        # Check if value is already a JSON string
-                        if isinstance(normalized_value, str):
-                            # Assume it's already a JSON string if it's a string
-                            params_for_set_clause.append(normalized_value)
-                        else:
-                            params_for_set_clause.append(self._ensure_json_string(normalized_value))
-                        fields_updated_log.append(key)
-                    elif key in updatable_direct_fields:
-                        set_clauses_sql.append(f"{key} = ?")
-                        params_for_set_clause.append(value)
-                        fields_updated_log.append(key)
-                    elif key not in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                        # Log if a key in card_data is not recognized as updatable, but don't error.
-                        # This matches the original sequential strategy's behavior of skipping unknown fields.
-                        logger.warning(
-                            f"Skipping unknown or non-updatable field '{key}' in update_character_card payload.")
-
-                # If expected_version check passed, we always update metadata (last_modified, version, client_id),
-                # effectively "touching" the record and bumping its version, even if fields_updated_log is empty
-                # (meaning card_data might have contained only non-updatable fields like 'id', or only unknown fields).
-                next_version_val = expected_version + 1
-
-                # Add metadata fields to be updated
-                set_clauses_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-                params_for_set_clause.extend([now, next_version_val, self.client_id])
-
-                # Construct the final query
-                # The set_clauses_sql will always have at least the metadata updates if this point is reached.
-                final_update_query = f"UPDATE character_cards SET {', '.join(set_clauses_sql)} WHERE id = ? AND version = ? AND deleted = 0"  # nosec B608
-
-                # WHERE clause parameters
-                where_params = [character_id, expected_version]
-                final_params = tuple(params_for_set_clause + where_params)
-
-                logger.debug(f"Executing SINGLE character update query: {final_update_query}")
-                logger.debug(f"Params: {final_params}")
-
-                cursor = conn.execute(final_update_query, final_params)
-                logger.debug(f"Character Update executed, rowcount: {cursor.rowcount}")
-
-                if cursor.rowcount == 0:
-                    # This could happen if a concurrent modification occurred between the initial version check and this UPDATE SQL.
-                    # Re-check the record's state to provide a more specific error.
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
-                                                      (character_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Update for character_cards ID {character_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Character card ID {character_id} disappeared before update completion (expected v{expected_version})."
-                    elif final_state['deleted']:
-                        msg = f"Character card ID {character_id} was soft-deleted concurrently (expected v{expected_version} for update)."
-                    elif final_state[
-                        'version'] != expected_version:  # Version changed from what we expected for the WHERE clause
-                        msg = f"Character card ID {character_id} version changed to {final_state['version']} concurrently (expected v{expected_version} for update's WHERE clause)."
-                    else:  # This case implies the record was found with the correct version and not deleted, yet rowcount was 0. Unlikely.
-                        msg = f"Update for character card ID {character_id} (expected v{expected_version}) affected 0 rows for an unknown reason after passing initial checks."
-                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)  # noqa: TRY301
-
-                log_msg_fields_updated = f"Fields from payload processed: {fields_updated_log if fields_updated_log else 'None'}."
-                logger.info(
-                    f"Updated character card ID {character_id} (SINGLE UPDATE) from client-expected version {expected_version} to final DB version {next_version_val}. {log_msg_fields_updated}")
-                return True
-
-        except sqlite3.IntegrityError as e: # Catch unique constraint violation for name
-            if "UNIQUE constraint failed: character_cards.name" in str(e):
-                updated_name = card_data.get("name", "[name not in update_data]")
-                logger.warning(f"Update for character card ID {character_id} failed: name '{updated_name}' already exists.")
-                raise ConflictError(f"Cannot update character card ID {character_id}: name '{updated_name}' already exists.",  # noqa: TRY003
-                                    entity="character_cards", entity_id=updated_name) from e # Use name as entity_id for this specific conflict
-            logger.critical(f"DATABASE IntegrityError during update_character_card (SINGLE UPDATE STRATEGY) for ID {character_id}: {e}", exc_info=True)
-            raise CharactersRAGDBError(f"Database integrity error during single update: {e}") from e  # noqa: TRY003
-        except sqlite3.DatabaseError as e:
-            logger.critical(f"DATABASE ERROR during update_character_card (SINGLE UPDATE STRATEGY) for ID {character_id}: {e}", exc_info=True)
-            raise CharactersRAGDBError(f"Database error during single update: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            if self._is_unique_violation(e):
-                updated_name = card_data.get("name", "[name not in update_data]")
-                logger.warning(
-                    "Update for character card ID {} failed on backend {}: name '{}' already exists.",
-                    character_id,
-                    self.backend_type.value,
-                    updated_name,
-                )
-                raise ConflictError(  # noqa: TRY003
-                    f"Cannot update character card ID {character_id}: name '{updated_name}' already exists.",
-                    entity="character_cards",
-                    entity_id=updated_name,
-                ) from e
-            logger.critical(
-                'Backend error during update_character_card (SINGLE UPDATE STRATEGY) for ID {}: {}',
-                character_id,
-                e,
-                exc_info=True,
-            )
-            raise CharactersRAGDBError(f"Database error during single update: {e}") from e  # noqa: TRY003
-        except ConflictError:  # Re-raise ConflictErrors from _get_current_db_version or manual checks
-            logger.warning(f"ConflictError during update_character_card for ID {character_id}.",
-                           exc_info=False)  # exc_info=True if needed
-            raise
-        except InputError:  # Should not happen if initial `if not card_data:` check is there.
-            logger.warning(f"InputError during update_character_card for ID {character_id}.", exc_info=False)
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:  # Catch any other unexpected Python errors
-            logger.error(
-                f"Unexpected Python error in update_character_card (SINGLE UPDATE STRATEGY) for ID {character_id}: {e}",
-                exc_info=True)
-            raise CharactersRAGDBError(f"Unexpected error updating character card: {e}") from e  # noqa: TRY003
-
-    def soft_delete_character_card(self, character_id: int, expected_version: int) -> bool | None:
-        """
-        Soft-deletes a character card using optimistic locking.
-
-        Sets the `deleted` flag to 1, updates `last_modified`, increments `version`,
-        and sets `client_id`. The operation succeeds only if `expected_version` matches
-        the current database version and the card is not already deleted.
-
-        If the card is already soft-deleted (idempotency check), the method considers
-        this a success and returns True.
-
-        FTS updates (removal from `character_cards_fts`) and `sync_log` entries for
-        deletions (which are technically updates marking as deleted) are handled by SQL triggers.
-
-        Args:
-            character_id: The ID of the character card to soft-delete.
-            expected_version: The version number the client expects the record to have.
-
-        Returns:
-            True if the soft-delete was successful or if the card was already soft-deleted.
-
-        Raises:
-            ConflictError: If the card is not found (and not already deleted), or
-                           if `expected_version` does not match (and the card is active),
-                           or if a concurrent modification prevents the update.
-            CharactersRAGDBError: For other database-related errors.
-        """
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-
-        query = "UPDATE character_cards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        params = (now, next_version_val, self.client_id, character_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                try:
-                    current_db_version = self._get_current_db_version(conn, "character_cards", "id", character_id)
-                    # If here, record is active.
-                except ConflictError:
-                    # Check if ConflictError from _get_current_db_version was because it's ALREADY soft-deleted.
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM character_cards WHERE id = ?",
-                                                       (character_id,))
-                    record_status = check_status_cursor.fetchone()
-                    if record_status and record_status['deleted']:
-                        logger.info(
-                            f"Character card ID {character_id} already soft-deleted. Soft delete successful (idempotent).")
-                        return True
-                    # If not found, or some other conflict, re-raise.
-                    raise
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Soft delete for Character ID {character_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="character_cards", entity_id=character_id
-                    )
-
-                cursor = conn.execute(query, params)
-
-                if cursor.rowcount == 0:
-                    # Race condition: Record changed between pre-check and UPDATE.
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
-                                                      (character_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Soft delete for Character ID {character_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Character card ID {character_id} disappeared before soft delete (expected active version {expected_version})."
-                    elif final_state['deleted']:
-                        # If it got deleted by another process. Consider this success if the state is 'deleted'.
-                        logger.info(
-                            f"Character card ID {character_id} was soft-deleted concurrently to version {final_state['version']}. Soft delete successful.")
-                        return True
-                    elif final_state['version'] != expected_version:  # Still active but version changed
-                        msg = f"Soft delete for Character ID {character_id} failed: version changed to {final_state['version']} concurrently (expected {expected_version})."
-                    else:
-                        msg = f"Soft delete for Character ID {character_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
-                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Soft-deleted character card ID {character_id} (was version {expected_version}), new version {next_version_val}.")
-                return True
-        except ConflictError:
-            raise
-        except BackendDatabaseError as e:
-            logger.error(
-                'Backend error soft-deleting character card ID {} (expected v{}): {}',
-                character_id,
-                expected_version,
-                e,
-            )
-            raise CharactersRAGDBError(f"Backend error during soft delete: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:  # Catches sqlite3.Error from conn.execute
-            logger.error(
-                f"Database error soft-deleting character card ID {character_id} (expected v{expected_version}): {e}",
-                exc_info=True)
-            raise
-
-    def restore_character_card(
-        self,
-        character_id: int,
-        expected_version: int,
-        *,
-        retention_days: int | None = None,
-    ) -> bool | None:
-        """
-        Restores a soft-deleted character card using optimistic locking.
-
-        Sets the `deleted` flag to 0, updates `last_modified`, increments `version`,
-        and sets `client_id`. The operation succeeds only if `expected_version` matches
-        the current database version and the card is currently deleted.
-
-        If the card is already active (not deleted), the method considers
-        this a success and returns True (idempotency).
-
-        Args:
-            character_id: The ID of the character card to restore.
-            expected_version: The version number the client expects the record to have.
-
-        Returns:
-            True if the restore was successful or if the card was already active.
-
-        Raises:
-            ConflictError: If the card is not found, or if `expected_version` does
-                           not match, or if a concurrent modification prevents the update.
-            CharactersRAGDBError: For other database-related errors.
-        """
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-
-        query = "UPDATE character_cards SET deleted = 0, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 1"
-        params = (now, next_version_val, self.client_id, character_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                # First check if record exists at all
-                check_cursor = conn.execute(
-                    "SELECT deleted, version, last_modified FROM character_cards WHERE id = ?",
-                    (character_id,),
-                )
-                record_status = check_cursor.fetchone()
-
-                if not record_status:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Character card ID {character_id} not found.",
-                        entity="character_cards", entity_id=character_id
-                    )
-
-                # If already active, return success (idempotent)
-                if not record_status['deleted']:
-                    logger.info(
-                        f"Character card ID {character_id} already active. Restore successful (idempotent).")
-                    return True
-
-                # Check version matches
-                current_db_version = record_status['version']
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Restore for Character ID {character_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="character_cards", entity_id=character_id
-                    )
-
-                if retention_days is not None:
-                    if retention_days < 0:
-                        raise InputError(  # noqa: TRY301
-                            f"Invalid retention_days value {retention_days}. Must be >= 0."
-                        )
-
-                    deleted_at_raw = record_status["last_modified"]
-                    deleted_at_dt: datetime | None = None
-
-                    if isinstance(deleted_at_raw, datetime):
-                        deleted_at_dt = deleted_at_raw
-                    elif isinstance(deleted_at_raw, str):
-                        normalized = deleted_at_raw.strip()
-                        if normalized.endswith("Z"):
-                            normalized = f"{normalized[:-1]}+00:00"
-                        try:
-                            deleted_at_dt = datetime.fromisoformat(normalized)
-                        except ValueError:
-                            for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-                                try:
-                                    deleted_at_dt = datetime.strptime(normalized, fmt)
-                                    break
-                                except ValueError:
-                                    continue
-
-                    if deleted_at_dt is None:
-                        raise CharactersRAGDBError(  # noqa: TRY301
-                            f"Cannot evaluate restore retention window for character {character_id}: "
-                            f"invalid deleted timestamp {deleted_at_raw!r}."
-                        )
-
-                    if deleted_at_dt.tzinfo is None:
-                        deleted_at_dt = deleted_at_dt.replace(tzinfo=timezone.utc)
-                    else:
-                        deleted_at_dt = deleted_at_dt.astimezone(timezone.utc)
-
-                    restore_expires_at_dt = deleted_at_dt + timedelta(days=retention_days)
-                    now_utc = datetime.now(timezone.utc)
-                    if now_utc > restore_expires_at_dt:
-                        deleted_at_iso = (
-                            deleted_at_dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-                        )
-                        restore_expires_at_iso = (
-                            restore_expires_at_dt.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-                        )
-                        raise RestoreWindowExpiredError(  # noqa: TRY301
-                            character_id=character_id,
-                            retention_days=retention_days,
-                            deleted_at_iso=deleted_at_iso,
-                            restore_expires_at_iso=restore_expires_at_iso,
-                        )
-
-                cursor = conn.execute(query, params)
-
-                if cursor.rowcount == 0:
-                    # Race condition: Record changed between pre-check and UPDATE.
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM character_cards WHERE id = ?",
-                                                      (character_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Restore for Character ID {character_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Character card ID {character_id} disappeared before restore (expected deleted version {expected_version})."
-                    elif not final_state['deleted']:
-                        # If it got restored by another process. Consider this success.
-                        logger.info(
-                            f"Character card ID {character_id} was restored concurrently to version {final_state['version']}. Restore successful.")
-                        return True
-                    elif final_state['version'] != expected_version:
-                        msg = f"Restore for Character ID {character_id} failed: version changed to {final_state['version']} concurrently (expected {expected_version})."
-                    else:
-                        msg = f"Restore for Character ID {character_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
-                    raise ConflictError(msg, entity="character_cards", entity_id=character_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Restored character card ID {character_id} (was version {expected_version}), new version {next_version_val}.")
-                return True
-        except ConflictError:
-            raise
-        except BackendDatabaseError as e:
-            logger.error(
-                'Backend error restoring character card ID {} (expected v{}): {}',
-                character_id,
-                expected_version,
-                e,
-            )
-            raise CharactersRAGDBError(f"Backend error during restore: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error restoring character card ID {character_id} (expected v{expected_version}): {e}",
-                exc_info=True)
-            raise
-
-    def search_character_cards(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]:
-        """
-        Searches character cards using Full-Text Search (FTS).
-
-        The search is performed on the `character_cards_fts` table, matching against
-        'name', 'description', 'personality', 'scenario', and 'system_prompt' fields.
-        Returns full card details for matching, non-deleted cards, ordered by relevance (rank).
-        JSON fields (see `_CHARACTER_CARD_JSON_FIELDS`) in the results are deserialized.
-
-        Args:
-            search_term: The term(s) to search for. Supports FTS query syntax (e.g., "dragon lore").
-            limit: The maximum number of results to return. Defaults to 10.
-
-        Returns:
-            A list of dictionaries, each representing a matching character card.
-            The list can be empty.
-
-        Raises:
-            CharactersRAGDBError: For database errors during the search.
-        """
-        if not search_term.strip():
-            logger.warning("Empty character card search term provided; returning no results.")
-            return []
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
-            if not tsquery:
-                logger.debug("FTS normalization produced empty tsquery for input '{}'", search_term)
-                return []
-
-            query = """
-                SELECT cc.*, ts_rank(cc.character_cards_fts_tsv, to_tsquery('english', ?)) AS rank
-                FROM character_cards cc
-                WHERE cc.deleted = FALSE
-                  AND cc.character_cards_fts_tsv @@ to_tsquery('english', ?)
-                ORDER BY rank DESC, cc.last_modified DESC
-                LIMIT ?
-            """
-            try:
-                cursor = self.execute_query(query, (tsquery, tsquery, limit))
-                rows = cursor.fetchall()
-                return [
-                    self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS)
-                    for row in rows
-                    if row
-                ]
-            except CharactersRAGDBError as exc:
-                logger.error("PostgreSQL FTS search failed for character cards term '{}': {}", search_term, exc)
-                raise
-
-        # Escape embedded quotes to avoid breaking the literal phrase wrapper
-        safe_literal = search_term.replace('"', '""')
-        safe_search_term = f'"{safe_literal}"'
-        query = """
-                SELECT cc.*
-                FROM character_cards_fts, character_cards cc
-                WHERE character_cards_fts.rowid = cc.id
-                  AND character_cards_fts MATCH ?
-                  AND cc.deleted = 0
-                ORDER BY cc.last_modified DESC
-                LIMIT ?
-                """
-        try:
-            cursor = self.execute_query(query, (search_term, limit))
-            rows = cursor.fetchall()
-            return [self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
-        except CharactersRAGDBError as e:
-            logger.error(f"Error searching character cards for '{safe_search_term}': {e}")
-            raise
-
-    def _check_json_support(self) -> bool:
-        """
-        Check if the current SQLite version supports JSON functions.
-
-        Returns:
-            True if JSON functions are available, False otherwise.
-        """
-        if self.backend_type != BackendType.SQLITE:
-            return False
-
-        try:
-            cursor = self.execute_query("SELECT json('{}') as test")
-            cursor.fetchone()
-            return True  # noqa: TRY300
-        except (sqlite3.OperationalError, CharactersRAGDBError):
-            return False
-
-    def search_character_cards_by_tags(self, tag_keywords: list[str], limit: int = 10) -> list[dict[str, Any]]:
-        """
-        Search character cards efficiently by their tags using database-level filtering.
-
-        This method provides significant performance improvements over loading all cards
-        into memory by using SQLite JSON functions when available, or falling back
-        to a normalized tag approach if JSON functions are not supported.
-
-        Args:
-            tag_keywords: List of tag strings to search for (case-insensitive).
-            limit: Maximum number of results to return. Defaults to 10.
-
-        Returns:
-            List of character card dictionaries that contain any of the specified tags.
-            Results are ordered by name and limited to non-deleted cards.
-
-        Raises:
-            CharactersRAGDBError: For database errors during the search.
-            InputError: If tag_keywords is empty or contains invalid values.
-        """
-        if not tag_keywords:
-            raise InputError("tag_keywords cannot be empty")  # noqa: TRY003
-
-        # Normalize tag keywords for case-insensitive matching
-        normalized_tags = [tag.lower().strip() for tag in tag_keywords if tag.strip()]
-        if not normalized_tags:
-            raise InputError("No valid tag keywords provided after normalization")  # noqa: TRY003
-
-        logger.debug(f"Searching character cards by tags: {normalized_tags}")
-
-        # Check if SQLite supports JSON functions
-        if self._check_json_support():
-            return self._search_cards_by_tags_json(normalized_tags, limit)
-        else:
-            # Fallback to loading and filtering in Python (original approach but optimized)
-            logger.warning("SQLite JSON functions not available, using fallback tag search method")
-            return self._search_cards_by_tags_fallback(normalized_tags, limit)
-
-    def _search_cards_by_tags_json(self, normalized_tags: list[str], limit: int) -> list[dict[str, Any]]:
-        """
-        Search character cards by tags using SQLite JSON functions.
-
-        This is the optimal approach for SQLite versions that support JSON functions.
-        """
-        try:
-            # Build query with JSON_EACH to extract and check tags
-            placeholders = ','.join('?' for _ in normalized_tags)
-            query = """
-                SELECT DISTINCT cc.*
-                FROM character_cards cc,
-                     json_each(cc.tags) je
-                WHERE cc.deleted = 0
-                  AND cc.tags IS NOT NULL
-                  AND cc.tags != 'null'
-                  AND lower(trim(je.value)) IN ({placeholders})
-                ORDER BY cc.name
-                LIMIT ?
-            """.format_map(locals())  # nosec B608
-
-            params = normalized_tags + [limit]
-            cursor = self.execute_query(query, params)
-            rows = cursor.fetchall()
-
-            result = [self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS) for row in rows if row]
-            logger.debug(f"Found {len(result)} character cards matching tags using JSON functions")
-            return result  # noqa: TRY300
-
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error in JSON-based tag search: {e}")
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            # JSON function might have failed, log and re-raise as database error
-            logger.error(f"Unexpected error in JSON-based tag search: {e}")
-            raise CharactersRAGDBError(f"JSON tag search failed: {e}") from e  # noqa: TRY003
-
-    def _search_cards_by_tags_fallback(self, normalized_tags: list[str], limit: int) -> list[dict[str, Any]]:
-        """
-        Fallback tag search that loads cards and filters in Python.
-
-        This is used when SQLite doesn't support JSON functions, but is optimized
-        to only load necessary data and exit early when limit is reached.
-        """
-        try:
-            # Use a reasonable batch size to avoid loading everything at once
-            batch_size = min(1000, limit * 10)  # Load 10x limit as heuristic
-            offset = 0
-            results = []
-            normalized_tags_set = set(normalized_tags)
-
-            while len(results) < limit:
-                # Load cards in batches
-                query = "SELECT * FROM character_cards WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
-                cursor = self.execute_query(query, (batch_size, offset))
-                batch_rows = cursor.fetchall()
-
-                if not batch_rows:
-                    break  # No more cards to process
-
-                # Process this batch
-                for row in batch_rows:
-                    if len(results) >= limit:
-                        break
-
-                    card = self._deserialize_row_fields(row, self._CHARACTER_CARD_JSON_FIELDS)
-
-                    # Check if card has matching tags
-                    tags_data = card.get('tags')
-                    if tags_data:
-                        try:
-                            # Handle both cases: already deserialized list or JSON string
-                            if isinstance(tags_data, list):
-                                tags_list = tags_data  # Already deserialized by _deserialize_row_fields
-                            elif isinstance(tags_data, str):
-                                tags_list = json.loads(tags_data)  # Parse JSON string
-                            else:
-                                tags_list = []  # Fallback for unexpected types
-
-                            if isinstance(tags_list, list):
-                                card_tags_normalized = {str(tag).lower().strip() for tag in tags_list}
-                                # Check for intersection with our target tags
-                                if not card_tags_normalized.isdisjoint(normalized_tags_set):
-                                    results.append(card)
-                        except json.JSONDecodeError:
-                            logger.warning(f"Invalid JSON in tags for character card ID {card.get('id')}: {tags_data}")
-                            continue
-
-                offset += batch_size
-
-                # If we got fewer rows than batch_size, we've reached the end
-                if len(batch_rows) < batch_size:
-                    break
-
-            logger.debug(f"Found {len(results)} character cards matching tags using fallback method")
-            return results  # noqa: TRY300
-
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error in fallback tag search: {e}")
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Unexpected error in fallback tag search: {e}")
-            raise CharactersRAGDBError(f"Fallback tag search failed: {e}") from e  # noqa: TRY003
-
-    # --- Character Exemplar Methods ---
-    @staticmethod
-    def _estimate_text_token_count(text: str) -> int:
-        """Estimate token count from text with a lightweight fallback heuristic."""
-        if not text:
-            return 1
-        return max(1, len(text.split()))
-
-    def _normalize_exemplar_enum(
-        self,
-        value: Any,
-        *,
-        allowed: tuple[str, ...],
-        field_name: str,
-        default: str,
-    ) -> str:
-        """Normalize and validate enum-like exemplar fields."""
-        if value is None:
-            return default
-        if not isinstance(value, str):
-            raise InputError(f"Field '{field_name}' must be a string.")  # noqa: TRY003
-        normalized = value.strip().lower()
-        if not normalized:
-            return default
-        if normalized not in allowed:
-            raise InputError(  # noqa: TRY003
-                f"Invalid value '{value}' for field '{field_name}'. Allowed: {', '.join(allowed)}"
-            )
-        return normalized
-
-    def _normalize_exemplar_string_list(self, value: Any, field_name: str) -> list[str]:
-        """Normalize list-like exemplar metadata to a string list."""
-        if value is None:
-            return []
-
-        parsed = value
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return []
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                parsed = [stripped]
-
-        if isinstance(parsed, set):
-            parsed = list(parsed)
-
-        if not isinstance(parsed, list):
-            raise InputError(f"Field '{field_name}' must be a list of strings.")  # noqa: TRY003
-
-        normalized: list[str] = []
-        for item in parsed:
-            if item is None:
-                continue
-            text = str(item).strip()
-            if text:
-                normalized.append(text)
-        return normalized
-
-    def _normalize_persona_exemplar_tags(self, value: Any, field_name: str) -> list[str]:
-        """Normalize free-form persona exemplar tags to lowercase unique strings."""
-        raw_values = self._normalize_exemplar_string_list(value, field_name)
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for item in raw_values:
-            text = str(item).strip().lower()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            normalized.append(text)
-        return normalized
-
-    def _normalize_character_exemplar_row(self, row: sqlite3.Row | dict[str, Any] | None) -> dict[str, Any] | None:
-        """Deserialize exemplar JSON fields and normalize bool-like values."""
-        if not row:
-            return None
-        item = self._deserialize_row_fields(row, self._CHARACTER_EXEMPLAR_JSON_FIELDS)
-        if not item:
-            return None
-        if 'rights_public_figure' in item:
-            item['rights_public_figure'] = bool(item['rights_public_figure'])
-        if 'is_deleted' in item:
-            item['is_deleted'] = bool(item['is_deleted'])
-        return item
-
-    def add_character_exemplar(self, character_id: int, exemplar_data: dict[str, Any]) -> dict[str, Any]:
-        """Create a character-scoped exemplar."""
-        if not self.get_character_card_by_id(character_id):
-            raise InputError(f"Character ID {character_id} not found.")  # noqa: TRY003
-
-        text = self._normalize_nullable_text(exemplar_data.get('text'))
-        if not text:
-            raise InputError("Exemplar text is required.")  # noqa: TRY003
-
-        source_type = self._normalize_exemplar_enum(
-            exemplar_data.get('source_type'),
-            allowed=self._ALLOWED_EXEMPLAR_SOURCE_TYPES,
-            field_name='source_type',
-            default='other',
-        )
-        novelty_hint = self._normalize_exemplar_enum(
-            exemplar_data.get('novelty_hint'),
-            allowed=self._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
-            field_name='novelty_hint',
-            default='unknown',
-        )
-        emotion = self._normalize_exemplar_enum(
-            exemplar_data.get('emotion'),
-            allowed=self._ALLOWED_EXEMPLAR_EMOTIONS,
-            field_name='emotion',
-            default='other',
-        )
-        scenario = self._normalize_exemplar_enum(
-            exemplar_data.get('scenario'),
-            allowed=self._ALLOWED_EXEMPLAR_SCENARIOS,
-            field_name='scenario',
-            default='other',
-        )
-
-        rhetorical = self._normalize_exemplar_string_list(exemplar_data.get('rhetorical'), 'rhetorical')
-        safety_allowed = self._normalize_exemplar_string_list(exemplar_data.get('safety_allowed'), 'safety_allowed')
-        safety_blocked = self._normalize_exemplar_string_list(exemplar_data.get('safety_blocked'), 'safety_blocked')
-
-        requested_length = exemplar_data.get('length_tokens')
-        if requested_length is None:
-            length_tokens = self._estimate_text_token_count(text)
-        else:
-            try:
-                length_tokens = int(requested_length)
-            except (TypeError, ValueError) as exc:
-                raise InputError("length_tokens must be an integer >= 1.") from exc  # noqa: TRY003
-            if length_tokens < 1:
-                raise InputError("length_tokens must be >= 1.")  # noqa: TRY003
-
-        exemplar_id = self._normalize_nullable_text(exemplar_data.get('id')) or self._generate_uuid()
-        now = self._get_current_utc_timestamp_iso()
-
-        query = """
-            INSERT INTO character_exemplars (
-                id, character_id, text, source_type, source_url_or_id, source_date,
-                novelty_hint, emotion, scenario, rhetorical, register, safety_allowed,
-                safety_blocked, rights_public_figure, rights_notes, length_tokens,
-                created_at, updated_at, is_deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        if self.backend_type == BackendType.POSTGRESQL:
-            is_deleted = False
-            rights_public_figure = bool(exemplar_data.get('rights_public_figure', True))
-        else:
-            is_deleted = 0
-            rights_public_figure = 1 if exemplar_data.get('rights_public_figure', True) else 0
-
-        params = (
-            exemplar_id,
-            character_id,
-            text,
-            source_type,
-            self._normalize_nullable_text(exemplar_data.get('source_url_or_id')),
-            self._normalize_nullable_text(exemplar_data.get('source_date')),
-            novelty_hint,
-            emotion,
-            scenario,
-            self._ensure_json_string(rhetorical) or "[]",
-            self._normalize_nullable_text(exemplar_data.get('register')),
-            self._ensure_json_string(safety_allowed) or "[]",
-            self._ensure_json_string(safety_blocked) or "[]",
-            rights_public_figure,
-            self._normalize_nullable_text(exemplar_data.get('rights_notes')),
-            length_tokens,
-            now,
-            now,
-            is_deleted,
-        )
-
-        try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                conn.execute(prepared_query, prepared_params)
-        except sqlite3.IntegrityError as exc:
-            msg = str(exc).lower()
-            if "unique constraint failed: character_exemplars.id" in msg:
-                raise ConflictError(  # noqa: TRY003
-                    f"Character exemplar with ID '{exemplar_id}' already exists.",
-                    entity="character_exemplars",
-                    entity_id=exemplar_id,
-                ) from exc
-            raise CharactersRAGDBError(f"Database integrity error adding character exemplar: {exc}") from exc  # noqa: TRY003
-        except BackendDatabaseError as exc:
-            if self._is_unique_violation(exc):
-                raise ConflictError(  # noqa: TRY003
-                    f"Character exemplar with ID '{exemplar_id}' already exists.",
-                    entity="character_exemplars",
-                    entity_id=exemplar_id,
-                ) from exc
-            raise CharactersRAGDBError(f"Backend error adding character exemplar: {exc}") from exc  # noqa: TRY003
-
-        created = self.get_character_exemplar_by_id(character_id, exemplar_id)
-        if not created:
-            raise CharactersRAGDBError("Created character exemplar could not be retrieved.")  # noqa: TRY003
-        return created
-
-    def get_character_exemplar_by_id(
-        self,
-        character_id: int,
-        exemplar_id: str,
-        *,
-        include_deleted: bool = False,
-    ) -> dict[str, Any] | None:
-        """Fetch a character exemplar by ID."""
-        deleted_clause = "" if include_deleted else "AND is_deleted = 0"
-        query = """
-            SELECT *
-            FROM character_exemplars
-            WHERE id = ? AND character_id = ? {deleted_clause}
-            LIMIT 1
-        """.format_map(locals())  # nosec B608
-        try:
-            cursor = self.execute_query(query, (exemplar_id, character_id))
-            row = cursor.fetchone()
-            return self._normalize_character_exemplar_row(row)
-        except CharactersRAGDBError:
-            raise
-
-    def list_character_exemplars(self, character_id: int, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """List non-deleted exemplars for a character."""
-        query = """
-            SELECT *
-            FROM character_exemplars
-            WHERE character_id = ? AND is_deleted = 0
-            ORDER BY updated_at DESC, created_at DESC
-            LIMIT ? OFFSET ?
-        """
-        try:
-            cursor = self.execute_query(query, (character_id, limit, offset))
-            rows = cursor.fetchall()
-            return [self._normalize_character_exemplar_row(row) for row in rows if row]
-        except CharactersRAGDBError:
-            raise
-
-    def update_character_exemplar(
-        self,
-        character_id: int,
-        exemplar_id: str,
-        update_data: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Update mutable fields for a character exemplar."""
-        existing = self.get_character_exemplar_by_id(character_id, exemplar_id)
-        if not existing:
-            return None
-
-        if not update_data:
-            return existing
-
-        set_clauses: list[str] = []
-        params: list[Any] = []
-
-        if 'text' in update_data:
-            text = self._normalize_nullable_text(update_data.get('text'))
-            if not text:
-                raise InputError("Exemplar text cannot be empty.")  # noqa: TRY003
-            set_clauses.append("text = ?")
-            params.append(text)
-            if 'length_tokens' not in update_data:
-                set_clauses.append("length_tokens = ?")
-                params.append(self._estimate_text_token_count(text))
-
-        if 'source_type' in update_data:
-            source_type = self._normalize_exemplar_enum(
-                update_data.get('source_type'),
-                allowed=self._ALLOWED_EXEMPLAR_SOURCE_TYPES,
-                field_name='source_type',
-                default='other',
-            )
-            set_clauses.append("source_type = ?")
-            params.append(source_type)
-
-        if 'source_url_or_id' in update_data:
-            set_clauses.append("source_url_or_id = ?")
-            params.append(self._normalize_nullable_text(update_data.get('source_url_or_id')))
-
-        if 'source_date' in update_data:
-            set_clauses.append("source_date = ?")
-            params.append(self._normalize_nullable_text(update_data.get('source_date')))
-
-        if 'novelty_hint' in update_data:
-            novelty_hint = self._normalize_exemplar_enum(
-                update_data.get('novelty_hint'),
-                allowed=self._ALLOWED_EXEMPLAR_NOVELTY_HINTS,
-                field_name='novelty_hint',
-                default='unknown',
-            )
-            set_clauses.append("novelty_hint = ?")
-            params.append(novelty_hint)
-
-        if 'emotion' in update_data:
-            emotion = self._normalize_exemplar_enum(
-                update_data.get('emotion'),
-                allowed=self._ALLOWED_EXEMPLAR_EMOTIONS,
-                field_name='emotion',
-                default='other',
-            )
-            set_clauses.append("emotion = ?")
-            params.append(emotion)
-
-        if 'scenario' in update_data:
-            scenario = self._normalize_exemplar_enum(
-                update_data.get('scenario'),
-                allowed=self._ALLOWED_EXEMPLAR_SCENARIOS,
-                field_name='scenario',
-                default='other',
-            )
-            set_clauses.append("scenario = ?")
-            params.append(scenario)
-
-        if 'rhetorical' in update_data:
-            rhetorical = self._normalize_exemplar_string_list(update_data.get('rhetorical'), 'rhetorical')
-            set_clauses.append("rhetorical = ?")
-            params.append(self._ensure_json_string(rhetorical) or "[]")
-
-        if 'register' in update_data:
-            set_clauses.append("register = ?")
-            params.append(self._normalize_nullable_text(update_data.get('register')))
-
-        if 'safety_allowed' in update_data:
-            safety_allowed = self._normalize_exemplar_string_list(update_data.get('safety_allowed'), 'safety_allowed')
-            set_clauses.append("safety_allowed = ?")
-            params.append(self._ensure_json_string(safety_allowed) or "[]")
-
-        if 'safety_blocked' in update_data:
-            safety_blocked = self._normalize_exemplar_string_list(update_data.get('safety_blocked'), 'safety_blocked')
-            set_clauses.append("safety_blocked = ?")
-            params.append(self._ensure_json_string(safety_blocked) or "[]")
-
-        if 'rights_public_figure' in update_data:
-            set_clauses.append("rights_public_figure = ?")
-            if self.backend_type == BackendType.POSTGRESQL:
-                params.append(bool(update_data.get('rights_public_figure')))
-            else:
-                params.append(1 if update_data.get('rights_public_figure') else 0)
-
-        if 'rights_notes' in update_data:
-            set_clauses.append("rights_notes = ?")
-            params.append(self._normalize_nullable_text(update_data.get('rights_notes')))
-
-        if 'length_tokens' in update_data:
-            try:
-                length_tokens = int(update_data.get('length_tokens'))
-            except (TypeError, ValueError) as exc:
-                raise InputError("length_tokens must be an integer >= 1.") from exc  # noqa: TRY003
-            if length_tokens < 1:
-                raise InputError("length_tokens must be >= 1.")  # noqa: TRY003
-            set_clauses.append("length_tokens = ?")
-            params.append(length_tokens)
-
-        if not set_clauses:
-            return existing
-
-        set_clauses.append("updated_at = ?")
-        params.append(self._get_current_utc_timestamp_iso())
-
-        set_clause_sql = ", ".join(set_clauses)
-        query = """
-            UPDATE character_exemplars
-            SET {set_clause_sql}
-            WHERE id = ? AND character_id = ? AND is_deleted = ?
-        """.format_map(locals())  # nosec B608
-        params.extend(
-            [
-                exemplar_id,
-                character_id,
-                False if self.backend_type == BackendType.POSTGRESQL else 0,
-            ]
-        )
-        try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
-                cursor = conn.cursor()
-                cursor.execute(prepared_query, prepared_params)
-                if cursor.rowcount == 0:
-                    return None
-        except (sqlite3.Error, BackendDatabaseError) as exc:
-            raise CharactersRAGDBError(f"Error updating character exemplar '{exemplar_id}': {exc}") from exc  # noqa: TRY003
-
-        return self.get_character_exemplar_by_id(character_id, exemplar_id)
-
-    def soft_delete_character_exemplar(self, character_id: int, exemplar_id: str) -> bool:
-        """Soft-delete a character exemplar (idempotent)."""
-        query = """
-            UPDATE character_exemplars
-            SET is_deleted = ?, updated_at = ?
-            WHERE id = ? AND character_id = ? AND is_deleted = ?
-        """
-        now = self._get_current_utc_timestamp_iso()
-        if self.backend_type == BackendType.POSTGRESQL:
-            set_deleted = True
-            active_flag = False
-        else:
-            set_deleted = 1
-            active_flag = 0
-
-        try:
-            with self.transaction() as conn:
-                prepared_query, prepared_params = self._prepare_backend_statement(
-                    query,
-                    (set_deleted, now, exemplar_id, character_id, active_flag),
-                )
-                cursor = conn.cursor()
-                cursor.execute(prepared_query, prepared_params)
-                if cursor.rowcount > 0:
-                    return True
-
-                check_query, check_params = self._prepare_backend_statement(
-                    "SELECT is_deleted FROM character_exemplars WHERE id = ? AND character_id = ?",
-                    (exemplar_id, character_id),
-                )
-                check_row = conn.execute(check_query, check_params).fetchone()
-                return bool(check_row and bool(check_row['is_deleted']))  # noqa: TRY300
-        except (sqlite3.Error, BackendDatabaseError) as exc:
-            raise CharactersRAGDBError(f"Error deleting character exemplar '{exemplar_id}': {exc}") from exc  # noqa: TRY003
-
-    def search_character_exemplars(
-        self,
-        character_id: int,
-        *,
-        query: str | None = None,
-        emotion: str | None = None,
-        scenario: str | None = None,
-        rhetorical: list[str] | None = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
-        """Search exemplars for a character via FTS + structured filters."""
-        emotion_filter = None
-        if emotion is not None:
-            emotion_filter = self._normalize_exemplar_enum(
-                emotion,
-                allowed=self._ALLOWED_EXEMPLAR_EMOTIONS,
-                field_name='emotion',
-                default='other',
-            )
-
-        scenario_filter = None
-        if scenario is not None:
-            scenario_filter = self._normalize_exemplar_enum(
-                scenario,
-                allowed=self._ALLOWED_EXEMPLAR_SCENARIOS,
-                field_name='scenario',
-                default='other',
-            )
-
-        rhetorical_filter = {
-            item.strip().lower()
-            for item in (rhetorical or [])
-            if isinstance(item, str) and item.strip()
-        }
-
-        params: list[Any] = [character_id, False if self.backend_type == BackendType.POSTGRESQL else 0]
-        filter_clauses = ["ce.character_id = ?", "ce.is_deleted = ?"]
-
-        if emotion_filter is not None:
-            filter_clauses.append("ce.emotion = ?")
-            params.append(emotion_filter)
-        if scenario_filter is not None:
-            filter_clauses.append("ce.scenario = ?")
-            params.append(scenario_filter)
-
-        where_sql = " AND ".join(filter_clauses)
-        normalized_query = (query or "").strip()
-
-        if normalized_query and self.backend_type == BackendType.POSTGRESQL:
-            tsquery = FTSQueryTranslator.normalize_query(normalized_query, 'postgresql')
-            if tsquery:
-                sql = """
-                    SELECT ce.*, ts_rank(ce.character_exemplars_fts_tsv, to_tsquery('english', ?)) AS rank
-                    FROM character_exemplars ce
-                    WHERE {where_sql}
-                      AND ce.character_exemplars_fts_tsv @@ to_tsquery('english', ?)
-                    ORDER BY rank DESC, ce.updated_at DESC
-                """.format_map(locals())  # nosec B608
-                query_params = [tsquery] + params + [tsquery]
-            else:
-                sql = """
-                    SELECT ce.*
-                    FROM character_exemplars ce
-                    WHERE {where_sql}
-                      AND ce.text ILIKE ?
-                    ORDER BY ce.updated_at DESC
-                """.format_map(locals())  # nosec B608
-                query_params = params + [f"%{normalized_query}%"]
-        elif normalized_query:
-            safe_literal = normalized_query.replace('"', '""')
-            safe_fts = f'"{safe_literal}"'
-            sql = """
-                SELECT ce.*, bm25(character_exemplars_fts) AS bm25_score
-                FROM character_exemplars_fts
-                JOIN character_exemplars ce ON character_exemplars_fts.rowid = ce.rowid
-                WHERE character_exemplars_fts MATCH ?
-                  AND {where_sql}
-                ORDER BY bm25_score, ce.updated_at DESC
-            """.format_map(locals())  # nosec B608
-            query_params = [safe_fts] + params
-        else:
-            sql = """
-                SELECT ce.*
-                FROM character_exemplars ce
-                WHERE {where_sql}
-                ORDER BY ce.updated_at DESC
-            """.format_map(locals())  # nosec B608
-            query_params = params
-
-        try:
-            cursor = self.execute_query(sql, tuple(query_params))
-            rows = cursor.fetchall()
-        except CharactersRAGDBError as exc:
-            logger.error(
-                "Error searching character exemplars for character_id={} query='{}': {}",
-                character_id,
-                normalized_query,
-                exc,
-            )
-            raise
-
-        results = [self._normalize_character_exemplar_row(row) for row in rows if row]
-
-        if rhetorical_filter:
-            filtered_results: list[dict[str, Any]] = []
-            for item in results:
-                values = item.get('rhetorical') or []
-                if isinstance(values, str):
-                    try:
-                        values = json.loads(values)
-                    except json.JSONDecodeError:
-                        values = []
-                normalized_values = {
-                    str(entry).strip().lower()
-                    for entry in values
-                    if str(entry).strip()
-                }
-                if rhetorical_filter.issubset(normalized_values):
-                    filtered_results.append(item)
-            results = filtered_results
-
-        total = len(results)
-        paginated = results[offset:offset + limit]
-        return paginated, total
-
-    # --- Conversation Methods ---
-    def _normalize_conversation_state(self, state: str | None) -> str:
-        """
-        Normalize and validate conversation state, applying the default when missing.
-        """
-        if state is None:
-            return self._DEFAULT_CONVERSATION_STATE
-        if not isinstance(state, str):
-            raise InputError(f"Conversation state must be a string. Got: {state!r}")  # noqa: TRY003
-        normalized = state.strip().lower()
-        if not normalized:
-            raise InputError("Conversation state cannot be empty.")  # noqa: TRY003
-        if normalized not in self._ALLOWED_CONVERSATION_STATES:
-            raise InputError(  # noqa: TRY003
-                f"Invalid conversation state '{state}'. Allowed: {', '.join(self._ALLOWED_CONVERSATION_STATES)}"
-            )
-        return normalized
-
-    def _normalize_conversation_character_scope(self, character_scope: str | None) -> str:
-        """Normalize and validate conversation character scope."""
-        if character_scope is None:
-            return "all"
-        if not isinstance(character_scope, str):
-            raise InputError(f"Conversation character scope must be a string. Got: {character_scope!r}")  # noqa: TRY003
-        normalized = character_scope.strip().lower()
-        if not normalized:
-            raise InputError("Conversation character scope cannot be empty.")  # noqa: TRY003
-        if normalized not in self._ALLOWED_CONVERSATION_CHARACTER_SCOPES:
-            raise InputError(
-                "Invalid conversation character scope "
-                f"'{character_scope}'. Allowed: {', '.join(self._ALLOWED_CONVERSATION_CHARACTER_SCOPES)}"
-            )  # noqa: TRY003
-        return normalized
-
-    def _conversation_character_scope_clause(
-        self,
-        character_scope: str | None,
-        *,
-        column: str = "character_id",
-    ) -> str | None:
-        """Return the SQL clause for a conversation character-scope filter."""
-        normalized = self._normalize_conversation_character_scope(character_scope)
-        if normalized == "all":
-            return None
-        if normalized == "character":
-            return f"{column} IS NOT NULL"
-        return f"{column} IS NULL"
-
-    def _conversation_deleted_scope_clause(
-        self,
-        *,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        column: str = "deleted",
-        true_literal: str = "1",
-        false_literal: str = "0",
-    ) -> str | None:
-        """Return the SQL clause for a conversation deleted-state filter."""
-        if deleted_only:
-            return f"{column} = {true_literal}"
-        if include_deleted:
-            return None
-        return f"{column} = {false_literal}"
+    # Character card CRUD / tag-search methods are delegated to CharacterStore at module bottom.
 
     @staticmethod
     def _normalize_nullable_text(value: Any) -> str | None:
@@ -14938,519 +14740,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     _ALLOWED_SCOPE_TYPES: tuple[str, ...] = ("global", "workspace")
 
-    @staticmethod
-    def _normalize_scope(
-        scope_type: str | None,
-        workspace_id: str | None,
-    ) -> tuple[str, str | None]:
-        """Validate and normalize conversation scope fields.
-
-        Returns:
-            (scope_type, workspace_id) tuple.
-
-        Raises:
-            InputError: If scope_type is invalid or workspace scope lacks workspace_id.
-        """
-        if scope_type is None:
-            scope_type = "global"
-        scope_type = scope_type.strip().lower()
-        if scope_type not in ("global", "workspace"):
-            raise InputError(  # noqa: TRY003
-                f"Invalid scope_type '{scope_type}'. Allowed: global, workspace"
-            )
-        if scope_type == "workspace":
-            if not workspace_id:
-                raise InputError("workspace_id is required when scope_type is 'workspace'.")  # noqa: TRY003
-        else:
-            workspace_id = None  # global scope never references a workspace
-        return scope_type, workspace_id
-
-    def _normalize_conversation_assistant_identity(
-        self,
-        *,
-        character_id: Any,
-        assistant_kind: Any,
-        assistant_id: Any,
-        persona_memory_mode: Any,
-    ) -> tuple[str, str, int | None, str | None]:
-        """Normalize and validate the persisted assistant identity for a conversation."""
-        normalized_kind = self._normalize_nullable_text(assistant_kind)
-        normalized_assistant_id = self._normalize_nullable_text(assistant_id)
-        normalized_memory_mode = self._normalize_nullable_text(persona_memory_mode)
-
-        if normalized_kind is None:
-            normalized_kind = "character" if character_id is not None else None
-        if normalized_kind is None:
-            if (
-                character_id is None
-                and normalized_assistant_id is None
-                and normalized_memory_mode is None
-            ):
-                raise InputError("Required field 'character_id' is missing")  # noqa: TRY003
-            raise InputError(
-                "Conversation requires either 'character_id' or assistant identity fields."
-            )  # noqa: TRY003
-
-        normalized_kind = normalized_kind.strip().lower()
-        if normalized_kind not in self._ALLOWED_CONVERSATION_ASSISTANT_KINDS:
-            raise InputError(
-                f"Invalid assistant_kind '{normalized_kind}'. Allowed: {', '.join(self._ALLOWED_CONVERSATION_ASSISTANT_KINDS)}"
-            )  # noqa: TRY003
-
-        if normalized_kind == "character":
-            normalized_character_id: int | None
-            if character_id is None:
-                if normalized_assistant_id is None:
-                    raise InputError(
-                        "Character conversations require 'character_id' or a numeric 'assistant_id'."
-                    )  # noqa: TRY003
-                try:
-                    normalized_character_id = int(normalized_assistant_id)
-                except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
-                    raise InputError(
-                        f"Character assistant_id must be numeric. Got: {normalized_assistant_id}"
-                    ) from exc  # noqa: TRY003
-            else:
-                try:
-                    normalized_character_id = int(character_id)
-                except (TypeError, ValueError) as exc:
-                    raise InputError(f"character_id must be numeric. Got: {character_id}") from exc  # noqa: TRY003
-
-            if normalized_memory_mode is not None:
-                raise InputError("persona_memory_mode is only valid for persona-backed conversations.")  # noqa: TRY003
-            return "character", str(normalized_character_id), normalized_character_id, None
-
-        if normalized_assistant_id is None:
-            raise InputError("Persona conversations require a non-empty 'assistant_id'.")  # noqa: TRY003
-
-        if normalized_memory_mode is not None:
-            normalized_memory_mode = normalized_memory_mode.strip().lower()
-            if normalized_memory_mode not in self._ALLOWED_PERSONA_MEMORY_MODES:
-                raise InputError(
-                    f"Invalid persona_memory_mode '{normalized_memory_mode}'. Allowed: {', '.join(self._ALLOWED_PERSONA_MEMORY_MODES)}"
-                )  # noqa: TRY003
-
-        return "persona", normalized_assistant_id, None, normalized_memory_mode
-
-    def add_conversation(self, conv_data: dict[str, Any]) -> str | None:
-        """
-        Adds a new conversation to the database.
-
-        `id` (UUID string) can be provided; if not, it's auto-generated.
-        `root_id` (UUID string) should be provided; if not, `id` is used as `root_id`.
-        Either `character_id` or a normalized assistant identity is required in `conv_data`.
-        `client_id` defaults to the DB instance's `client_id` if not provided in `conv_data`.
-        `version` defaults to 1. `created_at` and `last_modified` are set to current UTC time.
-
-        FTS updates (`conversations_fts` for the title) and `sync_log` entries for creations
-        are handled automatically by SQL triggers.
-
-        Args:
-            conv_data: A dictionary containing conversation data.
-                       Required: 'character_id' or ('assistant_kind' + 'assistant_id').
-                       Recommended: 'id' (if providing own UUID), 'root_id'.
-                       Optional: 'forked_from_message_id', 'parent_conversation_id',
-                                 'title', 'rating' (1-5), 'client_id'.
-
-        Returns:
-            The string UUID of the newly created conversation.
-
-        Raises:
-            InputError: If the assistant identity is invalid, or if 'client_id' is
-                        missing and not set on the DB instance.
-            ConflictError: If a conversation with the provided 'id' already exists.
-            CharactersRAGDBError: For other database-related errors.
-        """
-        conv_id = conv_data.get('id') or self._generate_uuid()
-        root_id = conv_data.get('root_id') or conv_id  # If root_id not given, this is a new root.
-
-        client_id = conv_data.get('client_id') or self.client_id
-        if not client_id:
-            raise InputError("Client ID is required for conversation (either in conv_data or DB instance).")  # noqa: TRY003
-
-        state = self._normalize_conversation_state(conv_data.get('state'))
-        topic_label = self._normalize_nullable_text(conv_data.get('topic_label'))
-        cluster_id = self._normalize_nullable_text(conv_data.get('cluster_id'))
-        source = self._normalize_nullable_text(conv_data.get('source'))
-        external_ref = self._normalize_nullable_text(conv_data.get('external_ref'))
-        assistant_kind, assistant_id, character_id, persona_memory_mode = self._normalize_conversation_assistant_identity(
-            character_id=conv_data.get('character_id'),
-            assistant_kind=conv_data.get('assistant_kind'),
-            assistant_id=conv_data.get('assistant_id'),
-            persona_memory_mode=conv_data.get('persona_memory_mode'),
-        )
-
-        scope_type, workspace_id = self._normalize_scope(
-            conv_data.get('scope_type'), conv_data.get('workspace_id'),
-        )
-
-        now = self._get_current_utc_timestamp_iso()
-        query = """
-                INSERT INTO conversations (id, root_id, forked_from_message_id, parent_conversation_id, \
-                                           character_id, assistant_kind, assistant_id, persona_memory_mode, \
-                                           title, state, topic_label, cluster_id, source, external_ref, rating, \
-                                           created_at, last_modified, client_id, version, deleted, \
-                                           scope_type, workspace_id) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                """ # created_at added
-        if self.backend_type == BackendType.POSTGRESQL:
-            params = (
-                conv_id, root_id, conv_data.get('forked_from_message_id'),
-                conv_data.get('parent_conversation_id'), character_id, assistant_kind, assistant_id, persona_memory_mode,
-                conv_data.get('title'), state, topic_label, cluster_id, source, external_ref, conv_data.get('rating'),
-                now, now, client_id, 1, False,
-                scope_type, workspace_id
-            )
-        else:
-            params = (
-                conv_id, root_id, conv_data.get('forked_from_message_id'),
-                conv_data.get('parent_conversation_id'), character_id, assistant_kind, assistant_id, persona_memory_mode,
-                conv_data.get('title'), state, topic_label, cluster_id, source, external_ref, conv_data.get('rating'),
-                now, now, client_id, 1, 0,
-                scope_type, workspace_id
-            )
-        try:
-            with self.transaction() as conn:
-                conn.execute(query, params)
-            logger.info(f"Added conversation ID: {conv_id}.")
-            return conv_id  # noqa: TRY300
-        except sqlite3.IntegrityError as e:
-            if "UNIQUE constraint failed: conversations.id" in str(e):
-                 raise ConflictError(f"Conversation with ID '{conv_id}' already exists.", entity="conversations", entity_id=conv_id) from e  # noqa: TRY003
-            # Could also be FK violation for character_id, etc.
-            raise CharactersRAGDBError(f"Database integrity error adding conversation: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error adding conversation: {e}")
-            raise
-        return None # Should not be reached
-
-    def get_conversation_by_id(self, conversation_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
-        """
-        Retrieves a specific conversation by its UUID.
-
-        Only non-deleted conversations are returned unless `include_deleted=True`.
-
-        Args:
-            conversation_id: The string UUID of the conversation.
-
-        Returns:
-            A dictionary containing the conversation's data if found (and not deleted
-            unless `include_deleted=True`), otherwise None.
-
-        Raises:
-            CharactersRAGDBError: For database errors during fetching.
-        """
-        if include_deleted:
-            query = "SELECT * FROM conversations WHERE id = ?"
-        else:
-            query = "SELECT * FROM conversations WHERE id = ? AND deleted = 0"
-        try:
-            cursor = self.execute_query(query, (conversation_id,))
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching conversation ID {conversation_id}: {e}")
-            raise
-
-    def get_conversations_for_character(
-        self,
-        character_id: int,
-        limit: int = 50,
-        offset: int = 0,
-        client_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        Lists conversations associated with a specific character ID.
-
-        Only non-deleted conversations are returned, ordered by `last_modified` descending.
-        Results are automatically scoped to the active client's conversations unless
-        `client_id` is explicitly provided. Pass `client_id=None` to disable scoping.
-
-        Args:
-            character_id: The integer ID of the character.
-            limit: The maximum number of conversations to return. Defaults to 50.
-            offset: The number of conversations to skip. Defaults to 0.
-            client_id: Optional override for the client scope. Defaults to the
-                database instance's `client_id`. Use `None` to query across all
-                clients (only for privileged workflows).
-
-        Returns:
-            A list of dictionaries, each representing a conversation. Can be empty.
-
-        Raises:
-            CharactersRAGDBError: For database errors.
-        """
-        client_filter = self.client_id if client_id is None else client_id
-        query = (
-            "SELECT * FROM conversations "
-            "WHERE character_id = ? AND deleted = 0"
-        )
-        params: list[Any] = [character_id]
-
-        if client_filter is not None:
-            query += " AND client_id = ?"
-            params.append(client_filter)
-
-        query += " ORDER BY last_modified DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            return [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching conversations for character ID {character_id}: {e}")
-            raise
-
-    def count_conversations_for_user(
-        self,
-        client_id: str,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        character_scope: str | None = None,
-        scope_type: str | None = None,
-        workspace_id: str | None = None,
-    ) -> int:
-        """
-        Count total non-deleted conversations for a given user (client_id).
-
-        Args:
-            client_id: The user/client identifier as string.
-
-        Returns:
-            Integer count of conversations.
-
-        Raises:
-            CharactersRAGDBError on database failure.
-        """
-        if deleted_only:
-            deleted_clause = "deleted = 1"
-        elif include_deleted:
-            deleted_clause = "1 = 1"
-        else:
-            deleted_clause = "deleted = 0"
-        clauses = ["client_id = ?", deleted_clause]
-        params: list[Any] = [client_id]
-        character_scope_clause = self._conversation_character_scope_clause(character_scope)
-        if character_scope_clause:
-            clauses.append(character_scope_clause)
-        normalized_workspace_id = self._normalize_nullable_text(workspace_id)
-        normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
-        clauses.append("scope_type = ?")
-        params.append(normalized_scope)
-        if normalized_workspace_id is not None:
-            clauses.append("workspace_id = ?")
-            params.append(normalized_workspace_id)
-        query = f"SELECT COUNT(*) as cnt FROM conversations WHERE {' AND '.join(clauses)}"  # nosec B608
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            return int(row[0] if row else 0)
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error counting conversations for client_id {client_id}: {e}")
-            raise
-
-    def get_conversations_for_user(
-        self,
-        client_id: str,
-        limit: int = 50,
-        offset: int = 0,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        scope_type: str | None = None,
-        workspace_id: str | None = None,
-        character_scope: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        List conversations for a given user (client_id), ordered by last_modified DESC.
-
-        Args:
-            client_id: The user/client identifier as string.
-            limit: Max number of rows to return.
-            offset: Number of rows to skip.
-            scope_type: Optional scope filter ('global' or 'workspace').
-            workspace_id: Optional workspace ID filter (used with scope_type='workspace').
-
-        Returns:
-            List of conversation records.
-
-        Raises:
-            CharactersRAGDBError on database failure.
-        """
-        if deleted_only:
-            deleted_clause = "deleted = 1"
-        elif include_deleted:
-            deleted_clause = "1 = 1"
-        else:
-            deleted_clause = "deleted = 0"
-
-        clauses = ["client_id = ?", deleted_clause]
-        params: list[Any] = [client_id]
-        character_scope_clause = self._conversation_character_scope_clause(character_scope)
-        if character_scope_clause:
-            clauses.append(character_scope_clause)
-        normalized_workspace_id = self._normalize_nullable_text(workspace_id)
-        normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
-        clauses.append("scope_type = ?")
-        params.append(normalized_scope)
-        if normalized_workspace_id is not None:
-            clauses.append("workspace_id = ?")
-            params.append(normalized_workspace_id)
-        query = (
-            "SELECT * FROM conversations "  # nosec B608
-            f"WHERE {' AND '.join(clauses)} "
-            "ORDER BY last_modified DESC LIMIT ? OFFSET ?"
-        )
-        params.extend([limit, offset])
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error listing conversations for client_id {client_id}: {e}")
-            raise
-
-    def count_messages_for_conversation(self, conversation_id: str, include_deleted: bool = False) -> int:
-        """
-        Count messages for a conversation, ensuring the parent conversation is active.
-
-        Args:
-            conversation_id: Conversation UUID
-            include_deleted: If True, include soft-deleted messages
-
-        Returns:
-            Integer count of messages.
-
-        Raises:
-            CharactersRAGDBError on database failure.
-        """
-        base_query = (
-            "SELECT COUNT(1) FROM messages m "
-            "JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND c.deleted = 0"
-        )
-        params = [conversation_id]
-        if not include_deleted:
-            base_query += " AND m.deleted = 0"
-        try:
-            cursor = self.execute_query(base_query, tuple(params))
-            row = cursor.fetchone()
-            # row may be tuple or dict depending on connection row factory
-            if row is None:
-                return 0
-            try:
-                return int(row[0])
-            except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                return int(row.get("COUNT(1)") or row.get("count") or 0)
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error counting messages for conversation {conversation_id}: {e}")
-            raise
-
-    def count_messages_for_conversations(
-        self,
-        conversation_ids: list[str],
-        include_deleted: bool = False,
-    ) -> dict[str, int]:
-        """
-        Count messages for multiple conversations in a single query.
-
-        Args:
-            conversation_ids: List of conversation UUIDs.
-            include_deleted: If True, include soft-deleted messages.
-
-        Returns:
-            Mapping of conversation_id -> message count.
-        """
-        if not conversation_ids:
-            return {}
-        placeholders = ",".join(["?"] * len(conversation_ids))
-        base_query = (
-            f"SELECT m.conversation_id, COUNT(1) as cnt "  # nosec B608
-            f"FROM messages m "
-            f"JOIN conversations c ON m.conversation_id = c.id "
-            f"WHERE m.conversation_id IN ({placeholders}) AND c.deleted = 0"
-        )
-        if not include_deleted:
-            base_query += " AND m.deleted = 0"
-        base_query += " GROUP BY m.conversation_id"
-        try:
-            cursor = self.execute_query(base_query, tuple(conversation_ids))
-            rows = cursor.fetchall()
-            result: dict[str, int] = dict.fromkeys(conversation_ids, 0)
-            for row in rows:
-                if isinstance(row, dict):
-                    conv_id = row.get("conversation_id")
-                    cnt = row.get("cnt") or row.get("COUNT(1)") or 0
-                else:
-                    conv_id = row[0]
-                    cnt = row[1]
-                if conv_id is not None:
-                    result[str(conv_id)] = int(cnt or 0)
-            return result  # noqa: TRY300
-        except CharactersRAGDBError as e:
-            logger.error("Database error counting messages for conversations: {}", e)
-            raise
-
-    def get_latest_message_for_conversation(self, conversation_id: str) -> dict[str, Any] | None:
-        """Fetch the most recent non-deleted message for a conversation."""
-        query = (
-            "SELECT m.id, m.timestamp, m.content, m.sender "
-            "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND m.deleted = 0 AND c.deleted = 0 "
-            "ORDER BY m.timestamp DESC LIMIT 1"
-        )
-        try:
-            cursor = self.execute_query(query, (conversation_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            return dict(row) if isinstance(row, dict) else {
-                "id": row[0],
-                "timestamp": row[1],
-                "content": row[2],
-                "sender": row[3],
-            }
-        except CharactersRAGDBError as exc:
-            logger.error("Database error fetching latest message for conversation {}: {}", conversation_id, exc)
-            raise
-
-    def count_messages_since(
-        self,
-        conversation_id: str,
-        since_message_id: str | None,
-    ) -> int:
-        """Count messages after the given message_id within a conversation."""
-        if not since_message_id:
-            return self.count_messages_for_conversation(conversation_id)
-
-        try:
-            since_message = self.get_message_by_id(since_message_id)
-        except CharactersRAGDBError:
-            return self.count_messages_for_conversation(conversation_id)
-
-        if not since_message:
-            return self.count_messages_for_conversation(conversation_id)
-
-        since_timestamp = since_message.get("timestamp")
-        if not since_timestamp:
-            return self.count_messages_for_conversation(conversation_id)
-
-        query = (
-            "SELECT COUNT(1) FROM messages m "
-            "JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND m.deleted = 0 AND c.deleted = 0 "
-            "AND m.timestamp > ?"
-        )
-        try:
-            cursor = self.execute_query(query, (conversation_id, since_timestamp))
-            row = cursor.fetchone()
-            if row is None:
-                return 0
-            try:
-                return int(row[0])
-            except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                return int(row.get("COUNT(1)") or row.get("count") or 0)
-        except CharactersRAGDBError as exc:
-            logger.error("Database error counting messages after {}: {}", since_message_id, exc)
-            raise
+    # Message count/query helpers are delegated to MessageStore at module bottom.
 
     def upsert_conversation_cluster(
         self,
@@ -15489,1264 +14779,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed to upsert conversation cluster {}: {}", cluster_id, exc)
             return False
 
-    def get_conversation_cluster(self, cluster_id: str) -> dict[str, Any] | None:
-        """Fetch a conversation cluster metadata row by ID."""
-        query = "SELECT * FROM conversation_clusters WHERE cluster_id = ?"
-        try:
-            cursor = self.execute_query(query, (cluster_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            return dict(row) if isinstance(row, dict) else {
-                "cluster_id": row[0],
-                "title": row[1],
-                "centroid": row[2],
-                "size": row[3],
-                "created_at": row[4],
-                "updated_at": row[5],
-            }
-        except CharactersRAGDBError as exc:
-            logger.error("Failed to fetch conversation cluster {}: {}", cluster_id, exc)
-            raise
-
-    def count_conversations_for_user_by_character(
-        self,
-        client_id: str,
-        character_id: int,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        scope_type: str | None = None,
-        workspace_id: str | None = None,
-    ) -> int:
-        """
-        Count non-deleted conversations for a given user scoped to a specific character.
-
-        Args:
-            client_id: The user/client identifier as string.
-            character_id: Character ID to scope the count.
-
-        Returns:
-            Integer count of conversations.
-
-        Raises:
-            CharactersRAGDBError on database failure.
-        """
-        if deleted_only:
-            deleted_clause = "deleted = 1"
-        elif include_deleted:
-            deleted_clause = "1 = 1"
-        else:
-            deleted_clause = "deleted = 0"
-        normalized_workspace_id = self._normalize_nullable_text(workspace_id)
-        normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
-        query = (
-            f"SELECT COUNT(1) FROM conversations WHERE client_id = ? AND character_id = ? AND {deleted_clause} AND scope_type = ?"  # nosec B608
-        )
-        params: list[Any] = [client_id, character_id, normalized_scope]
-        if normalized_workspace_id is not None:
-            query += " AND workspace_id = ?"
-            params.append(normalized_workspace_id)
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            if row is None:
-                return 0
-            try:
-                return int(row[0])
-            except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                return int(row.get("COUNT(1)") or row.get("count") or 0)
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error counting conversations for client_id {client_id} and character_id {character_id}: {e}"
-            )
-            raise
-
-    def get_conversations_for_user_and_character(
-        self,
-        client_id: str,
-        character_id: int,
-        limit: int = 50,
-        offset: int = 0,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        scope_type: str | None = None,
-        workspace_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        List conversations for a given user scoped to a specific character.
-
-        Args:
-            client_id: The user/client identifier as string.
-            character_id: Character ID to scope the list.
-            limit: Max number of rows to return.
-            offset: Number of rows to skip.
-
-        Returns:
-            List of conversation records.
-
-        Raises:
-            CharactersRAGDBError on database failure.
-        """
-        if deleted_only:
-            deleted_clause = "deleted = 1"
-        elif include_deleted:
-            deleted_clause = "1 = 1"
-        else:
-            deleted_clause = "deleted = 0"
-
-        normalized_workspace_id = self._normalize_nullable_text(workspace_id)
-        normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
-        query = (
-            "SELECT * FROM conversations "  # nosec B608
-            f"WHERE client_id = ? AND character_id = ? AND {deleted_clause} "
-            "AND scope_type = ? "
-        )
-        params: list[Any] = [client_id, character_id, normalized_scope]
-        if normalized_workspace_id is not None:
-            query += "AND workspace_id = ? "
-            params.append(normalized_workspace_id)
-        query += "ORDER BY last_modified DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error listing conversations for client_id {client_id} and character_id {character_id}: {e}"
-            )
-            raise
-
-    def update_conversation(self, conversation_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
-        """
-        Updates an existing conversation using optimistic locking.
-
-        The update succeeds if `expected_version` matches the current database version.
-        `version` is incremented and `last_modified` updated to current UTC time.
-        Note: this method does not change ownership; the `client_id` field is preserved
-        unless explicitly provided in `update_data` by a privileged caller.
-
-        Updatable fields from `update_data`: 'title', 'rating', 'state', 'topic_label',
-        'topic_label_source', 'topic_last_tagged_at', 'topic_last_tagged_message_id',
-        'cluster_id', 'source', 'external_ref', 'assistant_kind', 'assistant_id',
-        'character_id', 'persona_memory_mode'. Other fields are ignored.
-        If `update_data` is empty or contains no updatable fields, metadata (version,
-        last_modified, client_id) is still updated if the version check passes.
-
-        FTS updates (`conversations_fts` for title changes) and `sync_log` entries
-        are handled by SQL triggers.
-
-        Args:
-            conversation_id: The UUID of the conversation to update.
-            update_data: Dictionary with fields to update (e.g., 'title', 'rating').
-            expected_version: The client's expected version of the record.
-
-        Returns:
-            True if the update was successful.
-
-        Raises:
-            ConflictError: If the conversation is not found, is soft-deleted,
-                           or if `expected_version` does not match the current database version.
-            CharactersRAGDBError: For other database-related errors (e.g., rating out of range
-                                  if not caught by this method but by DB constraint).
-        """
-        logger.debug(
-            f"Starting update_conversation for ID {conversation_id}, expected_version {expected_version} (FTS handled by DB triggers)")
-
-        if (
-            'rating' in update_data
-            and update_data['rating'] is not None
-            and not (1 <= update_data['rating'] <= 5)
-        ):
-            # Basic check, DB has CHECK constraint too
-            raise InputError(f"Rating must be between 1 and 5. Got: {update_data['rating']}")  # noqa: TRY003
-
-        if 'state' in update_data:
-            state_val = update_data.get('state')
-            if state_val is None:
-                raise InputError("Conversation state cannot be empty.")  # noqa: TRY003
-            update_data['state'] = self._normalize_conversation_state(state_val)
-
-        if 'topic_label_source' in update_data:
-            source_val = update_data.get('topic_label_source')
-            if source_val is None:
-                update_data['topic_label_source'] = None
-            else:
-                normalized_source = str(source_val).strip().lower()
-                if normalized_source not in {"manual", "auto"}:
-                    raise InputError("topic_label_source must be 'manual' or 'auto'.")  # noqa: TRY003
-                update_data['topic_label_source'] = normalized_source
-
-        if 'topic_last_tagged_at' in update_data:
-            tag_val = update_data.get('topic_last_tagged_at')
-            if isinstance(tag_val, datetime):
-                if tag_val.tzinfo is None:
-                    tag_val = tag_val.replace(tzinfo=timezone.utc)
-                tag_val = tag_val.astimezone(timezone.utc).isoformat()
-            update_data['topic_last_tagged_at'] = tag_val
-
-        now = self._get_current_utc_timestamp_iso()
-
-        try:
-            with self.transaction() as conn:
-                logger.debug(f"Conversation update transaction started. Connection object: {id(conn)}")
-
-                # Fetch current state, including rowid (though not used for manual FTS, it's good practice to fetch if available)
-                # and current title for potential non-FTS related "title_changed" logic.
-                cursor_check = conn.execute(
-                    """
-                    SELECT rowid, title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
-                    FROM conversations
-                    WHERE id = ?
-                    """,
-                                            (conversation_id,))
-                current_state = cursor_check.fetchone()
-
-                if not current_state:
-                    raise ConflictError(f"Conversation ID {conversation_id} not found for update.",  # noqa: TRY003, TRY301
-                                        entity="conversations", entity_id=conversation_id)
-                if current_state['deleted']:
-                    raise ConflictError(f"Conversation ID {conversation_id} is deleted, cannot update.",  # noqa: TRY003, TRY301
-                                        entity="conversations", entity_id=conversation_id)
-
-                current_db_version = current_state['version']
-                current_title = current_state['title']  # For logging or other conditional logic if title changed
-                assistant_update_requested = any(
-                    field in update_data
-                    for field in ('assistant_kind', 'assistant_id', 'character_id', 'persona_memory_mode')
-                )
-                normalized_assistant_kind = current_state['assistant_kind']
-                normalized_assistant_id = current_state['assistant_id']
-                normalized_character_id = current_state['character_id']
-                normalized_persona_memory_mode = current_state['persona_memory_mode']
-
-                if assistant_update_requested:
-                    (
-                        normalized_assistant_kind,
-                        normalized_assistant_id,
-                        normalized_character_id,
-                        normalized_persona_memory_mode,
-                    ) = self._normalize_conversation_assistant_identity(
-                        character_id=update_data.get('character_id', current_state['character_id']),
-                        assistant_kind=update_data.get('assistant_kind', current_state['assistant_kind']),
-                        assistant_id=update_data.get('assistant_id', current_state['assistant_id']),
-                        persona_memory_mode=update_data.get(
-                            'persona_memory_mode',
-                            current_state['persona_memory_mode'],
-                        ),
-                    )
-
-                logger.debug(
-                    f"Conversation current DB version: {current_db_version}, Expected by client: {expected_version}, Current title: {current_title}")
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Conversation ID {conversation_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="conversations", entity_id=conversation_id
-                    )
-
-                fields_to_update_sql = []
-                params_for_set_clause = []
-                title_changed_flag = False  # Flag to indicate if title was among the updated fields and changed value
-
-                # Process 'title' if present in update_data
-                if 'title' in update_data:
-                    fields_to_update_sql.append("title = ?")
-                    params_for_set_clause.append(update_data['title'])
-                    if update_data['title'] != current_title:
-                        title_changed_flag = True
-
-                # Process 'rating' if present in update_data
-                if 'rating' in update_data:
-                    fields_to_update_sql.append("rating = ?")
-                    params_for_set_clause.append(update_data['rating'])
-
-                if 'state' in update_data:
-                    fields_to_update_sql.append("state = ?")
-                    params_for_set_clause.append(update_data['state'])
-
-                if 'topic_label' in update_data:
-                    fields_to_update_sql.append("topic_label = ?")
-                    params_for_set_clause.append(self._normalize_nullable_text(update_data.get('topic_label')))
-
-                if 'topic_label_source' in update_data:
-                    fields_to_update_sql.append("topic_label_source = ?")
-                    params_for_set_clause.append(update_data.get('topic_label_source'))
-
-                if 'topic_last_tagged_at' in update_data:
-                    fields_to_update_sql.append("topic_last_tagged_at = ?")
-                    params_for_set_clause.append(update_data.get('topic_last_tagged_at'))
-
-                if 'topic_last_tagged_message_id' in update_data:
-                    fields_to_update_sql.append("topic_last_tagged_message_id = ?")
-                    params_for_set_clause.append(
-                        self._normalize_nullable_text(update_data.get('topic_last_tagged_message_id'))
-                    )
-
-                if 'cluster_id' in update_data:
-                    fields_to_update_sql.append("cluster_id = ?")
-                    params_for_set_clause.append(self._normalize_nullable_text(update_data.get('cluster_id')))
-
-                if 'source' in update_data:
-                    fields_to_update_sql.append("source = ?")
-                    params_for_set_clause.append(self._normalize_nullable_text(update_data.get('source')))
-
-                if 'external_ref' in update_data:
-                    fields_to_update_sql.append("external_ref = ?")
-                    params_for_set_clause.append(self._normalize_nullable_text(update_data.get('external_ref')))
-
-                if assistant_update_requested:
-                    fields_to_update_sql.append("character_id = ?")
-                    params_for_set_clause.append(normalized_character_id)
-                    fields_to_update_sql.append("assistant_kind = ?")
-                    params_for_set_clause.append(normalized_assistant_kind)
-                    fields_to_update_sql.append("assistant_id = ?")
-                    params_for_set_clause.append(normalized_assistant_id)
-                    fields_to_update_sql.append("persona_memory_mode = ?")
-                    params_for_set_clause.append(normalized_persona_memory_mode)
-
-                next_version_val = expected_version + 1  # Version always increments on successful update
-
-                if not fields_to_update_sql:
-                    # This block executes if update_data was empty or contained no recognized updatable fields.
-                    # We still need to update last_modified and version due to the successful version check.
-                    logger.info(
-                        f"No specific updatable fields (e.g. title, rating) found for conversation {conversation_id}. Updating metadata only.")
-                    main_update_query = "UPDATE conversations SET last_modified = ?, version = ? WHERE id = ? AND version = ? AND deleted = 0"
-                    main_update_params = (now, next_version_val, conversation_id, expected_version)
-                else:
-                    # If specific fields were found, add metadata fields to the update
-                    fields_to_update_sql.extend(["last_modified = ?", "version = ?"])
-
-                    final_set_values = params_for_set_clause[:]  # Copy of values for specific fields
-                    final_set_values.extend([now, next_version_val])  # Add values for metadata fields
-
-                    main_update_query = f"UPDATE conversations SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"  # nosec B608
-                    main_update_params = tuple(final_set_values + [conversation_id, expected_version])
-
-                logger.debug(f"Executing MAIN conversation update query: {main_update_query}")
-                logger.debug(f"Params: {main_update_params}")
-
-                cursor_main = conn.execute(main_update_query, main_update_params)
-                logger.debug(f"Main Conversation Update executed, rowcount: {cursor_main.rowcount}")
-
-                if cursor_main.rowcount == 0:
-                    # This could happen if a concurrent modification occurred between the version check and this UPDATE.
-                    # Or if the record was deleted concurrently.
-                    # Re-check the state to provide a more accurate error.
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
-                                                      (conversation_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Main update for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Conversation ID {conversation_id} disappeared before update completion (expected v{expected_version})."
-                    elif final_state['deleted']:
-                        msg = f"Conversation ID {conversation_id} was soft-deleted concurrently (expected v{expected_version} for update)."
-                    elif final_state['version'] != expected_version:
-                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently (expected v{expected_version} for update)."
-                    else:  # Should not happen if rowcount is 0 and version check was successful.
-                        msg = f"Main update for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows for an unknown reason after passing initial checks."
-                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)  # noqa: TRY301
-
-                # FTS synchronization is handled by database triggers.
-                # No manual FTS DML (DELETE/INSERT on conversations_fts) is performed here.
-
-                logger.info(
-                    f"Updated conversation ID {conversation_id} from version {expected_version} to version {next_version_val} (FTS handled by DB triggers). Title changed: {title_changed_flag}")
-                return True
-
-        except sqlite3.IntegrityError as e: # e.g. rating check constraint
-            raise CharactersRAGDBError(f"Database integrity error during update_conversation: {e}") from e  # noqa: TRY003
-        except sqlite3.DatabaseError as e:
-            # This broad catch is for unexpected SQLite errors, including potential "malformed" if it still occurs.
-            logger.critical(f"DATABASE ERROR during update_conversation (FTS handled by DB triggers): {e}")
-            logger.critical(f"Error details: {str(e)}")
-            # Specific handling for "malformed" can be added if needed, but the goal is to prevent it.
-            raise CharactersRAGDBError(f"Database error during update_conversation: {e}") from e  # noqa: TRY003
-        except ConflictError:  # Re-raise ConflictErrors for tests or callers to handle
-            raise
-        except InputError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Application-level database error in update_conversation for ID {conversation_id}: {e}",
-                         exc_info=True)
-            raise
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:  # Catch-all for any other unexpected Python errors
-            logger.error(f"Unexpected Python error in update_conversation for ID {conversation_id}: {e}", exc_info=True)
-            raise CharactersRAGDBError(f"Unexpected error during update_conversation: {e}") from e  # noqa: TRY003
-
-    def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
-        """
-        Soft-deletes a conversation using optimistic locking.
-
-        Sets the `deleted` flag to 1, updates `last_modified`, increments `version`,
-        and sets `client_id`. Succeeds if `expected_version` matches the current
-        DB version and the record is active.
-        If already soft-deleted, returns True (idempotent).
-
-        FTS updates (removal from `conversations_fts`) and `sync_log` entries
-        are handled by SQL triggers.
-
-        Args:
-            conversation_id: The UUID of the conversation to soft-delete.
-            expected_version: The client's expected version of the record.
-
-        Returns:
-            True if the soft-delete was successful or if the conversation was already soft-deleted.
-
-        Raises:
-            ConflictError: If not found (and not already deleted), or if active with a version mismatch.
-            CharactersRAGDBError: For other database errors.
-        """
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-
-        query = "UPDATE conversations SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        params = (now, next_version_val, self.client_id, conversation_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                try:
-                    current_db_version = self._get_current_db_version(conn, "conversations", "id", conversation_id)
-                except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM conversations WHERE id = ?",
-                                                       (conversation_id,))
-                    record_status = check_status_cursor.fetchone()
-                    if record_status and record_status['deleted']:
-                        logger.info(f"Conversation ID {conversation_id} already soft-deleted. Success (idempotent).")
-                        return True
-                    raise # Re-raise if not found or other conflict
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Soft delete for Conversation ID {conversation_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="conversations", entity_id=conversation_id
-                    )
-
-                cursor = conn.execute(query, params)
-
-                if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM conversations WHERE id = ?",
-                                                      (conversation_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Soft delete for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Conversation ID {conversation_id} disappeared."
-                    elif final_state['deleted']:
-                        logger.info(f"Conversation ID {conversation_id} was soft-deleted concurrently. Success.")
-                        return True
-                    elif final_state['version'] != expected_version:
-                        msg = f"Conversation ID {conversation_id} version changed to {final_state['version']} concurrently."
-                    else:
-                        msg = f"Soft delete for conversation ID {conversation_id} (expected v{expected_version}) affected 0 rows."
-                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Soft-deleted conversation ID {conversation_id} (was v{expected_version}), new version {next_version_val}.")
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error soft-deleting conversation ID {conversation_id} (expected v{expected_version}): {e}",
-                exc_info=True)
-            raise
-
-    def restore_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
-        """
-        Restores a soft-deleted conversation using optimistic locking.
-
-        Args:
-            conversation_id: The UUID of the conversation to restore.
-            expected_version: The client's expected record version.
-
-        Returns:
-            True if restore succeeded or if already active (idempotent).
-
-        Raises:
-            ConflictError: If conversation is missing or version mismatch occurs.
-            CharactersRAGDBError: For database failures.
-        """
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-        query = (
-            "UPDATE conversations "
-            "SET deleted = 0, last_modified = ?, version = ?, client_id = ? "
-            "WHERE id = ? AND version = ? AND deleted = 1"
-        )
-        params = (now, next_version_val, self.client_id, conversation_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                check_cursor = conn.execute(
-                    "SELECT deleted, version FROM conversations WHERE id = ?",
-                    (conversation_id,),
-                )
-                record_status = check_cursor.fetchone()
-                if not record_status:
-                    raise ConflictError(
-                        f"Conversation ID {conversation_id} not found.",
-                        entity="conversations",
-                        entity_id=conversation_id,
-                    )
-
-                if not record_status["deleted"]:
-                    logger.info(
-                        f"Conversation ID {conversation_id} already active. Restore successful (idempotent)."
-                    )
-                    return True
-
-                current_db_version = record_status["version"]
-                if current_db_version != expected_version:
-                    raise ConflictError(
-                        (
-                            f"Restore for Conversation ID {conversation_id} failed: "
-                            f"version mismatch (db has {current_db_version}, client expected {expected_version})."
-                        ),
-                        entity="conversations",
-                        entity_id=conversation_id,
-                    )
-
-                cursor = conn.execute(query, params)
-                if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute(
-                        "SELECT version, deleted FROM conversations WHERE id = ?",
-                        (conversation_id,),
-                    )
-                    final_state = check_again_cursor.fetchone()
-                    msg = (
-                        f"Restore for conversation ID {conversation_id} "
-                        f"(expected v{expected_version}) affected 0 rows."
-                    )
-                    if not final_state:
-                        msg = f"Conversation ID {conversation_id} disappeared."
-                    elif not final_state["deleted"]:
-                        logger.info(
-                            f"Conversation ID {conversation_id} was restored concurrently. Success."
-                        )
-                        return True
-                    elif final_state["version"] != expected_version:
-                        msg = (
-                            f"Conversation ID {conversation_id} version changed to "
-                            f"{final_state['version']} concurrently."
-                        )
-                    raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
-
-                logger.info(
-                    f"Restored conversation ID {conversation_id} (was v{expected_version}), "
-                    f"new version {next_version_val}."
-                )
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error restoring conversation ID {conversation_id} (expected v{expected_version}): {e}",
-                exc_info=True,
-            )
-            raise
-
-    def hard_delete_conversation(self, conversation_id: str) -> bool:
-        """
-        Permanently deletes a conversation row.
-
-        Related rows are removed via foreign key cascades where configured.
-        """
-        try:
-            with self.transaction() as conn:
-                rowcount = conn.execute(
-                    "DELETE FROM conversations WHERE id = ?",
-                    (conversation_id,),
-                ).rowcount
-                return bool(rowcount and rowcount > 0)
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error hard-deleting conversation ID {conversation_id}: {e}", exc_info=True)
-            raise
-
-    def search_conversations_by_title(
-        self,
-        title_query: str,
-        character_id: int | None = None,
-        character_scope: str | None = None,
-        limit: int = 10,
-        offset: int = 0,
-        client_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        Searches conversations by title using FTS.
-
-        Matches against the 'title' field in `conversations_fts`.
-        Optionally filters by `character_id`. Returns non-deleted conversations,
-        ordered by relevance (rank).
-
-        Args:
-            title_query: The search term for the title. Supports FTS query syntax.
-            character_id: Optional character ID to filter results.
-            limit: Maximum number of results. Defaults to 10.
-            client_id: Optional override for client scoping. Defaults to the
-                database instance's `client_id`. Pass `None` to search across all
-                clients (reserved for privileged workflows).
-
-        Returns:
-            A list of matching conversation dictionaries. Can be empty.
-
-        Raises:
-            CharactersRAGDBError: For database search errors.
-        """
-        if not title_query.strip():
-            logger.warning("Empty title_query provided for conversation search. Returning empty list.")
-            return []
-
-        client_filter = self.client_id if client_id is None else client_id
-
-        normalized_character_scope = self._normalize_conversation_character_scope(character_scope)
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            tsquery = FTSQueryTranslator.normalize_query(title_query, 'postgresql')
-            if not tsquery:
-                logger.debug("Conversation title query normalized to empty tsquery for input '{}'", title_query)
-                return []
-
-            base_query = """
-                SELECT c.*, ts_rank(c.conversations_fts_tsv, to_tsquery('english', ?)) AS bm25_raw
-                FROM conversations c
-                WHERE c.deleted = FALSE
-                  AND c.conversations_fts_tsv @@ to_tsquery('english', ?)
-            """
-            params_list: list[Any] = [tsquery, tsquery]
-            filters: list[str] = []
-            if character_id is not None:
-                filters.append("c.character_id = ?")
-                params_list.append(character_id)
-            elif normalized_character_scope != "all":
-                filters.append(self._conversation_character_scope_clause(normalized_character_scope, column="c.character_id"))
-            if client_filter is not None:
-                filters.append("c.client_id = ?")
-                params_list.append(client_filter)
-            if filters:
-                base_query += " AND " + " AND ".join(filters)
-
-            try:
-                cursor = self.execute_query(base_query, tuple(params_list))
-                rows = [dict(row) for row in cursor.fetchall()]
-            except CharactersRAGDBError as exc:
-                logger.error("PostgreSQL FTS search failed for conversations term '{}': {}", title_query, exc)
-                raise
-
-            if not rows:
-                return []
-            max_score = max([row.get("bm25_raw", 0) or 0 for row in rows]) or 0
-            for row in rows:
-                raw = row.get("bm25_raw", 0) or 0
-                row["bm25_norm"] = (raw / max_score) if max_score else 0
-            rows.sort(
-                key=lambda r: (
-                    -(r.get("bm25_norm") or 0),
-                    str(r.get("last_modified") or ""),
-                    r.get("id") or "",
-                ),
-                reverse=False,
-            )
-            return rows[offset: offset + limit]
-
-        safe_search_term = f'"{title_query}"'
-        filters: list[str] = ["conversations_fts MATCH ?", "c.deleted = 0"]
-        params_filters: list[Any] = [title_query]
-        if character_id is not None:
-            filters.append("c.character_id = ?")
-            params_filters.append(character_id)
-        elif normalized_character_scope != "all":
-            filters.append(self._conversation_character_scope_clause(normalized_character_scope, column="c.character_id"))
-        if client_filter is not None:
-            filters.append("c.client_id = ?")
-            params_filters.append(client_filter)
-
-        where_clause = " AND ".join(filters)
-
-        select_query = """
-            SELECT c.*, bm25(conversations_fts) AS bm25_raw
-            FROM conversations_fts
-            JOIN conversations c ON conversations_fts.rowid = c.rowid
-            WHERE {where_clause}
-        """.format_map(locals())  # nosec B608
-
-        try:
-            cursor = self.execute_query(select_query, tuple(params_filters))
-            rows = [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Error searching conversations for title '{safe_search_term}': {e}")
-            raise
-
-        if not rows:
-            return []
-        max_bm25 = max([-1 * (row.get("bm25_raw", 0) or 0) for row in rows]) or 0
-        for row in rows:
-            raw = -1 * (row.get("bm25_raw", 0) or 0)
-            row["bm25_norm"] = (raw / max_bm25) if max_bm25 else 0
-
-        rows.sort(
-            key=lambda r: (
-                -(r.get("bm25_norm") or 0),
-                str(r.get("last_modified") or ""),
-                r.get("id") or "",
-            ),
-            reverse=False,
-        )
-        return rows[offset: offset + limit]
-
-    def _normalize_conversation_search_order(self, order_by: str | None) -> str:
-        """Normalize and validate conversation search ordering."""
-        if order_by is None:
-            return "recency"
-        if not isinstance(order_by, str):
-            raise InputError(f"Conversation search order must be a string. Got: {order_by!r}")  # noqa: TRY003
-        normalized = order_by.strip().lower()
-        if not normalized:
-            raise InputError("Conversation search order cannot be empty.")  # noqa: TRY003
-        if normalized not in self._ALLOWED_CONVERSATION_SEARCH_ORDER:
-            raise InputError(
-                "Invalid conversation search order "
-                f"'{order_by}'. Allowed: {', '.join(self._ALLOWED_CONVERSATION_SEARCH_ORDER)}"
-            )  # noqa: TRY003
-        return normalized
-
-    def _build_conversation_search_filters(
-        self,
-        *,
-        alias: str,
-        client_filter: str | None,
-        include_deleted: bool,
-        deleted_only: bool,
-        character_id: int | None,
-        character_scope: str | None,
-        scope_type: str | None,
-        workspace_id: str | None,
-        state: str | None,
-        topic_label: str | None,
-        topic_prefix: bool,
-        cluster_id: str | None,
-        keywords: list[str] | None,
-        start_date: str | None,
-        end_date: str | None,
-        date_expr: str,
-        keyword_table: str,
-        keyword_deleted_literal: str,
-        deleted_true_literal: str,
-        deleted_false_literal: str,
-    ) -> tuple[list[str], list[Any]]:
-        """Build shared conversation-search filter clauses and parameters."""
-        normalized_character_scope = self._normalize_conversation_character_scope(character_scope)
-        filters: list[str] = []
-        params: list[Any] = []
-
-        deleted_clause = self._conversation_deleted_scope_clause(
-            include_deleted=include_deleted,
-            deleted_only=deleted_only,
-            column=f"{alias}.deleted",
-            true_literal=deleted_true_literal,
-            false_literal=deleted_false_literal,
-        )
-        if deleted_clause:
-            filters.append(deleted_clause)
-
-        if character_id is not None:
-            filters.append(f"{alias}.character_id = ?")
-            params.append(character_id)
-        elif normalized_character_scope != "all":
-            filters.append(self._conversation_character_scope_clause(normalized_character_scope, column=f"{alias}.character_id"))
-
-        normalized_workspace_id = self._normalize_nullable_text(workspace_id)
-        normalized_scope, normalized_workspace_id = self._normalize_scope(scope_type, normalized_workspace_id)
-        filters.append(f"{alias}.scope_type = ?")
-        params.append(normalized_scope)
-        if normalized_workspace_id is not None:
-            filters.append(f"{alias}.workspace_id = ?")
-            params.append(normalized_workspace_id)
-
-        if client_filter is not None:
-            filters.append(f"{alias}.client_id = ?")
-            params.append(client_filter)
-
-        if state is not None:
-            filters.append(f"{alias}.state = ?")
-            params.append(self._normalize_conversation_state(state))
-
-        if topic_label:
-            normalized_topic = topic_label.rstrip("*").strip().lower()
-            if normalized_topic:
-                if topic_prefix:
-                    filters.append(f"LOWER({alias}.topic_label) LIKE ?")
-                    params.append(f"{normalized_topic}%")
-                else:
-                    filters.append(f"LOWER({alias}.topic_label) = ?")
-                    params.append(normalized_topic)
-
-        if cluster_id:
-            filters.append(f"{alias}.cluster_id = ?")
-            params.append(cluster_id)
-
-        if start_date:
-            filters.append(f"{date_expr} >= ?")
-            params.append(start_date)
-
-        if end_date:
-            filters.append(f"{date_expr} <= ?")
-            params.append(end_date)
-
-        if keywords:
-            for keyword in keywords:
-                filters.append(
-                    f"EXISTS (SELECT 1 FROM conversation_keywords ck "  # nosec B608
-                    f"JOIN {keyword_table} k ON k.id = ck.keyword_id "
-                    f"WHERE ck.conversation_id = {alias}.id AND k.deleted = {keyword_deleted_literal} "
-                    "AND LOWER(k.keyword) = ?)"
-                )
-                params.append(keyword.lower())
-
-        return filters, params
-
-    def _conversation_deleted_text_search_clause(
-        self,
-        *,
-        alias: str,
-        query: str,
-    ) -> tuple[str, list[str]]:
-        """Build a deleted-state text-search clause that matches the old sidebar fallback."""
-        normalized_query = query.strip().lower()
-        like_pattern = f"%{normalized_query}%"
-        clause = (
-            f"(LOWER(COALESCE({alias}.title, '')) LIKE ? "
-            f"OR LOWER(COALESCE({alias}.topic_label, '')) LIKE ? "
-            f"OR LOWER(COALESCE({alias}.state, '')) LIKE ?)"
-        )
-        return clause, [like_pattern, like_pattern, like_pattern]
-
-    def search_conversations(
-        self,
-        query: str | None,
-        *,
-        client_id: str | None = None,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        character_id: int | None = None,
-        character_scope: str | None = None,
-        state: str | None = None,
-        topic_label: str | None = None,
-        topic_prefix: bool = False,
-        cluster_id: str | None = None,
-        keywords: list[str] | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        date_field: str = "last_modified",
-        scope_type: str | None = None,
-        workspace_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """
-        Search/filter conversations with optional FTS query and metadata filters.
-
-        Returns conversation rows including `bm25_raw` when query is provided.
-        """
-        client_filter = self.client_id if client_id is None else client_id
-        safe_query = (query or "").strip()
-        if safe_query == "":
-            safe_query = None
-
-        if date_field not in {"last_modified", "created_at"}:
-            raise InputError("date_field must be 'last_modified' or 'created_at'")  # noqa: TRY003
-
-        keyword_table = self._map_table_for_backend("keywords")
-        use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
-            base_query = "SELECT c.*, 0.0 AS bm25_raw FROM conversations c WHERE TRUE"
-            params: list[Any] = []
-            filters: list[str] = []
-            if safe_query:
-                if use_deleted_text_search:
-                    text_clause, text_params = self._conversation_deleted_text_search_clause(
-                        alias="c",
-                        query=safe_query,
-                    )
-                    base_query += f" AND {text_clause}"
-                    params.extend(text_params)
-                else:
-                    tsquery = FTSQueryTranslator.normalize_query(safe_query, 'postgresql')
-                    if not tsquery:
-                        return []
-                    base_query = (
-                        "SELECT c.*, ts_rank(c.conversations_fts_tsv, to_tsquery('english', ?)) AS bm25_raw "
-                        "FROM conversations c "
-                        "WHERE c.conversations_fts_tsv @@ to_tsquery('english', ?)"
-                    )
-                    params.extend([tsquery, tsquery])
-
-            filters, filter_params = self._build_conversation_search_filters(
-                alias="c",
-                client_filter=client_filter,
-                include_deleted=include_deleted or deleted_only,
-                deleted_only=deleted_only,
-                character_id=character_id,
-                character_scope=character_scope,
-                state=state,
-                topic_label=topic_label,
-                topic_prefix=topic_prefix,
-                cluster_id=cluster_id,
-                keywords=keywords,
-                start_date=start_date,
-                end_date=end_date,
-                date_expr=date_expr,
-                keyword_table=keyword_table,
-                keyword_deleted_literal="FALSE",
-                deleted_true_literal="TRUE",
-                deleted_false_literal="FALSE",
-                scope_type=scope_type,
-                workspace_id=workspace_id,
-            )
-            params.extend(filter_params)
-
-            if filters:
-                base_query += " AND " + " AND ".join(filters)
-
-            try:
-                cursor = self.execute_query(base_query, tuple(params))
-                return [dict(row) for row in cursor.fetchall()]
-            except CharactersRAGDBError as exc:
-                logger.error("PostgreSQL conversation search failed: {}", exc)
-                raise
-
-        date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(NULLIF(c.last_modified,''), c.created_at)"
-        params: list[Any] = []
-        filters: list[str] = []
-
-        if safe_query:
-            if use_deleted_text_search:
-                text_clause, text_params = self._conversation_deleted_text_search_clause(
-                    alias="c",
-                    query=safe_query,
-                )
-                filters.append(text_clause)
-                params.extend(text_params)
-                base_query = "SELECT c.*, 0.0 AS bm25_raw FROM conversations c WHERE 1 = 1"
-            else:
-                filters.append("conversations_fts MATCH ?")
-                params.append(safe_query)
-                base_query = (
-                    "SELECT c.*, (bm25(conversations_fts) * -1) AS bm25_raw "
-                    "FROM conversations_fts JOIN conversations c ON conversations_fts.rowid = c.rowid "
-                    "WHERE 1 = 1"
-                )
-        else:
-            base_query = "SELECT c.*, 0.0 AS bm25_raw FROM conversations c WHERE 1 = 1"
-
-        extra_filters, extra_params = self._build_conversation_search_filters(
-            alias="c",
-            client_filter=client_filter,
-            include_deleted=include_deleted or deleted_only,
-            deleted_only=deleted_only,
-            character_id=character_id,
-            character_scope=character_scope,
-            state=state,
-            topic_label=topic_label,
-            topic_prefix=topic_prefix,
-            cluster_id=cluster_id,
-            keywords=keywords,
-            start_date=start_date,
-            end_date=end_date,
-            date_expr=date_expr,
-            keyword_table=keyword_table,
-            keyword_deleted_literal="0",
-            deleted_true_literal="1",
-            deleted_false_literal="0",
-            scope_type=scope_type,
-            workspace_id=workspace_id,
-        )
-        filters.extend(extra_filters)
-        params.extend(extra_params)
-
-        if filters:
-            base_query += " AND " + " AND ".join(filters)
-
-        try:
-            cursor = self.execute_query(base_query, tuple(params))
-            return [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Error searching conversations: {e}")
-            raise
-
-    def search_conversations_page(
-        self,
-        query: str | None,
-        *,
-        client_id: str | None = None,
-        include_deleted: bool = False,
-        deleted_only: bool = False,
-        character_id: int | None = None,
-        character_scope: str | None = None,
-        state: str | None = None,
-        topic_label: str | None = None,
-        topic_prefix: bool = False,
-        cluster_id: str | None = None,
-        keywords: list[str] | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        date_field: str = "last_modified",
-        order_by: str = "recency",
-        limit: int = 50,
-        offset: int = 0,
-        as_of: datetime | None = None,
-        half_life_days: float = 14.0,
-        bm25_weight: float = 0.65,
-        recency_weight: float = 0.35,
-        scope_type: str | None = None,
-        workspace_id: str | None = None,
-    ) -> tuple[list[dict[str, Any]], int, float]:
-        """Search conversations using DB-side ordering and pagination."""
-        client_filter = self.client_id if client_id is None else client_id
-        safe_query = (query or "").strip()
-        if safe_query == "":
-            safe_query = None
-
-        if date_field not in {"last_modified", "created_at"}:
-            raise InputError("date_field must be 'last_modified' or 'created_at'")  # noqa: TRY003
-
-        normalized_order = self._normalize_conversation_search_order(order_by)
-        as_of_dt = as_of or datetime.now(timezone.utc)
-        if as_of_dt.tzinfo is None:
-            as_of_dt = as_of_dt.replace(tzinfo=timezone.utc)
-        else:
-            as_of_dt = as_of_dt.astimezone(timezone.utc)
-
-        normalized_limit = max(1, int(limit))
-        normalized_offset = max(0, int(offset))
-        total_weight = (bm25_weight or 0.0) + (recency_weight or 0.0)
-        if total_weight <= 0:
-            normalized_bm25_weight = 0.65
-            normalized_recency_weight = 0.35
-        else:
-            normalized_bm25_weight = (bm25_weight or 0.0) / total_weight
-            normalized_recency_weight = (recency_weight or 0.0) / total_weight
-
-        keyword_table = self._map_table_for_backend("keywords")
-        use_deleted_text_search = safe_query is not None and (include_deleted or deleted_only)
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(c.last_modified, c.created_at)"
-            bm25_expr = "0.0"
-            where_clauses = ["TRUE"]
-            base_params: list[Any] = []
-            count_params: list[Any] = []
-            if safe_query:
-                if use_deleted_text_search:
-                    text_clause, text_params = self._conversation_deleted_text_search_clause(
-                        alias="c",
-                        query=safe_query,
-                    )
-                    where_clauses.append(text_clause)
-                    base_params.extend(text_params)
-                    count_params.extend(text_params)
-                else:
-                    tsquery = FTSQueryTranslator.normalize_query(safe_query, 'postgresql')
-                    if not tsquery:
-                        return [], 0, 0.0
-                    bm25_expr = "ts_rank(c.conversations_fts_tsv, to_tsquery('english', ?))"
-                    base_params.append(tsquery)
-                    where_clauses.append("c.conversations_fts_tsv @@ to_tsquery('english', ?)")
-                    base_params.append(tsquery)
-                    count_params.append(tsquery)
-
-            extra_filters, extra_params = self._build_conversation_search_filters(
-                alias="c",
-                client_filter=client_filter,
-                include_deleted=include_deleted or deleted_only,
-                deleted_only=deleted_only,
-                character_id=character_id,
-                character_scope=character_scope,
-                scope_type=scope_type,
-                workspace_id=workspace_id,
-                state=state,
-                topic_label=topic_label,
-                topic_prefix=topic_prefix,
-                cluster_id=cluster_id,
-                keywords=keywords,
-                start_date=start_date,
-                end_date=end_date,
-                date_expr=date_expr,
-                keyword_table=keyword_table,
-                keyword_deleted_literal="FALSE",
-                deleted_true_literal="TRUE",
-                deleted_false_literal="FALSE",
-            )
-            where_clauses.extend(extra_filters)
-            base_params.extend(extra_params)
-            count_params.extend(extra_params)
-            topic_sort_expr = "NULLIF(LOWER(BTRIM(c.topic_label)), '')"
-            recency_expr = (
-                "CASE WHEN sort_timestamp IS NULL OR ? <= 0 THEN 0.0 "
-                "ELSE EXP(-GREATEST(EXTRACT(EPOCH FROM (?::timestamptz - sort_timestamp)) / 86400.0, 0.0) / ?) END"
-            )
-            from_clause = "conversations c"
-        else:
-            date_expr = "c.created_at" if date_field == "created_at" else "COALESCE(NULLIF(c.last_modified,''), c.created_at)"
-            bm25_expr = "0.0"
-            where_clauses = ["1 = 1"]
-            base_params = []
-            count_params = []
-            if safe_query:
-                if use_deleted_text_search:
-                    text_clause, text_params = self._conversation_deleted_text_search_clause(
-                        alias="c",
-                        query=safe_query,
-                    )
-                    where_clauses.append(text_clause)
-                    base_params.extend(text_params)
-                    count_params.extend(text_params)
-                else:
-                    bm25_expr = "(bm25(conversations_fts) * -1)"
-                    where_clauses.append("conversations_fts MATCH ?")
-                    base_params.append(safe_query)
-                    count_params.append(safe_query)
-
-            extra_filters, extra_params = self._build_conversation_search_filters(
-                alias="c",
-                client_filter=client_filter,
-                include_deleted=include_deleted or deleted_only,
-                deleted_only=deleted_only,
-                character_id=character_id,
-                character_scope=character_scope,
-                scope_type=scope_type,
-                workspace_id=workspace_id,
-                state=state,
-                topic_label=topic_label,
-                topic_prefix=topic_prefix,
-                cluster_id=cluster_id,
-                keywords=keywords,
-                start_date=start_date,
-                end_date=end_date,
-                date_expr=date_expr,
-                keyword_table=keyword_table,
-                keyword_deleted_literal="0",
-                deleted_true_literal="1",
-                deleted_false_literal="0",
-            )
-            where_clauses.extend(extra_filters)
-            base_params.extend(extra_params)
-            count_params.extend(extra_params)
-            topic_sort_expr = "NULLIF(LOWER(TRIM(c.topic_label)), '')"
-            recency_expr = (
-                "CASE WHEN sort_timestamp IS NULL OR ? <= 0 THEN 0.0 "
-                "ELSE exp(-MAX(julianday(?) - julianday(sort_timestamp), 0.0) / ?) END"
-            )
-            from_clause = (
-                "conversations_fts JOIN conversations c ON conversations_fts.rowid = c.rowid"
-                if safe_query and not use_deleted_text_search
-                else "conversations c"
-            )
-
-        base_query = (
-            "SELECT c.*, "
-            f"{date_expr} AS sort_timestamp, "
-            f"{topic_sort_expr} AS topic_sort_key, "
-            f"{bm25_expr} AS bm25_raw "
-            f"FROM {from_clause} "  # nosec B608
-            f"WHERE {' AND '.join(where_clauses)}"
-        )  # nosec B608
-        count_query = (
-            "SELECT COUNT(*) AS total "
-            f"FROM {from_clause} "  # nosec B608
-            f"WHERE {' AND '.join(where_clauses)}"
-        )  # nosec B608
-
-        needs_global_bm25 = (
-            safe_query is not None
-            and not use_deleted_text_search
-            and normalized_order in {"bm25", "hybrid", "topic"}
-        )
-        try:
-            count_cursor = self.execute_query(count_query, tuple(count_params))
-            count_row = count_cursor.fetchone()
-        except CharactersRAGDBError as exc:
-            logger.error("Error counting paged conversation search rows: {}", exc)
-            raise
-
-        if count_row is None:
-            return [], 0, 0.0
-
-        try:
-            total = int(count_row[0] or 0)
-        except _CHACHA_NONCRITICAL_EXCEPTIONS:
-            total = int(count_row.get("total") or count_row.get("count") or 0)
-
-        max_bm25 = 0.0
-        if total > 0 and needs_global_bm25:
-            if self.backend_type == BackendType.POSTGRESQL:
-                max_query = (
-                    f"WITH candidate_rows AS ({base_query}) "  # nosec B608
-                    "SELECT COALESCE(MAX(bm25_raw), 0.0) AS max_bm25 FROM candidate_rows"
-                )
-                max_params = list(base_params)
-            else:
-                max_query = (
-                    f"WITH candidate_rows AS ({base_query}) "  # nosec B608
-                    "SELECT bm25_raw FROM candidate_rows "
-                    "ORDER BY bm25_raw DESC, sort_timestamp DESC, id ASC LIMIT 1"
-                )
-                max_params = list(base_params)
-
-            try:
-                max_cursor = self.execute_query(max_query, tuple(max_params))
-                max_row = max_cursor.fetchone()
-            except CharactersRAGDBError as exc:
-                logger.error("Error fetching paged conversation search max bm25: {}", exc)
-                raise
-
-            if max_row is not None:
-                try:
-                    max_bm25 = float(max_row[0] or 0.0)
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    max_bm25 = float(max_row.get("max_bm25") or max_row.get("bm25_raw") or 0.0)
-
-        if total == 0:
-            return [], 0, max_bm25
-
-        page_params = list(base_params)
-        page_params.extend([half_life_days, as_of_dt.isoformat(), half_life_days, max_bm25, max_bm25])
-
-        if normalized_order == "bm25" and safe_query:
-            order_clause = "bm25_norm DESC, sort_timestamp DESC, id ASC"
-        elif normalized_order == "topic":
-            if safe_query:
-                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, bm25_norm DESC, recency_score DESC, id ASC"
-            else:
-                order_clause = "topic_sort_is_null ASC, topic_sort_key ASC, recency_score DESC, id ASC"
-        elif normalized_order == "hybrid" and safe_query:
-            order_clause = "((bm25_norm * ?) + (recency_score * ?)) DESC, sort_timestamp DESC, id ASC"
-            page_params.extend([normalized_bm25_weight, normalized_recency_weight])
-        else:
-            order_clause = "recency_score DESC, sort_timestamp DESC, id ASC"
-
-        page_params.extend([normalized_limit, normalized_offset])
-        page_query = (
-            f"WITH candidate_rows AS ({base_query}), "  # nosec B608
-            "scored_rows AS ("
-            "SELECT candidate_rows.*, "
-            f"{recency_expr} AS recency_score, "
-            "CASE WHEN topic_sort_key IS NULL THEN 1 ELSE 0 END AS topic_sort_is_null, "
-            "CASE WHEN ? > 0 THEN bm25_raw / ? ELSE 0.0 END AS bm25_norm "
-            "FROM candidate_rows"
-            ") "
-            "SELECT * FROM scored_rows "
-            f"ORDER BY {order_clause} LIMIT ? OFFSET ?"
-        )  # nosec B608
-
-        try:
-            cursor = self.execute_query(page_query, tuple(page_params))
-            rows = [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as exc:
-            logger.error("Error fetching paged conversation search rows: {}", exc)
-            raise
-
-        return rows, total, max_bm25
+    # Conversation CRUD/search methods are delegated to ConversationStore at module bottom.
 
     # --- Workspace Methods ---
 
@@ -17105,16 +15138,162 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Workspace Artifact Methods ---
 
+    _WORKSPACE_ARTIFACT_JSON_FIELDS: tuple[tuple[str, str, Any], ...] = (
+        ("producer_metadata_json", "producer_metadata", {}),
+        ("source_lineage_json", "source_lineage", {}),
+        ("review_metadata_json", "review_metadata", {}),
+        ("version_metadata_json", "version_metadata", {}),
+        ("export_refs_json", "export_refs", []),
+        ("redaction_json", "redaction", {"support_safe": True, "redacted": False}),
+    )
+
+    @staticmethod
+    def _copy_workspace_artifact_default(default: Any) -> Any:
+        if isinstance(default, (dict, list)):
+            return json.loads(json.dumps(default))
+        return default
+
+    @classmethod
+    def _load_workspace_artifact_json(
+        cls,
+        raw: Any,
+        default: Any,
+        *,
+        field_name: str = "workspace_artifact_json",
+    ) -> Any:
+        if raw is None:
+            return cls._copy_workspace_artifact_default(default)
+        if isinstance(raw, (dict, list)):
+            return raw
+        if isinstance(raw, str):
+            if not raw.strip():
+                return cls._copy_workspace_artifact_default(default)
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                preview = raw[:120].replace("\n", "\\n")
+                logger.warning(
+                    "Failed to decode workspace artifact JSON field {} ({} chars): {}",
+                    field_name,
+                    len(raw),
+                    preview,
+                )
+                return cls._copy_workspace_artifact_default(default)
+        return cls._copy_workspace_artifact_default(default)
+
+    @classmethod
+    def _dump_workspace_artifact_json(cls, value: Any, default: Any) -> str:
+        if value is None:
+            value = cls._copy_workspace_artifact_default(default)
+        return json.dumps(value, ensure_ascii=True)
+
+    @staticmethod
+    def _workspace_artifact_version_id(artifact_id: str, version: int) -> str:
+        return f"{artifact_id}:v{version}"
+
+    def _normalize_workspace_artifact_review_state(self, value: Any) -> str:
+        state = str(value or "draft").strip().lower()
+        if state not in self._ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES:
+            raise InputError(f"Unsupported workspace artifact review state '{state}'.")  # noqa: TRY003
+        return state
+
+    def _normalize_workspace_artifact_row(self, row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if not row:
+            return None
+        item = dict(row)
+        artifact_id = str(item.get("id") or "")
+        version = int(item.get("version") or 1)
+        item["content_type"] = item.get("content_type") or "text/markdown"
+        item["review_state"] = item.get("review_state") or "draft"
+        item["owner_scope"] = item.get("owner_scope") or "user"
+        item["root_artifact_id"] = item.get("root_artifact_id") or artifact_id
+        item["artifact_version_id"] = item.get("artifact_version_id") or self._workspace_artifact_version_id(artifact_id, version)
+        item["previous_version_id"] = item.get("previous_version_id")
+        item["schema_version"] = int(item.get("schema_version") or 1)
+        for column_name, response_name, default in self._WORKSPACE_ARTIFACT_JSON_FIELDS:
+            item[response_name] = self._load_workspace_artifact_json(
+                item.get(column_name),
+                default,
+                field_name=column_name,
+            )
+        return item
+
+    def _insert_workspace_artifact_version(
+        self,
+        conn: Any,
+        *,
+        workspace_id: str,
+        artifact_id: str,
+        artifact_version_id: str,
+        root_artifact_id: str,
+        previous_version_id: str | None,
+        version: int,
+        review_state: str,
+        title: str,
+        content: str | None,
+        producer_metadata_json: str,
+        source_lineage_json: str,
+        review_metadata_json: str,
+        version_metadata_json: str,
+        export_refs_json: str,
+        redaction_json: str,
+        created_at: str,
+    ) -> None:
+        query = (
+            "INSERT INTO workspace_artifact_versions (workspace_id, artifact_id, artifact_version_id, "
+            "root_artifact_id, previous_version_id, version, review_state, title, content, "
+            "producer_metadata_json, source_lineage_json, review_metadata_json, version_metadata_json, "
+            "export_refs_json, redaction_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        conn.execute(
+            query,
+            (
+                workspace_id,
+                artifact_id,
+                artifact_version_id,
+                root_artifact_id,
+                previous_version_id,
+                version,
+                review_state,
+                title,
+                content,
+                producer_metadata_json,
+                source_lineage_json,
+                review_metadata_json,
+                version_metadata_json,
+                export_refs_json,
+                redaction_json,
+                created_at,
+            ),
+        )
+
     def add_workspace_artifact(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Add an artifact to a workspace."""
         artifact_id = data.get("id")
         if not artifact_id:
             raise InputError("Artifact id is required.")  # noqa: TRY003
+        artifact_id = str(artifact_id)
         now = self._get_current_utc_timestamp_iso()
+        review_state = self._normalize_workspace_artifact_review_state(data.get("review_state"))
+        root_artifact_id = artifact_id
+        artifact_version_id = self._workspace_artifact_version_id(artifact_id, 1)
+        previous_version_id = None
+        content_type = str(data.get("content_type") or "text/markdown")
+        producer_metadata_json = self._dump_workspace_artifact_json(data.get("producer_metadata"), {})
+        source_lineage_json = self._dump_workspace_artifact_json(data.get("source_lineage"), {})
+        review_metadata_json = self._dump_workspace_artifact_json(data.get("review_metadata"), {})
+        version_metadata_json = self._dump_workspace_artifact_json(data.get("version_metadata"), {})
+        export_refs_json = self._dump_workspace_artifact_json(data.get("export_refs"), [])
+        redaction_json = self._dump_workspace_artifact_json(data.get("redaction"), {"support_safe": True, "redacted": False})
+        schema_version = int(data.get("schema_version") or 1)
         query = (
             "INSERT INTO workspace_artifacts (id, workspace_id, artifact_type, title, status, content, "
-            "total_tokens, total_cost_usd, created_at, completed_at, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            "total_tokens, total_cost_usd, created_at, completed_at, version, content_type, preview_text, summary, "
+            "review_state, owner_scope, owner_id, project_id, task_id, source_collection_id, root_artifact_id, "
+            "artifact_version_id, previous_version_id, producer_metadata_json, source_lineage_json, review_metadata_json, "
+            "version_metadata_json, export_refs_json, redaction_json, schema_version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             artifact_id,
@@ -17127,9 +15306,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             data.get("total_cost_usd"),
             now,
             data.get("completed_at"),
+            content_type,
+            data.get("preview_text"),
+            data.get("summary"),
+            review_state,
+            data.get("owner_scope") or "user",
+            data.get("owner_id"),
+            data.get("project_id"),
+            data.get("task_id"),
+            data.get("source_collection_id"),
+            root_artifact_id,
+            artifact_version_id,
+            previous_version_id,
+            producer_metadata_json,
+            source_lineage_json,
+            review_metadata_json,
+            version_metadata_json,
+            export_refs_json,
+            redaction_json,
+            schema_version,
         )
         with self.transaction() as conn:
             conn.execute(query, params)
+            self._insert_workspace_artifact_version(
+                conn,
+                workspace_id=workspace_id,
+                artifact_id=artifact_id,
+                artifact_version_id=artifact_version_id,
+                root_artifact_id=root_artifact_id,
+                previous_version_id=previous_version_id,
+                version=1,
+                review_state=review_state,
+                title=str(data.get("title", "")),
+                content=data.get("content"),
+                producer_metadata_json=producer_metadata_json,
+                source_lineage_json=source_lineage_json,
+                review_metadata_json=review_metadata_json,
+                version_metadata_json=version_metadata_json,
+                export_refs_json=export_refs_json,
+                redaction_json=redaction_json,
+                created_at=now,
+            )
         return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
 
     def _get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
@@ -17138,7 +15355,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (workspace_id, artifact_id),
         )
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return self._normalize_workspace_artifact_row(row)
+
+    def get_workspace_artifact(self, workspace_id: str, artifact_id: str) -> dict[str, Any] | None:
+        """Fetch a workspace artifact by id."""
+        return self._get_workspace_artifact(workspace_id, artifact_id)
 
     def list_workspace_artifacts(self, workspace_id: str) -> list[dict[str, Any]]:
         """List all artifacts for a workspace."""
@@ -17146,7 +15367,148 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "SELECT * FROM workspace_artifacts WHERE workspace_id = ? ORDER BY created_at DESC",
             (workspace_id,),
         )
-        return [dict(row) for row in cursor.fetchall()]
+        return [
+            normalized
+            for row in cursor.fetchall()
+            if (normalized := self._normalize_workspace_artifact_row(row)) is not None
+        ]
+
+    def list_workspace_artifact_versions(self, workspace_id: str, artifact_id: str) -> list[dict[str, Any]]:
+        """List version history for a workspace artifact."""
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_artifact_versions WHERE workspace_id = ? AND artifact_id = ? ORDER BY version ASC",
+            (workspace_id, artifact_id),
+        )
+        versions: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            for column_name, response_name, default in self._WORKSPACE_ARTIFACT_JSON_FIELDS:
+                item[response_name] = self._load_workspace_artifact_json(
+                    item.get(column_name),
+                    default,
+                    field_name=column_name,
+                )
+            versions.append(item)
+        return versions
+
+    def get_workspace_artifact_version(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        artifact_version_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one workspace artifact version snapshot by stable version id."""
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_artifact_versions "
+            "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+            (workspace_id, artifact_id, artifact_version_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        for column_name, response_name, default in self._WORKSPACE_ARTIFACT_JSON_FIELDS:
+            item[response_name] = self._load_workspace_artifact_json(
+                item.get(column_name),
+                default,
+                field_name=column_name,
+            )
+        return item
+
+    def append_workspace_artifact_export_ref(
+        self,
+        workspace_id: str,
+        artifact_id: str,
+        export_ref: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Append an export reference without creating a new artifact content version."""
+        for _attempt in range(3):
+            with self.transaction() as conn:
+                artifact_row = conn.execute(
+                    "SELECT artifact_version_id, export_refs_json FROM workspace_artifacts "
+                    "WHERE workspace_id = ? AND id = ?",
+                    (workspace_id, artifact_id),
+                ).fetchone()
+                if artifact_row is None:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Workspace artifact '{artifact_id}' not found.",
+                        entity="workspace_artifacts",
+                        entity_id=artifact_id,
+                    )
+
+                artifact_export_refs_json = artifact_row["export_refs_json"]
+                artifact_version_id = str(
+                    export_ref.get("artifact_version_id") or artifact_row["artifact_version_id"] or ""
+                )
+                if not artifact_version_id:
+                    raise InputError("Workspace artifact export_ref artifact_version_id is required.")  # noqa: TRY003
+
+                artifact_export_refs = self._load_workspace_artifact_json(
+                    artifact_export_refs_json,
+                    [],
+                    field_name="workspace_artifacts.export_refs_json",
+                )
+                if not isinstance(artifact_export_refs, list):
+                    raise InputError("Workspace artifact export_refs must be a list.")  # noqa: TRY003
+                artifact_export_refs = list(artifact_export_refs)
+                artifact_export_refs.append(dict(export_ref))
+                updated_artifact_export_refs_json = self._dump_workspace_artifact_json(artifact_export_refs, [])
+
+                if artifact_export_refs_json is None:
+                    artifact_cursor = conn.execute(
+                        "UPDATE workspace_artifacts SET export_refs_json = ? "
+                        "WHERE workspace_id = ? AND id = ? AND export_refs_json IS NULL",
+                        (updated_artifact_export_refs_json, workspace_id, artifact_id),
+                    )
+                else:
+                    artifact_cursor = conn.execute(
+                        "UPDATE workspace_artifacts SET export_refs_json = ? "
+                        "WHERE workspace_id = ? AND id = ? AND export_refs_json = ?",
+                        (updated_artifact_export_refs_json, workspace_id, artifact_id, artifact_export_refs_json),
+                    )
+                if artifact_cursor.rowcount == 0:
+                    continue
+
+                version_row = conn.execute(
+                    "SELECT export_refs_json FROM workspace_artifact_versions "
+                    "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+                    (workspace_id, artifact_id, artifact_version_id),
+                ).fetchone()
+                if version_row is None:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Workspace artifact version '{artifact_version_id}' missing for artifact '{artifact_id}'.",
+                        entity="workspace_artifact_versions",
+                        entity_id=artifact_version_id,
+                    )
+
+                version_export_refs = self._load_workspace_artifact_json(
+                    version_row["export_refs_json"],
+                    [],
+                    field_name="workspace_artifact_versions.export_refs_json",
+                )
+                if not isinstance(version_export_refs, list):
+                    raise InputError("Workspace artifact version export_refs must be a list.")  # noqa: TRY003
+                version_export_refs = list(version_export_refs)
+                version_export_refs.append(dict(export_ref))
+                version_export_refs_json = self._dump_workspace_artifact_json(version_export_refs, [])
+                version_cursor = conn.execute(
+                    "UPDATE workspace_artifact_versions SET export_refs_json = ? "
+                    "WHERE workspace_id = ? AND artifact_id = ? AND artifact_version_id = ?",
+                    (version_export_refs_json, workspace_id, artifact_id, artifact_version_id),
+                )
+                if version_cursor.rowcount == 0:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Artifact version '{artifact_version_id}' export ref update failed.",
+                        entity="workspace_artifact_versions",
+                        entity_id=artifact_version_id,
+                    )
+                return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
+
+        raise ConflictError(  # noqa: TRY003
+            f"Artifact '{artifact_id}' export ref update conflicted with another writer.",
+            entity="workspace_artifacts",
+            entity_id=artifact_id,
+        )
 
     def update_workspace_artifact(
         self,
@@ -17170,12 +15532,60 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 entity="workspace_artifacts",
                 entity_id=artifact_id,
             )
+        next_version = expected_version + 1
+        next_root_artifact_id = str(existing.get("root_artifact_id") or artifact_id)
+        previous_version_id = self._workspace_artifact_version_id(artifact_id, expected_version)
+        next_artifact_version_id = self._workspace_artifact_version_id(artifact_id, next_version)
+        review_state = self._normalize_workspace_artifact_review_state(
+            updates.get("review_state") if "review_state" in updates else existing.get("review_state")
+        )
         set_clauses = ["version = ?"]
-        params: list[Any] = [expected_version + 1]
-        for col in ("title", "status", "content", "total_tokens", "total_cost_usd", "completed_at"):
+        params: list[Any] = [next_version]
+        forced_updates: dict[str, Any] = {
+            "root_artifact_id": next_root_artifact_id,
+            "artifact_version_id": next_artifact_version_id,
+            "previous_version_id": previous_version_id,
+            "review_state": review_state,
+        }
+        for col, value in forced_updates.items():
+            set_clauses.append(f"{col} = ?")
+            params.append(value)
+        for col in (
+            "title",
+            "status",
+            "content",
+            "content_type",
+            "preview_text",
+            "summary",
+            "owner_scope",
+            "owner_id",
+            "project_id",
+            "task_id",
+            "source_collection_id",
+            "total_tokens",
+            "total_cost_usd",
+            "completed_at",
+            "schema_version",
+        ):
             if col in updates:
                 set_clauses.append(f"{col} = ?")
                 params.append(updates[col])
+        json_updates: dict[str, tuple[str, Any]] = {
+            "producer_metadata": ("producer_metadata_json", {}),
+            "source_lineage": ("source_lineage_json", {}),
+            "review_metadata": ("review_metadata_json", {}),
+            "version_metadata": ("version_metadata_json", {}),
+            "export_refs": ("export_refs_json", []),
+            "redaction": ("redaction_json", {"support_safe": True, "redacted": False}),
+        }
+        next_json_values: dict[str, str] = {}
+        for field_name, (column_name, default) in json_updates.items():
+            value = updates[field_name] if field_name in updates else existing.get(field_name)
+            dumped = self._dump_workspace_artifact_json(value, default)
+            next_json_values[column_name] = dumped
+            if field_name in updates:
+                set_clauses.append(f"{column_name} = ?")
+                params.append(dumped)
         query = f"UPDATE workspace_artifacts SET {', '.join(set_clauses)} WHERE workspace_id = ? AND id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, artifact_id, expected_version])
         with self.transaction() as conn:
@@ -17186,11 +15596,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity="workspace_artifacts",
                     entity_id=artifact_id,
                 )
+            self._insert_workspace_artifact_version(
+                conn,
+                workspace_id=workspace_id,
+                artifact_id=artifact_id,
+                artifact_version_id=next_artifact_version_id,
+                root_artifact_id=next_root_artifact_id,
+                previous_version_id=previous_version_id,
+                version=next_version,
+                review_state=review_state,
+                title=str(updates.get("title") if "title" in updates else existing.get("title") or ""),
+                content=updates.get("content") if "content" in updates else existing.get("content"),
+                producer_metadata_json=next_json_values["producer_metadata_json"],
+                source_lineage_json=next_json_values["source_lineage_json"],
+                review_metadata_json=next_json_values["review_metadata_json"],
+                version_metadata_json=next_json_values["version_metadata_json"],
+                export_refs_json=next_json_values["export_refs_json"],
+                redaction_json=next_json_values["redaction_json"],
+                created_at=self._get_current_utc_timestamp_iso(),
+            )
         return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
 
     def delete_workspace_artifact(self, workspace_id: str, artifact_id: str) -> None:
         """Hard-delete a workspace artifact."""
         with self.transaction() as conn:
+            conn.execute(
+                "DELETE FROM workspace_artifact_versions WHERE workspace_id = ? AND artifact_id = ?",
+                (workspace_id, artifact_id),
+            )
             conn.execute(
                 "DELETE FROM workspace_artifacts WHERE workspace_id = ? AND id = ?",
                 (workspace_id, artifact_id),
@@ -17287,696 +15720,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
     # --- Message Methods ---
-    def add_message(self, msg_data: dict[str, Any]) -> str | None:
-        """
-        Adds a new message to a conversation, optionally with image data.
-
-        `id` (UUID string) is auto-generated if not provided in `msg_data`.
-        Requires 'conversation_id', 'sender'. Message must have 'content' (text) or image attachments.
-        `client_id` defaults to DB instance's `client_id`. `version` is set to 1.
-        `timestamp` defaults to current UTC time if not provided; `last_modified` is set to current UTC time.
-
-        Verifies that the parent conversation (given by `conversation_id`) exists and is not deleted.
-        FTS updates (`messages_fts` for content) and `sync_log` entries are handled by SQL triggers.
-
-        Args:
-            msg_data: Dictionary with message data.
-                      Required: 'conversation_id', 'sender'. At least one of 'content' or images.
-                      Optional: 'id', 'parent_message_id', 'content' (str),
-                                'image_data' (bytes), 'image_mime_type' (str, required if image_data present),
-                                'images' (iterable of {'data','mime'}), 'timestamp', 'ranking', 'client_id'.
-
-        Returns:
-            The string UUID of the newly added message.
-
-        Raises:
-            InputError: If required fields are missing, if both 'content' and attachments are absent,
-                        or if the parent conversation is not found or is deleted.
-            ConflictError: If a message with the provided 'id' (if any) already exists.
-            CharactersRAGDBError: For other database errors (e.g., FK violation for conversation_id).
-        """
-        images_payload_raw = msg_data.pop('images', None)
-        normalized_images: list[tuple[bytes, str]] = []
-        if images_payload_raw:
-            for entry in images_payload_raw:
-                img_bytes: bytes | None = None
-                img_mime: str | None = None
-                if isinstance(entry, dict):
-                    img_bytes = entry.get("data") or entry.get("image_data")
-                    img_mime = entry.get("mime") or entry.get("image_mime_type")
-                elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                    img_bytes, img_mime = entry[0], entry[1]
-                if img_bytes is None or img_mime is None:
-                    continue
-                if isinstance(img_bytes, memoryview):
-                    img_bytes = img_bytes.tobytes()
-                normalized_images.append((img_bytes, str(img_mime)))
-
-        # Enforce maximum image sizes (single and multi-image) using settings override
-        try:
-            _max_img_bytes = int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024))
-        except _CHACHA_NONCRITICAL_EXCEPTIONS:
-            _max_img_bytes = 5 * 1024 * 1024  # 5MB default
-
-        # Validate primary image size if present
-        primary_img = msg_data.get('image_data')
-        if isinstance(primary_img, memoryview):
-            primary_img = primary_img.tobytes()
-        if isinstance(primary_img, (bytes, bytearray)) and len(primary_img) > _max_img_bytes:
-            raise InputError(  # noqa: TRY003
-                f"Primary image attachment exceeds maximum size of {_max_img_bytes} bytes"
-            )
-
-        # Validate any additional images provided via 'images'
-        if normalized_images:
-            for b, _m in normalized_images:
-                if b is None:
-                    continue
-                if isinstance(b, memoryview):
-                    b = b.tobytes()
-                if isinstance(b, (bytes, bytearray)) and len(b) > _max_img_bytes:
-                    raise InputError(  # noqa: TRY003
-                        f"Message image attachment exceeds maximum size of {_max_img_bytes} bytes"
-                    )
-
-        msg_id = msg_data.get('id') or self._generate_uuid()
-
-        required_fields = ['conversation_id', 'sender', 'content']
-        for field in required_fields:
-            if field not in msg_data:
-                raise InputError(f"Required field '{field}' is missing for message.")  # noqa: TRY003
-        if not msg_data.get('content') and not msg_data.get('image_data') and not normalized_images:
-            raise InputError("Message must have text content or image data.")  # noqa: TRY003
-        if msg_data.get('image_data') and not msg_data.get('image_mime_type'):
-            raise InputError("image_mime_type is required if image_data is provided.")  # noqa: TRY003
-
-        if normalized_images and not msg_data.get('image_data'):
-            first_bytes, first_mime = normalized_images[0]
-            msg_data['image_data'] = first_bytes
-            msg_data['image_mime_type'] = first_mime
-
-        client_id = msg_data.get('client_id') or self.client_id
-        if not client_id:
-            raise InputError("Client ID is required for message.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        timestamp = msg_data.get('timestamp') or now
-
-        query = """
-                INSERT INTO messages (id, conversation_id, parent_message_id, sender, content,
-                                      image_data, image_mime_type,
-                                      timestamp, ranking, last_modified, client_id, version, deleted)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-        if self.backend_type == BackendType.POSTGRESQL:
-            params = (
-                msg_id, msg_data['conversation_id'], msg_data.get('parent_message_id'),
-                msg_data['sender'], msg_data.get('content', ''),
-                msg_data.get('image_data'), msg_data.get('image_mime_type'),
-                timestamp, msg_data.get('ranking'), now, client_id, 1, False
-            )
-        else:
-            params = (
-                msg_id, msg_data['conversation_id'], msg_data.get('parent_message_id'),
-                msg_data['sender'], msg_data.get('content', ''),
-                msg_data.get('image_data'), msg_data.get('image_mime_type'),
-                timestamp, msg_data.get('ranking'), now, client_id, 1, 0
-            )
-        try:
-            with self.transaction():
-                conv_cursor = self.execute_query(
-                    "SELECT 1 FROM conversations WHERE id = ? AND deleted = 0",
-                    (msg_data['conversation_id'],),
-                )
-                if not conv_cursor.fetchone():
-                    raise InputError(  # noqa: TRY003, TRY301
-                        f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted."
-                    )
-                self.execute_query(query, params)
-                if normalized_images:
-                    self._insert_message_images(msg_id, normalized_images)
-            logger.info(
-                'Added message ID: {} to conversation {} (Images stored: {}).',
-                msg_id,
-                msg_data['conversation_id'],
-                len(normalized_images) if normalized_images else ("Yes" if msg_data.get('image_data') else "No"),
-            )
-            return msg_id  # noqa: TRY300
-        except sqlite3.IntegrityError as e:
-            if "UNIQUE constraint failed: messages.id" in str(e):
-                raise ConflictError(  # noqa: TRY003
-                    f"Message with ID '{msg_id}' already exists.",
-                    entity="messages",
-                    entity_id=msg_id,
-                ) from e
-            raise CharactersRAGDBError(f"Database integrity error adding message: {e}") from e  # noqa: TRY003
-        except InputError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error adding message: {e}")
-            raise
-    def _insert_message_images(self, message_id: str, images: list[tuple[bytes, str]]) -> None:
-        """Insert or replace message images for the given message."""
-        if not images:
-            return
-        params: list[tuple[str, int, bytes, str]] = []
-        for idx, (img_bytes, img_mime) in enumerate(images):
-            if img_bytes is None or img_mime is None:
-                continue
-            if isinstance(img_bytes, memoryview):
-                img_bytes = img_bytes.tobytes()
-            params.append((message_id, idx, img_bytes, img_mime))
-        if not params:
-            return
-        query = (
-            "INSERT INTO message_images (message_id, position, image_data, image_mime_type) "
-            "VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(message_id, position) DO UPDATE SET "
-            "image_data=excluded.image_data, image_mime_type=excluded.image_mime_type, "
-            "created_at=CURRENT_TIMESTAMP"
-        )
-        self.execute_many(query, params, commit=False)
-
-    def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
-        """Fetch all images associated with a message, ordered by position."""
-        try:
-            cursor = self.execute_query(
-                "SELECT message_id, position, image_data, image_mime_type FROM message_images "
-                "WHERE message_id = ? ORDER BY position ASC",
-                (message_id,),
-            )
-            rows = cursor.fetchall()
-            columns = [col[0] for col in cursor.description] if cursor.description else []
-            images: list[dict[str, Any]] = []
-            for row in rows:
-                record = dict(row) if isinstance(row, dict) else {columns[idx]: row[idx] for idx in range(len(columns))}
-                img_bytes = record.get("image_data")
-                if isinstance(img_bytes, memoryview):
-                    record["image_data"] = img_bytes.tobytes()
-                images.append(record)
-            return images  # noqa: TRY300
-        except CharactersRAGDBError as e:
-            logger.error(f"Failed to fetch images for message {message_id}: {e}")
-            return []
-
-    def get_message_conversation_id(self, message_id: str) -> str | None:
-        """Return the conversation_id for a message if it exists and is not deleted."""
-        query = "SELECT conversation_id FROM messages WHERE id = ? AND deleted = 0"
-        try:
-            cursor = self.execute_query(query, (message_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            if isinstance(row, dict):
-                return row.get("conversation_id")
-            return row[0] if row else None
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching conversation_id for message {message_id}: {e}")
-            raise
-
-    def get_message_by_id(self, message_id: str) -> dict[str, Any] | None:
-        """
-        Retrieves a specific message by its UUID.
-
-        Only non-deleted messages are returned. Includes all fields, such as
-        `image_data` (BLOB) and `image_mime_type` if present.
-
-        Args:
-            message_id: The string UUID of the message.
-
-        Returns:
-            A dictionary with message data if found and not deleted, else None.
-
-        Raises:
-            CharactersRAGDBError: For database errors.
-        """
-        query = (
-            "SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, "
-            "m.image_data, m.image_mime_type, m.timestamp, m.ranking, m.last_modified, "
-            "m.version, m.client_id, m.deleted "
-            "FROM messages m "
-            "JOIN conversations c ON c.id = m.conversation_id "
-            "WHERE m.id = ? AND m.deleted = 0 AND c.deleted = 0"
-        )
-        try:
-            cursor = self.execute_query(query, (message_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            if isinstance(row, dict):
-                record = dict(row)
-            else:
-                columns = [col[0] for col in cursor.description] if cursor.description else []
-                record = {columns[idx]: row[idx] for idx in range(len(columns))}
-            img_blob = record.get("image_data")
-            if isinstance(img_blob, memoryview):
-                record["image_data"] = img_blob.tobytes()
-            record["images"] = self.get_message_images(message_id)
-            return record  # noqa: TRY300
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching message ID {message_id}: {e}")
-            raise
-
-    def get_messages_for_conversation(self, conversation_id: str, limit: int = 100, offset: int = 0,
-                                      order_by_timestamp: str = "ASC", include_deleted: bool = False) -> list[dict[str, Any]]:
-        """
-        Lists messages for a specific conversation.
-        Returns non-deleted messages, ordered by `timestamp` according to `order_by_timestamp`.
-        Crucially, it also ensures the parent conversation is not soft-deleted.
-        """
-        if order_by_timestamp.upper() not in ["ASC", "DESC"]:
-            raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
-
-        # The new query joins with conversations to check its 'deleted' status.
-        delete_clause = "" if include_deleted else "AND m.deleted = 0"
-
-        query = """
-            SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content,
-                   m.image_data, m.image_mime_type, m.timestamp, m.ranking,
-                   m.last_modified, m.version, m.client_id, m.deleted
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE m.conversation_id = ?
-              {delete_clause}
-              AND c.deleted = 0
-            ORDER BY m.timestamp {order_by_timestamp}
-            LIMIT ? OFFSET ?
-        """.format_map(locals())  # nosec B608
-        try:
-            cursor = self.execute_query(query, (conversation_id, limit, offset))
-            raw_rows = cursor.fetchall()
-            columns = [col[0] for col in cursor.description] if cursor.description else []
-            results: list[dict[str, Any]] = []
-            for row in raw_rows:
-                record = dict(row) if isinstance(row, dict) else {columns[idx]: row[idx] for idx in range(len(columns))}
-                image_blob = record.get("image_data")
-                if isinstance(image_blob, memoryview):
-                    record["image_data"] = image_blob.tobytes()
-                record["images"] = self.get_message_images(record["id"])
-                results.append(record)
-            return results  # noqa: TRY300
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error fetching messages for conversation ID {conversation_id}: {e}")
-            raise
-
-    def count_root_messages_for_conversation(self, conversation_id: str) -> int:
-        """Count root (parentless) messages for a conversation."""
-        query = (
-            "SELECT COUNT(1) FROM messages m "
-            "JOIN conversations c ON m.conversation_id = c.id "
-            "WHERE m.conversation_id = ? AND m.parent_message_id IS NULL "
-            "AND m.deleted = 0 AND c.deleted = 0"
-        )
-        try:
-            cursor = self.execute_query(query, (conversation_id,))
-            row = cursor.fetchone()
-            if row is None:
-                return 0
-            try:
-                return int(row[0])
-            except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                return int(row.get("COUNT(1)") or row.get("count") or 0)
-        except CharactersRAGDBError as e:
-            logger.error("Database error counting root messages for conversation {}: {}", conversation_id, e)
-            raise
-
-    def get_root_messages_for_conversation(
-        self,
-        conversation_id: str,
-        *,
-        limit: int,
-        offset: int,
-        order_by_timestamp: str = "ASC",
-    ) -> list[dict[str, Any]]:
-        """Fetch root (parentless) messages with minimal columns for tree building."""
-        if order_by_timestamp.upper() not in ["ASC", "DESC"]:
-            raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
-        query = """
-            SELECT m.id, m.parent_message_id, m.sender, m.content, m.timestamp
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE m.conversation_id = ?
-              AND m.parent_message_id IS NULL
-              AND m.deleted = 0
-              AND c.deleted = 0
-            ORDER BY m.timestamp {order_by_timestamp}
-            LIMIT ? OFFSET ?
-        """.format_map(locals())  # nosec B608
-        try:
-            cursor = self.execute_query(query, (conversation_id, limit, offset))
-            rows = cursor.fetchall()
-            columns = [col[0] for col in cursor.description] if cursor.description else []
-            results: list[dict[str, Any]] = []
-            for row in rows:
-                record = dict(row) if isinstance(row, dict) else {columns[idx]: row[idx] for idx in range(len(columns))}
-                results.append(record)
-            return results  # noqa: TRY300
-        except CharactersRAGDBError as e:
-            logger.error("Database error fetching root messages for conversation {}: {}", conversation_id, e)
-            raise
-
-    def get_messages_for_conversation_by_parent_ids(
-        self,
-        conversation_id: str,
-        parent_ids: list[str],
-        *,
-        order_by_timestamp: str = "ASC",
-    ) -> list[dict[str, Any]]:
-        """Fetch child messages for the given parent IDs with minimal columns."""
-        if not parent_ids:
-            return []
-        if order_by_timestamp.upper() not in ["ASC", "DESC"]:
-            raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
-        placeholders = ",".join(["?"] * len(parent_ids))
-        query = """
-            SELECT m.id, m.parent_message_id, m.sender, m.content, m.timestamp
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE m.conversation_id = ?
-              AND m.parent_message_id IN ({placeholders})
-              AND m.deleted = 0
-              AND c.deleted = 0
-            ORDER BY m.timestamp {order_by_timestamp}
-        """.format_map(locals())  # nosec B608
-        params = [conversation_id, *parent_ids]
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            rows = cursor.fetchall()
-            columns = [col[0] for col in cursor.description] if cursor.description else []
-            results: list[dict[str, Any]] = []
-            for row in rows:
-                record = dict(row) if isinstance(row, dict) else {columns[idx]: row[idx] for idx in range(len(columns))}
-                results.append(record)
-            return results  # noqa: TRY300
-        except CharactersRAGDBError as e:
-            logger.error(
-                'Database error fetching child messages for conversation {}: {}',
-                conversation_id,
-                e,
-            )
-            raise
-
-    def has_system_message_for_conversation(
-        self,
-        conversation_id: str,
-        include_deleted: bool = False,
-    ) -> bool:
-        """Check whether a conversation has at least one system message."""
-        if include_deleted:
-            query = """
-                SELECT 1
-                FROM messages m
-                JOIN conversations c ON m.conversation_id = c.id
-                WHERE m.conversation_id = ?
-                  AND lower(m.sender) = 'system'
-                  AND c.deleted = ?
-                LIMIT 1
-            """
-            params = (conversation_id, False)
-        else:
-            query = """
-                SELECT 1
-                FROM messages m
-                JOIN conversations c ON m.conversation_id = c.id
-                WHERE m.conversation_id = ?
-                  AND lower(m.sender) = 'system'
-                  AND m.deleted = ?
-                  AND c.deleted = ?
-                LIMIT 1
-            """
-            params = (conversation_id, False, False)
-        try:
-            cursor = self.execute_query(query, params)
-            return cursor.fetchone() is not None
-        except CharactersRAGDBError as e:
-            logger.error(
-                'Database error checking system messages for conversation ID {}: {}',
-                conversation_id,
-                e,
-            )
-            raise
-
-    def update_message(self, message_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
-        """
-        Updates an existing message using optimistic locking.
-
-        Succeeds if `expected_version` matches the current database version.
-        `version` is incremented, `last_modified` updated, and `client_id` set.
-        Updatable fields from `update_data`: 'content', 'ranking', 'parent_message_id'.
-        Image data can also be updated: 'image_data' and 'image_mime_type'.
-        If 'image_data' is set to `None` in `update_data`, both 'image_data' and
-        'image_mime_type' columns will be set to NULL in the database.
-        Other fields in `update_data` are ignored. `update_data` must not be empty.
-
-        FTS updates (`messages_fts` for content changes) and `sync_log` entries
-        are handled by SQL triggers.
-
-        Args:
-            message_id: The UUID of the message to update.
-            update_data: Dictionary with fields to update. Must not be empty.
-                         If 'image_data' is updated, 'image_mime_type' should also be
-                         provided, unless 'image_data' is set to None.
-            expected_version: The client's expected version of the record.
-
-        Returns:
-            True if the update was successful.
-
-        Raises:
-            InputError: If `update_data` is empty.
-            ConflictError: If the message is not found, is soft-deleted, or if `expected_version`
-                           does not match the current database version.
-            CharactersRAGDBError: For database integrity errors (e.g., invalid `parent_message_id`)
-                                  or other database issues.
-        """
-        if not update_data:
-            raise InputError("No data provided for message update.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        fields_to_update_sql = []
-        params_for_set_clause = []
-
-        allowed_to_update = ['content', 'ranking', 'parent_message_id', 'image_data', 'image_mime_type']
-
-        # Special handling for clearing image
-        if 'image_data' in update_data and update_data['image_data'] is None:
-            fields_to_update_sql.append("image_data = NULL")
-            fields_to_update_sql.append("image_mime_type = NULL")
-            # Remove these keys from update_data to avoid processing them again
-            # in the loop if they were explicitly set to None
-            # This isn't strictly necessary with current loop logic but good for clarity
-            update_data.pop('image_data', None)
-            update_data.pop('image_mime_type', None)
-
-        for key, value in update_data.items():
-            if key in allowed_to_update:
-                fields_to_update_sql.append(f"{key} = ?")
-                params_for_set_clause.append(value)
-            elif key not in ['id', 'conversation_id', 'sender', 'timestamp', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(
-                    f"Attempted to update immutable or unknown field '{key}' in message ID {message_id}, skipping.")
-
-        if not fields_to_update_sql: # If only image was cleared, this list might be empty now if no other fields
-            logger.info(f"No updatable content fields provided for message ID {message_id}, but metadata will be updated if version matches.")
-            # Proceed to metadata update; SQL query will be constructed accordingly
-
-        next_version_val = expected_version + 1
-
-        current_fields_to_update_sql = list(fields_to_update_sql)
-        current_params_for_set_clause = list(params_for_set_clause)
-
-        current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-        current_params_for_set_clause.extend([now, next_version_val, self.client_id])
-
-        where_values = [message_id, expected_version]
-        final_params_for_execute = tuple(current_params_for_set_clause + where_values)
-
-        query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"  # nosec B608
-
-        try:
-            with self.transaction() as conn:
-                current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Message ID {message_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="messages", entity_id=message_id
-                    )
-
-                cursor = conn.execute(query, final_params_for_execute)
-
-                if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Message ID {message_id} disappeared."
-                    elif final_state['deleted']:
-                        msg = f"Message ID {message_id} was soft-deleted concurrently."
-                    elif final_state['version'] != expected_version:
-                        msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
-                    raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
-                return True
-        except sqlite3.IntegrityError as e:
-            logger.error(f"SQLite integrity error updating message ID {message_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise CharactersRAGDBError(f"Database integrity error updating message: {e}") from e  # noqa: TRY003
-        except ConflictError:
-            raise
-        except InputError: # Should not be raised from here directly, but for completeness
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error updating message ID {message_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise
-
-    def soft_delete_message(self, message_id: str, expected_version: int) -> bool | None:
-        """
-        Soft-deletes a message using optimistic locking.
-
-        Sets `deleted` to 1, updates `last_modified`, increments `version`, and sets `client_id`.
-        Succeeds if `expected_version` matches the current DB version and the record is active.
-        If already soft-deleted, returns True (idempotent).
-
-        FTS updates (removal from `messages_fts`) and `sync_log` entries are handled by SQL triggers.
-
-        Args:
-            message_id: The UUID of the message to soft-delete.
-            expected_version: The client's expected version of the record.
-
-        Returns:
-            True if the soft-delete was successful or if the message was already soft-deleted.
-
-        Raises:
-            ConflictError: If not found (and not already deleted), or if active with a version mismatch.
-            CharactersRAGDBError: For other database errors.
-        """
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-
-        query = "UPDATE messages SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        params = (now, next_version_val, self.client_id, message_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                try:
-                    current_db_version = self._get_current_db_version(conn, "messages", "id", message_id)
-                except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?",
-                                                       (message_id,))
-                    record_status = check_status_cursor.fetchone()
-                    if record_status and record_status['deleted']:
-                        logger.info(f"Message ID {message_id} already soft-deleted. Success (idempotent).")
-                        return True
-                    raise # Re-raise if not found or other conflict
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Soft delete for Message ID {message_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="messages", entity_id=message_id
-                    )
-
-                cursor = conn.execute(query, params)
-
-                if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Message ID {message_id} disappeared."
-                    elif final_state['deleted']:
-                        logger.info(f"Message ID {message_id} was soft-deleted concurrently. Success.")
-                        return True
-                    elif final_state['version'] != expected_version:
-                        msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
-                    else:
-                        msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
-                    raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting message ID {message_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise
-
-    def search_messages_by_content(self, content_query: str, conversation_id: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
-        """
-        Searches messages by content using FTS.
-
-        Matches against the 'content' field in `messages_fts`.
-        Optionally filters by `conversation_id`. Returns non-deleted messages,
-        ordered by relevance (rank).
-
-        Args:
-            content_query: The search term for content. Supports FTS query syntax.
-            conversation_id: Optional conversation UUID to filter results.
-            limit: Maximum number of results. Defaults to 10.
-
-        Returns:
-            A list of matching message dictionaries. Can be empty.
-
-        Raises:
-            CharactersRAGDBError: For database search errors.
-        """
-        if self.backend_type == BackendType.POSTGRESQL:
-            tsquery = FTSQueryTranslator.normalize_query(content_query, 'postgresql')
-            if not tsquery:
-                logger.debug("Message content query normalized to empty tsquery for input '{}'", content_query)
-                return []
-
-            base_query = [
-                "SELECT m.*, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
-                "FROM messages m",
-                "WHERE m.deleted = FALSE",
-                "AND m.messages_fts_tsv @@ to_tsquery('english', ?)",
-            ]
-            params_list: list[Any] = [tsquery, tsquery]
-
-            if conversation_id:
-                base_query.append("AND m.conversation_id = ?")
-                params_list.append(conversation_id)
-
-            base_query.append("ORDER BY rank DESC, m.last_modified DESC")
-            base_query.append("LIMIT ?")
-            params_list.append(limit)
-
-            try:
-                cursor = self.execute_query("\n".join(base_query), tuple(params_list))
-                return [dict(row) for row in cursor.fetchall()]
-            except CharactersRAGDBError as exc:
-                logger.error("PostgreSQL FTS search failed for messages term '{}': {}", content_query, exc)
-                raise
-
-        safe_search_term = f'"{content_query}"'
-        base_query = """
-                     SELECT m.*
-                     FROM messages_fts, messages m
-                     WHERE messages_fts.rowid = m.rowid \
-                       AND messages_fts MATCH ? \
-                       AND m.deleted = 0 \
-                     """
-        params_list = [content_query]
-        if conversation_id:
-            base_query += " AND m.conversation_id = ?"
-            params_list.append(conversation_id)
-
-        base_query += " ORDER BY bm25(messages_fts) ASC, m.last_modified DESC LIMIT ?"
-        params_list.append(limit)
-
-        try:
-            cursor = self.execute_query(base_query, tuple(params_list))
-            return [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Error searching messages for content '{safe_search_term}': {e}")
-            raise
+    # Message CRUD/search methods are delegated to MessageStore at module bottom.
 
     # --- Keyword, KeywordCollection, Note Methods (CRUD + Search) ---
     # These follow similar patterns to CharacterCard, Conversation, Message methods:
@@ -18515,1395 +16259,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
 
     # Keywords
-    def add_keyword(self, keyword_text: str) -> int | None:
-        """
-        Adds a new keyword or undeletes an existing soft-deleted one.
-
-        Keyword text is stripped of leading/trailing whitespace.
-        Uniqueness is case-insensitive due to `COLLATE NOCASE` on the `keyword` column (schema).
-        FTS and sync_log entries are handled by SQL triggers.
-
-        Args:
-            keyword_text: The text of the keyword. Cannot be empty or whitespace only.
-
-        Returns:
-            The integer ID of the keyword.
-
-        Raises:
-            InputError: If `keyword_text` is empty or effectively empty after stripping.
-            ConflictError: If an active keyword with the same text already exists, or if undelete fails.
-            CharactersRAGDBError: For other database errors.
-        """
-        if not keyword_text or not keyword_text.strip():
-            raise InputError("Keyword text cannot be empty.")  # noqa: TRY003
-        return self._add_generic_item("keywords", "keyword", {}, keyword_text.strip(), {})  # No other_fields_map
-
-    def get_keyword_by_id(self, keyword_id: int) -> dict[str, Any] | None:
-        """
-        Retrieves a keyword by its integer ID. Returns active (non-deleted) keywords only.
-
-        Args:
-            keyword_id: The ID of the keyword.
-
-        Returns:
-            Keyword data as a dictionary, or None if not found/deleted.
-        """
-        return self._get_generic_item_by_id("keywords", keyword_id)
-
-    def get_keyword_by_text(self, keyword_text: str) -> dict[str, Any] | None:
-        """
-        Retrieves a keyword by its text (case-insensitive due to schema).
-        Returns active (non-deleted) keywords only.
-
-        Args:
-            keyword_text: The text of the keyword (stripped before query).
-
-        Returns:
-            Keyword data as a dictionary, or None if not found/deleted.
-        """
-        return self._get_generic_item_by_unique_text("keywords", "keyword", keyword_text.strip())
-
-    def list_keywords(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """
-        Lists active keywords, ordered by text (case-insensitively).
-
-        Args:
-            limit: Max number of keywords.
-            offset: Number to skip.
-
-        Returns:
-            A list of keyword dictionaries.
-        """
-        return self._list_generic_items("keywords", "keyword COLLATE NOCASE", limit, offset)
-
-    def get_note_counts_for_keywords(self, keyword_ids: list[int] | None = None) -> dict[int, int]:
-        """Return active-note usage counts keyed by keyword ID."""
-        normalized_ids: list[int] = []
-        if keyword_ids:
-            seen = set()
-            for raw in keyword_ids:
-                try:
-                    value = int(raw)
-                except (TypeError, ValueError):
-                    continue
-                if value <= 0 or value in seen:
-                    continue
-                seen.add(value)
-                normalized_ids.append(value)
-
-        keyword_table = self._map_table_for_backend("keywords")
-        notes_table = self._map_table_for_backend("notes")
-        keyword_filter = ""
-        params: list[Any] = []
-        if normalized_ids:
-            placeholders = ", ".join(["?"] * len(normalized_ids))
-            keyword_filter = f" AND nk.keyword_id IN ({placeholders})"
-            params.extend(normalized_ids)
-
-        deleted_note_value = "FALSE" if self.backend_type == BackendType.POSTGRESQL else "0"
-        deleted_keyword_value = "FALSE" if self.backend_type == BackendType.POSTGRESQL else "0"
-
-        query = """
-            SELECT nk.keyword_id AS keyword_id, COUNT(DISTINCT nk.note_id) AS note_count
-            FROM note_keywords nk
-            JOIN {notes_table} n ON n.id = nk.note_id
-            JOIN {keyword_table} k ON k.id = nk.keyword_id
-            WHERE n.deleted = {deleted_note_value}
-              AND k.deleted = {deleted_keyword_value}
-              {keyword_filter}
-            GROUP BY nk.keyword_id
-        """.format_map(locals())  # nosec B608
-
-        cursor = self.execute_query(query, tuple(params) if params else None)
-        out: dict[int, int] = {}
-        for row in cursor.fetchall():
-            try:
-                keyword_id = int(row["keyword_id"])
-                out[keyword_id] = int(row["note_count"] or 0)
-            except (TypeError, ValueError):
-                continue
-        return out
-
-    def count_keywords(self) -> int:
-        """Return count of active (non-deleted) keywords."""
-        keyword_table = self._map_table_for_backend("keywords")
-        query = f"SELECT COUNT(*) AS cnt FROM {keyword_table} WHERE deleted = 0"  # nosec B608
-        try:
-            cursor = self.execute_query(query)
-            row = cursor.fetchone()
-            return int(row["cnt"]) if row else 0
-        except CharactersRAGDBError as exc:
-            logger.error(f"Error counting keywords: {exc}")
-            raise
-
-    def soft_delete_keyword(self, keyword_id: int, expected_version: int) -> bool:
-        """
-        Soft-deletes a keyword using optimistic locking.
-
-        Sets `deleted = 1`, updates metadata. Succeeds if `expected_version` matches
-        and record is active. Idempotent if already deleted.
-        FTS and sync_log handled by triggers.
-
-        Args:
-            keyword_id: The ID of the keyword to soft-delete.
-            expected_version: The version number the client expects the record to have.
-
-        Returns:
-            True if successful or already deleted.
-
-        Raises:
-            ConflictError: If not found (not deleted), or active with version mismatch.
-            CharactersRAGDBError: For other database errors.
-        """
-        return self._soft_delete_generic_item(
-            table_name="keywords",
-            item_id=keyword_id,
-            expected_version=expected_version,
-            pk_col_name="id" # Explicitly pass, though "id" is default
-        )
-
-    def rename_keyword(self, keyword_id: int, new_keyword_text: str, expected_version: int) -> dict[str, Any]:
-        """
-        Rename an active keyword using optimistic locking.
-
-        Raises:
-            InputError: If new keyword text is empty.
-            ConflictError: If versions conflict or the destination text already exists.
-            CharactersRAGDBError: On storage failures.
-        """
-        normalized_text = str(new_keyword_text or "").strip()
-        if not normalized_text:
-            raise InputError("Keyword text cannot be empty.")  # noqa: TRY003
-
-        keyword_table = self._map_table_for_backend("keywords")
-        now_iso = self._get_current_utc_timestamp_iso()
-        next_version = expected_version + 1
-
-        try:
-            with self.transaction() as conn:
-                current_version = self._get_current_db_version(conn, keyword_table, "id", keyword_id)
-                if current_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Keyword {keyword_id} version mismatch (db={current_version}, expected={expected_version}).",
-                        entity="keywords",
-                        entity_id=keyword_id,
-                    )
-
-                duplicate = conn.execute(
-                    f"SELECT id FROM {keyword_table} WHERE deleted = 0 AND keyword = ? AND id <> ? LIMIT 1",  # nosec B608
-                    (normalized_text, keyword_id),
-                ).fetchone()
-                if duplicate:
-                    raise ConflictError(  # noqa: TRY003
-                        f"Keyword '{normalized_text}' already exists.",
-                        entity="keywords",
-                        entity_id=normalized_text,
-                    )
-
-                cursor = conn.execute(
-                    (
-                        f"UPDATE {keyword_table} "  # nosec B608
-                        f"SET keyword = ?, last_modified = ?, version = ?, client_id = ? "
-                        f"WHERE id = ? AND version = ? AND deleted = 0"
-                    ),
-                    (
-                        normalized_text,
-                        now_iso,
-                        next_version,
-                        self.client_id,
-                        keyword_id,
-                        expected_version,
-                    ),
-                )
-                if cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Keyword {keyword_id} update affected 0 rows.",
-                        entity="keywords",
-                        entity_id=keyword_id,
-                    )
-
-                refreshed = conn.execute(
-                    f"SELECT * FROM {keyword_table} WHERE id = ? AND deleted = 0",  # nosec B608
-                    (keyword_id,),
-                ).fetchone()
-                if not refreshed:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Keyword {keyword_id} not found after rename.",
-                        entity="keywords",
-                        entity_id=keyword_id,
-                    )
-                return dict(refreshed)
-        except sqlite3.IntegrityError as exc:
-            if "unique constraint failed" in str(exc).lower():
-                raise ConflictError(  # noqa: TRY003
-                    f"Keyword '{normalized_text}' already exists.",
-                    entity="keywords",
-                    entity_id=normalized_text,
-                ) from exc
-            raise CharactersRAGDBError(f"Failed to rename keyword {keyword_id}: {exc}") from exc  # noqa: TRY003
-        except BackendDatabaseError as exc:
-            if self._is_unique_violation(exc):
-                raise ConflictError(  # noqa: TRY003
-                    f"Keyword '{normalized_text}' already exists.",
-                    entity="keywords",
-                    entity_id=normalized_text,
-                ) from exc
-            raise CharactersRAGDBError(f"Failed to rename keyword {keyword_id}: {exc}") from exc  # noqa: TRY003
-
-    def _merge_keyword_links_for_table(
-        self,
-        conn: Any,
-        *,
-        link_table: str,
-        entity_column: str,
-        source_keyword_id: int,
-        target_keyword_id: int,
-        now_iso: str,
-    ) -> int:
-        """Move link-table references from source keyword to target keyword."""
-        if self.backend_type == BackendType.POSTGRESQL:
-            insert_sql = (
-                f"INSERT INTO {link_table} ({entity_column}, keyword_id, created_at) "  # nosec B608
-                f"SELECT src.{entity_column}, ?, ? "
-                f"FROM {link_table} src "
-                f"WHERE src.keyword_id = ? "
-                f"ON CONFLICT ({entity_column}, keyword_id) DO NOTHING"
-            )
-        else:
-            insert_sql = (
-                f"INSERT OR IGNORE INTO {link_table} ({entity_column}, keyword_id, created_at) "  # nosec B608
-                f"SELECT src.{entity_column}, ?, ? "
-                f"FROM {link_table} src "
-                f"WHERE src.keyword_id = ?"
-            )
-
-        insert_cursor = conn.execute(
-            insert_sql,
-            (target_keyword_id, now_iso, source_keyword_id),
-        )
-        inserted_count = int(insert_cursor.rowcount or 0)
-        if inserted_count < 0:
-            inserted_count = 0
-
-        conn.execute(
-            f"DELETE FROM {link_table} WHERE keyword_id = ?",  # nosec B608
-            (source_keyword_id,),
-        )
-        return inserted_count
-
-    def merge_keywords(
-        self,
-        *,
-        source_keyword_id: int,
-        target_keyword_id: int,
-        expected_source_version: int,
-        expected_target_version: int | None = None,
-    ) -> dict[str, Any]:
-        """
-        Merge one keyword into another and soft-delete the source keyword atomically.
-
-        Link tables migrated:
-        - note_keywords
-        - conversation_keywords
-        - collection_keywords
-        - flashcard_keywords
-        """
-        if source_keyword_id == target_keyword_id:
-            raise InputError("Source and target keyword IDs must differ.")  # noqa: TRY003
-
-        keyword_table = self._map_table_for_backend("keywords")
-        now_iso = self._get_current_utc_timestamp_iso()
-        source_next_version = expected_source_version + 1
-
-        try:
-            with self.transaction() as conn:
-                source_version = self._get_current_db_version(
-                    conn, keyword_table, "id", source_keyword_id
-                )
-                if source_version != expected_source_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        (
-                            f"Source keyword {source_keyword_id} version mismatch "
-                            f"(db={source_version}, expected={expected_source_version})."
-                        ),
-                        entity="keywords",
-                        entity_id=source_keyword_id,
-                    )
-
-                target_version = self._get_current_db_version(
-                    conn, keyword_table, "id", target_keyword_id
-                )
-                if (
-                    expected_target_version is not None
-                    and target_version != expected_target_version
-                ):
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        (
-                            f"Target keyword {target_keyword_id} version mismatch "
-                            f"(db={target_version}, expected={expected_target_version})."
-                        ),
-                        entity="keywords",
-                        entity_id=target_keyword_id,
-                    )
-
-                merged_note_links = self._merge_keyword_links_for_table(
-                    conn,
-                    link_table="note_keywords",
-                    entity_column="note_id",
-                    source_keyword_id=source_keyword_id,
-                    target_keyword_id=target_keyword_id,
-                    now_iso=now_iso,
-                )
-                merged_conversation_links = self._merge_keyword_links_for_table(
-                    conn,
-                    link_table="conversation_keywords",
-                    entity_column="conversation_id",
-                    source_keyword_id=source_keyword_id,
-                    target_keyword_id=target_keyword_id,
-                    now_iso=now_iso,
-                )
-                merged_collection_links = self._merge_keyword_links_for_table(
-                    conn,
-                    link_table="collection_keywords",
-                    entity_column="collection_id",
-                    source_keyword_id=source_keyword_id,
-                    target_keyword_id=target_keyword_id,
-                    now_iso=now_iso,
-                )
-                merged_flashcard_links = self._merge_keyword_links_for_table(
-                    conn,
-                    link_table="flashcard_keywords",
-                    entity_column="card_id",
-                    source_keyword_id=source_keyword_id,
-                    target_keyword_id=target_keyword_id,
-                    now_iso=now_iso,
-                )
-
-                soft_delete_cursor = conn.execute(
-                    (
-                        f"UPDATE {keyword_table} "  # nosec B608
-                        f"SET deleted = 1, last_modified = ?, version = ?, client_id = ? "
-                        f"WHERE id = ? AND version = ? AND deleted = 0"
-                    ),
-                    (
-                        now_iso,
-                        source_next_version,
-                        self.client_id,
-                        source_keyword_id,
-                        expected_source_version,
-                    ),
-                )
-                if soft_delete_cursor.rowcount == 0:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        (
-                            f"Source keyword {source_keyword_id} changed during merge "
-                            f"(expected version {expected_source_version})."
-                        ),
-                        entity="keywords",
-                        entity_id=source_keyword_id,
-                    )
-
-                return {
-                    "source_keyword_id": source_keyword_id,
-                    "target_keyword_id": target_keyword_id,
-                    "source_deleted_version": source_next_version,
-                    "target_version": target_version,
-                    "merged_note_links": merged_note_links,
-                    "merged_conversation_links": merged_conversation_links,
-                    "merged_collection_links": merged_collection_links,
-                    "merged_flashcard_links": merged_flashcard_links,
-                }
-        except sqlite3.Error as exc:
-            raise CharactersRAGDBError(
-                f"Failed to merge keyword {source_keyword_id} into {target_keyword_id}: {exc}"
-            ) from exc  # noqa: TRY003
-        except BackendDatabaseError as exc:
-            raise CharactersRAGDBError(
-                f"Failed to merge keyword {source_keyword_id} into {target_keyword_id}: {exc}"
-            ) from exc  # noqa: TRY003
-
-    def search_keywords(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]:
-        """
-        Searches keywords by text using FTS.
-
-        Matches against the 'keyword' field in `keywords_fts`.
-        Returns active keywords, ordered by relevance.
-
-        Args:
-            search_term: FTS query string for keyword text.
-            limit: Max number of results.
-
-        Returns:
-            A list of matching keyword dictionaries.
-        """
-        if search_term is None:
-            raise InputError("Search term cannot be empty.")  # noqa: TRY003
-        search_term = search_term.strip()
-        if not search_term:
-            raise InputError("Search term cannot be empty.")  # noqa: TRY003
-        if '"' in search_term or "'" in search_term:
-            raise InputError("Search term contains unsupported characters.")  # noqa: TRY003
-        is_simple_token = re.fullmatch(r"[\w-]+", search_term) is not None
-        if self.backend_type == BackendType.POSTGRESQL:
-            if is_simple_token:
-                tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
-                if tsquery:
-                    source_table = self._map_table_for_backend("keywords")
-                    fts_column = "keywords_fts_tsv"
-                    query = """
-                        SELECT k.*, ts_rank(k.{fts_column}, to_tsquery('english', ?)) AS rank
-                        FROM {source_table} k
-                        WHERE k.deleted = FALSE
-                          AND k.{fts_column} @@ to_tsquery('english', ?)
-                        ORDER BY rank DESC, k.last_modified DESC
-                        LIMIT ?
-                    """.format_map(locals())  # nosec B608
-                    try:
-                        cursor = self.execute_query(query, (tsquery, tsquery, limit))
-                        return [dict(row) for row in cursor.fetchall()]
-                    except CharactersRAGDBError as exc:
-                        logger.error("PostgreSQL FTS search failed for keywords term '{}': {}", search_term, exc)
-                        raise
-                logger.debug("Keyword search term normalized to empty tsquery for input '{}'", search_term)
-                return []
-
-            # Non-simple tokens (e.g., "C++") skip FTS and fall back to ILIKE.
-            source_table = self._map_table_for_backend("keywords")
-            escaped = search_term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            query = """
-                SELECT k.*
-                FROM {source_table} k
-                WHERE k.deleted = FALSE
-                  AND k.keyword ILIKE ? ESCAPE '\\'
-                ORDER BY k.last_modified DESC
-                LIMIT ?
-            """.format_map(locals())  # nosec B608
-            cursor = self.execute_query(query, (f"%{escaped}%", limit))
-            return [dict(row) for row in cursor.fetchall()]
-
-        # SQLite: use FTS prefix for simple tokens.
-        if is_simple_token:
-            # Support prefix/substring search expectations in tests by using prefix match
-            # e.g., 'fru' should match 'fruit'. FTS5 uses '*' for prefix queries.
-            fts_query = f"{search_term}*"
-            try:
-                return self._search_generic_items_fts("keywords_fts", "keywords", "keyword", fts_query, limit)
-            except CharactersRAGDBError as exc:
-                msg = str(exc).lower()
-                if "fts" in msg or "match" in msg or "syntax" in msg:
-                    raise InputError("Search term contains unsupported characters.") from exc  # noqa: TRY003
-                raise
-
-        keyword_table = self._map_table_for_backend("keywords")
-        escaped = search_term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        query = """
-            SELECT k.*
-            FROM {keyword_table} k
-            WHERE k.deleted = 0
-              AND k.keyword LIKE ? ESCAPE '\\'
-            ORDER BY k.last_modified DESC
-            LIMIT ?
-        """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (f"%{escaped}%", limit))
-        return [dict(row) for row in cursor.fetchall()]
-
-    # Keyword Collections
-    def add_keyword_collection(self, name: str, parent_id: int | None = None) -> int | None:
-        """
-        Adds a new keyword collection or undeletes an existing one.
-
-        Collection name is stripped. Uniqueness is case-insensitive (`COLLATE NOCASE` in schema).
-        FTS and sync_log handled by triggers.
-
-        Args:
-            name: The name of the collection. Cannot be empty or whitespace only.
-            parent_id: Optional integer ID of a parent collection for hierarchy.
-
-        Returns:
-            The integer ID of the collection.
-
-        Raises:
-            InputError: If `name` is empty.
-            ConflictError: If an active collection with the same name exists, or undelete fails.
-            CharactersRAGDBError: For other DB errors.
-        """
-        if not name or not name.strip():
-            raise InputError("Collection name cannot be empty.")  # noqa: TRY003
-        return self._add_generic_item("keyword_collections", "name", {"parent_id": parent_id}, name.strip(),
-                                      {"parent_id": "parent_id"}) # Maps DB 'parent_id' to item_data['parent_id']
-
-    def get_keyword_collection_by_id(self, collection_id: int) -> dict[str, Any] | None:
-        """
-        Retrieves a keyword collection by ID. Active collections only.
-
-        Args:
-            collection_id: ID of the collection.
-
-        Returns:
-            Collection data as dictionary, or None.
-        """
-        return self._get_generic_item_by_id("keyword_collections", collection_id)
-
-    def get_keyword_collection_by_name(self, name: str) -> dict[str, Any] | None:
-        """
-        Retrieves a keyword collection by name (case-insensitive). Active collections only.
-
-        Args:
-            name: Name of the collection (stripped).
-
-        Returns:
-            Collection data as dictionary, or None.
-        """
-        return self._get_generic_item_by_unique_text("keyword_collections", "name", name.strip())
-
-    def list_keyword_collections(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """
-        Lists active keyword collections, ordered by name (case-insensitively).
-
-        Args:
-            limit: Max number of collections.
-            offset: Number to skip.
-
-        Returns:
-            A list of collection dictionaries.
-        """
-        return self._list_generic_items("keyword_collections", "name COLLATE NOCASE", limit, offset)
-
-    def update_keyword_collection(self, collection_id: int, update_data: dict[str, Any], expected_version: int) -> bool:
-        """
-        Updates a keyword collection with optimistic locking.
-
-        Args:
-            collection_id: The ID of the keyword collection to update.
-            update_data: A dictionary containing the fields to update (e.g., 'name', 'parent_id').
-            expected_version: The version number the client expects the record to have.
-
-        Returns:
-            True if the update was successful.
-
-        Raises:
-            InputError: If no update data is provided.
-            ConflictError: If the record is not found, already soft-deleted,
-                           or if the expected_version does not match the current database version.
-            CharactersRAGDBError: For other database-related errors.
-        """
-        # pk_col_name for 'keyword_collections' is 'id' (default in _update_generic_item)
-        # item_id is int.
-        return self._update_generic_item(
-            table_name="keyword_collections",
-            item_id=collection_id,
-            update_data=update_data,
-            expected_version=expected_version,
-            allowed_fields=['name', 'parent_id'],
-            pk_col_name="id", # Explicitly pass, though "id" is default
-            unique_col_name_in_data='name' # For handling unique constraint on name if it's updated
-        )
-
-    def soft_delete_keyword_collection(self, collection_id: int, expected_version: int) -> bool:
-        """
-        Soft-deletes a keyword collection with optimistic locking.
-
-        Args:
-            collection_id: The ID of the keyword collection to soft-delete.
-            expected_version: The version number the client expects the record to have.
-
-        Returns:
-            True if the soft-delete was successful or if the collection was already soft-deleted.
-
-        Raises:
-            ConflictError: If the record is not found, or if (it's active and)
-                           the expected_version does not match the current database version.
-            CharactersRAGDBError: For other database-related errors.
-        """
-        # pk_col_name for 'keyword_collections' is 'id' (default in _soft_delete_generic_item)
-        # item_id is int.
-        return self._soft_delete_generic_item(
-            table_name="keyword_collections",
-            item_id=collection_id,
-            expected_version=expected_version,
-            pk_col_name="id" # Explicitly pass, though "id" is default
-        )
-
-    def search_keyword_collections(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]:
-        safe_literal = search_term.replace('"', '""')
-        safe_search_term = f'"{safe_literal}"'
-        return self._search_generic_items_fts("keyword_collections_fts", "keyword_collections", "name", safe_search_term,
-                                              limit)
+    # Keyword CRUD/search methods and note-count helper are delegated to extracted stores at module bottom.
 
     # Notes (Now with UUID and specific methods)
-    def add_note(
-        self,
-        title: str,
-        content: str,
-        note_id: str | None = None,
-        conversation_id: str | None = None,
-        message_id: str | None = None,
-        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
-    ) -> str | None:
-        if not title or not title.strip():
-            raise InputError("Note title cannot be empty.")  # noqa: TRY003
-        if content is None: # Allow empty string for content
-            raise InputError("Note content cannot be None.")  # noqa: TRY003
-
-        final_note_id = note_id or self._generate_uuid()
-        now = self._get_current_utc_timestamp_iso()
-        client_id_to_use = self.client_id # Notes use the instance's client_id directly
-        normalized_conversation_id = self._normalize_nullable_text(conversation_id)
-        normalized_message_id = self._normalize_nullable_text(message_id)
-
-        query = """
-            INSERT INTO notes (id, title, content, last_modified, client_id, version, deleted, created_at, conversation_id, message_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        if self.backend_type == BackendType.POSTGRESQL:
-            params = (
-                final_note_id, title.strip(), content, now, client_id_to_use, 1, False, now,
-                normalized_conversation_id, normalized_message_id
-            )
-        else:
-            params = (
-                final_note_id, title.strip(), content, now, client_id_to_use, 1, 0, now,
-                normalized_conversation_id, normalized_message_id
-            )
-
-        try:
-            def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
-                transaction_conn.execute(query, params)
-                logger.info(f"Added note '{title.strip()}' with ID: {final_note_id}.")
-                return final_note_id
-
-            if conn is None:
-                with self.transaction() as transaction_conn:
-                    return _execute(transaction_conn)
-            return _execute(conn)
-        except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "foreign key constraint failed" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "unique constraint failed: notes.id" in msg:
-                raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Database integrity error adding note: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            msg = str(e).lower()
-            if "foreign key" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "duplicate key" in msg or "unique constraint" in msg:
-                raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Backend error adding note: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error adding note '{title.strip()}': {e}")
-            raise
-
-    @staticmethod
-    def _serialize_note_studio_json_field(value: dict[str, Any] | None, field_name: str, *, required: bool) -> str | None:
-        if value is None:
-            if required:
-                raise InputError(f"{field_name} cannot be None.")  # noqa: TRY003
-            return None
-        if not isinstance(value, dict):
-            raise InputError(f"{field_name} must be a JSON object.")  # noqa: TRY003
-        try:
-            return json.dumps(value)
-        except TypeError as exc:
-            raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
-
-    @staticmethod
-    def _build_note_studio_summary(document: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "note_id": document["note_id"],
-            "template_type": document["template_type"],
-            "handwriting_mode": document["handwriting_mode"],
-            "source_note_id": document.get("source_note_id"),
-            "excerpt_hash": document.get("excerpt_hash"),
-            "companion_content_hash": document.get("companion_content_hash"),
-            "render_version": document.get("render_version", 1),
-        }
-
-    def _fetch_note_studio_document_row(
-        self,
-        note_id: str,
-        *,
-        conn: sqlite3.Connection | None = None,
-    ) -> dict[str, Any] | None:
-        query = "SELECT * FROM note_studio_documents WHERE note_id = ?"
-        if conn is None:
-            cursor = self.execute_query(query, (note_id,))
-        else:
-            cursor = conn.execute(query, (note_id,))
-        row = cursor.fetchone()
-        return self._deserialize_row_fields(row, ["payload_json", "diagram_manifest_json"]) if row else None
-
-    def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None:
-        return self._fetch_note_studio_document_row(note_id)
-
-    def _write_note_studio_document(
-        self,
-        *,
-        note_id: str,
-        payload_json: dict[str, Any],
-        template_type: str,
-        handwriting_mode: str,
-        source_note_id: str | None,
-        excerpt_snapshot: str | None,
-        excerpt_hash: str | None,
-        diagram_manifest_json: dict[str, Any] | None,
-        companion_content_hash: str | None,
-        render_version: int,
-        conn: sqlite3.Connection | None,
-        upsert: bool,
-    ) -> dict[str, Any]:
-        normalized_note_id = str(note_id).strip()
-        if not normalized_note_id:
-            raise InputError("note_id cannot be empty.")  # noqa: TRY003
-        if template_type not in _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES:
-            raise InputError(
-                f"template_type must be one of {sorted(_SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES)}."
-            )  # noqa: TRY003
-        if handwriting_mode not in _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES:
-            raise InputError(
-                f"handwriting_mode must be one of {sorted(_SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES)}."
-            )  # noqa: TRY003
-        if not isinstance(render_version, int) or render_version < 1:
-            raise InputError("render_version must be an integer >= 1.")  # noqa: TRY003
-
-        payload_json_str = self._serialize_note_studio_json_field(payload_json, "payload_json", required=True)
-        diagram_manifest_json_str = self._serialize_note_studio_json_field(
-            diagram_manifest_json,
-            "diagram_manifest_json",
-            required=False,
-        )
-        now = self._get_current_utc_timestamp_iso()
-
-        if upsert:
-            query = (
-                "INSERT INTO note_studio_documents ("
-                "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
-                "excerpt_snapshot, excerpt_hash, diagram_manifest_json, companion_content_hash, "
-                "render_version, created_at, last_modified"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(note_id) DO UPDATE SET "
-                "payload_json = excluded.payload_json, "
-                "template_type = excluded.template_type, "
-                "handwriting_mode = excluded.handwriting_mode, "
-                "source_note_id = excluded.source_note_id, "
-                "excerpt_snapshot = excluded.excerpt_snapshot, "
-                "excerpt_hash = excluded.excerpt_hash, "
-                "diagram_manifest_json = excluded.diagram_manifest_json, "
-                "companion_content_hash = excluded.companion_content_hash, "
-                "render_version = excluded.render_version, "
-                "last_modified = excluded.last_modified"
-            )
-        else:
-            query = (
-                "INSERT INTO note_studio_documents ("
-                "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
-                "excerpt_snapshot, excerpt_hash, diagram_manifest_json, companion_content_hash, "
-                "render_version, created_at, last_modified"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-
-        params = (
-            normalized_note_id,
-            payload_json_str,
-            template_type,
-            handwriting_mode,
-            source_note_id,
-            excerpt_snapshot,
-            excerpt_hash,
-            diagram_manifest_json_str,
-            companion_content_hash,
-            render_version,
-            now,
-            now,
-        )
-
-        def _execute(inner_conn: sqlite3.Connection) -> dict[str, Any]:
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            inner_conn.execute(prepared_query, prepared_params or ())
-            document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
-            if not document:
-                raise CharactersRAGDBError(f"Failed to read note studio document for note ID '{normalized_note_id}'.")
-            return document
-
-        if conn is None:
-            with self.transaction() as transaction_conn:
-                return _execute(transaction_conn)
-        return _execute(conn)
-
-    def create_note_studio_document(
-        self,
-        *,
-        note_id: str,
-        payload_json: dict[str, Any],
-        template_type: str,
-        handwriting_mode: str,
-        source_note_id: str | None = None,
-        excerpt_snapshot: str | None = None,
-        excerpt_hash: str | None = None,
-        diagram_manifest_json: dict[str, Any] | None = None,
-        companion_content_hash: str | None = None,
-        render_version: int,
-        conn: sqlite3.Connection | None = None,
-    ) -> dict[str, Any]:
-        return self._write_note_studio_document(
-            note_id=note_id,
-            payload_json=payload_json,
-            template_type=template_type,
-            handwriting_mode=handwriting_mode,
-            source_note_id=source_note_id,
-            excerpt_snapshot=excerpt_snapshot,
-            excerpt_hash=excerpt_hash,
-            diagram_manifest_json=diagram_manifest_json,
-            companion_content_hash=companion_content_hash,
-            render_version=render_version,
-            conn=conn,
-            upsert=False,
-        )
-
-    def upsert_note_studio_document(
-        self,
-        *,
-        note_id: str,
-        payload_json: dict[str, Any],
-        template_type: str,
-        handwriting_mode: str,
-        source_note_id: str | None = None,
-        excerpt_snapshot: str | None = None,
-        excerpt_hash: str | None = None,
-        diagram_manifest_json: dict[str, Any] | None = None,
-        companion_content_hash: str | None = None,
-        render_version: int,
-        conn: sqlite3.Connection | None = None,
-    ) -> dict[str, Any]:
-        return self._write_note_studio_document(
-            note_id=note_id,
-            payload_json=payload_json,
-            template_type=template_type,
-            handwriting_mode=handwriting_mode,
-            source_note_id=source_note_id,
-            excerpt_snapshot=excerpt_snapshot,
-            excerpt_hash=excerpt_hash,
-            diagram_manifest_json=diagram_manifest_json,
-            companion_content_hash=companion_content_hash,
-            render_version=render_version,
-            conn=conn,
-            upsert=True,
-        )
-
-    def get_note_by_id(
-        self,
-        note_id: str,
-        include_deleted: bool = False,
-        include_studio_summary: bool = False,
-    ) -> dict[str, Any] | None:
-        query = "SELECT * FROM notes WHERE id = ?"
-        params: list[Any] = [note_id]
-        if not include_deleted:
-            query += " AND deleted = ?"
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        cursor = self.execute_query(query, tuple(params))
-        row = cursor.fetchone()
-        note = dict(row) if row else None
-        if note and include_studio_summary:
-            studio_document = self.get_note_studio_document(note_id)
-            if studio_document:
-                note["studio"] = self._build_note_studio_summary(studio_document)
-        return note
-
-    def list_notes(
-        self,
-        limit: int = 100,
-        offset: int = 0,
-        include_deleted: bool = False,
-        only_deleted: bool = False,
-    ) -> list[dict[str, Any]]:
-        """List notes ordered by most recently modified.
-
-        By default this returns only active notes (`deleted = 0`).
-        Set `only_deleted=True` to list trash items, or `include_deleted=True`
-        to list both active and deleted notes.
-        """
-        where_clause = ""
-        params: list[Any] = []
-        if only_deleted:
-            where_clause = " WHERE deleted = ?"
-            params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
-        elif not include_deleted:
-            where_clause = " WHERE deleted = ?"
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-
-        query = (
-            f"SELECT * FROM notes{where_clause} "  # nosec B608
-            "ORDER BY last_modified DESC "
-            "LIMIT ? OFFSET ?"
-        )
-        params.extend([limit, offset])
-        cursor = self.execute_query(query, tuple(params))
-        return [dict(row) for row in cursor.fetchall()]
-
-    def list_deleted_notes(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-        """List only soft-deleted notes (trash)."""
-        return self.list_notes(limit=limit, offset=offset, only_deleted=True)
-
-    def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int:
-        """Count notes by deletion scope.
-
-        Defaults to active-note count only.
-        """
-        where_clause = ""
-        params: list[Any] = []
-        if only_deleted:
-            where_clause = " WHERE deleted = ?"
-            params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
-        elif not include_deleted:
-            where_clause = " WHERE deleted = ?"
-            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-
-        query = f"SELECT COUNT(*) AS cnt FROM notes{where_clause}"  # nosec B608
-        try:
-            cursor = self.execute_query(query, tuple(params) if params else None)
-            row = cursor.fetchone()
-            return int(row["cnt"]) if row else 0
-        except CharactersRAGDBError as exc:
-            logger.error(f"Error counting notes: {exc}")
-            raise
-
-    def count_deleted_notes(self) -> int:
-        """Return count of soft-deleted notes."""
-        return self.count_notes(only_deleted=True)
-
-    def update_note(
-        self,
-        note_id: str,
-        update_data: dict[str, Any],
-        expected_version: int,
-        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
-    ) -> bool | None:
-        if not update_data:
-            raise InputError("No data provided for note update.")  # noqa: TRY003
-
-        now = self._get_current_utc_timestamp_iso()
-        fields_to_update_sql = []
-        params_for_set_clause = []
-
-        allowed_to_update = ['title', 'content', 'conversation_id', 'message_id']
-        for key, value in update_data.items():
-            if key in allowed_to_update:
-                if key == 'title' and isinstance(value, str):
-                    fields_to_update_sql.append(f"{key} = ?")
-                    params_for_set_clause.append(value.strip())
-                elif key in ('conversation_id', 'message_id'):
-                    fields_to_update_sql.append(f"{key} = ?")
-                    params_for_set_clause.append(self._normalize_nullable_text(value))
-                else:
-                    fields_to_update_sql.append(f"{key} = ?")
-                    params_for_set_clause.append(value)
-            elif key not in ['id', 'created_at', 'last_modified', 'version', 'client_id', 'deleted']:
-                logger.warning(
-                    f"Attempted to update immutable or unknown field '{key}' in note ID {note_id}, skipping.")
-
-        if not fields_to_update_sql:
-            logger.info(f"No updatable fields provided for note ID {note_id}.")
-            return True
-
-        next_version_val = expected_version + 1
-        fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
-
-        all_set_values = params_for_set_clause[:]
-        all_set_values.extend([now, next_version_val, self.client_id])
-
-        where_values = [note_id, expected_version]
-        final_params_for_execute = tuple(all_set_values + where_values)
-
-        query = f"UPDATE notes SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"  # nosec B608
-
-        try:
-            def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
-                current_db_version = self._get_current_db_version(transaction_conn, "notes", "id", note_id)
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Note ID {note_id} update failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="notes", entity_id=note_id
-                    )
-
-                cursor = transaction_conn.execute(query, final_params_for_execute)
-
-                if cursor.rowcount == 0:
-                    check_again_cursor = transaction_conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
-                    final_state = check_again_cursor.fetchone()
-                    if not final_state:
-                        msg = f"Note ID {note_id} disappeared."
-                    elif final_state['deleted']:
-                        msg = f"Note ID {note_id} was soft-deleted concurrently."
-                    elif final_state['version'] != expected_version:
-                        msg = f"Note ID {note_id} version changed to {final_state['version']} concurrently."
-                    else:
-                        msg = f"Update for note ID {note_id} (expected v{expected_version}) affected 0 rows."
-                    raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
-
-                logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
-                return True
-
-            if conn is None:
-                with self.transaction() as transaction_conn:
-                    return _execute(transaction_conn)
-            return _execute(conn)
-        # No specific UNIQUE constraint on notes.title or notes.content in the schema, so sqlite3.IntegrityError less likely for these fields.
-        except ConflictError:
-            raise
-        except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "foreign key constraint failed" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=note_id) from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Database integrity error updating note: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            msg = str(e).lower()
-            if "foreign key" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=note_id) from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Backend error updating note: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:  # Catches sqlite3.Error
-            logger.error(f"Database error updating note ID {note_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise
-
-    def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None:
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-
-        query = "UPDATE notes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        params = (now, next_version_val, self.client_id, note_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                try:
-                    current_db_version = self._get_current_db_version(conn, "notes", "id", note_id)
-                except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
-                    record_status = check_status_cursor.fetchone()
-                    if record_status and record_status['deleted']:
-                        logger.info(f"Note ID {note_id} already soft-deleted. Success (idempotent).")
-                        return True
-                    raise
-
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Soft delete for Note ID {note_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="notes", entity_id=note_id
-                    )
-
-                cursor = conn.execute(query, params)
-
-                if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
-                    final_state = check_again_cursor.fetchone()
-                    if not final_state:
-                        msg = f"Note ID {note_id} disappeared."
-                    elif final_state['deleted']:
-                        logger.info(f"Note ID {note_id} was soft-deleted concurrently. Success.")
-                        return True
-                    elif final_state['version'] != expected_version:
-                        msg = f"Note ID {note_id} version changed to {final_state['version']} concurrently."
-                    else:
-                        msg = f"Soft delete for note ID {note_id} (expected v{expected_version}) affected 0 rows."
-                    raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Soft-deleted note ID {note_id} (was v{expected_version}), new version {next_version_val}.")
-                return True
-        except ConflictError:
-            raise
-        except CharactersRAGDBError as e:
-            logger.error(f"Database error soft-deleting note ID {note_id} (expected v{expected_version}): {e}",
-                         exc_info=True)
-            raise
-
-    def delete_note(self, note_id: str, expected_version: int | None = None, hard_delete: bool = False) -> bool:
-        """Soft or hard delete a note."""
-        now = self._get_current_utc_timestamp_iso()
-        try:
-            with self.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM notes WHERE id = ?", (note_id,)).fetchone()
-                if not row:
-                    return False
-                cur_ver = int(row["version"])
-                deleted = bool(row["deleted"])
-                if hard_delete:
-                    conn.execute("DELETE FROM note_studio_documents WHERE note_id = ?", (note_id,))
-                    conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
-                    return True
-                if deleted:
-                    return True
-                if expected_version is not None and cur_ver != expected_version:
-                    raise ConflictError("Version mismatch deleting note", entity="notes", identifier=note_id)  # noqa: TRY003
-                deleted_val = True if self.backend_type == BackendType.POSTGRESQL else 1
-                rc = conn.execute(
-                    "UPDATE notes SET deleted = ?, last_modified = ?, version = ?, client_id = ? "
-                    "WHERE id = ? AND deleted = 0",
-                    (deleted_val, now, cur_ver + 1, self.client_id, note_id),
-                ).rowcount
-                return rc > 0
-        except BackendDatabaseError as e:
-            raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
-        except sqlite3.Error as e:
-            raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
-
-    def restore_note(self, note_id: str, expected_version: int) -> bool | None:
-        """
-        Restores a soft-deleted note using optimistic locking.
-
-        Sets the `deleted` flag to 0, updates `last_modified`, increments `version`,
-        and sets `client_id`. The operation succeeds only if `expected_version` matches
-        the current database version and the note is currently deleted.
-
-        If the note is already active (not deleted), the method considers
-        this a success and returns True (idempotency).
-
-        Args:
-            note_id: The ID of the note to restore.
-            expected_version: The version number the client expects the record to have.
-
-        Returns:
-            True if the restore was successful or if the note was already active.
-
-        Raises:
-            ConflictError: If the note is not found, or if `expected_version` does
-                           not match, or if a concurrent modification prevents the update.
-            CharactersRAGDBError: For other database-related errors.
-        """
-        now = self._get_current_utc_timestamp_iso()
-        next_version_val = expected_version + 1
-
-        query = "UPDATE notes SET deleted = 0, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 1"
-        params = (now, next_version_val, self.client_id, note_id, expected_version)
-
-        try:
-            with self.transaction() as conn:
-                # First check if record exists at all
-                check_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
-                record_status = check_cursor.fetchone()
-
-                if not record_status:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Note ID {note_id} not found.",
-                        entity="notes", entity_id=note_id
-                    )
-
-                # If already active, return success (idempotent)
-                if not record_status['deleted']:
-                    logger.info(f"Note ID {note_id} already active. Restore successful (idempotent).")
-                    return True
-
-                # Check version matches
-                current_db_version = record_status['version']
-                if current_db_version != expected_version:
-                    raise ConflictError(  # noqa: TRY003, TRY301
-                        f"Restore for Note ID {note_id} failed: version mismatch (db has {current_db_version}, client expected {expected_version}).",
-                        entity="notes", entity_id=note_id
-                    )
-
-                cursor = conn.execute(query, params)
-
-                if cursor.rowcount == 0:
-                    # Race condition: Record changed between pre-check and UPDATE.
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
-                    final_state = check_again_cursor.fetchone()
-                    msg = f"Restore for Note ID {note_id} (expected v{expected_version}) affected 0 rows."
-                    if not final_state:
-                        msg = f"Note ID {note_id} disappeared before restore (expected deleted version {expected_version})."
-                    elif not final_state['deleted']:
-                        # If it got restored by another process. Consider this success.
-                        logger.info(
-                            f"Note ID {note_id} was restored concurrently to version {final_state['version']}. Restore successful.")
-                        return True
-                    elif final_state['version'] != expected_version:
-                        msg = f"Restore for Note ID {note_id} failed: version changed to {final_state['version']} concurrently (expected {expected_version})."
-                    else:
-                        msg = f"Restore for Note ID {note_id} (expected version {expected_version}) affected 0 rows for an unknown reason after passing initial checks."
-                    raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
-
-                logger.info(
-                    f"Restored note ID {note_id} (was version {expected_version}), new version {next_version_val}.")
-                return True
-        except ConflictError:
-            raise
-        except BackendDatabaseError as e:
-            logger.error(
-                'Backend error restoring note ID {} (expected v{}): {}',
-                note_id,
-                expected_version,
-                e,
-            )
-            raise CharactersRAGDBError(f"Backend error during restore: {e}") from e  # noqa: TRY003
-        except CharactersRAGDBError as e:
-            logger.error(
-                f"Database error restoring note ID {note_id} (expected v{expected_version}): {e}",
-                exc_info=True)
-            raise
-
-    def search_notes(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
-        """Searches notes_fts (title and content) with optional pagination."""
-        # FTS5 requires wrapping terms with special characters in double quotes
-        # to be treated as a literal phrase.
-
-        # Debug: Log FTS table state to help diagnose E2E test failures
-        # Only run for SQLite; PostgreSQL uses tsvector columns, not a notes_fts table.
-        if self.backend_type == BackendType.SQLITE:
-            try:
-                fts_count = self.execute_query("SELECT COUNT(*) as cnt FROM notes_fts").fetchone()
-                notes_count = self.execute_query("SELECT COUNT(*) as cnt FROM notes WHERE deleted = 0").fetchone()
-                logger.debug(
-                    f"search_notes: term='{search_term[:50] if search_term else ''}' notes_fts_count={fts_count['cnt'] if fts_count else 0} "
-                    f"notes_count={notes_count['cnt'] if notes_count else 0}"
-                )
-            except _CHACHA_NONCRITICAL_EXCEPTIONS as diag_err:
-                logger.debug(f"search_notes diagnostic query failed: {diag_err}")
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            if not search_term or not str(search_term).strip():
-                logger.debug("Empty notes search term; returning no results.")
-                return []
-            tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
-            fallback_query = """
-                SELECT n.*
-                FROM notes n
-                WHERE n.deleted = FALSE
-                  AND (n.title ILIKE ? OR n.content ILIKE ?)
-                ORDER BY n.last_modified DESC
-                LIMIT ? OFFSET ?
-            """
-            fallback_params = (f"%{search_term}%", f"%{search_term}%", limit, offset)
-            if not tsquery:
-                logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
-                cursor = self.execute_query(fallback_query, fallback_params)
-                return [dict(row) for row in cursor.fetchall()]
-
-            query = """
-                SELECT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank
-                FROM notes n
-                WHERE n.deleted = FALSE
-                  AND n.notes_fts_tsv @@ to_tsquery('english', ?)
-                ORDER BY rank DESC, n.last_modified DESC
-                LIMIT ? OFFSET ?
-            """
-            try:
-                cursor = self.execute_query(query, (tsquery, tsquery, limit, offset))
-                rows = cursor.fetchall()
-                if rows:
-                    return [dict(row) for row in rows]
-                # Fallback: if FTS vectors are missing/stale, use ILIKE search.
-                cursor = self.execute_query(fallback_query, fallback_params)
-                return [dict(row) for row in cursor.fetchall()]
-            except CharactersRAGDBError as exc:
-                logger.error("PostgreSQL FTS search failed for notes term '{}': {}", search_term, exc)
-                raise
-
-        safe_literal = search_term.replace('"', '""')
-        safe_search_term = f'"{safe_literal}"'
-
-        query = """
-                SELECT main.*, bm25(notes_fts) AS bm25_score
-                FROM notes_fts
-                JOIN notes AS main ON notes_fts.rowid = main.rowid
-                WHERE notes_fts MATCH ?
-                  AND main.deleted = 0
-                ORDER BY bm25_score, main.last_modified DESC
-                LIMIT ? OFFSET ?
-                """
-        try:
-            cursor = self.execute_query(query, (safe_search_term, limit, offset))
-            return [dict(row) for row in cursor.fetchall()]
-        except CharactersRAGDBError as e:
-            logger.error(f"Error searching notes for '{search_term}': {e}")
-            raise
-
-
-    def search_notes_with_keywords(
-        self,
-        search_term: str | None,
-        keyword_tokens: list[str],
-        limit: int = 10,
-        offset: int = 0
-    ) -> list[dict[str, Any]]:
-        """Search notes with an optional FTS query and keyword-token filter."""
-        tokens = [t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()]
-        if not tokens:
-            if not search_term or not str(search_term).strip():
-                return []
-            return self.search_notes(search_term=str(search_term), limit=limit, offset=offset)
-
-        keyword_table = self._map_table_for_backend("keywords")
-        like_clause = " OR ".join(["LOWER(k.keyword) LIKE ?"] * len(tokens))
-        like_params = [f"%{t}%" for t in tokens]
-
-        if self.backend_type == BackendType.POSTGRESQL:
-            if search_term and str(search_term).strip():
-                tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
-                if not tsquery:
-                    logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
-                    return []
-                query = """
-                    SELECT DISTINCT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank
-                    FROM notes n
-                    JOIN note_keywords nk ON n.id = nk.note_id
-                    JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE
-                      AND k.deleted = FALSE
-                      AND n.notes_fts_tsv @@ to_tsquery('english', ?)
-                      AND ({like_clause})
-                    ORDER BY rank DESC, n.last_modified DESC
-                    LIMIT ? OFFSET ?
-                """.format_map(locals())  # nosec B608
-                params = (tsquery, tsquery, *like_params, limit, offset)
-            else:
-                query = """
-                    SELECT DISTINCT n.*
-                    FROM notes n
-                    JOIN note_keywords nk ON n.id = nk.note_id
-                    JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE
-                      AND k.deleted = FALSE
-                      AND ({like_clause})
-                    ORDER BY n.last_modified DESC
-                    LIMIT ? OFFSET ?
-                """.format_map(locals())  # nosec B608
-                params = (*like_params, limit, offset)
-            cursor = self.execute_query(query, params)
-            return [dict(row) for row in cursor.fetchall()]
-
-        if search_term and str(search_term).strip():
-            safe_literal = str(search_term).replace('"', '""')
-            safe_search_term = f'"{safe_literal}"'
-            query = """
-                    SELECT DISTINCT n.*
-                    FROM notes_fts
-                    JOIN notes AS n ON notes_fts.rowid = n.rowid
-                    JOIN note_keywords nk ON n.id = nk.note_id
-                    JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE notes_fts MATCH ?
-                      AND n.deleted = 0
-                      AND k.deleted = 0
-                      AND ({like_clause})
-                    ORDER BY bm25(notes_fts), n.last_modified DESC
-                    LIMIT ? OFFSET ?
-                    """.format_map(locals())  # nosec B608
-            params = (safe_search_term, *like_params, limit, offset)
-        else:
-            query = """
-                    SELECT DISTINCT n.*
-                    FROM notes n
-                    JOIN note_keywords nk ON n.id = nk.note_id
-                    JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = 0
-                      AND k.deleted = 0
-                      AND ({like_clause})
-                    ORDER BY n.last_modified DESC
-                    LIMIT ? OFFSET ?
-                    """.format_map(locals())  # nosec B608
-            params = (*like_params, limit, offset)
-
-        cursor = self.execute_query(query, params)
-        return [dict(row) for row in cursor.fetchall()]
+    # Note CRUD/search methods are delegated to NoteStore at module bottom.
 
 
     def count_notes_matching(self, search_term: str) -> int:
@@ -20064,6 +16423,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         cursor = self.execute_query(query, tuple(params))
         rows = cursor.fetchall()
         return [self._deserialize_moodboard_row(row) for row in rows if row]
+
+    def count_moodboards(
+        self,
+        include_deleted: bool = False,
+        only_deleted: bool = False,
+    ) -> int:
+        where_clause = ""
+        params: list[Any] = []
+        if only_deleted:
+            where_clause = " WHERE deleted = ?"
+            params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
+        elif not include_deleted:
+            where_clause = " WHERE deleted = ?"
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+
+        query = f"SELECT COUNT(*) AS total FROM moodboards{where_clause}"  # nosec B608
+        cursor = self.execute_query(query, tuple(params))
+        row = cursor.fetchone()
+        return int(row["total"]) if row and row["total"] is not None else 0
 
     def update_moodboard(self, moodboard_id: int, update_data: dict[str, Any], expected_version: int) -> bool | None:
         if not update_data:
@@ -20488,155 +16866,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
 
     # Conversation <-> Keyword
-    def link_conversation_to_keyword(self, conversation_id: str, keyword_id: int) -> bool:
-        return self._manage_link("conversation_keywords", "conversation_id", conversation_id, "keyword_id", keyword_id,
-                                 "link")
-
-    def unlink_conversation_from_keyword(self, conversation_id: str, keyword_id: int) -> bool:
-        return self._manage_link("conversation_keywords", "conversation_id", conversation_id, "keyword_id", keyword_id,
-                                 "unlink")
-
-    def get_keywords_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]:
-        keyword_table = self._map_table_for_backend("keywords")
-        order_clause = self._case_insensitive_order_clause("k.keyword")
-        query = """
-                SELECT k.* \
-                FROM {keyword_table} k \
-                         JOIN conversation_keywords ck ON k.id = ck.keyword_id
-                WHERE ck.conversation_id = ? \
-                  AND k.deleted = 0 \
-                {order_clause}
-                """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (conversation_id,))
-        return [dict(row) for row in cursor.fetchall()]
-
-    def get_keywords_for_conversations(self, conversation_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        """Fetch keywords for multiple conversations in a single query."""
-        if not conversation_ids:
-            return {}
-        keyword_table = self._map_table_for_backend("keywords")
-        placeholders = ",".join(["?"] * len(conversation_ids))
-        order_expr = self._case_insensitive_order_expression("k.keyword")
-        query = """
-                SELECT ck.conversation_id as conversation_id, k.* \
-                FROM {keyword_table} k \
-                         JOIN conversation_keywords ck ON k.id = ck.keyword_id
-                WHERE ck.conversation_id IN ({placeholders}) \
-                  AND k.deleted = 0 \
-                ORDER BY ck.conversation_id, {order_expr}
-                """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, tuple(conversation_ids))
-        rows = cursor.fetchall()
-        columns = [col[0] for col in cursor.description] if cursor.description else []
-        result: dict[str, list[dict[str, Any]]] = {cid: [] for cid in conversation_ids}
-        for row in rows:
-            record = dict(row) if isinstance(row, dict) else {columns[idx]: row[idx] for idx in range(len(columns))}
-            conv_id = record.pop("conversation_id", None)
-            if conv_id is None:
-                continue
-            result.setdefault(str(conv_id), []).append(record)
-        return result
-
-    def get_conversations_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-        query = """
-                SELECT c.* \
-                FROM conversations c \
-                         JOIN conversation_keywords ck ON c.id = ck.conversation_id
-                WHERE ck.keyword_id = ? \
-                  AND c.deleted = 0
-                ORDER BY c.last_modified DESC LIMIT ? \
-                OFFSET ? \
-                """
-        cursor = self.execute_query(query, (keyword_id, limit, offset))
-        return [dict(row) for row in cursor.fetchall()]
-
-    # Collection <-> Keyword
-    def link_collection_to_keyword(self, collection_id: int, keyword_id: int) -> bool:
-        return self._manage_link("collection_keywords", "collection_id", collection_id, "keyword_id", keyword_id,
-                                 "link")
-
-    def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool:
-        return self._manage_link("collection_keywords", "collection_id", collection_id, "keyword_id", keyword_id,
-                                 "unlink")
-
-    def get_keywords_for_collection(self, collection_id: int) -> list[dict[str, Any]]:
-        keyword_table = self._map_table_for_backend("keywords")
-        order_clause = self._case_insensitive_order_clause("k.keyword")
-        query = """
-                SELECT k.* \
-                FROM {keyword_table} k \
-                         JOIN collection_keywords ck ON k.id = ck.keyword_id
-                WHERE ck.collection_id = ? \
-                  AND k.deleted = 0 \
-                {order_clause}
-                """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (collection_id,))
-        return [dict(row) for row in cursor.fetchall()]
-
-    def get_collections_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-        order_clause = self._case_insensitive_order_clause("kc.name")
-        query = """
-                SELECT kc.* \
-                FROM keyword_collections kc \
-                         JOIN collection_keywords ck ON kc.id = ck.collection_id
-                WHERE ck.keyword_id = ? \
-                  AND kc.deleted = 0
-                {order_clause} LIMIT ? \
-                OFFSET ? \
-                """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (keyword_id, limit, offset))
-        return [dict(row) for row in cursor.fetchall()]
-
-    # Note <-> Keyword
-    def link_note_to_keyword(self, note_id: str, keyword_id: int) -> bool: # note_id is str
-        return self._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "link")
-
-    def unlink_note_from_keyword(self, note_id: str, keyword_id: int) -> bool: # note_id is str
-        return self._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "unlink")
-
-    def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]: # note_id is str
-        keyword_table = self._map_table_for_backend("keywords")
-        order_clause = self._case_insensitive_order_clause("k.keyword")
-        query = """
-                SELECT k.* \
-                FROM {keyword_table} k \
-                         JOIN note_keywords nk ON k.id = nk.keyword_id
-                WHERE nk.note_id = ? \
-                  AND k.deleted = 0 \
-                {order_clause}
-                """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (note_id,))
-        return [dict(row) for row in cursor.fetchall()]
-
-    def get_keywords_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        """Return keywords for multiple notes as a map of note_id -> keywords list."""
-        if not note_ids:
-            return {}
-        keyword_table = self._map_table_for_backend("keywords")
-        order_clause = self._case_insensitive_order_clause("k.keyword")
-        out: dict[str, list[dict[str, Any]]] = {nid: [] for nid in note_ids}
-        # SQLite has a default variable cap of 999; keep a buffer to be safe.
-        max_vars = 900
-        for start in range(0, len(note_ids), max_vars):
-            batch = note_ids[start:start + max_vars]
-            placeholders = ",".join(["?"] * len(batch))
-            query = """
-                    SELECT nk.note_id AS note_id, k.* \
-                    FROM {keyword_table} k \
-                             JOIN note_keywords nk ON k.id = nk.keyword_id
-                    WHERE nk.note_id IN ({placeholders}) \
-                      AND k.deleted = 0 \
-                    {order_clause}
-                    """.format_map(locals())  # nosec B608
-            cursor = self.execute_query(query, tuple(batch))
-            rows = cursor.fetchall()
-            for row in rows:
-                record = dict(row)
-                note_id = record.pop("note_id", None)
-                if not note_id:
-                    continue
-                out.setdefault(note_id, []).append(record)
-        return out
+    # Keyword/note link helper methods are delegated to extracted stores at module bottom.
 
     @staticmethod
     def _coerce_mapping_row(row: Any) -> dict[str, Any] | None:
@@ -20972,22 +17202,79 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 out.setdefault(current_note_id, []).append(record)
         return out
 
-    def get_notes_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-        query = """
-                SELECT n.* \
-                FROM notes n \
-                         JOIN note_keywords nk ON n.id = nk.note_id
-                WHERE nk.keyword_id = ? \
-                  AND n.deleted = 0
-                ORDER BY n.last_modified DESC LIMIT ? \
-                OFFSET ? \
-                """
-        cursor = self.execute_query(query, (keyword_id, limit, offset))
-        return [dict(row) for row in cursor.fetchall()]
+    # get_notes_for_keyword is delegated to KeywordStore at module bottom.
 
     # ==========================
     # Flashcards & Decks (V5)
     # ==========================
+    @staticmethod
+    def _normalize_deck_parent_id(parent_deck_id: Any) -> int | None:
+        if parent_deck_id is None:
+            return None
+        if isinstance(parent_deck_id, bool):
+            raise InputError("parent_deck_id must be a positive integer")  # noqa: TRY003
+        try:
+            normalized = int(parent_deck_id)
+        except (TypeError, ValueError) as exc:
+            raise InputError("parent_deck_id must be a positive integer") from exc  # noqa: TRY003
+        if normalized <= 0:
+            raise InputError("parent_deck_id must be a positive integer")  # noqa: TRY003
+        return normalized
+
+    def _validate_deck_parent_locked(
+        self,
+        conn: Any,
+        *,
+        deck_id: int | None,
+        parent_deck_id: Any,
+    ) -> int | None:
+        parent_id = self._normalize_deck_parent_id(parent_deck_id)
+        if parent_id is None:
+            return None
+
+        target_deck_id = int(deck_id) if deck_id is not None else None
+        if target_deck_id is not None and parent_id == target_deck_id:
+            raise InputError("Deck cannot be its own parent")  # noqa: TRY003
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            parent_lookup_query = (
+                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 FOR UPDATE"
+            )
+            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ? FOR UPDATE"
+        else:
+            parent_lookup_query = "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0"
+            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ?"
+        parent_row = self._coerce_mapping_row(
+            conn.execute(
+                parent_lookup_query,
+                (parent_id,),
+            ).fetchone()
+        )
+        if not parent_row:
+            raise InputError("Parent deck not found")  # noqa: TRY003
+
+        if target_deck_id is None:
+            return parent_id
+
+        seen: set[int] = set()
+        current_parent_id: int | None = parent_id
+        while current_parent_id is not None:
+            if current_parent_id == target_deck_id or current_parent_id in seen:
+                raise InputError("Deck parent would create a cycle")  # noqa: TRY003
+            seen.add(current_parent_id)
+            row = self._coerce_mapping_row(
+                conn.execute(
+                    ancestor_lookup_query,
+                    (current_parent_id,),
+                ).fetchone()
+            )
+            if not row:
+                return parent_id
+            raw_parent_id = row.get("parent_deck_id")
+            current_parent_id = None if raw_parent_id is None else self._normalize_deck_parent_id(raw_parent_id)
+
+        return parent_id
+
     def add_deck(
         self,
         name: str,
@@ -20996,13 +17283,33 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         scheduler_type: str = "sm2_plus",
         workspace_id: str | None = None,
+        parent_deck_id: Any = ...,
+        visibility: str | None = None,
+        review_prompt_side: str | None = None,
     ) -> int:
         """Create a deck and return its id."""
         now = self._get_current_utc_timestamp_iso()
         scheduler_type = _coerce_scheduler_type(scheduler_type)
+        normalized_visibility = None if visibility is None else _normalize_deck_visibility(visibility)
+        visibility_for_insert = normalized_visibility or "private"
+        normalized_prompt_side = (
+            None
+            if review_prompt_side is None
+            else "back" if str(review_prompt_side).strip().lower() == "back" else "front"
+        )
+        prompt_side_for_insert = normalized_prompt_side or "front"
         scheduler_settings_json = scheduler_settings_to_json(scheduler_settings)
         try:
             with self.transaction() as conn:
+                parent_for_insert = (
+                    None
+                    if parent_deck_id is ...
+                    else self._validate_deck_parent_locked(
+                        conn,
+                        deck_id=None,
+                        parent_deck_id=parent_deck_id,
+                    )
+                )
                 # Undelete if a deck with the same name exists but is deleted
                 deleted_row = conn.execute(
                     "SELECT id, version FROM decks WHERE name = ? AND deleted = 1",
@@ -21010,29 +17317,45 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ).fetchone()
                 if deleted_row:
                     deck_id, current_version = int(deleted_row[0]), int(deleted_row[1])
+                    if parent_deck_id is not ...:
+                        self._validate_deck_parent_locked(
+                            conn,
+                            deck_id=deck_id,
+                            parent_deck_id=parent_for_insert,
+                        )
                     next_version = current_version + 1
                     deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+                    set_parts = [
+                        "deleted = ?",
+                        "last_modified = ?",
+                        "version = ?",
+                        "client_id = ?",
+                        "description = COALESCE(?, description)",
+                        "workspace_id = ?",
+                        "visibility = COALESCE(?, visibility)",
+                        "review_prompt_side = COALESCE(?, review_prompt_side)",
+                        "scheduler_type = COALESCE(?, scheduler_type)",
+                        "scheduler_settings_json = COALESCE(?, scheduler_settings_json)",
+                    ]
+                    params: list[Any] = [
+                        deleted_value,
+                        now,
+                        next_version,
+                        self.client_id,
+                        description,
+                        workspace_id,
+                        normalized_visibility,
+                        normalized_prompt_side,
+                        scheduler_type,
+                        scheduler_settings_json,
+                    ]
+                    if parent_deck_id is not ...:
+                        set_parts.append("parent_deck_id = ?")
+                        params.append(parent_for_insert)
+                    params.extend([deck_id, current_version])
                     rc = conn.execute(
-                        (
-                            "UPDATE decks SET deleted = ?, last_modified = ?, version = ?, client_id = ?, "
-                            "description = COALESCE(?, description), "
-                            "workspace_id = ?, "
-                            "scheduler_type = COALESCE(?, scheduler_type), "
-                            "scheduler_settings_json = COALESCE(?, scheduler_settings_json) "
-                            "WHERE id = ? AND version = ?"
-                        ),
-                        (
-                            deleted_value,
-                            now,
-                            next_version,
-                            self.client_id,
-                            description,
-                            workspace_id,
-                            scheduler_type,
-                            scheduler_settings_json,
-                            deck_id,
-                            current_version,
-                        ),
+                        f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND version = ?",  # nosec B608
+                        tuple(params),
                     ).rowcount
                     if rc == 0:
                         raise ConflictError(  # noqa: TRY003
@@ -21043,13 +17366,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     return deck_id
                 insert_sql = (
                     "INSERT INTO decks("
-                    "name, description, workspace_id, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
-                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 params = (
                     name,
                     description,
+                    parent_for_insert,
                     workspace_id,
+                    visibility_for_insert,
+                    prompt_side_for_insert,
                     scheduler_settings_json,
                     scheduler_type,
                     now,
@@ -21088,9 +17414,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_deleted: bool = False,
         workspace_id: str | None = None,
         include_workspace_items: bool = False,
+        shared_with_user_id: int | None = None,
     ) -> list[dict[str, Any]]:
+        if shared_with_user_id is not None:
+            query = (
+                "SELECT d.id, d.name, d.description, d.parent_deck_id, d.workspace_id, d.visibility, d.review_prompt_side, "
+                "d.scheduler_settings_json, d.scheduler_type, d.created_at, d.last_modified, "
+                "d.deleted, d.client_id, d.version FROM decks d "
+                "JOIN deck_shares ds ON ds.deck_id = d.id "
+            )
+            conditions = ["ds.user_id = ?"]
+            params_list: list[Any] = [int(shared_with_user_id)]
+            if not include_deleted:
+                conditions.append("d.deleted = 0")
+            if workspace_id is not None:
+                if include_workspace_items:
+                    conditions.append("(d.workspace_id = ? OR d.workspace_id IS NULL)")
+                else:
+                    conditions.append("d.workspace_id = ?")
+                params_list.append(workspace_id)
+            query += "WHERE " + " AND ".join(conditions) + " ORDER BY d.name LIMIT ? OFFSET ?"
+            params_list.extend([limit, offset])
+            try:
+                cursor = self.execute_query(query, tuple(params_list))
+                return [dict(row) for row in cursor.fetchall()]
+            except CharactersRAGDBError:  # noqa: TRY203
+                raise
+
         select_sql = (
-            "SELECT id, name, description, workspace_id, scheduler_settings_json, scheduler_type, created_at, last_modified, "
+            "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
             "deleted, client_id, version FROM decks "
         )
         if include_deleted:
@@ -21122,7 +17474,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_deck(self, deck_id: int) -> dict[str, Any] | None:
         """Fetch a single deck row by id."""
         query = (
-            "SELECT id, name, description, workspace_id, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
+            "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
             "FROM decks WHERE id = ?"
         )
         try:
@@ -21132,15 +17484,159 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
+    def get_deck_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
+        """Fetch one deck row by name using the repository-wide unique-name invariant."""
+        if include_deleted:
+            query = (
+                "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
+                "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? "
+                "ORDER BY id LIMIT 1"
+            )
+        else:
+            query = (
+                "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
+                "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? AND deleted = 0 "
+                "ORDER BY id LIMIT 1"
+            )
+        try:
+            cursor = self.execute_query(query, (name,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def upsert_deck_share(
+        self,
+        deck_id: int,
+        *,
+        user_id: int,
+        role: str = "viewer",
+        shared_by: int,
+    ) -> dict[str, Any]:
+        """Create or update a per-user share record for a deck owned by this DB."""
+        target_user_id = int(user_id)
+        sharing_user_id = int(shared_by)
+        if target_user_id <= 0:
+            raise InputError("user_id must be a positive integer")  # noqa: TRY003
+        if sharing_user_id <= 0:
+            raise InputError("shared_by must be a positive integer")  # noqa: TRY003
+        if target_user_id == sharing_user_id:
+            raise InputError("Cannot share a deck with its owner")  # noqa: TRY003
+
+        normalized_role = _normalize_deck_share_role(role)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                deck = conn.execute(
+                    "SELECT id FROM decks WHERE id = ? AND deleted = 0",
+                    (int(deck_id),),
+                ).fetchone()
+                if deck is None:
+                    raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
+
+                insert_sql = """
+                    INSERT INTO deck_shares(
+                        deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, 1)
+                    ON CONFLICT(deck_id, user_id) DO UPDATE SET
+                        role = excluded.role,
+                        shared_by = excluded.shared_by,
+                        last_modified = excluded.last_modified,
+                        client_id = excluded.client_id,
+                        version = deck_shares.version + 1
+                """
+                params = (
+                    int(deck_id),
+                    target_user_id,
+                    normalized_role,
+                    sharing_user_id,
+                    now,
+                    now,
+                    self.client_id,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    row = conn.execute(
+                        insert_sql
+                        + " RETURNING deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version",
+                        params,
+                    ).fetchone()
+                    return dict(row)
+
+                conn.execute(insert_sql, params)
+                row = conn.execute(
+                    """
+                    SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                      FROM deck_shares
+                     WHERE deck_id = ? AND user_id = ?
+                    """,
+                    (int(deck_id), target_user_id),
+                ).fetchone()
+                if row is None:
+                    raise CharactersRAGDBError("Failed to read deck share after upsert")  # noqa: TRY003
+                return dict(row)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to share deck: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to share deck: {exc}") from exc  # noqa: TRY003
+
+    def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
+        """List all per-user share records for a deck owned by this DB."""
+        try:
+            cursor = self.execute_query(
+                """
+                SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                  FROM deck_shares
+                 WHERE deck_id = ?
+                 ORDER BY user_id
+                """,
+                (int(deck_id),),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
+        """Fetch one per-user share record for a deck owned by this DB."""
+        try:
+            cursor = self.execute_query(
+                """
+                SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
+                  FROM deck_shares
+                 WHERE deck_id = ? AND user_id = ?
+                """,
+                (int(deck_id), int(user_id)),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
+        """Remove one per-user share record from a deck owned by this DB."""
+        try:
+            with self.transaction() as conn:
+                rowcount = conn.execute(
+                    "DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?",
+                    (int(deck_id), int(user_id)),
+                ).rowcount
+                return rowcount > 0
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to remove deck share: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to remove deck share: {exc}") from exc  # noqa: TRY003
+
     def update_deck(
         self,
         deck_id: int,
         *,
         name: str | None = None,
         description: str | None = None,
+        review_prompt_side: str | None = None,
+        visibility: str | None = None,
         scheduler_settings: Mapping[str, Any] | str | None = None,
         scheduler_type: str | None = None,
         workspace_id: Any = ...,
+        parent_deck_id: Any = ...,
         expected_version: int | None = None,
     ) -> bool:
         """Update mutable deck fields with optimistic locking."""
@@ -21152,6 +17648,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if description is not None:
             set_parts.append("description = ?")
             params.append(description)
+        if review_prompt_side is not None:
+            set_parts.append("review_prompt_side = ?")
+            params.append("back" if str(review_prompt_side).strip().lower() == "back" else "front")
+        if visibility is not None:
+            set_parts.append("visibility = ?")
+            params.append(_normalize_deck_visibility(visibility))
         if scheduler_settings is not None:
             set_parts.append("scheduler_settings_json = ?")
             params.append(scheduler_settings_to_json(scheduler_settings))
@@ -21161,6 +17663,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if workspace_id is not ...:
             set_parts.append("workspace_id = ?")
             params.append(workspace_id)
+        if parent_deck_id is not ...:
+            set_parts.append("parent_deck_id = ?")
+            params.append(self._normalize_deck_parent_id(parent_deck_id))
         if not set_parts:
             if expected_version is None:
                 return True
@@ -21186,6 +17691,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 current_version = int(row[0])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                if parent_deck_id is not ...:
+                    params[set_parts.index("parent_deck_id = ?")] = self._validate_deck_parent_locked(
+                        conn,
+                        deck_id=int(deck_id),
+                        parent_deck_id=parent_deck_id,
+                    )
 
                 params_final = params + [deck_id]
                 query = f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
@@ -21197,6 +17708,500 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Failed to update deck: {exc}") from exc  # noqa: TRY003
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to update deck: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError("Deck name already exists", entity="decks", identifier=name or deck_id) from exc  # noqa: TRY003
+            raise CharactersRAGDBError(f"Failed to update deck: {exc}") from exc  # noqa: TRY003
+
+    def _flashcard_template_default_placeholders(self, raw_definitions: Any) -> list[dict[str, Any]]:
+        if raw_definitions in (None, ""):
+            return []
+        if not isinstance(raw_definitions, list):
+            raise InputError("placeholder_definitions must be a list")  # noqa: TRY003
+        normalized: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for raw_definition in raw_definitions:
+            if not isinstance(raw_definition, Mapping):
+                raise InputError("placeholder_definitions items must be objects")  # noqa: TRY003
+            key = str(raw_definition.get("key") or "").strip()
+            label = str(raw_definition.get("label") or "").strip()
+            help_text = self._normalize_nullable_text(raw_definition.get("help_text"))
+            default_value = self._normalize_nullable_text(raw_definition.get("default_value"))
+            required = bool(raw_definition.get("required", False))
+            targets_raw = raw_definition.get("targets") or []
+            if not key:
+                raise InputError("Placeholder definitions require a non-empty key")  # noqa: TRY003
+            if key in seen_keys:
+                raise InputError(f"Duplicate placeholder definition: {key}")  # noqa: TRY003
+            if not label:
+                raise InputError(f"Placeholder definition '{key}' requires a non-empty label")  # noqa: TRY003
+            if not isinstance(targets_raw, list) or not targets_raw:
+                raise InputError(f"Placeholder definition '{key}' requires at least one target")  # noqa: TRY003
+            targets: list[str] = []
+            for target in targets_raw:
+                target_name = str(target or "").strip()
+                if target_name not in _FLASHCARD_TEMPLATE_FIELD_NAMES:
+                    raise InputError(
+                        f"Placeholder definition '{key}' has unsupported target '{target_name}'"
+                    )  # noqa: TRY003
+                if target_name not in targets:
+                    targets.append(target_name)
+            seen_keys.add(key)
+            normalized.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "help_text": help_text,
+                    "default_value": default_value,
+                    "required": required,
+                    "targets": targets,
+                }
+            )
+        return normalized
+
+    def _flashcard_template_tokens(self, text: Any) -> set[str]:
+        raw = str(text or "")
+        return {match.group(1) for match in _FLASHCARD_TEMPLATE_TOKEN_RE.finditer(raw)}
+
+    def _flashcard_template_deleted_value(self, deleted: bool) -> bool | int:
+        if self.backend_type == BackendType.POSTGRESQL:
+            return bool(deleted)
+        return 1 if deleted else 0
+
+    def _validate_flashcard_template_contract(
+        self,
+        *,
+        model_type: str,
+        front_template: Any,
+        back_template: Any,
+        notes_template: Any,
+        extra_template: Any,
+        placeholder_definitions: Any,
+    ) -> tuple[str, str, str | None, str | None, str | None, list[dict[str, Any]]]:
+        normalized_model_type = str(model_type or "").strip().lower()
+        if normalized_model_type not in ("basic", "basic_reverse", "cloze"):
+            raise InputError("model_type must be one of 'basic', 'basic_reverse', or 'cloze'")  # noqa: TRY003
+
+        normalized_front = str(front_template or "").strip()
+        if not normalized_front:
+            raise InputError("front_template is required")  # noqa: TRY003
+
+        normalized_back = self._normalize_nullable_text(back_template)
+        if normalized_model_type in ("basic", "basic_reverse") and not normalized_back:
+            raise InputError("back_template is required for basic and basic_reverse templates")  # noqa: TRY003
+
+        normalized_notes = self._normalize_nullable_text(notes_template)
+        normalized_extra = self._normalize_nullable_text(extra_template)
+        normalized_definitions = self._flashcard_template_default_placeholders(placeholder_definitions)
+        definitions_by_key = {definition["key"]: definition for definition in normalized_definitions}
+
+        fields_by_name = {
+            "front_template": normalized_front,
+            "back_template": normalized_back or "",
+            "notes_template": normalized_notes or "",
+            "extra_template": normalized_extra or "",
+        }
+        for field_name, text in fields_by_name.items():
+            tokens = self._flashcard_template_tokens(text)
+            if not tokens:
+                continue
+            missing = sorted(token for token in tokens if token not in definitions_by_key)
+            if missing:
+                raise InputError(
+                    f"{field_name} references undefined placeholder(s): {', '.join(missing)}"
+                )  # noqa: TRY003
+
+        for definition in normalized_definitions:
+            targets = definition["targets"]
+            if not any(definition["key"] in self._flashcard_template_tokens(fields_by_name[target]) for target in targets):
+                raise InputError(
+                    f"Placeholder definition '{definition['key']}' must be referenced in at least one targeted field"
+                )  # noqa: TRY003
+
+        return (
+            normalized_model_type,
+            normalized_front,
+            normalized_back,
+            normalized_notes,
+            normalized_extra,
+            normalized_definitions,
+        )
+
+    def _serialize_flashcard_template_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        item = dict(row)
+        raw_definitions = item.get("placeholder_definitions_json")
+        if isinstance(raw_definitions, str):
+            try:
+                parsed = json.loads(raw_definitions)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "_serialize_flashcard_template_row failed to parse placeholder_definitions_json "
+                    "for flashcard template {}: {}. Raw value: {}",
+                    item.get("id"),
+                    exc,
+                    raw_definitions,
+                )
+                parsed = []
+        else:
+            parsed = raw_definitions
+        if not isinstance(parsed, list):
+            parsed = []
+        item["placeholder_definitions"] = self._flashcard_template_default_placeholders(parsed)
+        item.pop("placeholder_definitions_json", None)
+        return item
+
+    def add_flashcard_template(
+        self,
+        *,
+        name: str,
+        model_type: str,
+        front_template: str,
+        back_template: str | None = None,
+        notes_template: str | None = None,
+        extra_template: str | None = None,
+        placeholder_definitions: list[dict[str, Any]] | None = None,
+    ) -> int:
+        """Create or undelete a flashcard template and return its integer id."""
+        template_name = str(name or "").strip()
+        if not template_name:
+            raise InputError("name is required")  # noqa: TRY003
+
+        (
+            normalized_model_type,
+            normalized_front,
+            normalized_back,
+            normalized_notes,
+            normalized_extra,
+            normalized_definitions,
+        ) = self._validate_flashcard_template_contract(
+            model_type=model_type,
+            front_template=front_template,
+            back_template=back_template,
+            notes_template=notes_template,
+            extra_template=extra_template,
+            placeholder_definitions=placeholder_definitions,
+        )
+
+        now = self._get_current_utc_timestamp_iso()
+        definitions_json = json.dumps(normalized_definitions)
+        deleted_value = self._flashcard_template_deleted_value(True)
+        try:
+            with self.transaction() as conn:
+                deleted_row = conn.execute(
+                    """
+                    SELECT id, version
+                      FROM flashcard_templates
+                     WHERE name = ? AND deleted = ?
+                     ORDER BY id DESC
+                     LIMIT 1
+                    """,
+                    (template_name, deleted_value),
+                ).fetchone()
+                if deleted_row:
+                    template_id = int(deleted_row[0])
+                    current_version = int(deleted_row[1])
+                    next_version = current_version + 1
+                    rc = conn.execute(
+                        """
+                        UPDATE flashcard_templates
+                           SET deleted = ?,
+                               name = ?,
+                               model_type = ?,
+                               front_template = ?,
+                               back_template = ?,
+                               notes_template = ?,
+                               extra_template = ?,
+                               placeholder_definitions_json = ?,
+                               last_modified = ?,
+                               version = ?,
+                               client_id = ?
+                         WHERE id = ? AND version = ?
+                        """,
+                        (
+                            self._flashcard_template_deleted_value(False),
+                            template_name,
+                            normalized_model_type,
+                            normalized_front,
+                            normalized_back,
+                            normalized_notes,
+                            normalized_extra,
+                            definitions_json,
+                            now,
+                            next_version,
+                            self.client_id,
+                            template_id,
+                            current_version,
+                        ),
+                    ).rowcount
+                    if rc == 0:
+                        raise ConflictError(
+                            "Failed to undelete flashcard template due to version mismatch",
+                            entity="flashcard_templates",
+                            identifier=template_name,
+                        )  # noqa: TRY003
+                    return template_id
+
+                insert_sql = """
+                    INSERT INTO flashcard_templates(
+                        name, model_type, front_template, back_template, notes_template, extra_template,
+                        placeholder_definitions_json, created_at, last_modified, deleted, client_id, version
+                    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                params = (
+                    template_name,
+                    normalized_model_type,
+                    normalized_front,
+                    normalized_back,
+                    normalized_notes,
+                    normalized_extra,
+                    definitions_json,
+                    now,
+                    now,
+                    self._flashcard_template_deleted_value(False),
+                    self.client_id,
+                    1,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    row = cursor.fetchone()
+                    template_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(insert_sql, params)
+                    template_id = int(cursor.lastrowid)
+                if template_id is None:
+                    raise CharactersRAGDBError("Failed to determine flashcard template ID after insert")  # noqa: TRY003
+                return template_id
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed: flashcard_templates.name" in str(exc):
+                raise ConflictError(
+                    "Flashcard template name already exists",
+                    entity="flashcard_templates",
+                    identifier=template_name,
+                ) from exc  # noqa: TRY003
+            raise CharactersRAGDBError(f"Failed to create flashcard template: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    "Flashcard template name already exists",
+                    entity="flashcard_templates",
+                    identifier=template_name,
+                ) from exc  # noqa: TRY003
+            raise CharactersRAGDBError(f"Failed to create flashcard template: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create flashcard template: {exc}") from exc  # noqa: TRY003
+
+    def count_flashcard_templates(self) -> int:
+        try:
+            cursor = self.execute_query(
+                "SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?",
+                (self._flashcard_template_deleted_value(False),),
+            )
+            row = cursor.fetchone()
+            return int(row["cnt"]) if row else 0
+        except CharactersRAGDBError:
+            raise
+
+    def list_flashcard_templates(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        query = (
+            "SELECT id, name, model_type, front_template, back_template, notes_template, extra_template, "
+            "placeholder_definitions_json, created_at, last_modified, deleted, client_id, version "
+            "FROM flashcard_templates WHERE deleted = ? ORDER BY name ASC LIMIT ? OFFSET ?"
+        )
+        try:
+            cursor = self.execute_query(
+                query,
+                (self._flashcard_template_deleted_value(False), limit, offset),
+            )
+            return [self._serialize_flashcard_template_row(dict(row)) for row in cursor.fetchall()]
+        except CharactersRAGDBError:
+            raise
+
+    def get_flashcard_template(self, template_id: int, *, include_deleted: bool = False) -> dict[str, Any] | None:
+        query = (
+            "SELECT id, name, model_type, front_template, back_template, notes_template, extra_template, "
+            "placeholder_definitions_json, created_at, last_modified, deleted, client_id, version "
+            "FROM flashcard_templates WHERE id = ?"
+        )
+        params: list[Any] = [template_id]
+        if not include_deleted:
+            query += " AND deleted = ?"
+            params.append(self._flashcard_template_deleted_value(False))
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            row = cursor.fetchone()
+            return self._serialize_flashcard_template_row(dict(row)) if row else None
+        except CharactersRAGDBError:
+            raise
+
+    def update_flashcard_template(
+        self,
+        template_id: int,
+        updates: dict[str, Any],
+        expected_version: int | None = None,
+    ) -> bool:
+        current = self.get_flashcard_template(template_id)
+        if not current:
+            return False
+        if not updates:
+            if expected_version is not None and int(current["version"]) != expected_version:
+                raise ConflictError(
+                    "Version mismatch updating flashcard template",
+                    entity="flashcard_templates",
+                    identifier=template_id,
+                )  # noqa: TRY003
+            return True
+
+        merged = {
+            "name": current["name"],
+            "model_type": current["model_type"],
+            "front_template": current["front_template"],
+            "back_template": current.get("back_template"),
+            "notes_template": current.get("notes_template"),
+            "extra_template": current.get("extra_template"),
+            "placeholder_definitions": current.get("placeholder_definitions") or [],
+        }
+        for key in ("name", "model_type", "front_template", "back_template", "notes_template", "extra_template", "placeholder_definitions"):
+            if key in updates:
+                merged[key] = updates[key]
+
+        (
+            normalized_model_type,
+            normalized_front,
+            normalized_back,
+            normalized_notes,
+            normalized_extra,
+            normalized_definitions,
+        ) = self._validate_flashcard_template_contract(
+            model_type=merged["model_type"],
+            front_template=merged["front_template"],
+            back_template=merged["back_template"],
+            notes_template=merged["notes_template"],
+            extra_template=merged["extra_template"],
+            placeholder_definitions=merged["placeholder_definitions"],
+        )
+        template_name = str(merged["name"] or "").strip()
+        if not template_name:
+            raise InputError("name is required")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        definitions_json = json.dumps(normalized_definitions)
+        set_parts = [
+            "name = ?",
+            "model_type = ?",
+            "front_template = ?",
+            "back_template = ?",
+            "notes_template = ?",
+            "extra_template = ?",
+            "placeholder_definitions_json = ?",
+            "last_modified = ?",
+            "version = version + 1",
+            "client_id = ?",
+        ]
+        params: list[Any] = [
+            template_name,
+            normalized_model_type,
+            normalized_front,
+            normalized_back,
+            normalized_notes,
+            normalized_extra,
+            definitions_json,
+            now,
+            self.client_id,
+        ]
+        active_value = self._flashcard_template_deleted_value(False)
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    "SELECT version FROM flashcard_templates WHERE id = ? AND deleted = ?",
+                    (template_id, active_value),
+                ).fetchone()
+                if not row:
+                    return False
+                current_version = int(row[0])
+                if expected_version is not None and current_version != expected_version:
+                    raise ConflictError(
+                        "Version mismatch updating flashcard template",
+                        entity="flashcard_templates",
+                        identifier=template_id,
+                    )  # noqa: TRY003
+
+                if expected_version is not None:
+                    params.extend([template_id, expected_version, active_value])
+                    query = f"UPDATE flashcard_templates SET {', '.join(set_parts)} WHERE id = ? AND version = ? AND deleted = ?"  # nosec B608
+                else:
+                    params.extend([template_id, active_value])
+                    query = f"UPDATE flashcard_templates SET {', '.join(set_parts)} WHERE id = ? AND deleted = ?"  # nosec B608
+                rc = conn.execute(query, tuple(params)).rowcount
+                return rc > 0
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed: flashcard_templates.name" in str(exc):
+                raise ConflictError(
+                    "Flashcard template name already exists",
+                    entity="flashcard_templates",
+                    identifier=template_name,
+                ) from exc  # noqa: TRY003
+            raise CharactersRAGDBError(f"Failed to update flashcard template: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    "Flashcard template name already exists",
+                    entity="flashcard_templates",
+                    identifier=template_name,
+                ) from exc  # noqa: TRY003
+            raise CharactersRAGDBError(f"Failed to update flashcard template: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update flashcard template: {exc}") from exc  # noqa: TRY003
+
+    def soft_delete_flashcard_template(self, template_id: int, expected_version: int) -> bool:
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    "SELECT version, deleted FROM flashcard_templates WHERE id = ?",
+                    (template_id,),
+                ).fetchone()
+                if not row:
+                    return False
+                current_version = int(row[0])
+                deleted = bool(row[1])
+                if deleted:
+                    return False
+                if current_version != expected_version:
+                    raise ConflictError(
+                        "Version mismatch deleting flashcard template",
+                        entity="flashcard_templates",
+                        identifier=template_id,
+                    )  # noqa: TRY003
+                rc = conn.execute(
+                    """
+                    UPDATE flashcard_templates
+                       SET deleted = ?,
+                           last_modified = ?,
+                           version = ?,
+                           client_id = ?
+                     WHERE id = ? AND version = ? AND deleted = ?
+                    """,
+                    (
+                        self._flashcard_template_deleted_value(True),
+                        now,
+                        expected_version + 1,
+                        self.client_id,
+                        template_id,
+                        expected_version,
+                        self._flashcard_template_deleted_value(False),
+                    ),
+                ).rowcount
+                if rc == 0:
+                    raise ConflictError(
+                        "Version mismatch deleting flashcard template",
+                        entity="flashcard_templates",
+                        identifier=template_id,
+                    )  # noqa: TRY003
+                return rc > 0
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to delete flashcard template: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to delete flashcard template: {exc}") from exc  # noqa: TRY003
 
     def _get_flashcard_id_from_uuid(self, conn: sqlite3.Connection, card_uuid: str) -> int | None:
         row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
@@ -21445,10 +18450,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         deck_id_column: str = "f.deck_id",
     ) -> tuple[str, tuple[Any, ...], bool]:
         """Return the visibility predicate and whether a deck join is required."""
+        if workspace_id is not None:
+            if deck_id is not None:
+                return f"{deck_id_column} = ? AND {deck_alias}.workspace_id = ?", (deck_id, workspace_id), True
+            return f"{deck_alias}.workspace_id = ?", (workspace_id,), True
         if deck_id is not None:
             return f"{deck_id_column} = ?", (deck_id,), False
-        if workspace_id is not None:
-            return f"{deck_alias}.workspace_id = ?", (workspace_id,), True
         if not include_workspace_items:
             return f"{deck_alias}.workspace_id IS NULL", tuple(), True
         return "", tuple(), False
@@ -21524,7 +18531,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         where_sql = " AND ".join(where_clauses)
         query = """
-            SELECT f.uuid, f.deck_id, d.name AS deck_name, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
+            SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason,
@@ -21617,6 +18624,67 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
+    def list_flashcard_tag_suggestions(
+        self,
+        q: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List global flashcard tag suggestions with per-tag usage counts."""
+        if limit <= 0:
+            return []
+
+        keyword_table = self._map_table_for_backend("keywords")
+        normalized_q = (q or "").strip()
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.extend(
+                [
+                    "f.deleted = FALSE",
+                    "kw.deleted = FALSE",
+                    "(f.deck_id IS NULL OR (d.id IS NOT NULL AND d.deleted = FALSE))",
+                ]
+            )
+        else:
+            where_clauses.extend(
+                [
+                    "f.deleted = 0",
+                    "kw.deleted = 0",
+                    "(f.deck_id IS NULL OR (d.id IS NOT NULL AND d.deleted = 0))",
+                ]
+            )
+
+        if normalized_q:
+            where_clauses.append("LOWER(kw.keyword) LIKE ?")
+            params.append(f"%{normalized_q.lower()}%")
+
+        order_keyword = self._case_insensitive_order_expression("kw.keyword")
+        where_sql = " AND ".join(where_clauses)
+        query = """
+            SELECT
+                kw.keyword AS tag,
+                COUNT(DISTINCT f.id) AS usage_count
+            FROM flashcards f
+            JOIN flashcard_keywords fk ON fk.card_id = f.id
+            JOIN {keyword_table} kw ON kw.id = fk.keyword_id
+            LEFT JOIN decks d ON d.id = f.deck_id
+            WHERE {where_sql}
+            GROUP BY kw.keyword
+            ORDER BY usage_count DESC, {order_keyword}
+            LIMIT ?
+        """.format_map(locals())  # nosec B608
+        params.append(limit)
+
+        try:
+            cursor = self.execute_query(query, tuple(params))
+            return [
+                {"tag": str(row["tag"]), "count": int(row["usage_count"] or 0)}
+                for row in cursor.fetchall()
+            ]
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
     def get_flashcards_by_uuids(self, uuids: list[str]) -> list[dict[str, Any]]:
         """Fetch multiple flashcards by UUIDs in one query. Order is not guaranteed; caller can reorder."""
         if not uuids:
@@ -21624,7 +18692,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         placeholders = ",".join(["?"] * len(uuids))
         deleted_clause = "f.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "f.deleted = 0"
         query = """
-            SELECT f.uuid, f.deck_id, d.name AS deck_name, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
+            SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason,
@@ -21818,7 +18886,443 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             'was_lapse': was_lapse,
         }
 
-    def review_flashcard(self, card_uuid: str, rating: int, answer_time_ms: int | None = None) -> dict[str, Any]:
+    def _normalize_flashcard_review_mode(self, review_mode: str) -> str:
+        normalized = str(review_mode or "").strip().lower()
+        if normalized not in _FLASHCARD_REVIEW_MODES:
+            raise InputError("review_mode must be one of: due, cram")  # noqa: TRY003
+        return normalized
+
+    def _normalize_flashcard_review_session_status(self, status: str) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized not in _FLASHCARD_REVIEW_SESSION_STATUSES:
+            raise InputError("status must be one of: active, completed, abandoned")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _normalize_flashcard_review_session_source_bundle(source_bundle_value: Any) -> list[dict[str, Any]]:
+        if isinstance(source_bundle_value, dict) and isinstance(source_bundle_value.get("items"), list):
+            source_bundle_value = source_bundle_value.get("items")
+
+        if isinstance(source_bundle_value, list):
+            return [dict(entry) for entry in source_bundle_value if isinstance(entry, dict)]
+        if isinstance(source_bundle_value, dict):
+            return [dict(source_bundle_value)]
+        return []
+
+    def _deserialize_flashcard_review_session_row(self, row: Any) -> dict[str, Any] | None:
+        item = self._deserialize_row_fields(row, _FLASHCARD_REVIEW_SESSION_JSON_FIELDS)
+        if not item:
+            return None
+
+        if item.get("cards_reviewed") is not None:
+            item["cards_reviewed"] = int(item["cards_reviewed"])
+        if item.get("correct_count") is not None:
+            item["correct_count"] = int(item["correct_count"])
+        if item.get("study_pack_id") is not None:
+            item["study_pack_id"] = int(item["study_pack_id"])
+
+        normalized_bundle = self._normalize_flashcard_review_session_source_bundle(item.get("source_bundle_json"))
+        item["source_bundle_json"] = normalized_bundle or None
+        item["source_bundle"] = normalized_bundle
+        return item
+
+    def _get_flashcard_review_session_row_for_conn(self, conn: Any, session_id: int) -> dict[str, Any] | None:
+        row = conn.execute(
+            """
+            SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                   started_at, last_activity_at, completed_at, client_id,
+                   cards_reviewed, correct_count, source_bundle_json, study_pack_id
+              FROM flashcard_review_sessions
+             WHERE id = ?
+            """,
+            (int(session_id),),
+        ).fetchone()
+        return self._deserialize_flashcard_review_session_row(row) if row else None
+
+    def _get_flashcard_review_session_reconstructed_aggregates(self, conn: Any, session_id: int) -> tuple[int, int]:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS cards_reviewed,
+                   COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0) AS correct_count
+              FROM flashcard_reviews
+             WHERE review_session_id = ?
+            """,
+            (int(session_id),),
+        ).fetchone()
+        if not row:
+            return 0, 0
+        return int(row["cards_reviewed"] or 0), int(row["correct_count"] or 0)
+
+    def _repair_flashcard_review_session_aggregates_if_unchanged(
+        self,
+        conn: Any,
+        session_id: int,
+        *,
+        expected_cards_reviewed: int | None,
+        expected_correct_count: int | None,
+        repaired_cards_reviewed: int,
+        repaired_correct_count: int,
+    ) -> bool:
+        cursor = conn.execute(
+            """
+            UPDATE flashcard_review_sessions
+               SET cards_reviewed = ?,
+                   correct_count = ?
+             WHERE id = ?
+               AND ((cards_reviewed IS NULL AND ? IS NULL) OR cards_reviewed = ?)
+               AND ((correct_count IS NULL AND ? IS NULL) OR correct_count = ?)
+            """,
+            (
+                repaired_cards_reviewed,
+                repaired_correct_count,
+                int(session_id),
+                expected_cards_reviewed,
+                expected_cards_reviewed,
+                expected_correct_count,
+                expected_correct_count,
+            ),
+        )
+        return max(0, int(getattr(cursor, "rowcount", 0) or 0)) > 0
+
+    def abandon_stale_flashcard_review_sessions(self, *, scope_key: str | None = None) -> int:
+        """Mark active review sessions as abandoned when inactive for over 30 minutes."""
+        cutoff = to_iso_z(datetime.now(timezone.utc) - _FLASHCARD_REVIEW_SESSION_TIMEOUT) or self._get_current_utc_timestamp_iso()
+        query = (
+            """
+            UPDATE flashcard_review_sessions
+               SET status = 'abandoned'
+             WHERE status = 'active'
+               AND last_activity_at < ?
+            """
+        )
+        params: list[Any] = [cutoff]
+        if scope_key:
+            query += " AND scope_key = ?"
+            params.append(scope_key)
+        cursor = self.execute_query(query, tuple(params), commit=True)
+        return max(0, int(getattr(cursor, "rowcount", 0) or 0))
+
+    def list_flashcard_review_sessions(
+        self,
+        *,
+        deck_id: int | None = None,
+        scope_key: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List persisted review sessions ordered from newest to oldest."""
+        self.abandon_stale_flashcard_review_sessions(scope_key=scope_key)
+        query_parts = [
+            """
+            SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                   started_at, last_activity_at, completed_at, client_id,
+                   cards_reviewed, correct_count, source_bundle_json, study_pack_id
+              FROM flashcard_review_sessions
+             WHERE 1 = 1
+            """
+        ]
+        params: list[Any] = []
+        if deck_id is not None:
+            query_parts.append("AND deck_id = ?")
+            params.append(int(deck_id))
+        if scope_key:
+            query_parts.append("AND scope_key = ?")
+            params.append(scope_key)
+        if status:
+            query_parts.append("AND status = ?")
+            params.append(self._normalize_flashcard_review_session_status(status))
+        query_parts.append("ORDER BY last_activity_at DESC, started_at DESC, id DESC LIMIT ?")
+        params.append(max(1, int(limit)))
+        cursor = self.execute_query(" ".join(query_parts), tuple(params))
+        return [
+            session
+            for row in cursor.fetchall()
+            if (session := self._deserialize_flashcard_review_session_row(row)) is not None
+        ]
+
+    def get_or_create_flashcard_review_session(
+        self,
+        *,
+        deck_id: int | None,
+        review_mode: str,
+        tag_filter: str | None,
+        scope_key: str,
+    ) -> dict[str, Any]:
+        """Return the authoritative active session for a scope or create a new one."""
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key:
+            raise InputError("scope_key is required")  # noqa: TRY003
+        normalized_mode = self._normalize_flashcard_review_mode(review_mode)
+        normalized_tag_filter = self._normalize_nullable_text(tag_filter)
+        self.abandon_stale_flashcard_review_sessions(scope_key=normalized_scope_key)
+        now = self._get_current_utc_timestamp_iso()
+
+        try:
+            with self.transaction() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                           started_at, last_activity_at, completed_at, client_id,
+                           cards_reviewed, correct_count, source_bundle_json, study_pack_id
+                      FROM flashcard_review_sessions
+                     WHERE scope_key = ? AND status = 'active'
+                     ORDER BY last_activity_at DESC, started_at DESC, id DESC
+                    """,
+                    (normalized_scope_key,),
+                ).fetchall()
+                if rows:
+                    authoritative = self._deserialize_flashcard_review_session_row(rows[0]) or {}
+                    if len(rows) > 1:
+                        duplicate_ids = [int(row["id"]) for row in rows[1:]]
+                        placeholders = ", ".join("?" for _ in duplicate_ids)
+                        conn.execute(
+                            f"UPDATE flashcard_review_sessions SET status = 'abandoned' WHERE id IN ({placeholders})",  # nosec B608
+                            tuple(duplicate_ids),
+                        )
+                    conn.execute(
+                        """
+                        UPDATE flashcard_review_sessions
+                           SET last_activity_at = ?
+                         WHERE id = ?
+                        """,
+                        (now, int(authoritative["id"])),
+                    )
+                    authoritative["last_activity_at"] = now
+                    return authoritative
+
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO flashcard_review_sessions(
+                            deck_id, review_mode, tag_filter, scope_key, status,
+                            started_at, last_activity_at, completed_at, cards_reviewed,
+                            correct_count, source_bundle_json, study_pack_id, client_id
+                        )
+                        VALUES(?, ?, ?, ?, 'active', ?, ?, NULL, 0, 0, NULL, NULL, ?)
+                        RETURNING id
+                        """,
+                        (
+                            int(deck_id) if deck_id is not None else None,
+                            normalized_mode,
+                            normalized_tag_filter,
+                            normalized_scope_key,
+                            now,
+                            now,
+                            self.client_id,
+                        ),
+                    )
+                    row = cursor.fetchone()
+                    session_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO flashcard_review_sessions(
+                            deck_id, review_mode, tag_filter, scope_key, status,
+                            started_at, last_activity_at, completed_at, cards_reviewed,
+                            correct_count, source_bundle_json, study_pack_id, client_id
+                        )
+                        VALUES(?, ?, ?, ?, 'active', ?, ?, NULL, 0, 0, NULL, NULL, ?)
+                        """,
+                        (
+                            int(deck_id) if deck_id is not None else None,
+                            normalized_mode,
+                            normalized_tag_filter,
+                            normalized_scope_key,
+                            now,
+                            now,
+                            self.client_id,
+                        ),
+                    )
+                    session_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+                if session_id is None:
+                    raise CharactersRAGDBError("Failed to determine flashcard review session ID after insert")  # noqa: TRY003
+                row = conn.execute(
+                    """
+                    SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                           started_at, last_activity_at, completed_at, client_id,
+                           cards_reviewed, correct_count, source_bundle_json, study_pack_id
+                      FROM flashcard_review_sessions
+                     WHERE id = ?
+                    """,
+                    (session_id,),
+                ).fetchone()
+                return self._deserialize_flashcard_review_session_row(row) or {}
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to get or create flashcard review session: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to get or create flashcard review session: {exc}") from exc  # noqa: TRY003
+
+    def get_flashcard_review_session(self, session_id: int) -> dict[str, Any] | None:
+        """Fetch a single flashcard review session by id, or None if not found."""
+        cursor = self.execute_query(
+            """
+            SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                   started_at, last_activity_at, completed_at, client_id,
+                   cards_reviewed, correct_count, source_bundle_json, study_pack_id
+              FROM flashcard_review_sessions
+             WHERE id = ?
+            """,
+            (int(session_id),),
+        )
+        row = cursor.fetchone()
+        return self._deserialize_flashcard_review_session_row(row) if row else None
+
+    def mark_flashcard_review_session_completed(self, session_id: int) -> dict[str, Any]:
+        """Mark a persisted review session as completed."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            cursor = self.execute_query(
+                """
+                UPDATE flashcard_review_sessions
+                   SET status = 'completed',
+                       last_activity_at = ?,
+                       completed_at = ?
+                 WHERE id = ?
+                """,
+                (now, now, int(session_id)),
+                commit=True,
+            )
+            if getattr(cursor, "rowcount", 0) == 0:
+                raise ConflictError("Flashcard review session not found", entity="flashcard_review_sessions", entity_id=session_id)  # noqa: TRY003
+            row = self.execute_query(
+                """
+                SELECT id, deck_id, review_mode, tag_filter, scope_key, status,
+                       started_at, last_activity_at, completed_at, client_id,
+                       cards_reviewed, correct_count, source_bundle_json, study_pack_id
+                  FROM flashcard_review_sessions
+                 WHERE id = ?
+                """,
+                (int(session_id),),
+            ).fetchone()
+            return self._deserialize_flashcard_review_session_row(row) or {}
+        except CharactersRAGDBError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise CharactersRAGDBError(f"Failed to mark flashcard review session completed: {exc}") from exc  # noqa: TRY003
+
+    def get_flashcard_review_session_rollup(
+        self,
+        session_id: int,
+        *,
+        repair_session_aggregates: bool = True,
+    ) -> dict[str, Any] | None:
+        """Return a merged session view that trusts review rows when cached aggregates drift."""
+        try:
+            with self.transaction() as conn:
+                session = self._get_flashcard_review_session_row_for_conn(conn, int(session_id))
+                if not session:
+                    return None
+
+                reconstructed_cards_reviewed, reconstructed_correct_count = (
+                    self._get_flashcard_review_session_reconstructed_aggregates(conn, int(session_id))
+                )
+                session_cards_reviewed = session.get("cards_reviewed")
+                session_correct_count = session.get("correct_count")
+                session_aggregates_match = (
+                    session_cards_reviewed is not None
+                    and session_correct_count is not None
+                    and session_cards_reviewed >= 0
+                    and session_correct_count >= 0
+                    and session_correct_count <= session_cards_reviewed
+                    and session_cards_reviewed == reconstructed_cards_reviewed
+                    and session_correct_count == reconstructed_correct_count
+                )
+
+                if session_aggregates_match:
+                    session["aggregate_source"] = "session"
+                    return session
+
+                if repair_session_aggregates:
+                    repaired = self._repair_flashcard_review_session_aggregates_if_unchanged(
+                        conn,
+                        int(session_id),
+                        expected_cards_reviewed=session_cards_reviewed,
+                        expected_correct_count=session_correct_count,
+                        repaired_cards_reviewed=reconstructed_cards_reviewed,
+                        repaired_correct_count=reconstructed_correct_count,
+                    )
+                    if repaired:
+                        session["cards_reviewed"] = reconstructed_cards_reviewed
+                        session["correct_count"] = reconstructed_correct_count
+                        session["aggregate_source"] = "reconstructed"
+                        return session
+
+                    session = self._get_flashcard_review_session_row_for_conn(conn, int(session_id))
+                    if not session:
+                        return None
+                    reconstructed_cards_reviewed, reconstructed_correct_count = (
+                        self._get_flashcard_review_session_reconstructed_aggregates(conn, int(session_id))
+                    )
+                    session_cards_reviewed = session.get("cards_reviewed")
+                    session_correct_count = session.get("correct_count")
+                    session_aggregates_match = (
+                        session_cards_reviewed is not None
+                        and session_correct_count is not None
+                        and session_cards_reviewed >= 0
+                        and session_correct_count >= 0
+                        and session_correct_count <= session_cards_reviewed
+                        and session_cards_reviewed == reconstructed_cards_reviewed
+                        and session_correct_count == reconstructed_correct_count
+                    )
+                    if session_aggregates_match:
+                        session["aggregate_source"] = "session"
+                        return session
+
+                session["cards_reviewed"] = reconstructed_cards_reviewed
+                session["correct_count"] = reconstructed_correct_count
+                session["aggregate_source"] = "reconstructed"
+                return session
+        except CharactersRAGDBError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise CharactersRAGDBError(f"Failed to fetch flashcard review session rollup: {exc}") from exc  # noqa: TRY003
+
+    def get_flashcard_reviewed_cards(self, session_id: int) -> list[dict[str, Any]]:
+        """Return reviewed flashcard metadata for a session in review order."""
+        cursor = self.execute_query(
+            """
+            SELECT f.uuid,
+                   MAX(f.tags_json) AS tags_json,
+                   MAX(f.source_ref_type) AS source_ref_type,
+                   MAX(f.source_ref_id) AS source_ref_id,
+                   MAX(d.name) AS deck_name
+              FROM flashcard_reviews fr
+              JOIN flashcards f ON f.id = fr.card_id
+              LEFT JOIN decks d ON d.id = f.deck_id
+             WHERE fr.review_session_id = ?
+             GROUP BY f.uuid
+             ORDER BY MIN(fr.id)
+            """,
+            (int(session_id),),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_latest_flashcard_review(self, card_uuid: str) -> dict[str, Any] | None:
+        """Return the most recent review row for a flashcard, including nullable session linkage."""
+        cursor = self.execute_query(
+            """
+            SELECT fr.id, fr.card_id, fr.reviewed_at, fr.rating, fr.answer_time_ms,
+                   fr.scheduled_interval_days, fr.new_ef, fr.new_repetitions, fr.was_lapse,
+                   fr.client_id, fr.scheduler_type, fr.previous_queue_state, fr.next_queue_state,
+                   fr.previous_due_at, fr.next_due_at, fr.review_session_id
+              FROM flashcard_reviews fr
+              JOIN flashcards f ON f.id = fr.card_id
+             WHERE f.uuid = ?
+             ORDER BY fr.id DESC
+             LIMIT 1
+            """,
+            (card_uuid,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def review_flashcard(
+        self,
+        card_uuid: str,
+        rating: int,
+        answer_time_ms: int | None = None,
+        review_session_id: int | None = None,
+    ) -> dict[str, Any]:
         """Submit a review for a flashcard and update scheduling. Returns updated card fields."""
         now_dt = datetime.now(timezone.utc)
         now = to_iso_z(now_dt) or self._get_current_utc_timestamp_iso()
@@ -21840,6 +19344,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if not card:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
                 card_id = int(card['id'])
+                card_deck_id = int(card["deck_id"]) if card["deck_id"] is not None else None
+                resolved_review_session_id = int(review_session_id) if review_session_id is not None else None
+                if resolved_review_session_id is None:
+                    auto_session = self.get_or_create_flashcard_review_session(
+                        deck_id=card_deck_id,
+                        review_mode="due",
+                        tag_filter=None,
+                        scope_key=f"due:deck:{card_deck_id}" if card_deck_id is not None else "due:global",
+                    )
+                    resolved_review_session_id = int(auto_session["id"])
+                if resolved_review_session_id is not None:
+                    session_row = conn.execute(
+                        """
+                        SELECT id, deck_id, status
+                          FROM flashcard_review_sessions
+                         WHERE id = ?
+                        """,
+                        (resolved_review_session_id,),
+                    ).fetchone()
+                    if not session_row:
+                        raise ConflictError(
+                            "Flashcard review session not found",
+                            entity="flashcard_review_sessions",
+                            identifier=resolved_review_session_id,
+                        )
+                    session_deck_id = int(session_row["deck_id"]) if session_row["deck_id"] is not None else None
+                    if session_deck_id != card_deck_id:
+                        raise InputError("review_session_id must match the flashcard deck scope")  # noqa: TRY003
+                    if str(session_row["status"] or "").strip().lower() != "active":
+                        raise ConflictError(
+                            "Flashcard review session is not active",
+                            entity="flashcard_review_sessions",
+                            identifier=resolved_review_session_id,
+                        )
                 previous_queue_state = coerce_queue_state(dict(card))
                 previous_due_at = self._normalize_nullable_text(card["due_at"])
                 scheduler_type = _coerce_scheduler_type(card["scheduler_type"])
@@ -21881,9 +19419,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     INSERT INTO flashcard_reviews(
                         card_id, reviewed_at, rating, answer_time_ms, scheduled_interval_days,
                         new_ef, new_repetitions, was_lapse, client_id, scheduler_type,
-                        previous_queue_state, next_queue_state, previous_due_at, next_due_at
+                        previous_queue_state, next_queue_state, previous_due_at, next_due_at, review_session_id
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         card_id,
@@ -21900,8 +19438,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         upd["queue_state"],
                         previous_due_at,
                         upd["due_at"],
+                        resolved_review_session_id,
                     )
                 )
+                if resolved_review_session_id is not None:
+                    correct_increment = 1 if int(rating) >= 3 else 0
+                    conn.execute(
+                        """
+                        UPDATE flashcard_review_sessions
+                           SET last_activity_at = ?,
+                               cards_reviewed = COALESCE(cards_reviewed, 0) + 1,
+                               correct_count = COALESCE(correct_count, 0) + ?
+                         WHERE id = ?
+                        """,
+                        (now, correct_increment, resolved_review_session_id),
+                    )
                 updated = conn.execute(
                     """
                     SELECT uuid, ef, interval_days, repetitions, lapses, due_at, last_reviewed_at,
@@ -21919,6 +19470,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     scheduler_settings_envelope=scheduler_settings,
                     now=now_dt,
                 )
+                updated_payload["review_session_id"] = resolved_review_session_id
                 return updated_payload
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to review flashcard: {e}") from e  # noqa: TRY003
@@ -22118,7 +19670,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_flashcard(self, card_uuid: str) -> dict[str, Any] | None:
         """Fetch a single flashcard by uuid (active only)."""
         query = """
-            SELECT f.uuid, f.deck_id, d.name AS deck_name, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
+            SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason, f.scheduler_state_json, d.scheduler_type,
@@ -22524,6 +20076,1235 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # unlink extras
         for kid in cur_kw_ids - desired_kw_ids:
             conn.execute("DELETE FROM flashcard_keywords WHERE card_id = ? AND keyword_id = ?", (card_id, int(kid)))
+
+    # ==========================
+    # Study Packs
+    # ==========================
+    def create_study_pack(
+        self,
+        *,
+        title: str,
+        workspace_id: str | None,
+        deck_id: int | None,
+        source_bundle_json: dict[str, Any] | str,
+        generation_options_json: dict[str, Any] | str | None,
+        status: str = "active",
+        superseded_by_pack_id: int | None = None,
+    ) -> int:
+        """Create a study pack row and return its integer id."""
+        if status not in ("active", "superseded"):
+            raise InputError("Invalid study pack status; must be 'active' or 'superseded'")  # noqa: TRY003
+
+        source_bundle_candidate: Any = source_bundle_json
+        if isinstance(source_bundle_json, str):
+            with contextlib.suppress(json.JSONDecodeError):
+                source_bundle_candidate = json.loads(source_bundle_json)
+        if isinstance(source_bundle_candidate, dict):
+            source_items = source_bundle_candidate.get("items")
+            if isinstance(source_items, list):
+                for source_item in source_items:
+                    if not isinstance(source_item, dict):
+                        continue
+                    if self._normalize_nullable_text(source_item.get("source_id")) is None:
+                        raise InputError("Study pack source_id is required")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+        source_bundle = self._ensure_json_string_from_mixed(source_bundle_json)
+        generation_options = self._ensure_json_string_from_mixed(generation_options_json)
+
+        try:
+            with self.transaction() as conn:
+                insert_sql = (
+                    "INSERT INTO study_packs("
+                    "workspace_id, title, deck_id, source_bundle_json, generation_options_json, "
+                    "status, superseded_by_pack_id, created_at, last_modified, deleted, client_id, version"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                params = (
+                    workspace_id,
+                    title,
+                    deck_id,
+                    source_bundle,
+                    generation_options,
+                    status,
+                    superseded_by_pack_id,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    row = cursor.fetchone()
+                    pack_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(insert_sql, params)
+                    pack_id = int(cursor.lastrowid)
+
+                if pack_id is None:
+                    raise CharactersRAGDBError("Failed to determine study pack ID after insert")  # noqa: TRY003
+                return pack_id
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create study pack: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create study pack: {exc}") from exc  # noqa: TRY003
+
+    _SAFE_SUGGESTION_PAYLOAD_EXACT_KEYS = frozenset(
+        {
+            "summary",
+            "topics",
+            "counts",
+            "flags",
+            "score",
+            "selected",
+            "display_label",
+            "label",
+            "topic_key",
+            "normalization_version",
+            "evidence_reasons",
+            "source_id",
+            "source_type",
+            "source_ref",
+            "ref",
+            "refs",
+            "status",
+            "available",
+            "enabled",
+            "count",
+            "source_count",
+            "total",
+            "id",
+            "ids",
+            "type",
+            "types",
+            "service",
+            "services",
+        }
+    )
+    _SAFE_SUGGESTION_PAYLOAD_SUFFIXES = (
+        "_id",
+        "_ids",
+        "_type",
+        "_types",
+        "_label",
+        "_labels",
+        "_ref",
+        "_refs",
+        "_count",
+        "_counts",
+        "_flag",
+        "_flags",
+        "_score",
+        "_status",
+    )
+    _SAFE_SUGGESTION_PAYLOAD_MAX_TEXT_LENGTH = 256
+    _SAFE_SUGGESTION_EVIDENCE_REASONS = frozenset(
+        {
+            "missed_question",
+            "source_citation",
+            "tag_match",
+            "derived_label",
+        }
+    )
+
+    @classmethod
+    def _is_safe_suggestion_payload_key(cls, key: str) -> bool:
+        normalized = str(key or "").strip().lower()
+        return normalized in cls._SAFE_SUGGESTION_PAYLOAD_EXACT_KEYS or normalized.endswith(
+            cls._SAFE_SUGGESTION_PAYLOAD_SUFFIXES
+        )
+
+    @classmethod
+    def _sanitize_suggestion_evidence_reasons(cls, value: Any) -> list[str] | None:
+        """Persist only structured evidence reason codes from the approved set."""
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            raw_items: list[Any] = [value]
+        elif isinstance(value, list | tuple | set):
+            raw_items = list(value)
+        else:
+            return None
+
+        sanitized: list[str] = []
+        for item in raw_items:
+            reason = str(item or "").strip().lower()
+            if not reason or reason not in cls._SAFE_SUGGESTION_EVIDENCE_REASONS:
+                continue
+            if reason not in sanitized:
+                sanitized.append(reason)
+        return sanitized or None
+
+    @classmethod
+    def _sanitize_suggestion_payload(cls, payload: Any, *, parent_key: str | None = None) -> Any:
+        """Persist only safe labels/refs/flags/counts by default."""
+        if isinstance(payload, dict):
+            sanitized: dict[str, Any] = {}
+            for raw_key, value in payload.items():
+                key_text = str(raw_key)
+                if not cls._is_safe_suggestion_payload_key(key_text):
+                    continue
+                if key_text.strip().lower() == "evidence_reasons":
+                    cleaned_value = cls._sanitize_suggestion_evidence_reasons(value)
+                else:
+                    cleaned_value = cls._sanitize_suggestion_payload(value, parent_key=key_text)
+                if cleaned_value in (None, {}, []):
+                    continue
+                sanitized[key_text] = cleaned_value
+            return sanitized
+
+        if isinstance(payload, list | tuple):
+            sanitized_items = [
+                cls._sanitize_suggestion_payload(item, parent_key=parent_key)
+                for item in payload
+            ]
+            return [item for item in sanitized_items if item not in (None, {}, [])]
+
+        if isinstance(payload, bool | int | float):
+            return payload
+
+        if isinstance(payload, str):
+            if not parent_key or not cls._is_safe_suggestion_payload_key(parent_key):
+                return None
+            text = payload.strip()
+            if not text or len(text) > cls._SAFE_SUGGESTION_PAYLOAD_MAX_TEXT_LENGTH:
+                return None
+            return text
+
+        return None
+
+    def create_suggestion_snapshot(
+        self,
+        *,
+        service: str,
+        activity_type: str,
+        anchor_type: str,
+        anchor_id: int,
+        suggestion_type: str,
+        payload_json: dict[str, Any] | list[Any] | str,
+        status: str = "active",
+        user_selection_json: dict[str, Any] | list[Any] | str | None = None,
+        refreshed_from_snapshot_id: int | None = None,
+    ) -> int:
+        """Create a suggestion snapshot row and return its integer id."""
+        if status not in ("active", "superseded"):
+            raise InputError("Invalid suggestion snapshot status; must be 'active' or 'superseded'")  # noqa: TRY003
+
+        sanitized_payload: Any = payload_json
+        if isinstance(payload_json, str):
+            with contextlib.suppress(json.JSONDecodeError):
+                sanitized_payload = json.loads(payload_json)
+        sanitized_payload = self._sanitize_suggestion_payload(sanitized_payload)
+        payload_value = self._ensure_json_string_from_mixed(sanitized_payload)
+        if payload_value is None:
+            raise InputError("Suggestion snapshot payload_json is required")  # noqa: TRY003
+
+        now = self._get_current_utc_timestamp_iso()
+
+        try:
+            with self.transaction() as conn:
+                if isinstance(user_selection_json, str):
+                    try:
+                        parsed_user_selection = json.loads(user_selection_json)
+                    except json.JSONDecodeError as exc:
+                        raise InputError("Suggestion snapshot user_selection_json must be valid JSON") from exc  # noqa: TRY003
+                    user_selection_value = self._ensure_json_string_from_mixed(parsed_user_selection)
+                else:
+                    user_selection_value = self._ensure_json_string_from_mixed(user_selection_json)
+
+                if refreshed_from_snapshot_id is not None:
+                    parent_row = conn.execute(
+                        """
+                        SELECT service, activity_type, anchor_type, anchor_id, suggestion_type, user_selection_json
+                          FROM suggestion_snapshots
+                         WHERE id = ? AND deleted = 0
+                        """,
+                        (refreshed_from_snapshot_id,),
+                    ).fetchone()
+                    if not parent_row:
+                        raise ConflictError(
+                            "Suggestion snapshot refresh source not found",
+                            entity="suggestion_snapshots",
+                            identifier=refreshed_from_snapshot_id,
+                        )
+                    if (
+                        str(parent_row["service"]) != str(service)
+                        or str(parent_row["activity_type"]) != str(activity_type)
+                        or str(parent_row["anchor_type"]) != str(anchor_type)
+                        or int(parent_row["anchor_id"]) != int(anchor_id)
+                        or str(parent_row["suggestion_type"]) != str(suggestion_type)
+                    ):
+                        raise InputError("refreshed_from_snapshot_id must reference the same suggestion lineage")  # noqa: TRY003
+                    if user_selection_value is None:
+                        user_selection_value = parent_row["user_selection_json"]
+                insert_sql = (
+                    "INSERT INTO suggestion_snapshots("
+                    "service, activity_type, anchor_type, anchor_id, suggestion_type, status, "
+                    "payload_json, user_selection_json, refreshed_from_snapshot_id, "
+                    "created_at, last_modified, deleted, client_id, version"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                params = (
+                    service,
+                    activity_type,
+                    anchor_type,
+                    int(anchor_id),
+                    suggestion_type,
+                    status,
+                    payload_value,
+                    user_selection_value,
+                    refreshed_from_snapshot_id,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    row = cursor.fetchone()
+                    snapshot_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(insert_sql, params)
+                    snapshot_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+                if snapshot_id is None:
+                    raise CharactersRAGDBError("Failed to determine suggestion snapshot ID after insert")  # noqa: TRY003
+                return snapshot_id
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create suggestion snapshot: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create suggestion snapshot: {exc}") from exc  # noqa: TRY003
+
+    def get_suggestion_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
+        """Fetch a single active suggestion snapshot by id."""
+        query = """
+            SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
+                   payload_json, user_selection_json, refreshed_from_snapshot_id,
+                   created_at, last_modified, deleted, client_id, version
+              FROM suggestion_snapshots
+             WHERE id = ? AND deleted = 0
+        """
+        cursor = self.execute_query(query, (snapshot_id,))
+        row = cursor.fetchone()
+        return self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
+
+    def list_suggestion_snapshots_for_anchor(
+        self,
+        anchor_type: str,
+        anchor_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
+        """List snapshots for a concrete anchor in newest-first order."""
+        deleted_clause = "1=1" if include_deleted else "deleted = 0"
+        query = f"""
+            SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
+                   payload_json, user_selection_json, refreshed_from_snapshot_id,
+                   created_at, last_modified, deleted, client_id, version
+              FROM suggestion_snapshots
+             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}
+             ORDER BY id DESC
+        """  # nosec B608
+        cursor = self.execute_query(query, (anchor_type, anchor_id))
+        return [
+            self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
+            for row in cursor.fetchall()
+            if row
+        ]
+
+    def create_suggestion_generation_link(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        target_id: str,
+        selection_fingerprint: str,
+    ) -> int:
+        """Persist one durable link per concrete snapshot/action result."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                insert_sql = (
+                    "INSERT INTO suggestion_generation_links("
+                    "snapshot_id, target_service, target_type, target_id, selection_fingerprint, "
+                    "created_at, last_modified, deleted, client_id, version"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                params = (
+                    snapshot_id,
+                    target_service,
+                    target_type,
+                    target_id,
+                    selection_fingerprint,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    row = cursor.fetchone()
+                    link_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(insert_sql, params)
+                    link_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+                if link_id is None:
+                    raise CharactersRAGDBError("Failed to determine suggestion generation link ID after insert")  # noqa: TRY003
+                return link_id
+        except sqlite3.IntegrityError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    "Suggestion generation link already exists",
+                    entity="suggestion_generation_links",
+                    identifier=f"{snapshot_id}:{target_service}:{target_type}:{selection_fingerprint}",
+                ) from exc
+            raise CharactersRAGDBError(f"Failed to create suggestion generation link: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    "Suggestion generation link already exists",
+                    entity="suggestion_generation_links",
+                    identifier=f"{snapshot_id}:{target_service}:{target_type}:{selection_fingerprint}",
+                ) from exc
+            raise CharactersRAGDBError(f"Failed to create suggestion generation link: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create suggestion generation link: {exc}") from exc  # noqa: TRY003
+
+    def find_suggestion_generation_link(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        target_id: str,
+        selection_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        """Find the durable link row for a concrete snapshot/action result."""
+        query = """
+            SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
+                   created_at, last_modified, deleted, client_id, version
+              FROM suggestion_generation_links
+             WHERE snapshot_id = ?
+               AND target_service = ?
+               AND target_type = ?
+               AND target_id = ?
+               AND selection_fingerprint = ?
+               AND deleted = 0
+             ORDER BY id DESC
+             LIMIT 1
+        """
+        cursor = self.execute_query(
+            query,
+            (snapshot_id, target_service, target_type, target_id, selection_fingerprint),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def replace_suggestion_generation_link(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        target_id: str,
+        selection_fingerprint: str,
+    ) -> int:
+        """Upsert a direct generation link without accumulating multiple active rows."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id
+                      FROM suggestion_generation_links
+                     WHERE snapshot_id = ?
+                       AND target_service = ?
+                       AND target_type = ?
+                       AND selection_fingerprint = ?
+                       AND deleted = 0
+                     ORDER BY id DESC
+                    """,
+                    (
+                        int(snapshot_id),
+                        target_service,
+                        target_type,
+                        selection_fingerprint,
+                    ),
+                ).fetchall()
+                if rows:
+                    keeper_id = int(rows[0]["id"])
+                    updated = conn.execute(
+                        """
+                        UPDATE suggestion_generation_links
+                           SET target_id = ?, last_modified = ?, version = version + 1, client_id = ?
+                         WHERE id = ? AND deleted = 0
+                        """,
+                        (
+                            str(target_id),
+                            now,
+                            self.client_id,
+                            keeper_id,
+                        ),
+                    ).rowcount
+                    stale_ids = [int(row["id"]) for row in rows[1:]]
+                    for stale_id in stale_ids:
+                        conn.execute(
+                            """
+                            UPDATE suggestion_generation_links
+                               SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
+                             WHERE id = ? AND deleted = 0
+                            """,
+                            (True, now, self.client_id, stale_id),
+                        )
+                    if updated <= 0:
+                        raise CharactersRAGDBError("Failed to update existing suggestion generation link")  # noqa: TRY003
+                    return keeper_id
+
+                insert_sql = (
+                    "INSERT INTO suggestion_generation_links("
+                    "snapshot_id, target_service, target_type, target_id, selection_fingerprint, "
+                    "created_at, last_modified, deleted, client_id, version"
+                    ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                params = (
+                    int(snapshot_id),
+                    target_service,
+                    target_type,
+                    str(target_id),
+                    selection_fingerprint,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    row = cursor.fetchone()
+                    link_id = int(row["id"]) if row else None
+                else:
+                    cursor = conn.execute(insert_sql, params)
+                    link_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+                if link_id is None:
+                    raise CharactersRAGDBError("Failed to determine suggestion generation link ID after insert")  # noqa: TRY003
+                return link_id
+        except sqlite3.IntegrityError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    "Suggestion generation link already exists",
+                    entity="suggestion_generation_links",
+                    identifier=f"{snapshot_id}:{target_service}:{target_type}:{selection_fingerprint}",
+                ) from exc
+            raise CharactersRAGDBError(f"Failed to replace suggestion generation link: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            if self._is_unique_violation(exc):
+                raise ConflictError(
+                    "Suggestion generation link already exists",
+                    entity="suggestion_generation_links",
+                    identifier=f"{snapshot_id}:{target_service}:{target_type}:{selection_fingerprint}",
+                ) from exc
+            raise CharactersRAGDBError(f"Failed to replace suggestion generation link: {exc}") from exc  # noqa: TRY003
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to replace suggestion generation link: {exc}") from exc  # noqa: TRY003
+
+    def find_suggestion_generation_link_by_fingerprint(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        selection_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        """Find an existing generation link by fingerprint without requiring the target id."""
+        query = """
+            SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
+                   created_at, last_modified, deleted, client_id, version
+              FROM suggestion_generation_links
+             WHERE snapshot_id = ?
+               AND target_service = ?
+               AND target_type = ?
+               AND selection_fingerprint = ?
+               AND deleted = 0
+             ORDER BY id DESC
+             LIMIT 1
+        """
+        cursor = self.execute_query(
+            query,
+            (int(snapshot_id), target_service, target_type, selection_fingerprint),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def finalize_suggestion_generation_link(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        selection_fingerprint: str,
+        final_target_id: str,
+    ) -> int:
+        """Replace an in-progress reservation target id with the real durable target id.
+
+        Returns the number of rows updated (0 means the reservation was not found).
+        """
+        now = self._get_current_utc_timestamp_iso()
+        pending_target_id = f"pending:{selection_fingerprint}"
+        try:
+            with self.transaction() as conn:
+                updated = conn.execute(
+                    """
+                    UPDATE suggestion_generation_links
+                       SET target_id = ?, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE snapshot_id = ?
+                       AND target_service = ?
+                       AND target_type = ?
+                       AND target_id = ?
+                       AND selection_fingerprint = ?
+                       AND deleted = 0
+                    """,
+                    (
+                        str(final_target_id),
+                        now,
+                        self.client_id,
+                        int(snapshot_id),
+                        target_service,
+                        target_type,
+                        pending_target_id,
+                        selection_fingerprint,
+                    ),
+                ).rowcount
+            return int(updated)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to finalize suggestion generation link: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to finalize suggestion generation link: {exc}") from exc  # noqa: TRY003
+
+    def soft_delete_suggestion_generation_link(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        selection_fingerprint: str,
+    ) -> int:
+        """Soft-delete active generation links matching a snapshot fingerprint."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                updated = conn.execute(
+                    """
+                    UPDATE suggestion_generation_links
+                       SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE snapshot_id = ?
+                       AND target_service = ?
+                       AND target_type = ?
+                       AND selection_fingerprint = ?
+                       AND deleted = 0
+                    """,
+                    (
+                        True,
+                        now,
+                        self.client_id,
+                        int(snapshot_id),
+                        target_service,
+                        target_type,
+                        selection_fingerprint,
+                    ),
+                ).rowcount
+            return int(updated)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to soft-delete suggestion generation link: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to soft-delete suggestion generation link: {exc}") from exc  # noqa: TRY003
+
+    def release_suggestion_generation_link_reservation(
+        self,
+        *,
+        snapshot_id: int,
+        target_service: str,
+        target_type: str,
+        selection_fingerprint: str,
+    ) -> None:
+        """Soft-delete an in-progress reservation after generation failure."""
+        now = self._get_current_utc_timestamp_iso()
+        pending_target_id = f"pending:{selection_fingerprint}"
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    UPDATE suggestion_generation_links
+                       SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE snapshot_id = ?
+                       AND target_service = ?
+                       AND target_type = ?
+                       AND target_id = ?
+                       AND selection_fingerprint = ?
+                       AND deleted = 0
+                    """,
+                    (
+                        True,
+                        now,
+                        self.client_id,
+                        int(snapshot_id),
+                        target_service,
+                        target_type,
+                        pending_target_id,
+                        selection_fingerprint,
+                    ),
+                )
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to release suggestion generation link reservation: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to release suggestion generation link reservation: {exc}") from exc  # noqa: TRY003
+
+    def soft_delete_deck_by_id(self, deck_id: int, expected_version: int | None = None) -> None:
+        """Best-effort soft-delete of a deck by id, optionally with optimistic locking."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                params: list[Any] = [
+                    True,
+                    now,
+                    self.client_id,
+                    int(deck_id),
+                ]
+                version_clause = ""
+                if expected_version is not None:
+                    version_clause = " AND version = ?"
+                    params.append(int(expected_version))
+                rowcount = conn.execute(
+                    f"""
+                    UPDATE decks
+                       SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE id = ? AND deleted = 0{version_clause}
+                    """,  # nosec B608
+                    tuple(params),
+                ).rowcount
+                if rowcount == 0 and expected_version is not None:
+                    existing = conn.execute(
+                        "SELECT id FROM decks WHERE id = ? AND deleted = 0",
+                        (int(deck_id),),
+                    ).fetchone()
+                    if existing is None:
+                        raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
+                    raise ConflictError("Version mismatch deleting deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                if rowcount > 0:
+                    conn.execute("DELETE FROM deck_shares WHERE deck_id = ?", (int(deck_id),))
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to soft-delete deck: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to soft-delete deck: {exc}") from exc  # noqa: TRY003
+
+    def get_study_pack(self, pack_id: int) -> dict[str, Any] | None:
+        """Fetch a single active study pack by id."""
+        query = """
+            SELECT id, workspace_id, title, deck_id, source_bundle_json, generation_options_json,
+                   status, superseded_by_pack_id, created_at, last_modified, deleted, client_id, version
+              FROM study_packs
+             WHERE id = ? AND deleted = 0
+        """
+        try:
+            cursor = self.execute_query(query, (pack_id,))
+            row = cursor.fetchone()
+            return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def add_study_pack_cards(self, study_pack_id: int, flashcard_uuids: list[str]) -> int:
+        """Attach flashcards to a study pack by UUID without relying on deck membership."""
+        if not flashcard_uuids:
+            return 0
+
+        now = self._get_current_utc_timestamp_iso()
+        if self.backend_type == BackendType.POSTGRESQL:
+            insert_sql = (
+                "INSERT INTO study_pack_cards("
+                "study_pack_id, flashcard_uuid, created_at, last_modified, deleted, client_id, version"
+                ") VALUES(?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT DO NOTHING"
+            )
+        else:
+            insert_sql = (
+                "INSERT OR IGNORE INTO study_pack_cards("
+                "study_pack_id, flashcard_uuid, created_at, last_modified, deleted, client_id, version"
+                ") VALUES(?, ?, ?, ?, ?, ?, ?)"
+            )
+
+        params = [
+            (study_pack_id, card_uuid, now, now, False, self.client_id, 1)
+            for card_uuid in flashcard_uuids
+        ]
+        try:
+            with self.transaction() as conn:
+                before_row = conn.execute(
+                    "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
+                    (study_pack_id,),
+                ).fetchone()
+                before_count = int(before_row[0]) if before_row else 0
+                self.execute_many(insert_sql, params, commit=False)
+                after_row = conn.execute(
+                    "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
+                    (study_pack_id,),
+                ).fetchone()
+                after_count = int(after_row[0]) if after_row else before_count
+            return max(0, after_count - before_count)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to add study pack cards: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to add study pack cards: {exc}") from exc  # noqa: TRY003
+
+    def list_study_pack_cards(self, study_pack_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        """List study pack membership rows in insertion order."""
+        deleted_clause = "1=1" if include_deleted else "spc.deleted = 0"
+        query = f"""
+            SELECT spc.id, spc.study_pack_id, spc.flashcard_uuid, spc.created_at, spc.last_modified,
+                   spc.deleted, spc.client_id, spc.version, f.deck_id
+              FROM study_pack_cards spc
+              LEFT JOIN flashcards f ON f.uuid = spc.flashcard_uuid
+             WHERE spc.study_pack_id = ? AND {deleted_clause}
+             ORDER BY spc.id
+        """  # nosec B608
+        try:
+            cursor = self.execute_query(query, (study_pack_id,))
+            return [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def add_flashcard_citations(self, flashcard_uuid: str, citations: list[dict[str, Any]]) -> int:
+        """Insert provenance citations for a flashcard."""
+        if not citations:
+            return 0
+
+        now = self._get_current_utc_timestamp_iso()
+        params: list[tuple[Any, ...]] = []
+        for citation in citations:
+            source_type = str(citation.get("source_type") or "").strip().lower()
+            if source_type not in ("note", "media", "message"):
+                raise InputError("Invalid flashcard citation source_type")  # noqa: TRY003
+            normalized_source_id = self._normalize_nullable_text(citation.get("source_id"))
+            if normalized_source_id is None:
+                raise InputError("Flashcard citation source_id is required")  # noqa: TRY003
+            normalized_locator = self._ensure_json_string_from_mixed(citation.get("locator"))
+            if isinstance(normalized_locator, str):
+                normalized_locator = normalized_locator.strip() or None
+            try:
+                ordinal = int(citation.get("ordinal", 0) or 0)
+            except (TypeError, ValueError) as exc:
+                raise InputError("Flashcard citation ordinal must be an integer >= 0") from exc  # noqa: TRY003
+            if ordinal < 0:
+                raise InputError("Flashcard citation ordinal must be >= 0")  # noqa: TRY003
+            params.append(
+                (
+                    flashcard_uuid,
+                    source_type,
+                    normalized_source_id,
+                    self._normalize_nullable_text(citation.get("citation_text")),
+                    normalized_locator,
+                    ordinal,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+            )
+
+        try:
+            with self.transaction() as _:
+                self.execute_many(
+                    """
+                    INSERT INTO flashcard_citations(
+                        flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
+                        created_at, last_modified, deleted, client_id, version
+                    )
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    params,
+                    commit=False,
+                )
+            return len(params)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to add flashcard citations: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to add flashcard citations: {exc}") from exc  # noqa: TRY003
+
+    def replace_flashcard_citations(self, flashcard_uuid: str, citations: list[dict[str, Any]]) -> int:
+        """Replace the active citation set for a flashcard with the provided rows."""
+        now = self._get_current_utc_timestamp_iso()
+        params: list[tuple[Any, ...]] = []
+        for citation in citations:
+            source_type = str(citation.get("source_type") or "").strip().lower()
+            if source_type not in ("note", "media", "message"):
+                raise InputError("Invalid flashcard citation source_type")  # noqa: TRY003
+            normalized_source_id = self._normalize_nullable_text(citation.get("source_id"))
+            if normalized_source_id is None:
+                raise InputError("Flashcard citation source_id is required")  # noqa: TRY003
+            normalized_locator = self._ensure_json_string_from_mixed(citation.get("locator"))
+            if isinstance(normalized_locator, str):
+                normalized_locator = normalized_locator.strip() or None
+            try:
+                ordinal = int(citation.get("ordinal", 0) or 0)
+            except (TypeError, ValueError) as exc:
+                raise InputError("Flashcard citation ordinal must be an integer >= 0") from exc  # noqa: TRY003
+            if ordinal < 0:
+                raise InputError("Flashcard citation ordinal must be >= 0")  # noqa: TRY003
+            params.append(
+                (
+                    flashcard_uuid,
+                    source_type,
+                    normalized_source_id,
+                    self._normalize_nullable_text(citation.get("citation_text")),
+                    normalized_locator,
+                    ordinal,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+            )
+
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    UPDATE flashcard_citations
+                       SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE flashcard_uuid = ? AND deleted = 0
+                    """,
+                    (now, self.client_id, flashcard_uuid),
+                )
+                if params:
+                    self.execute_many(
+                        """
+                        INSERT INTO flashcard_citations(
+                            flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
+                            created_at, last_modified, deleted, client_id, version
+                        )
+                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        params,
+                        commit=False,
+                    )
+            return len(params)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to replace flashcard citations: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to replace flashcard citations: {exc}") from exc  # noqa: TRY003
+
+    def replace_flashcard_citations_and_source_reference_summary(
+        self,
+        flashcard_uuid: str,
+        citations: list[dict[str, Any]],
+        *,
+        source_ref_type: str | None,
+        source_ref_id: str | None,
+    ) -> int:
+        """Atomically replace citations and mirror the primary legacy source reference."""
+        normalized_source_ref_id = self._normalize_nullable_text(source_ref_id)
+        normalized_source_ref_type = str(source_ref_type or "manual").strip().lower() or "manual"
+        if normalized_source_ref_type not in ("note", "media", "message", "manual"):
+            raise InputError("Invalid flashcard source_ref_type")  # noqa: TRY003
+        if normalized_source_ref_id is None:
+            normalized_source_ref_type = "manual"
+
+        now = self._get_current_utc_timestamp_iso()
+        params: list[tuple[Any, ...]] = []
+        for citation in citations:
+            source_type = str(citation.get("source_type") or "").strip().lower()
+            if source_type not in ("note", "media", "message"):
+                raise InputError("Invalid flashcard citation source_type")  # noqa: TRY003
+            normalized_citation_source_id = self._normalize_nullable_text(citation.get("source_id"))
+            if normalized_citation_source_id is None:
+                raise InputError("Flashcard citation source_id is required")  # noqa: TRY003
+            normalized_locator = self._ensure_json_string_from_mixed(citation.get("locator"))
+            if isinstance(normalized_locator, str):
+                normalized_locator = normalized_locator.strip() or None
+            try:
+                ordinal = int(citation.get("ordinal", 0) or 0)
+            except (TypeError, ValueError) as exc:
+                raise InputError("Flashcard citation ordinal must be an integer >= 0") from exc  # noqa: TRY003
+            if ordinal < 0:
+                raise InputError("Flashcard citation ordinal must be >= 0")  # noqa: TRY003
+            params.append(
+                (
+                    flashcard_uuid,
+                    source_type,
+                    normalized_citation_source_id,
+                    self._normalize_nullable_text(citation.get("citation_text")),
+                    normalized_locator,
+                    ordinal,
+                    now,
+                    now,
+                    False,
+                    self.client_id,
+                    1,
+                )
+            )
+
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
+                    (flashcard_uuid,),
+                ).fetchone()
+                if not row:
+                    raise ConflictError("Flashcard not found", entity="flashcards", identifier=flashcard_uuid)  # noqa: TRY003
+                conn.execute(
+                    """
+                    UPDATE flashcards
+                       SET source_ref_type = ?, source_ref_id = ?, last_modified = ?,
+                           version = version + 1, client_id = ?
+                     WHERE id = ? AND deleted = 0
+                    """,
+                    (
+                        normalized_source_ref_type,
+                        normalized_source_ref_id,
+                        now,
+                        self.client_id,
+                        int(row["id"]),
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE flashcard_citations
+                       SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE flashcard_uuid = ? AND deleted = 0
+                    """,
+                    (now, self.client_id, flashcard_uuid),
+                )
+                if params:
+                    self.execute_many(
+                        """
+                        INSERT INTO flashcard_citations(
+                            flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
+                            created_at, last_modified, deleted, client_id, version
+                        )
+                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        params,
+                        commit=False,
+                    )
+            return len(params)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(
+                f"Failed to replace flashcard citations and source summary: {exc}"
+            ) from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(
+                f"Failed to replace flashcard citations and source summary: {exc}"
+            ) from exc  # noqa: TRY003
+
+    def list_flashcard_citations(self, flashcard_uuid: str, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        """List citations for a flashcard ordered by ordinal."""
+        deleted_clause = "1=1" if include_deleted else "deleted = 0"
+        query = f"""
+            SELECT id, flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
+                   created_at, last_modified, deleted, client_id, version
+              FROM flashcard_citations
+             WHERE flashcard_uuid = ? AND {deleted_clause}
+             ORDER BY ordinal, id
+        """  # nosec B608
+        try:
+            cursor = self.execute_query(query, (flashcard_uuid,))
+            return [dict(row) for row in cursor.fetchall()]
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def set_flashcard_source_reference_summary(
+        self,
+        flashcard_uuid: str,
+        *,
+        source_ref_type: str | None,
+        source_ref_id: str | None,
+    ) -> bool:
+        """Persist the legacy flashcard source summary from the primary citation only."""
+        normalized_source_ref_id = self._normalize_nullable_text(source_ref_id)
+        normalized_source_ref_type = str(source_ref_type or "manual").strip().lower() or "manual"
+        if normalized_source_ref_type not in ("note", "media", "message", "manual"):
+            raise InputError("Invalid flashcard source_ref_type")  # noqa: TRY003
+        if normalized_source_ref_id is None:
+            normalized_source_ref_type = "manual"
+
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
+                    (flashcard_uuid,),
+                ).fetchone()
+                if not row:
+                    raise ConflictError("Flashcard not found", entity="flashcards", identifier=flashcard_uuid)  # noqa: TRY003
+                cursor = conn.execute(
+                    """
+                    UPDATE flashcards
+                       SET source_ref_type = ?, source_ref_id = ?, last_modified = ?,
+                           version = version + 1, client_id = ?
+                     WHERE id = ? AND deleted = 0
+                    """,
+                    (
+                        normalized_source_ref_type,
+                        normalized_source_ref_id,
+                        now,
+                        self.client_id,
+                        int(row["id"]),
+                    ),
+                )
+                return cursor.rowcount > 0
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update flashcard source summary: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to update flashcard source summary: {exc}") from exc  # noqa: TRY003
+
+    def get_study_pack_for_flashcard(self, flashcard_uuid: str) -> dict[str, Any] | None:
+        """Return the first active study pack containing the flashcard."""
+        query = """
+            SELECT sp.id, sp.workspace_id, sp.title, sp.deck_id, sp.source_bundle_json, sp.generation_options_json,
+                   sp.status, sp.superseded_by_pack_id, sp.created_at, sp.last_modified, sp.deleted, sp.client_id, sp.version
+              FROM study_pack_cards spc
+              JOIN study_packs sp ON sp.id = spc.study_pack_id
+             WHERE spc.flashcard_uuid = ? AND spc.deleted = 0 AND sp.deleted = 0
+             ORDER BY spc.id ASC, sp.id ASC
+             LIMIT 1
+        """
+        try:
+            cursor = self.execute_query(query, (flashcard_uuid,))
+            row = cursor.fetchone()
+            return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
+        except CharactersRAGDBError:  # noqa: TRY203
+            raise
+
+    def soft_delete_study_pack(self, pack_id: int, expected_version: int | None = None) -> bool:
+        """Soft delete a study pack with optional optimistic locking."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = conn.execute("SELECT version, deleted FROM study_packs WHERE id = ?", (pack_id,)).fetchone()
+                if not row:
+                    raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                current_version = int(row["version"])
+                deleted = bool(row["deleted"])
+                if deleted:
+                    return True
+                if expected_version is not None and current_version != expected_version:
+                    raise ConflictError("Version mismatch deleting study pack", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                update_query = """
+                    UPDATE study_packs
+                       SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
+                     WHERE id = ? AND deleted = 0
+                """
+                update_params: list[Any] = [now, self.client_id, pack_id]
+                if expected_version is not None:
+                    update_query += " AND version = ?"
+                    update_params.append(expected_version)
+                cursor = conn.execute(update_query, tuple(update_params))
+                if cursor.rowcount == 0:
+                    changed_row = conn.execute(
+                        "SELECT version, deleted FROM study_packs WHERE id = ?",
+                        (pack_id,),
+                    ).fetchone()
+                    if not changed_row:
+                        raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                    if bool(changed_row["deleted"]):
+                        return True
+                    if expected_version is not None and int(changed_row["version"]) != expected_version:
+                        raise ConflictError("Version mismatch deleting study pack", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                    raise ConflictError(
+                        "Concurrent update deleting study pack",
+                        entity="study_packs",
+                        identifier=pack_id,
+                    )
+                return True
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Failed to delete study pack: {exc}") from exc  # noqa: TRY003
+
+    def supersede_study_pack(
+        self,
+        pack_id: int,
+        *,
+        superseded_by_pack_id: int,
+        expected_version: int | None = None,
+    ) -> bool:
+        """Mark a study pack superseded by another pack."""
+        if superseded_by_pack_id == pack_id:
+            raise InputError("Study pack cannot self-supersede")  # noqa: TRY003
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                if self.backend_type == BackendType.POSTGRESQL:
+                    locked_rows: dict[int, Any] = {}
+                    for locked_pack_id in sorted((pack_id, superseded_by_pack_id)):
+                        locked_row = conn.execute(
+                            "SELECT id, version, deleted FROM study_packs WHERE id = ? FOR UPDATE",
+                            (locked_pack_id,),
+                        ).fetchone()
+                        if locked_row:
+                            locked_rows[int(locked_row["id"])] = locked_row
+                    row = locked_rows.get(pack_id)
+                    replacement_row = locked_rows.get(superseded_by_pack_id)
+                else:
+                    row = conn.execute("SELECT version, deleted FROM study_packs WHERE id = ?", (pack_id,)).fetchone()
+                    replacement_row = conn.execute(
+                        "SELECT id, deleted FROM study_packs WHERE id = ?",
+                        (superseded_by_pack_id,),
+                    ).fetchone()
+
+                if not row or bool(row["deleted"]):
+                    raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                current_version = int(row["version"])
+                if expected_version is not None and current_version != expected_version:
+                    raise ConflictError("Version mismatch updating study pack", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                if not replacement_row:
+                    raise ConflictError(
+                        "Study pack replacement pack not found",
+                        entity="study_packs",
+                        identifier=superseded_by_pack_id,
+                    )
+                if bool(replacement_row["deleted"]):
+                    raise ConflictError(
+                        "Study pack replacement pack is deleted",
+                        entity="study_packs",
+                        identifier=superseded_by_pack_id,
+                    )
+                update_query = """
+                    UPDATE study_packs
+                       SET status = 'superseded',
+                           superseded_by_pack_id = ?,
+                           last_modified = ?,
+                           version = version + 1,
+                           client_id = ?
+                     WHERE id = ? AND deleted = 0
+                """
+                update_params: list[Any] = [superseded_by_pack_id, now, self.client_id, pack_id]
+                if expected_version is not None:
+                    update_query += " AND version = ?"
+                    update_params.append(expected_version)
+                cursor = conn.execute(update_query, tuple(update_params))
+                if cursor.rowcount == 0:
+                    changed_row = conn.execute(
+                        "SELECT version, deleted FROM study_packs WHERE id = ?",
+                        (pack_id,),
+                    ).fetchone()
+                    if not changed_row:
+                        raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                    if bool(changed_row["deleted"]):
+                        raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                    if expected_version is not None and int(changed_row["version"]) != expected_version:
+                        raise ConflictError("Version mismatch updating study pack", entity="study_packs", identifier=pack_id)  # noqa: TRY003
+                    raise ConflictError(
+                        "Concurrent update superseding study pack",
+                        entity="study_packs",
+                        identifier=pack_id,
+                    )
+                return True
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Failed to supersede study pack: {exc}") from exc  # noqa: TRY003
 
     # ==========================
     # Quizzes (V12)
@@ -23533,6 +22314,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         question_ids: list[int],
         target_deck_id: int | None = None,
         create_deck_name: str | None = None,
+        create_deck_review_prompt_side: str | None = None,
         create_deck_scheduler_type: str | None = None,
         create_deck_scheduler_settings: Mapping[str, Any] | str | None = None,
         replace_active: bool = False,
@@ -23599,6 +22381,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         description=None,
                         scheduler_type=_coerce_scheduler_type(create_deck_scheduler_type),
                         scheduler_settings=create_deck_scheduler_settings,
+                        review_prompt_side=create_deck_review_prompt_side,
                     )
                     deck = self.get_deck(int(created_deck_id))
                     target_deck = {
@@ -24591,6 +23374,214 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         return self._soft_delete_generic_item("writing_sessions", session_id, expected_version, pk_col_name="id")
 
+    def restore_writing_session(
+        self,
+        session_id: str,
+        *,
+        name: str,
+        payload: dict,
+        schema_version: int,
+        version_parent_id: str | None,
+    ) -> None:
+        """Restore a soft-deleted writing session while preserving its ID."""
+        existing = self.get_writing_session(session_id, include_deleted=True)
+        if not existing:
+            raise ConflictError(
+                f"Session with ID '{session_id}' not found.",
+                entity="writing_sessions",
+                entity_id=session_id,
+            )
+        payload_json = json.dumps(payload, ensure_ascii=True)
+        next_version = int(existing.get("version") or 1) + 1
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE writing_sessions
+                   SET name = ?,
+                       payload_json = ?,
+                       schema_version = ?,
+                       version_parent_id = ?,
+                       deleted = 0,
+                       last_modified = CURRENT_TIMESTAMP,
+                       version = ?,
+                       client_id = ?
+                 WHERE id = ?
+                """,
+                (
+                    name,
+                    payload_json,
+                    int(schema_version),
+                    version_parent_id,
+                    next_version,
+                    self.client_id,
+                    session_id,
+                ),
+            )
+
+    def import_writing_snapshot(
+        self,
+        *,
+        mode: str,
+        sessions: list[dict[str, Any]],
+        templates: list[dict[str, Any]],
+        themes: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Atomically import a writing snapshot (sessions, templates, themes).
+
+        All operations execute on a single connection within one transaction
+        so a failure mid-import triggers a full rollback.
+
+        Args:
+            mode: ``"merge"`` or ``"replace"``.
+            sessions: List of session dicts with keys: name, payload, schema_version,
+                      id (optional), version_parent_id (optional).
+            templates: List of template dicts with keys: name, payload, schema_version,
+                       version_parent_id (optional), is_default (optional).
+            themes: List of theme dicts with keys: name, class_name, css, schema_version,
+                    version_parent_id (optional), is_default (optional), order_index (optional).
+
+        Returns:
+            Dict with counts: ``{"sessions": N, "templates": N, "themes": N}``.
+        """
+        now = self._get_current_utc_timestamp_iso()
+        imported = {"sessions": 0, "templates": 0, "themes": 0}
+
+        with self.transaction() as conn:
+            # --- replace mode: soft-delete all existing items ---
+            if mode == "replace":
+                conn.execute(
+                    "UPDATE writing_sessions SET deleted = 1, last_modified = ?, client_id = ? "
+                    "WHERE deleted = 0",
+                    (now, self.client_id),
+                )
+                conn.execute(
+                    "UPDATE writing_templates SET deleted = 1, last_modified = ?, client_id = ? "
+                    "WHERE deleted = 0",
+                    (now, self.client_id),
+                )
+                conn.execute(
+                    "UPDATE writing_themes SET deleted = 1, last_modified = ?, client_id = ? "
+                    "WHERE deleted = 0",
+                    (now, self.client_id),
+                )
+
+            # --- sessions ---
+            for s in sessions:
+                s_name = self._normalize_writing_name(s["name"], "Session")
+                s_payload = json.dumps(s["payload"], ensure_ascii=True)
+                s_schema = int(s.get("schema_version") or 1)
+                s_vp = self._normalize_nullable_text(s.get("version_parent_id"))
+                s_id = (s.get("id") or "").strip() or None
+
+                if s_id:
+                    row = conn.execute(
+                        "SELECT version, deleted FROM writing_sessions WHERE id = ?",
+                        (s_id,),
+                    ).fetchone()
+                    if row is not None:
+                        cur_ver = int(row[0] if isinstance(row, (list, tuple)) else row["version"])
+                        is_deleted = bool(row[1] if isinstance(row, (list, tuple)) else row["deleted"])
+                        if is_deleted:
+                            conn.execute(
+                                "UPDATE writing_sessions SET name=?, payload_json=?, schema_version=?, "
+                                "version_parent_id=?, deleted=0, last_modified=?, version=?, client_id=? "
+                                "WHERE id=?",
+                                (s_name, s_payload, s_schema, s_vp, now, cur_ver + 1, self.client_id, s_id),
+                            )
+                        else:
+                            conn.execute(
+                                "UPDATE writing_sessions SET name=?, payload_json=?, schema_version=?, "
+                                "version_parent_id=?, last_modified=?, version=?, client_id=? "
+                                "WHERE id=?",
+                                (s_name, s_payload, s_schema, s_vp, now, cur_ver + 1, self.client_id, s_id),
+                            )
+                    else:
+                        conn.execute(
+                            "INSERT INTO writing_sessions "
+                            "(id, name, payload_json, schema_version, version_parent_id, "
+                            "created_at, last_modified, deleted, client_id, version) "
+                            "VALUES (?,?,?,?,?,?,?,0,?,1)",
+                            (s_id, s_name, s_payload, s_schema, s_vp, now, now, self.client_id),
+                        )
+                else:
+                    new_id = self._generate_uuid()
+                    conn.execute(
+                        "INSERT INTO writing_sessions "
+                        "(id, name, payload_json, schema_version, version_parent_id, "
+                        "created_at, last_modified, deleted, client_id, version) "
+                        "VALUES (?,?,?,?,?,?,?,0,?,1)",
+                        (new_id, s_name, s_payload, s_schema, s_vp, now, now, self.client_id),
+                    )
+                imported["sessions"] += 1
+
+            # --- templates ---
+            for t in templates:
+                t_name = self._normalize_writing_name(t["name"], "Template")
+                t_payload = json.dumps(t["payload"], ensure_ascii=True)
+                t_schema = int(t.get("schema_version") or 1)
+                t_vp = self._normalize_nullable_text(t.get("version_parent_id"))
+                t_default = 1 if t.get("is_default") else 0
+
+                row = conn.execute(
+                    "SELECT id, version FROM writing_templates WHERE name = ?",
+                    (t_name,),
+                ).fetchone()
+                if row is not None:
+                    template_id = int(row[0] if isinstance(row, (list, tuple)) else row["id"])
+                    cur_ver = int(row[1] if isinstance(row, (list, tuple)) else row["version"])
+                    conn.execute(
+                        "UPDATE writing_templates SET payload_json=?, schema_version=?, "
+                        "version_parent_id=?, is_default=?, deleted=0, last_modified=?, version=?, client_id=? "
+                        "WHERE id=?",
+                        (t_payload, t_schema, t_vp, t_default, now, cur_ver + 1, self.client_id, template_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO writing_templates "
+                        "(name, payload_json, schema_version, version_parent_id, is_default, "
+                        "created_at, last_modified, deleted, client_id, version) "
+                        "VALUES (?,?,?,?,?,?,?,0,?,1)",
+                        (t_name, t_payload, t_schema, t_vp, t_default, now, now, self.client_id),
+                    )
+                imported["templates"] += 1
+
+            # --- themes ---
+            for th in themes:
+                th_name = self._normalize_writing_name(th["name"], "Theme")
+                th_class = str(th.get("class_name") or "").strip()
+                th_css = str(th.get("css") or "").strip()
+                th_schema = int(th.get("schema_version") or 1)
+                th_vp = self._normalize_nullable_text(th.get("version_parent_id"))
+                th_default = 1 if th.get("is_default") else 0
+                th_order = int(th.get("order_index") or 0)
+
+                row = conn.execute(
+                    "SELECT id, version FROM writing_themes WHERE name = ?",
+                    (th_name,),
+                ).fetchone()
+                if row is not None:
+                    theme_id = int(row[0] if isinstance(row, (list, tuple)) else row["id"])
+                    cur_ver = int(row[1] if isinstance(row, (list, tuple)) else row["version"])
+                    conn.execute(
+                        "UPDATE writing_themes SET class_name=?, css=?, schema_version=?, "
+                        "version_parent_id=?, is_default=?, order_index=?, deleted=0, last_modified=?, "
+                        "version=?, client_id=? WHERE id=?",
+                        (th_class, th_css, th_schema, th_vp, th_default, th_order, now,
+                         cur_ver + 1, self.client_id, theme_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO writing_themes "
+                        "(name, class_name, css, schema_version, version_parent_id, is_default, "
+                        "order_index, created_at, last_modified, deleted, client_id, version) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,0,?,1)",
+                        (th_name, th_class, th_css, th_schema, th_vp, th_default, th_order,
+                         now, now, self.client_id),
+                    )
+                imported["themes"] += 1
+
+        return imported
+
     def clone_writing_session(self, session_id: str, *, name: str | None = None) -> dict[str, Any]:
         """
         Clone a writing session, optionally renaming the copy.
@@ -25251,6 +24242,294 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:
             logger.error(f"Error fetching latest sync log change_id: {e}")
             raise
+
+
+def _delegate_store_method(store_attr: str, method_name: str) -> Callable[..., Any]:
+    def _delegated(self: CharactersRAGDB, *args: Any, **kwargs: Any) -> Any:
+        return getattr(getattr(self, store_attr), method_name)(*args, **kwargs)
+
+    _delegated.__name__ = method_name
+    _delegated.__qualname__ = f"CharactersRAGDB.{method_name}"
+    return _delegated
+
+
+def _delegate_conversation_store_method(method_name: str) -> Callable[..., Any]:
+    return _delegate_store_method("conversation_store", method_name)
+
+
+for _conversation_store_method in (
+    "_ensure_conversation_settings_table",
+    "upsert_conversation_settings",
+    "get_conversation_settings",
+    "_normalize_conversation_state",
+    "_normalize_conversation_character_scope",
+    "_conversation_character_scope_clause",
+    "_conversation_deleted_scope_clause",
+    "_normalize_scope",
+    "_normalize_conversation_assistant_identity",
+    "add_conversation",
+    "get_conversation_by_id",
+    "get_conversation_by_source_ref",
+    "conversation_title_exists",
+    "get_conversations_for_character",
+    "count_conversations_for_user",
+    "count_conversations_for_user_by_character",
+    "get_conversations_for_user",
+    "get_conversations_for_user_and_character",
+    "get_conversation_cluster",
+    "update_conversation",
+    "soft_delete_conversation",
+    "restore_conversation",
+    "hard_delete_conversation",
+    "search_conversations_by_title",
+    "_normalize_conversation_search_order",
+    "_build_conversation_search_filters",
+    "_conversation_deleted_text_search_clause",
+    "search_conversations",
+    "search_conversations_page",
+):
+    setattr(
+        CharactersRAGDB,
+        _conversation_store_method,
+        _delegate_conversation_store_method(_conversation_store_method),
+    )
+
+
+for _character_store_method in (
+    "add_character_card",
+    "get_character_card_by_id",
+    "get_character_card_by_name",
+    "list_character_cards",
+    "query_character_cards",
+    "query_character_setup_options",
+    "get_character_setup_option_by_id",
+    "_normalize_character_tags_for_operation",
+    "_apply_character_tag_operation_to_list",
+    "manage_character_tags",
+    "update_character_card",
+    "soft_delete_character_card",
+    "restore_character_card",
+    "search_character_cards",
+    "search_character_cards_by_tags",
+    "_check_json_support",
+    "_search_cards_by_tags_json",
+    "_search_cards_by_tags_fallback",
+    "_estimate_text_token_count",
+    "_normalize_exemplar_enum",
+    "_normalize_exemplar_string_list",
+    "_normalize_character_exemplar_row",
+    "add_character_exemplar",
+    "get_character_exemplar_by_id",
+    "list_character_exemplars",
+    "update_character_exemplar",
+    "soft_delete_character_exemplar",
+    "search_character_exemplars",
+):
+    setattr(
+        CharactersRAGDB,
+        _character_store_method,
+        _delegate_store_method("character_store", _character_store_method),
+    )
+
+
+for _message_store_method in (
+    "add_message",
+    "_insert_message_images",
+    "append_message_image",
+    "get_message_images",
+    "get_message_conversation_id",
+    "get_message_by_id",
+    "get_messages_for_conversation",
+    "count_root_messages_for_conversation",
+    "get_root_messages_for_conversation",
+    "get_messages_for_conversation_by_parent_ids",
+    "has_system_message_for_conversation",
+    "update_message",
+    "soft_delete_message",
+    "search_messages_by_content",
+    "add_message_metadata",
+    "get_message_metadata",
+    "get_message_metadata_map",
+    "set_message_metadata_extra",
+    "set_message_rag_context",
+    "get_message_rag_context",
+    "get_messages_with_rag_context",
+    "count_messages_for_conversation",
+    "count_messages_for_conversations",
+    "get_latest_message_for_conversation",
+    "count_messages_since",
+):
+    setattr(
+        CharactersRAGDB,
+        _message_store_method,
+        _delegate_store_method("message_store", _message_store_method),
+    )
+
+
+for _note_store_method in (
+    "add_note",
+    "get_note_by_id",
+    "get_note_studio_document",
+    "create_note_studio_document",
+    "upsert_note_studio_document",
+    "list_notes",
+    "list_deleted_notes",
+    "get_notes_batch",
+    "get_all_note_ids_for_graph",
+    "get_note_tag_edges",
+    "count_notes",
+    "count_deleted_notes",
+    "count_user_notes",
+    "count_notes_per_tag",
+    "get_note_source_info",
+    "update_note",
+    "soft_delete_note",
+    "delete_note",
+    "restore_note",
+    "search_notes",
+    "search_notes_with_keywords",
+    "link_note_to_keyword",
+    "unlink_note_from_keyword",
+    "unlink_note_to_keyword",
+    "get_keywords_for_note",
+    "get_keywords_for_notes",
+    "get_note_counts_for_keywords",
+):
+    setattr(
+        CharactersRAGDB,
+        _note_store_method,
+        _delegate_store_method("note_store", _note_store_method),
+    )
+
+
+for _keyword_store_method in (
+    "add_keyword",
+    "get_keyword_by_id",
+    "get_keyword_by_text",
+    "list_keywords",
+    "count_keywords",
+    "soft_delete_keyword",
+    "rename_keyword",
+    "_merge_keyword_links_for_table",
+    "merge_keywords",
+    "search_keywords",
+    "add_keyword_collection",
+    "get_keyword_collection_by_id",
+    "get_keyword_collection_by_name",
+    "list_keyword_collections",
+    "count_keyword_collections",
+    "update_keyword_collection",
+    "soft_delete_keyword_collection",
+    "search_keyword_collections",
+    "link_conversation_to_keyword",
+    "unlink_conversation_from_keyword",
+    "get_keywords_for_conversation",
+    "get_keywords_for_conversations",
+    "count_conversation_keyword_links",
+    "get_conversations_for_keyword",
+    "link_collection_to_keyword",
+    "unlink_collection_from_keyword",
+    "unlink_collection_to_keyword",
+    "get_keywords_for_collection",
+    "count_collection_keyword_links",
+    "get_collections_for_keyword",
+    "get_notes_for_keyword",
+):
+    setattr(
+        CharactersRAGDB,
+        _keyword_store_method,
+        _delegate_store_method("keyword_store", _keyword_store_method),
+    )
+
+
+for _persona_state_store_method in (
+    "_ensure_persona_live_voice_session_summaries_table",
+    "upsert_persona_live_voice_session_summary",
+    "list_persona_live_voice_session_summaries",
+    "get_persona_live_voice_session_summary",
+    "_ensure_persona_setup_events_table",
+    "_persona_setup_event_row_to_dict",
+    "_decode_persona_json_object",
+    "record_persona_setup_event",
+    "list_persona_setup_events",
+    "get_persona_setup_analytics_summary",
+    "_persona_profile_row_to_dict",
+    "_persona_buddy_row_to_dict",
+    "_decode_persona_json_list",
+    "_persona_visual_pack_row_to_dict",
+    "_persona_visual_asset_row_to_dict",
+    "_persona_visual_candidate_row_to_dict",
+    "_persona_visual_library_item_row_to_dict",
+    "_normalize_persona_visual_library_tags",
+    "_require_persona_visual_library_item_owner",
+    "_normalize_persona_visual_enum",
+    "_require_persona_visual_pack_owner",
+    "_persona_scope_rule_row_to_dict",
+    "_persona_policy_rule_row_to_dict",
+    "_persona_session_row_to_dict",
+    "_normalize_persona_session_activity_surface",
+    "_persona_memory_row_to_dict",
+    "_persona_exemplar_row_to_dict",
+    "_require_active_persona_profile_owner",
+    "_normalize_persona_exemplar_tone",
+    "create_persona_exemplar",
+    "get_persona_exemplar",
+    "list_persona_exemplars",
+    "update_persona_exemplar",
+    "soft_delete_persona_exemplar",
+    "create_persona_profile",
+    "get_persona_profile",
+    "list_persona_profiles",
+    "update_persona_profile",
+    "soft_delete_persona_profile",
+    "restore_persona_profile",
+    "get_persona_buddy",
+    "list_persona_buddies",
+    "upsert_persona_buddy",
+    "create_persona_visual_pack",
+    "get_persona_visual_pack",
+    "list_persona_visual_packs",
+    "get_active_persona_visual_pack",
+    "activate_persona_visual_pack",
+    "deactivate_persona_visual_pack",
+    "update_persona_visual_pack_manifest",
+    "update_persona_visual_pack_status",
+    "soft_delete_persona_visual_pack_with_assets",
+    "upsert_persona_visual_library_item",
+    "list_persona_visual_library_items",
+    "get_persona_visual_library_item",
+    "get_persona_visual_library_item_by_source",
+    "update_persona_visual_library_item",
+    "soft_delete_persona_visual_library_item",
+    "create_persona_visual_asset",
+    "get_persona_visual_asset",
+    "list_persona_visual_assets",
+    "create_persona_visual_candidate",
+    "get_persona_visual_candidate",
+    "list_persona_visual_candidates",
+    "update_persona_visual_candidate_status",
+    "list_persona_scope_rules",
+    "replace_persona_scope_rules",
+    "list_persona_policy_rules",
+    "replace_persona_policy_rules",
+    "create_persona_session",
+    "get_persona_session",
+    "list_persona_sessions",
+    "update_persona_session",
+    "add_persona_memory_entry",
+    "list_persona_memory_entries",
+    "get_persona_memory_entry_by_id",
+    "count_persona_memory_entries",
+    "set_persona_memory_archived",
+    "update_persona_memory_entry",
+    "backfill_persona_memory_scope_namespace",
+    "soft_delete_persona_memory_entry",
+):
+    setattr(
+        CharactersRAGDB,
+        _persona_state_store_method,
+        _delegate_store_method("persona_state_store", _persona_state_store_method),
+    )
 
 
 # --- Transaction Context Manager Class (Helper for `with db.transaction():`) ---

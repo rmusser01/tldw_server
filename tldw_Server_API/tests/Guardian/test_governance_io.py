@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+import tldw_Server_API.app.core.Moderation.governance_io as governance_io_module
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 from tldw_Server_API.app.core.Moderation.governance_io import (
     GovernanceExportBundle,
@@ -173,3 +174,49 @@ class TestImport:
         counts = import_governance_rules(db, "user1", {})
         assert counts["governance_policies"] == 0
         assert counts["self_monitoring_rules"] == 0
+
+    def test_import_governance_policy_warning_sanitizes_backend_details(self, monkeypatch, db):
+        def fail_create_policy(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise ValueError("policy import failed at /private/governance-import.json")
+
+        monkeypatch.setattr(db, "create_governance_policy", fail_create_policy)
+        bundle_data = {
+            "governance_policies": [
+                {"id": "old-gp-1", "name": "Imported Policy"},
+            ],
+        }
+
+        messages: list[str] = []
+        sink_id = governance_io_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            counts = import_governance_rules(db, "user1", bundle_data)
+        finally:
+            governance_io_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert counts["governance_policies"] == 0
+        assert "Failed to import governance policy" in joined
+        assert "governance-import.json" not in joined
+
+    def test_import_self_monitoring_warning_sanitizes_backend_details(self, monkeypatch, db):
+        def fail_create_rule(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise ValueError("rule import failed at /private/selfmon-import.json")
+
+        monkeypatch.setattr(db, "create_self_monitoring_rule", fail_create_rule)
+        bundle_data = {
+            "self_monitoring_rules": [
+                {"name": "Imported Rule", "patterns": ["imported_pattern"]},
+            ],
+        }
+
+        messages: list[str] = []
+        sink_id = governance_io_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            counts = import_governance_rules(db, "user1", bundle_data)
+        finally:
+            governance_io_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert counts["self_monitoring_rules"] == 0
+        assert "Failed to import self-monitoring rule" in joined
+        assert "selfmon-import.json" not in joined

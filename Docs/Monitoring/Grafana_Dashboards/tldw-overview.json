@@ -20,7 +20,7 @@
       "type": "stat",
       "title": "Request Rate (req/s)",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "sum(rate(http_requests_total[5m]))",
@@ -35,7 +35,7 @@
       "type": "stat",
       "title": "5xx Error Rate",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))",
@@ -50,7 +50,7 @@
       "type": "stat",
       "title": "Memory Usage",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "process_resident_memory_bytes",
@@ -65,7 +65,7 @@
       "type": "stat",
       "title": "CPU Usage",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "rate(process_cpu_seconds_total[5m])",
@@ -80,7 +80,7 @@
       "type": "timeseries",
       "title": "HTTP Request Rate",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "sum(rate(http_requests_total[5m])) by (method)",
@@ -93,7 +93,7 @@
       "type": "timeseries",
       "title": "HTTP Error Rate (5xx)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (handler)",
@@ -106,7 +106,7 @@
       "type": "timeseries",
       "title": "Request Latency (p50 / p95 / p99)",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",

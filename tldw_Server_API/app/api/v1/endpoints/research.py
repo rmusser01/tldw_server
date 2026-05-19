@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 
 #
 # Local Imports
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.research_schemas import (
     ArxivPaper,
     ArxivSearchRequestForm,
@@ -31,7 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.websearch_schemas import (
     WebSearchRawResponse,
     WebSearchRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user  # For User dependency
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
@@ -73,6 +74,31 @@ def shutdown_websearch_executor(*, wait: bool = True, cancel_futures: bool = Tru
     _WEBSEARCH_EXECUTOR = None
     if executor is not None:
         executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+
+
+def _get_phase1_fatal_error(phase1: dict[str, Any]) -> HTTPException | None:
+    """Convert fatal provider failures with no results into an HTTP error."""
+    web_results = phase1.get("web_search_results_dict")
+    if not isinstance(web_results, dict):
+        return None
+
+    results = web_results.get("results")
+    if isinstance(results, list) and results:
+        return None
+
+    error_message = web_results.get("processing_error") or web_results.get("error")
+    if not error_message:
+        warnings = web_results.get("warnings")
+        if isinstance(warnings, list):
+            for warning in warnings:
+                if isinstance(warning, dict) and warning.get("phase") == "provider" and warning.get("message"):
+                    error_message = warning["message"]
+                    break
+
+    if not error_message:
+        return None
+
+    return HTTPException(status_code=502, detail="Websearch failed")
 
 #
 #########################################################################################################################
@@ -136,8 +162,11 @@ async def arxiv_search_endpoint(
     except HTTPException:  # Re-raise if it's already an HTTPException
         raise
     except Exception as e:
-        logger.error(f"Unexpected error during arXiv search execution: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while searching arXiv: {str(e)}") from e
+        logger.error("Unexpected error during arXiv search execution")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while searching arXiv",
+        ) from e
 
     total_pages_calculated = math.ceil(
         total_results_from_api / search_params.results_per_page) if search_params.results_per_page > 0 else 0
@@ -155,6 +184,12 @@ async def arxiv_search_endpoint(
         page=search_params.page,
         results_per_page=search_params.results_per_page,
         total_pages=total_pages_calculated,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_from_api,
+            total_pages=total_pages_calculated,
+        ),
     )
 
 # FIXME - This needs to be updated/Integrated
@@ -187,7 +222,8 @@ def process_and_ingest_arxiv_paper(paper_id, additional_keywords):
 
         return f"arXiv paper '{title}' ingested successfully."
     except Exception as e:
-        return f"Error processing arXiv paper: {str(e)}"
+        logger.error("Error processing arXiv paper")
+        return "Error processing arXiv paper"
 #
 # End of arxiv_search_endpoint
 ###########################################################################
@@ -253,9 +289,11 @@ async def semantic_scholar_search_endpoint(
     except HTTPException:  # Re-raise if it's already an HTTPException from above
         raise
     except Exception as e:
-        logger.error(f"Unexpected error during Semantic Scholar search execution: {e}", exc_info=True)
-        raise HTTPException(status_code=500,
-                            detail=f"An unexpected error occurred while searching Semantic Scholar: {str(e)}") from e
+        logger.error("Unexpected error during Semantic Scholar search execution")
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while searching Semantic Scholar",
+        ) from e
 
     total_results_api = api_response_data.get("total", 0)
     actual_offset_api = api_response_data.get("offset", 0)  # S2 returns the actual offset used
@@ -295,6 +333,12 @@ async def semantic_scholar_search_endpoint(
         next_offset=next_offset_api,
         page=search_params.page,  # The page number we calculated offset from
         total_pages=total_pages_calculated,
+        pagination=build_page_pagination_meta(
+            page=search_params.page,
+            per_page=search_params.results_per_page,
+            total=total_results_api,
+            total_pages=total_pages_calculated,
+        ),
     )
 
 #
@@ -376,6 +420,10 @@ async def websearch_endpoint(
             search_params,
         )
 
+        phase1_fatal_error = _get_phase1_fatal_error(phase1)
+        if phase1_fatal_error is not None:
+            raise phase1_fatal_error
+
         if payload.aggregate:
             # Cancellation propagates if client disconnects
             cancel_event = asyncio.Event()
@@ -418,8 +466,8 @@ async def websearch_endpoint(
         logger.warning(f"websearch endpoint config validation failed: {e}")
         raise HTTPException(status_code=422, detail=f"Websearch configuration error: {str(e)}") from e
     except Exception as e:
-        logger.error(f"websearch endpoint failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Websearch failed: {str(e)}") from e
+        logger.error("websearch endpoint failed")
+        raise HTTPException(status_code=500, detail="Websearch failed") from e
 
 
 #

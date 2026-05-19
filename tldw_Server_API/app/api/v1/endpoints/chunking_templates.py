@@ -25,7 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.chunking_templates_schemas import (
     TemplateValidationError,
     TemplateValidationResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.Chunking.regex_safety import check_pattern as _rx_check
 from tldw_Server_API.app.core.Chunking.regex_safety import compile_flags as _rx_flags
@@ -223,8 +223,8 @@ async def list_templates(
         return resp
 
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error listing templates: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Error listing templates")
+        raise HTTPException(status_code=500, detail="Failed to list chunking templates") from e
 
 
 @router.get("/{template_name}", response_model=ChunkingTemplateResponse)
@@ -276,8 +276,8 @@ async def get_template(
     except HTTPException:
         raise
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting template: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Error getting template")
+        raise HTTPException(status_code=500, detail="Failed to get chunking template") from e
 
 
 @router.post("", response_model=ChunkingTemplateResponse, status_code=201)
@@ -369,8 +369,11 @@ async def create_template(
         elif "Invalid template JSON" in msg:
             raise HTTPException(status_code=400, detail={"success": False, "error": msg, "error_code": "BAD_REQUEST"}) from e
         else:
-            logger.error(f"Error creating template: {e}")
-            raise HTTPException(status_code=500, detail={"success": False, "error": msg, "error_code": "SERVER_ERROR"}) from e
+            logger.error("Error creating template")
+            raise HTTPException(
+                status_code=500,
+                detail={"success": False, "error": "Failed to create template", "error_code": "SERVER_ERROR"},
+            ) from e
 
 
 @router.put("/{template_name}", response_model=ChunkingTemplateResponse)
@@ -543,8 +546,8 @@ async def update_template(
     except HTTPException:
         raise
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error updating template: {e}")
-        raise HTTPException(status_code=500, detail={"success": False, "error": str(e), "error_code": "SERVER_ERROR"}) from e
+        logger.error("Error updating template")
+        raise HTTPException(status_code=500, detail={"success": False, "error": "Failed to update template", "error_code": "SERVER_ERROR"}) from e
 
 
 @router.delete("/{template_name}", status_code=204)
@@ -650,8 +653,8 @@ async def delete_template(
     except HTTPException:
         raise
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error deleting template: {e}")
-        raise HTTPException(status_code=500, detail={"success": False, "error": str(e), "error_code": "SERVER_ERROR"}) from e
+        logger.error("Error deleting template")
+        raise HTTPException(status_code=500, detail={"success": False, "error": "Failed to delete template", "error_code": "SERVER_ERROR"}) from e
 
 
 @router.post("/apply", response_model=ApplyTemplateResponse)
@@ -772,7 +775,7 @@ async def apply_template(
     except HTTPException:
         raise
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error applying template: {e}")
+        logger.error("Error applying template")
         raise HTTPException(status_code=400, detail={"success": False, "error": f"Template application error: {str(e)}", "error_code": "BAD_REQUEST"}) from e
 
 
@@ -979,7 +982,7 @@ async def validate_template(
         )
 
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error validating template: {e}")
+        logger.error("Error validating template")
         return TemplateValidationResponse(
             valid=False,
             errors=[TemplateValidationError(
@@ -1014,7 +1017,7 @@ async def match_templates(
         ranked.sort(key=lambda x: (x['score'], x.get('priority', 0)), reverse=True)
         return {"matches": ranked}
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to match chunking templates") from e
 
 
 class LearnTemplateRequest(BaseModel):
@@ -1068,4 +1071,4 @@ async def learn_template(
                 }
         return {"template": tmpl, "saved": req.save}
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to learn chunking template") from e

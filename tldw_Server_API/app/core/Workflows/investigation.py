@@ -202,6 +202,20 @@ def _serialize_step(
     attempts: list[dict[str, Any]],
     include_operator_detail: bool,
 ) -> dict[str, Any]:
+    try:
+        legacy_attempt_count = int(step_run.get("attempt") or 0)
+    except (TypeError, ValueError):
+        legacy_attempt_count = 0
+    highest_attempt_number = 0
+    for attempt in attempts:
+        try:
+            highest_attempt_number = max(
+                highest_attempt_number,
+                int(attempt.get("attempt_number") or 0),
+            )
+        except (TypeError, ValueError):
+            continue
+    attempt_count = max(legacy_attempt_count, len(attempts), highest_attempt_number)
     latest_failed_attempt = None
     for attempt in reversed(attempts):
         if str(attempt.get("status") or "") == "failed":
@@ -219,7 +233,7 @@ def _serialize_step(
         "name": step_run.get("name"),
         "type": step_run.get("type"),
         "status": step_run.get("status"),
-        "attempt_count": int(step_run.get("attempt") or len(attempts) or 0),
+        "attempt_count": attempt_count,
         "started_at": step_run.get("started_at"),
         "ended_at": step_run.get("ended_at"),
         "error": step_run.get("error"),

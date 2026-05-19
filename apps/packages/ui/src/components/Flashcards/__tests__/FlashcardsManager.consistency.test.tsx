@@ -1,10 +1,12 @@
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardsManager } from "../FlashcardsManager"
 
 const mocks = vi.hoisted(() => ({
-  navigate: vi.fn()
+  navigate: vi.fn(),
+  useDecksQuery: vi.fn(),
+  decks: [{ id: 1, name: "Biology" }]
 }))
 
 vi.mock("react-i18next", () => ({
@@ -30,8 +32,21 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("react-router-dom", () => ({
-  useNavigate: () => mocks.navigate
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return {
+    ...actual,
+    useNavigate: () => mocks.navigate,
+    useLocation: () => ({
+      pathname: window.location.pathname,
+      search: window.location.search,
+      hash: window.location.hash
+    })
+  }
+})
+
+vi.mock("../hooks", () => ({
+  useDecksQuery: (...args: unknown[]) => mocks.useDecksQuery(...args)
 }))
 
 vi.mock("../tabs", () => ({
@@ -59,7 +74,8 @@ vi.mock("../tabs", () => ({
       <span data-testid="mock-manage-show-workspace">{String(props.initialShowWorkspaceDecks ?? false)}</span>
     </div>
   ),
-  ImportExportTab: () => <div data-testid="mock-transfer-tab">Transfer panel</div>,
+  ImportExportTab: () => <div data-testid="mock-transfer-tab">Import / Export panel</div>,
+  TemplatesTab: () => <div data-testid="mock-templates-tab">Templates panel</div>,
   SchedulerTab: (props: {
     onDirtyChange?: (dirty: boolean) => void
     discardSignal?: number
@@ -109,6 +125,21 @@ if (!(globalThis as any).ResizeObserver) {
 }
 
 describe("FlashcardsManager consistency standards", () => {
+  mocks.useDecksQuery.mockImplementation(() => ({
+    data: mocks.decks,
+    isLoading: false
+  }))
+
+  beforeEach(() => {
+    mocks.navigate.mockReset()
+    mocks.decks = [{ id: 1, name: "Biology" }]
+    mocks.useDecksQuery.mockClear()
+    mocks.useDecksQuery.mockImplementation(() => ({
+      data: mocks.decks,
+      isLoading: false
+    }))
+  })
+
   it("hydrates review deck and quiz context from quiz-study handoff params", () => {
     window.history.replaceState(
       {},
@@ -128,7 +159,7 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("opens Transfer tab first when URL contains generate intent", () => {
+  it("opens Import / Export tab first when URL contains generate intent", () => {
     window.history.replaceState(
       {},
       "",
@@ -160,8 +191,66 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByText("Study")).toBeInTheDocument()
     expect(screen.getByText("Manage")).toBeInTheDocument()
-    expect(screen.getByText("Transfer")).toBeInTheDocument()
+    expect(screen.getByText("Import / Export")).toBeInTheDocument()
+    expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByText("Scheduler")).toBeInTheDocument()
+  })
+
+  it("defaults to Import / Export and hides Scheduler when no decks are available", () => {
+    mocks.decks = []
+    window.history.replaceState({}, "", "/flashcards")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByText("Templates")).toBeInTheDocument()
+    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+  })
+
+  it("routes template deep-links to the Templates tab", () => {
+    window.history.replaceState({}, "", "/flashcards?tab=templates")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByText("Templates")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
+  })
+
+  it("keeps the Templates tab reachable when no decks exist", () => {
+    mocks.decks = []
+    window.history.replaceState({}, "", "/flashcards?tab=templates")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByText("Templates")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
+    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+  })
+
+  it("requests workspace decks when study links include workspace items", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/flashcards?tab=review&deck_id=9&include_workspace_items=1"
+    )
+
+    render(<FlashcardsManager />)
+
+    expect(mocks.useDecksQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeWorkspaceItems: true
+      })
+    )
+  })
+
+  it("clamps scheduler deep-links to Import / Export when Scheduler is hidden", () => {
+    mocks.decks = []
+    window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
+
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
   it("routes secondary create CTA to the Manage tab create entry point", () => {

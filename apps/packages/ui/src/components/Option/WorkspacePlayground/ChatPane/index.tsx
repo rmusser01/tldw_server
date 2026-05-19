@@ -12,26 +12,28 @@ import {
   SlidersHorizontal,
   Loader2,
   Share2,
-  Cpu,
   Plus,
   BookOpen,
   Users,
-  Briefcase
+  Briefcase,
+  WifiOff
 } from "lucide-react"
 import { Modal, Tag, Tooltip, Input, Slider, Switch, Button, message } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useStoreMessageOption } from "@/store/option"
-import { useStoreChatModelSettings } from "@/store/model"
 import type { Message } from "@/store/option"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
 import { useMobile } from "@/hooks/useMediaQuery"
+import { useModelSelector } from "@/hooks/playground"
 import { useConnectionStore } from "@/store/connection"
-import { ConnectionPhase } from "@/types/connection"
+import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection"
 import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
+import { fetchChatModels } from "@/services/tldw-server"
 import { formatCost } from "@/utils/model-pricing"
+import { resolveStartupSelectedModel } from "@/utils/model-startup-selection"
 import { trackWorkspacePlaygroundTelemetry } from "@/utils/workspace-playground-telemetry"
 import type { WorkspaceSource, WorkspaceSourceType } from "@/types/workspace"
 import type { ChatScope } from "@/types/chat-scope"
@@ -41,7 +43,11 @@ import {
 } from "@/utils/message-variants"
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
-import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
+import { Link, useNavigate } from "react-router-dom"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system"
+import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
+import { PlaygroundModelCatalogControls } from "@/components/Option/Playground/PlaygroundModelCatalogControls"
 import { buildChatLorebookDebugPath } from "@/routes/route-paths"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
@@ -58,6 +64,11 @@ import {
 } from "../undo-manager"
 import { getWorkspaceChatNoSourcesHint } from "../source-location-copy"
 import { getWorkspaceChatSearchMessageId } from "../workspace-global-search"
+import {
+  getCapability,
+  getCapabilityCopy,
+  type ResearchStudioCapabilitiesResponse
+} from "../research-studio-capabilities"
 
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
@@ -76,11 +87,7 @@ type RetrievalDiagnostics = {
 }
 
 type ChatModePreference = "normal" | "rag"
-type ChatModelOption = {
-  id: string
-  label: string
-  provider: string
-}
+type ChatComposerModel = Awaited<ReturnType<typeof fetchChatModels>>[number]
 type ChatPaneContentWidthMode = "comfortable" | "expanded" | "full"
 type LorebookActivityTurn = {
   turnNumber: number
@@ -633,7 +640,7 @@ const RetrievalDiagnosticsPanel: React.FC<{
     diagnostics.confidenceLevel === "high"
       ? "text-success"
       : diagnostics.confidenceLevel === "medium"
-        ? "text-warning"
+        ? "text-warn"
         : diagnostics.confidenceLevel === "low"
           ? "text-error"
           : "text-text-muted"
@@ -850,22 +857,31 @@ const WorkspaceChatEmpty: React.FC<{
 
   return (
     <div className={`mx-auto w-full ${emptyStateMaxWidthClass} px-4 pb-2 pt-3`}>
-      <FeatureEmptyState
+      <EmptyState
         className="max-w-none"
         icon={MessageSquarePlus}
         title={t("playground:chat.emptyTitle", "Start your research")}
         description={
-          hasSelectedSources
-            ? t(
-                "playground:chat.emptyWithSources",
-                "Ask questions about your {{count}} selected source(s)",
-                { count: sourceCount }
-              )
-            : t(
-                "playground:chat.emptyNoSources",
-                getWorkspaceChatNoSourcesHint(isMobile)
-              )
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-text-muted">
+              {t("playground:chat.emptyTagline", "Your research assistant — grounded in your sources")}
+            </p>
+            <p className="text-xs text-text-subtle">
+              {hasSelectedSources
+                ? t(
+                    "playground:chat.emptyWithSources",
+                    "Ask questions about your {{count}} selected source(s)",
+                    { count: sourceCount }
+                  )
+                : t(
+                    "playground:chat.emptyNoSources",
+                    getWorkspaceChatNoSourcesHint(isMobile)
+                  )}
+            </p>
+          </div>
         }
+        size="lg"
+        variant="card"
         examples={examples.map((example, index) => (
           <button
             key={example}
@@ -883,8 +899,21 @@ const WorkspaceChatEmpty: React.FC<{
         ))}
       />
 
+      <p className="mt-3 text-center text-[11px] text-text-subtle">
+        {t("playground:chat.knowledgeHint", "Quick document search?")}{" "}
+        <Link to="/knowledge" className="text-primary/70 hover:text-primary transition-colors">
+          {t("playground:chat.knowledgeHintLink", "Try Knowledge QA \u2192")}
+        </Link>
+      </p>
+
       {totalSourceCount === 0 && (
         <div className="mt-4 space-y-3" data-testid="workspace-chat-empty-guidance">
+          <p className="text-center text-xs text-text-muted" data-testid="workspace-chat-sources-explainer">
+            {t(
+              "playground:chat.sourcesExplainer",
+              "Sources are documents, PDFs, web pages, or other content you upload. Add sources in the left panel to start asking questions about them."
+            )}
+          </p>
           {onAddSource && (
             <button
               type="button"
@@ -935,6 +964,9 @@ const SimpleChatInput: React.FC<{
   onStop: () => void
   isLoading: boolean
   isPreparingContext?: boolean
+  isChatUnavailable?: boolean
+  isChatUnavailableReason?: "connection" | "capability"
+  chatUnavailableMessage?: string | null
   placeholder?: string
   seededValue?: string | null
   onSeedConsumed?: () => void
@@ -944,6 +976,9 @@ const SimpleChatInput: React.FC<{
   onStop,
   isLoading,
   isPreparingContext = false,
+  isChatUnavailable = false,
+  isChatUnavailableReason = "connection",
+  chatUnavailableMessage,
   placeholder,
   seededValue,
   onSeedConsumed,
@@ -982,7 +1017,7 @@ const SimpleChatInput: React.FC<{
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault()
     const trimmed = value.trim()
-    if (!trimmed || isLoading || isPreparingContext) return
+    if (!trimmed || isLoading || isPreparingContext || isChatUnavailable) return
     onSubmit(trimmed)
     setValue("")
     setShowSlashMenu(false)
@@ -1027,6 +1062,18 @@ const SimpleChatInput: React.FC<{
 
   return (
     <div className="rounded-lg border border-border/70 bg-surface/90 p-1.5 shadow-sm">
+      {isChatUnavailable && (
+        <div className="px-3 py-2 text-xs text-warning bg-warning/10 border-b border-warning/20 flex items-center gap-2 rounded-t-md">
+          <WifiOff className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            {chatUnavailableMessage ||
+              t(
+                "playground:chat.disconnectedWarning",
+                "Can't reach the server. Check your connection or server status."
+              )}
+          </span>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex items-end gap-1.5">
         <div className="relative flex-1">
           {/* Slash command autocomplete dropdown (UX-006) */}
@@ -1063,10 +1110,17 @@ const SimpleChatInput: React.FC<{
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              placeholder || t("playground:chat.inputPlaceholder", "Type / for commands or a message...")
+              isChatUnavailable
+                ? isChatUnavailableReason === "capability"
+                  ? t(
+                      "playground:chat.inputPlaceholderUnavailable",
+                      "Chat unavailable..."
+                    )
+                  : t("playground:chat.inputPlaceholderDisconnected", "Server disconnected...")
+                : placeholder || t("playground:chat.inputPlaceholder", "Type / for commands or a message...")
             }
             autoSize={{ minRows: 1, maxRows: 6 }}
-            disabled={isLoading || isPreparingContext}
+            disabled={isLoading || isPreparingContext || isChatUnavailable}
             className="pr-10 text-sm"
           />
         </div>
@@ -1083,10 +1137,14 @@ const SimpleChatInput: React.FC<{
         ) : (
           <button
             type="submit"
-            disabled={!value.trim() || isPreparingContext}
+            disabled={!value.trim() || isPreparingContext || isChatUnavailable}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={
-              isPreparingContext
+              isChatUnavailable
+                ? isChatUnavailableReason === "capability"
+                  ? t("playground:chat.chatUnavailable", "Chat unavailable")
+                  : t("playground:chat.serverDisconnected", "Server disconnected")
+                : isPreparingContext
                 ? t(
                     "playground:chat.preparingSourceContext",
                     "Preparing source context"
@@ -1152,15 +1210,35 @@ interface ChatPaneProps {
   provenanceEnabled?: boolean
   statusGuardrailsEnabled?: boolean
   contentWidthMode?: ChatPaneContentWidthMode
+  researchStudioCapabilities?: ResearchStudioCapabilitiesResponse
+  researchStudioCapabilitiesStale?: boolean
+  onRefreshResearchStudioCapabilities?: () => Promise<ResearchStudioCapabilitiesResponse>
 }
 
 export const ChatPane: React.FC<ChatPaneProps> = ({
   provenanceEnabled = true,
   statusGuardrailsEnabled = true,
-  contentWidthMode = "comfortable"
+  contentWidthMode = "comfortable",
+  researchStudioCapabilities,
+  researchStudioCapabilitiesStale = false,
+  onRefreshResearchStudioCapabilities
 }) => {
   const { t } = useTranslation(["playground", "common"])
+  const translate = React.useCallback(
+    (
+      key: string,
+      defaultValueOrOptions?: unknown,
+      options?: unknown
+    ): string =>
+      t(
+        key,
+        defaultValueOrOptions as never,
+        options as never
+      ) as unknown as string,
+    [t]
+  )
   const isMobile = useMobile()
+  const navigate = useNavigate()
   const [messageApi, messageContextHolder] = message.useMessage()
 
   // Workspace store
@@ -1183,6 +1261,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const chatFocusTarget = useWorkspaceStore((s) => s.chatFocusTarget)
   const clearChatFocusTarget = useWorkspaceStore((s) => s.clearChatFocusTarget)
   const openAddSourceModal = useWorkspaceStore((s) => s.openAddSourceModal)
+  const openExistingSourcesModal = React.useCallback(() => {
+    openAddSourceModal("existing")
+  }, [openAddSourceModal])
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
@@ -1190,7 +1271,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   // Model settings for model badge (UX-009)
   const selectedModel = useStoreMessageOption((s) => s.selectedModel)
   const setSelectedModel = useStoreMessageOption((s) => s.setSelectedModel)
-  const chatApiProvider = useStoreChatModelSettings((s) => s.apiProvider)
   const chatScope = React.useMemo<ChatScope | undefined>(
     () =>
       workspaceId
@@ -1244,6 +1324,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
   const checkConnectionOnce = useConnectionStore((s) => s.checkOnce)
   const connectionState = useConnectionStore((s) => s.state)
+  const navigateTo = React.useCallback((path: string) => {
+    navigate(path)
+  }, [navigate])
   const [preferredChatMode, setPreferredChatMode] = React.useState<
     ChatModePreference | null
   >(null)
@@ -1279,10 +1362,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [slashCommands, setSlashCommands] = React.useState<
     Array<{ name: string; description: string }>
   >([])
-  const [availableModels, setAvailableModels] = React.useState<ChatModelOption[]>(
-    []
-  )
-  const [loadingModels, setLoadingModels] = React.useState(false)
+  const [composerModels, setComposerModels] = React.useState<
+    ChatComposerModel[]
+  >([])
   const slashCommandsFetchedRef = React.useRef(false)
   const modelsFetchedRef = React.useRef(false)
   const workspaceSessionRef = React.useRef<string | null>(null)
@@ -1462,62 +1544,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [hasSelectedSources, showAdvancedRagSettings])
 
+  const applyComposerModels = React.useCallback(
+    (models: ChatComposerModel[]) => {
+      modelsFetchedRef.current = models.length > 0
+      setComposerModels(models)
+    },
+    []
+  )
+
   React.useEffect(() => {
     if (modelsFetchedRef.current) return
-    modelsFetchedRef.current = true
-    if (typeof tldwClient.getModels !== "function") return
 
     let isMounted = true
-    setLoadingModels(true)
-    void tldwClient
-      .getModels()
+    void fetchChatModels({ returnEmpty: true })
       .then((models) => {
         if (!isMounted) return
-        if (!Array.isArray(models) || models.length === 0) {
-          setAvailableModels([])
-          return
-        }
-        const uniqueById = new Map<string, ChatModelOption>()
-        for (const model of models) {
-          if (!model || typeof model !== "object") continue
-          const modelId = extractStringCandidate((model as { id?: unknown }).id)
-          if (!modelId) continue
-          const provider = extractStringCandidate(
-            (model as { provider?: unknown }).provider
-          )
-          const modelName = extractStringCandidate(
-            (model as { name?: unknown }).name
-          )
-          const label =
-            modelName && modelName !== modelId
-              ? `${modelName} (${modelId})`
-              : modelName || modelId
-          uniqueById.set(modelId, {
-            id: modelId,
-            label: provider ? `${provider} · ${label}` : label,
-            provider
-          })
-        }
-        setAvailableModels(
-          Array.from(uniqueById.values()).sort((a, b) =>
-            a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
-          )
-        )
+        applyComposerModels(models)
       })
       .catch(() => {
         if (!isMounted) return
-        setAvailableModels([])
-      })
-      .finally(() => {
-        if (isMounted) {
-          setLoadingModels(false)
-        }
+        modelsFetchedRef.current = false
+        setComposerModels([])
       })
 
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [applyComposerModels])
 
   React.useEffect(() => {
     selectedSourceIdsRef.current = selectedSourceIds
@@ -1828,6 +1881,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSubmit = async (message: string) => {
     if (preparingSourceContext) return
+    let actionChatCapability = chatCapability
+    if (
+      statusGuardrailsEnabled &&
+      onRefreshResearchStudioCapabilities &&
+      (researchStudioCapabilitiesStale || !actionChatCapability)
+    ) {
+      try {
+        actionChatCapability = getCapability(
+          await onRefreshResearchStudioCapabilities(),
+          "chat"
+        )
+      } catch {
+        // Keep the existing snapshot; connection errors are handled by submit.
+      }
+    }
+
+    if (statusGuardrailsEnabled && actionChatCapability?.mode === "block") {
+      const capabilityMessage = getCapabilityCopy(actionChatCapability, "Chat")
+      if (capabilityMessage) {
+        messageApi.warning(capabilityMessage)
+      }
+      return
+    }
+
     const normalizedMessage = message.trim().replace(/\s+/g, " ").toLowerCase()
     const sourceScopeSignature = [...effectiveSelectedSourceIdsRef.current]
       .sort((a, b) => a.localeCompare(b))
@@ -2206,6 +2283,17 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
     setSubmitError(null)
     await checkConnectionOnce()
+    modelsFetchedRef.current = false
+    try {
+      const models = await fetchChatModels({
+        returnEmpty: true,
+        forceRefresh: true
+      })
+      applyComposerModels(models)
+    } catch {
+      modelsFetchedRef.current = false
+      setComposerModels([])
+    }
   }
 
   const handleCitationSourceClick = React.useCallback(
@@ -2425,20 +2513,101 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
   }, [])
 
-  // Model display label (UX-009)
-  const modelDisplayLabel = React.useMemo(() => {
-    if (selectedModel) return selectedModel
-    if (chatApiProvider) return chatApiProvider
-    return null
-  }, [selectedModel, chatApiProvider])
+  const handleModelSelect = React.useCallback(
+    (model: string) => {
+      if (typeof setSelectedModel !== "function") return
+      setSelectedModel(model)
+    },
+    [setSelectedModel]
+  )
+  const {
+    modelDropdownOpen,
+    setModelDropdownOpen,
+    modelSearchQuery,
+    setModelSearchQuery,
+    modelSortMode,
+    setModelSortMode,
+    modelListScope,
+    setModelListScope,
+    selectedModelKey,
+    resolvedProviderKey,
+    apiModelLabel,
+    modelSelectorWarning,
+    favoriteModels,
+    favoriteModelsIsLoading,
+    modelDropdownMenuItems
+  } = useModelSelector({
+    composerModels,
+    selectedModel,
+    setSelectedModel: handleModelSelect,
+    navigate: navigateTo
+  })
+
+  React.useEffect(() => {
+    const nextModel = resolveStartupSelectedModel({
+      currentModel: selectedModel,
+      models: composerModels,
+      preferredModelIds: favoriteModels,
+      isCurrentModelHydrating: false,
+      arePreferencesHydrating: favoriteModelsIsLoading
+    })
+    if (nextModel && typeof setSelectedModel === "function") {
+      setSelectedModel(nextModel)
+    }
+  }, [
+    composerModels,
+    favoriteModels,
+    favoriteModelsIsLoading,
+    selectedModel,
+    setSelectedModel
+  ])
+
+  const connectionUxState = React.useMemo(
+    () => deriveConnectionUxState(connectionState),
+    [connectionState]
+  )
+  const isConnectionReady = connectionState.phase === ConnectionPhase.CONNECTED
+  const connectionStatusLabel = React.useMemo(() => {
+    if (!isConnectionReady) {
+      return t("playground:composer.providerStatusOffline", "Offline")
+    }
+    if (connectionUxState === "connected_degraded") {
+      return t("playground:composer.providerStatusDegraded", DEGRADED_STATE_LABEL)
+    }
+    return t("playground:composer.providerStatusReady", READY_STATE_LABEL)
+  }, [connectionUxState, isConnectionReady, t])
+  const connectionStatusWarning =
+    !isConnectionReady || connectionUxState === "connected_degraded"
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
-  const showConnectionBanner =
+  const hasConnectionFailure =
+    connectionState.phase === ConnectionPhase.ERROR &&
+    !connectionState.isChecking
+  const chatCapability = researchStudioCapabilities
+    ? getCapability(researchStudioCapabilities, "chat")
+    : null
+  const chatCapabilityMessage = statusGuardrailsEnabled
+    ? chatCapability
+      ? getCapabilityCopy(chatCapability, "Chat")
+      : null
+    : null
+  const isChatCapabilityRefreshable =
     statusGuardrailsEnabled &&
-    (submitError !== null ||
-      (connectionState.phase === ConnectionPhase.ERROR &&
-        !connectionState.isChecking))
+    researchStudioCapabilitiesStale &&
+    Boolean(onRefreshResearchStudioCapabilities)
+  const isChatCapabilityBlocked =
+    statusGuardrailsEnabled &&
+    chatCapability?.mode === "block" &&
+    !isChatCapabilityRefreshable
+  const isChatCapabilityWarn =
+    statusGuardrailsEnabled && chatCapability?.mode === "warn"
+  const isConnectionUnavailable =
+    statusGuardrailsEnabled &&
+    (submitError !== null || hasConnectionFailure)
+  const isChatUnavailable =
+    isConnectionUnavailable || isChatCapabilityBlocked
+  const showConnectionBanner = isConnectionUnavailable
   const connectionDescription =
     submitError ||
     connectionState.lastError ||
@@ -2646,22 +2815,20 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         activeVariantIndex={msg.activeVariantIndex}
                         onSwipePrev={
                           msg.isBot
-                            ? (id: string) => {
-                                const foundIdx = messages.findIndex((m) => m.id === id)
-                                if (foundIdx >= 0) handleSwitchMessageVariant(foundIdx, "prev")
+                            ? () => {
+                                handleSwitchMessageVariant(idx, "prev")
                               }
                             : undefined
                         }
                         onSwipeNext={
                           msg.isBot
-                            ? (id: string) => {
-                                const foundIdx = messages.findIndex((m) => m.id === id)
-                                if (foundIdx >= 0) handleSwitchMessageVariant(foundIdx, "next")
+                            ? () => {
+                                handleSwitchMessageVariant(idx, "next")
                               }
                             : undefined
                         }
                         onNewBranch={
-                          msg.isBot ? (idx: number) => handleCreateChatBranch(idx) : undefined
+                          msg.isBot ? () => handleCreateChatBranch(idx) : undefined
                         }
                         modelName={msg.modelName}
                         modelImage={msg.modelImage}
@@ -2680,10 +2847,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                             ? () => regenerateLastMessage()
                             : () => {}
                         }
-                        onDeleteMessage={(idx: number) => handleDeleteMessageWithUndo(idx)}
+                        onDeleteMessage={() => handleDeleteMessageWithUndo(idx)}
                         suppressDeleteSuccessToast
-                        onEditFormSubmit={(idx: number, value: string, isUser: boolean, isSend?: boolean) => {
-                          editMessage(idx, value, isUser, isSend)
+                        onEditFormSubmit={(value: string, isSend: boolean) => {
+                          editMessage(idx, value, !msg.isBot, isSend)
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}
@@ -2708,7 +2875,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   isMobile={isMobile}
                   layoutMode={contentWidthMode}
                   onExamplePromptSelect={(prompt) => setSeededPrompt(prompt)}
-                  onAddSource={openAddSourceModal}
+                  onAddSource={openExistingSourcesModal}
                   onCreateFromTemplate={handleCreateFromTemplate}
                 />
               </div>
@@ -2746,7 +2913,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         onDragOver={handleDropZoneDragOver}
         onDrop={handleDropZoneDrop}
         onDragLeave={handleDropZoneDragLeave}
-        className={`sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85 transition-colors ${
+        className={`sticky bottom-0 z-20 shrink-0 border-t border-border bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85 transition-colors ${
           dropZoneActive ? "bg-primary/5" : ""
         }`}
       >
@@ -2852,45 +3019,31 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               </label>
             )}
             <div className="ml-auto flex flex-wrap items-center gap-1">
-              {provenanceEnabled && (loadingModels || availableModels.length > 0) && (
-                <label
-                  className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-surface/80 px-2 py-1 text-[11px] text-text-muted"
-                  title={
-                    modelDisplayLabel
-                      ? t(
-                          "playground:chat.currentModelTooltip",
-                          "Current model: {{model}}",
-                          { model: modelDisplayLabel }
-                        ).replace("{{model}}", modelDisplayLabel)
-                      : undefined
+              {provenanceEnabled && (
+                <ChatModelSelectorDropdown
+                  activeModelKey={selectedModelKey ?? selectedModel}
+                  apiModelLabel={apiModelLabel}
+                  catalogControls={
+                    <PlaygroundModelCatalogControls
+                      t={translate}
+                      modelListScope={modelListScope}
+                      setModelListScope={setModelListScope}
+                      modelSearchQuery={modelSearchQuery}
+                      setModelSearchQuery={setModelSearchQuery}
+                      modelSortMode={modelSortMode}
+                      setModelSortMode={setModelSortMode}
+                    />
                   }
-                >
-                  <Cpu className="h-3 w-3" />
-                  <span>{t("playground:chat.modelPickerLabel", "Model")}</span>
-                  <select
-                    aria-label={t(
-                      "playground:chat.modelPickerAria",
-                      "Select model"
-                    )}
-                    value={selectedModel ?? ""}
-                    onChange={(event) => {
-                      if (typeof setSelectedModel !== "function") return
-                      const value = event.target.value.trim()
-                      setSelectedModel(value.length > 0 ? value : null)
-                    }}
-                    className="max-w-[180px] truncate bg-transparent text-[11px] text-text focus:outline-none"
-                    disabled={loadingModels}
-                  >
-                    <option value="">
-                      {t("playground:chat.modelPickerAuto", "Auto")}
-                    </option>
-                    {availableModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  connectionStatusLabel={connectionStatusLabel}
+                  connectionStatusWarning={connectionStatusWarning}
+                  modelDropdownMenuItems={modelDropdownMenuItems}
+                  modelDropdownOpen={modelDropdownOpen}
+                  modelSelectorWarning={modelSelectorWarning}
+                  placement="topLeft"
+                  resolvedProviderKey={resolvedProviderKey}
+                  setModelDropdownOpen={setModelDropdownOpen}
+                  setModelSearchQuery={setModelSearchQuery}
+                />
               )}
               {/* Share conversation button (UX-044) */}
               {serverChatId && hasMessages && (
@@ -3006,11 +3159,30 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               </div>
             </div>
           )}
+          {isChatCapabilityWarn && chatCapabilityMessage && (
+            <div
+              data-testid="workspace-chat-capability-status"
+              className="mb-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+            >
+              {chatCapabilityMessage}
+            </div>
+          )}
           <SimpleChatInput
             onSubmit={handleSubmit}
             onStop={handleStopStreaming}
             isLoading={streaming}
             isPreparingContext={preparingSourceContext}
+            isChatUnavailable={isChatUnavailable}
+            isChatUnavailableReason={
+              isChatCapabilityBlocked && !isConnectionUnavailable
+                ? "capability"
+                : "connection"
+            }
+            chatUnavailableMessage={
+              isChatCapabilityBlocked && !isConnectionUnavailable
+                ? chatCapabilityMessage
+                : null
+            }
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
             slashCommands={slashCommands}

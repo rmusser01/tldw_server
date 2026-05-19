@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
 from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.Sandbox.models import RunStatus, RunPhase, RuntimeType
 
 
 def _client(monkeypatch) -> TestClient:
@@ -28,7 +26,6 @@ def _admin_user_dep():
 
 def _seed_run(run_id: str, user_id: int, image_digest: str, started_offset_sec: int, phase: str = "completed") -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
-    from tldw_Server_API.app.core.Sandbox.models import RunPhase
     st = RunStatus(
         id=run_id,
         phase=RunPhase(phase),
@@ -66,7 +63,15 @@ def test_admin_list_filters_and_pagination(monkeypatch):
         assert j["limit"] == 1
         assert j["offset"] == 0
         assert j["has_more"] is True
+        assert j["pagination"]["total"] == 2
+        assert j["pagination"]["limit"] == 1
+        assert j["pagination"]["offset"] == 0
+        assert j["pagination"]["has_more"] is True
+        assert j["pagination"]["next_offset"] == 1
         assert len(j["items"]) == 1
+        item_details = j["items"][0].get("status_reason_details")
+        assert item_details["code"] == j["items"][0]["status_reason_code"]
+        assert item_details["category"] == "success"
 
         # Next page
         r2 = client.get("/api/v1/sandbox/admin/runs", params={"image_digest": "d1", "limit": 1, "offset": 1})
@@ -74,6 +79,11 @@ def test_admin_list_filters_and_pagination(monkeypatch):
         j2 = r2.json()
         assert j2["total"] == 2
         assert j2["has_more"] is False
+        assert j2["pagination"]["total"] == 2
+        assert j2["pagination"]["limit"] == 1
+        assert j2["pagination"]["offset"] == 1
+        assert j2["pagination"]["has_more"] is False
+        assert j2["pagination"]["next_offset"] is None
         assert len(j2["items"]) == 1
 
         # Date filter: only include recent (exclude r1 by from cutoff)

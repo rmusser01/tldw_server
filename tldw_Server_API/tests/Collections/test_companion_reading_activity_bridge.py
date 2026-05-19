@@ -1,7 +1,9 @@
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -21,6 +23,14 @@ TEST_USER_ID = 222
 fastapi_app = FastAPI()
 fastapi_app.include_router(reading_ep.router, prefix="/api/v1")
 fastapi_app.include_router(reading_highlights_ep.router, prefix="/api/v1")
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(message.format(*args) if args else message)
 
 
 @pytest.fixture()
@@ -58,6 +68,40 @@ def client_with_companion_opt_in(monkeypatch):
                 del settings.USER_DB_BASE_DIR
             except AttributeError:
                 pass
+
+
+@pytest.mark.asyncio
+async def test_create_highlight_failure_log_is_sanitized(monkeypatch):
+    class _FailingHighlightsDB:
+        def get_content_item(self, item_id: int):
+            raise KeyError(item_id)
+
+        def create_highlight(self, **kwargs: Any):
+            raise RuntimeError("highlight backend exploded at /private/highlights.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(reading_highlights_ep, "logger", logger)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await reading_highlights_ep.create_highlight(
+            item_id=1,
+            payload=reading_highlights_ep.HighlightCreateRequest(
+                item_id=1,
+                quote="Important sentence",
+                color="yellow",
+                note="Capture this",
+                anchor_strategy="fuzzy_quote",
+            ),
+            current_user=User(id=TEST_USER_ID, username="reader", email=None, is_active=True),
+            db=_FailingHighlightsDB(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "highlight_create_failed"
+    assert logger.errors == ["create_highlight failed"]
+    error_text = "\n".join(logger.errors)
+    assert "highlight backend exploded" not in error_text
+    assert "/private/highlights.db" not in error_text
 
 
 def test_reading_actions_record_companion_activity(client_with_companion_opt_in):

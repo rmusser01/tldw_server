@@ -714,7 +714,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               <div className="text-xs text-text-muted">
                 {t(
                   "watchlists:filters.preview.summary",
-                  "{{ingestable}} ingestable, {{filtered}} filtered from {{total}} sample items.",
+                  "Found {{ingestable}} articles ({{filtered}} skipped) out of {{total}} sample items.",
                   {
                     ingestable: preview.outcome.ingestable,
                     filtered: preview.outcome.filtered,

@@ -48,7 +48,6 @@ DENYLIST = {
     "Caddyfile.hosted-saas.prod.compose": "public surfaces should not point to hosted production Caddy samples",
     "@web/components/hosted": "public frontend entrypoints should not import hosted private components",
     "@web/lib/hosted-route-allowlist": "public frontend entrypoints should not import hosted route gating helpers",
-    "tldw_Server_API/app/api/v1/endpoints/billing.py": "public OSS surfaces should not reference the extracted commercial billing runtime",
     "tldw_Server_API/app/api/v1/endpoints/billing_webhooks.py": "public OSS surfaces should not reference Stripe webhook runtime",
     "tldw_Server_API/app/core/Billing/stripe_client.py": "public OSS surfaces should not reference Stripe client runtime",
     "tldw_Server_API/app/services/stripe_metering_service.py": "public OSS surfaces should not reference Stripe metering runtime",

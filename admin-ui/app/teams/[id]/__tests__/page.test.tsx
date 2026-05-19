@@ -8,6 +8,7 @@ import { api } from '@/lib/api-client';
 
 const confirmMock = vi.hoisted(() => vi.fn());
 const pushMock = vi.hoisted(() => vi.fn());
+const loggerErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
@@ -48,6 +49,12 @@ vi.mock('@/lib/api-client', () => ({
   },
 }));
 
+vi.mock('@/lib/logger', () => ({
+  logger: {
+    error: loggerErrorMock,
+  },
+}));
+
 type ApiMock = {
   getTeam: ReturnType<typeof vi.fn>;
   getTeamMembers: ReturnType<typeof vi.fn>;
@@ -63,6 +70,7 @@ const apiMock = api as unknown as ApiMock;
 beforeEach(() => {
   confirmMock.mockResolvedValue(true);
   pushMock.mockClear();
+  loggerErrorMock.mockClear();
 
   apiMock.getTeam.mockResolvedValue({
     id: 5,
@@ -110,5 +118,28 @@ describe('TeamDetailPage member role updates', () => {
     await waitFor(() => {
       expect(apiMock.updateTeamMemberRole).toHaveBeenCalledWith('5', 2, { role: 'admin' });
     });
+  });
+
+  it('logs an error when updating the team details fails', async () => {
+    apiMock.updateTeam.mockRejectedValueOnce(new Error('backend exploded'));
+    const user = userEvent.setup();
+    render(<TeamDetailPage />);
+
+    await screen.findByText('Team One');
+    await user.click(screen.getByRole('button', { name: 'Edit Team' }));
+    await user.clear(screen.getByLabelText('Team Name'));
+    await user.type(screen.getByLabelText('Team Name'), 'Platform Team');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(loggerErrorMock).toHaveBeenCalledWith(
+        'Failed to update team',
+        expect.objectContaining({
+          component: 'TeamDetailPage',
+          error: 'backend exploded',
+        })
+      );
+    });
+    expect(await screen.findByText('backend exploded')).toBeInTheDocument();
   });
 });

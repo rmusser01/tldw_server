@@ -13,6 +13,8 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrganizationCreateRequest,
     OrganizationListResponse,
     OrganizationResponse,
+    OrganizationSTTSettingsResponse,
+    OrganizationSTTSettingsUpdate,
     OrganizationWatchlistsSettingsResponse,
     OrganizationWatchlistsSettingsUpdate,
     OrgMemberAddRequest,
@@ -101,6 +103,40 @@ async def admin_get_team(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> TeamResponse:
     return await admin_orgs_service.get_team(team_id, principal)
+
+
+@router.patch(
+    "/orgs/{org_id}/stt/settings",
+    response_model=OrganizationSTTSettingsResponse,
+)
+async def admin_update_org_stt_settings(
+    org_id: int,
+    payload: OrganizationSTTSettingsUpdate,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db: Any = Depends(get_db_transaction),
+) -> OrganizationSTTSettingsResponse:
+    return await admin_orgs_service.update_org_stt_settings(
+        org_id,
+        payload,
+        principal=principal,
+        db=db,
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/stt/settings",
+    response_model=OrganizationSTTSettingsResponse,
+)
+async def admin_get_org_stt_settings(
+    org_id: int,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    db: Any = Depends(get_db_transaction),
+) -> OrganizationSTTSettingsResponse:
+    return await admin_orgs_service.get_org_stt_settings(
+        org_id,
+        principal=principal,
+        db=db,
+    )
 
 
 @router.patch(

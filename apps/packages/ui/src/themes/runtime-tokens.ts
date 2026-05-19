@@ -1,6 +1,6 @@
-import type { ThemeColorTokens } from "./types"
+import type { ThemeRgbTokenKey } from "./types"
 
-const TOKEN_TO_CSS_VAR: Record<keyof ThemeColorTokens, string> = {
+const TOKEN_TO_CSS_VAR: Record<ThemeRgbTokenKey, string> = {
   bg: "--color-bg",
   surface: "--color-surface",
   surface2: "--color-surface-2",
@@ -35,7 +35,7 @@ function tripleToHex(triple: string): string {
  * Read a single computed CSS custom property value and return it as a hex string.
  * Falls back to "#000000" if the property is not found.
  */
-export function getComputedToken(key: keyof ThemeColorTokens): string {
+export function getComputedToken(key: ThemeRgbTokenKey): string {
   if (typeof document === "undefined") return "#000000"
   const cssVar = TOKEN_TO_CSS_VAR[key]
   const value = getComputedStyle(document.documentElement)
@@ -49,20 +49,20 @@ export function getComputedToken(key: keyof ThemeColorTokens): string {
  * Read all computed CSS custom property values and return them as hex strings.
  * Useful for JS contexts (Cytoscape, Canvas, Chart.js) that need hex colors.
  */
-export function getComputedTokens(): Record<keyof ThemeColorTokens, string> {
+export function getComputedTokens(): Record<ThemeRgbTokenKey, string> {
   if (typeof document === "undefined") {
-    const empty = {} as Record<keyof ThemeColorTokens, string>
-    for (const key of Object.keys(TOKEN_TO_CSS_VAR) as (keyof ThemeColorTokens)[]) {
+    const empty = {} as Record<ThemeRgbTokenKey, string>
+    for (const key of Object.keys(TOKEN_TO_CSS_VAR) as ThemeRgbTokenKey[]) {
       empty[key] = "#000000"
     }
     return empty
   }
 
   const style = getComputedStyle(document.documentElement)
-  const result = {} as Record<keyof ThemeColorTokens, string>
+  const result = {} as Record<ThemeRgbTokenKey, string>
   for (const [key, cssVar] of Object.entries(TOKEN_TO_CSS_VAR)) {
     const value = style.getPropertyValue(cssVar).trim()
-    result[key as keyof ThemeColorTokens] = value ? tripleToHex(value) : "#000000"
+    result[key as ThemeRgbTokenKey] = value ? tripleToHex(value) : "#000000"
   }
   return result
 }

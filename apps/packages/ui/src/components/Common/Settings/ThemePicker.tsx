@@ -1,12 +1,26 @@
-import React, { useState } from "react"
-import { Segmented } from "antd"
-import { Monitor, Moon, Sun, Pencil, Trash2, Plus } from "lucide-react"
+import React, { useState, useRef, useCallback } from "react"
+import { Segmented, Button, Modal, message } from "antd"
+import {
+  Monitor,
+  Moon,
+  Sun,
+  Pencil,
+  Trash2,
+  Download,
+  Upload,
+  Palette,
+  SlidersHorizontal,
+  Copy,
+} from "lucide-react"
 import { useTheme } from "@/hooks/useTheme"
 import { rgbTripleToHex } from "@/themes/antd-theme"
 import type { ThemeDefinition } from "@/themes/types"
 import type { ThemeValue } from "@/services/settings/ui-settings"
 import { useTranslation } from "react-i18next"
-import { ThemeEditorModal } from "./ThemeEditorModal"
+import { ThemeQuickEditor } from "./ThemeQuickEditor"
+import { ThemeAdvancedEditor } from "./ThemeAdvancedEditor"
+import { downloadThemeJson, parseImportedTheme } from "@/themes/import-export"
+import { duplicateTheme } from "@/themes/custom-themes"
 
 const MODE_OPTIONS: { value: ThemeValue; icon: React.ReactNode; label: string }[] = [
   { value: "system", icon: <Monitor className="h-3.5 w-3.5" />, label: "System" },
@@ -30,6 +44,8 @@ function ThemeSwatch({
   onClick,
   onEdit,
   onDelete,
+  onExport,
+  onDuplicateExport,
 }: {
   theme: ThemeDefinition
   isActive: boolean
@@ -37,6 +53,8 @@ function ThemeSwatch({
   onClick: () => void
   onEdit?: () => void
   onDelete?: () => void
+  onExport?: () => void
+  onDuplicateExport?: () => void
 }) {
   const palette = isDark ? theme.palette.dark : theme.palette.light
 
@@ -70,9 +88,9 @@ function ThemeSwatch({
         </div>
         <span className="text-xs text-text-muted leading-none">{theme.name}</span>
       </button>
-      {/* Edit/delete overlay for custom themes */}
-      {(onEdit || onDelete) && (
-        <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex gap-0.5">
+      {/* Overlay icons on hover */}
+      {(onEdit || onDelete || onExport || onDuplicateExport) && (
+        <div className="absolute -top-1.5 -right-1.5 hidden group-hover:flex group-focus-within:flex gap-0.5">
           {onEdit && (
             <button
               type="button"
@@ -81,6 +99,26 @@ function ThemeSwatch({
               title="Edit theme"
             >
               <Pencil className="h-2.5 w-2.5 text-text-muted" />
+            </button>
+          )}
+          {onExport && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onExport() }}
+              className="h-5 w-5 rounded-full bg-surface border border-border flex items-center justify-center shadow-sm hover:bg-surface2"
+              title="Export theme"
+            >
+              <Download className="h-2.5 w-2.5 text-text-muted" />
+            </button>
+          )}
+          {onDuplicateExport && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDuplicateExport() }}
+              className="h-5 w-5 rounded-full bg-surface border border-border flex items-center justify-center shadow-sm hover:bg-surface2"
+              title="Duplicate & Export"
+            >
+              <Copy className="h-2.5 w-2.5 text-text-muted" />
             </button>
           )}
           {onDelete && (
@@ -107,35 +145,121 @@ export function ThemePicker() {
     setModePreference,
     themeId,
     setThemeId,
+    themeDefinition,
     presets,
     customThemes,
     saveCustomTheme,
     deleteCustomTheme,
   } = useTheme()
   const isDark = mode === "dark"
-  const [showAdvancedTools, setShowAdvancedTools] = useState(false)
 
-  const [editorOpen, setEditorOpen] = useState(false)
+  // Editor modal state
+  const [quickEditorOpen, setQuickEditorOpen] = useState(false)
+  const [advancedEditorOpen, setAdvancedEditorOpen] = useState(false)
   const [editingTheme, setEditingTheme] = useState<ThemeDefinition | undefined>()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleCreate = () => {
-    setEditingTheme(undefined)
-    setEditorOpen(true)
-  }
+  // --- Handlers ---
 
-  const handleEdit = (theme: ThemeDefinition) => {
+  const handleSave = useCallback(
+    (theme: ThemeDefinition) => {
+      saveCustomTheme(theme)
+      setThemeId(theme.id)
+    },
+    [saveCustomTheme, setThemeId],
+  )
+
+  const handleDelete = useCallback(
+    (id: string) => {
+      const theme = customThemes.find((entry) => entry.id === id)
+      Modal.confirm({
+        title: t("generalSettings.settings.themePreset.delete.title", "Delete theme?"),
+        content: t(
+          "generalSettings.settings.themePreset.delete.description",
+          `"${theme?.name ?? "This theme"}" will be permanently removed.`
+        ),
+        okText: t("common:delete", "Delete"),
+        okType: "danger",
+        cancelText: t("common:cancel", "Cancel"),
+        onOk: () => {
+          deleteCustomTheme(id)
+        }
+      })
+    },
+    [customThemes, deleteCustomTheme, t],
+  )
+
+  const handleEditCustom = useCallback((theme: ThemeDefinition) => {
     setEditingTheme(theme)
-    setEditorOpen(true)
-  }
+    setAdvancedEditorOpen(true)
+  }, [])
 
-  const handleSave = (theme: ThemeDefinition) => {
-    saveCustomTheme(theme)
-    setThemeId(theme.id)
-  }
+  const handleExportCustom = useCallback((theme: ThemeDefinition) => {
+    downloadThemeJson(theme)
+  }, [])
 
-  const handleDelete = (id: string) => {
-    deleteCustomTheme(id)
-  }
+  const handleDuplicateExport = useCallback(
+    (preset: ThemeDefinition) => {
+      const copy = duplicateTheme(preset, preset.name + " Copy")
+      downloadThemeJson(copy)
+    },
+    [],
+  )
+
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleImportFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+
+      const reader = new FileReader()
+      reader.onload = () => {
+        const jsonString = reader.result as string
+        const result = parseImportedTheme(jsonString)
+
+        if (result.valid === false) {
+          void message.error(result.error)
+          return
+        }
+
+        saveCustomTheme(result.theme)
+        setThemeId(result.theme.id)
+        if (result.warnings.length > 0) {
+          void message.warning(result.warnings.join(" "))
+        } else {
+          void message.success(`Theme "${result.theme.name}" imported successfully.`)
+        }
+      }
+      reader.onerror = () => {
+        void message.error("Failed to read theme file.")
+      }
+      reader.readAsText(file)
+
+      // Reset file input so re-importing the same file triggers onChange
+      e.target.value = ""
+    },
+    [saveCustomTheme, setThemeId],
+  )
+
+  const handleOpenQuick = useCallback(() => {
+    setEditingTheme(undefined)
+    setQuickEditorOpen(true)
+  }, [])
+
+  const handleOpenAdvanced = useCallback(() => {
+    setEditingTheme(undefined)
+    setAdvancedEditorOpen(true)
+  }, [])
+
+  /** Transition from quick editor → advanced editor, carrying over the preview theme */
+  const handleQuickToAdvanced = useCallback((previewTheme: ThemeDefinition) => {
+    setQuickEditorOpen(false)
+    setEditingTheme(previewTheme)
+    setAdvancedEditorOpen(true)
+  }, [])
 
   // Split presets into builtin and custom for separate rendering
   const builtinPresets = presets.filter((p) => p.builtin)
@@ -163,27 +287,9 @@ export function ThemePicker() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm text-text">
-            {t("generalSettings.settings.themePreset.label", "Theme")}
-          </span>
-          <button
-            type="button"
-            className="text-xs text-text-muted hover:text-text"
-            data-testid="theme-advanced-tools-toggle"
-            onClick={() => setShowAdvancedTools((prev) => !prev)}
-          >
-            {showAdvancedTools
-              ? t(
-                  "generalSettings.settings.themePreset.hideAdvanced",
-                  "Hide advanced theme tools"
-                )
-              : t(
-                  "generalSettings.settings.themePreset.showAdvanced",
-                  "Show advanced theme tools"
-                )}
-          </button>
-        </div>
+        <span className="text-sm text-text">
+          {t("generalSettings.settings.themePreset.label", "Theme")}
+        </span>
         <div className="flex flex-wrap gap-2">
           {builtinPresets.map((preset) => (
             <ThemeSwatch
@@ -192,6 +298,7 @@ export function ThemePicker() {
               isActive={preset.id === themeId}
               isDark={isDark}
               onClick={() => setThemeId(preset.id)}
+              onDuplicateExport={() => handleDuplicateExport(preset)}
             />
           ))}
           {customPresets.map((preset) => (
@@ -201,43 +308,63 @@ export function ThemePicker() {
               isActive={preset.id === themeId}
               isDark={isDark}
               onClick={() => setThemeId(preset.id)}
-              onEdit={
-                showAdvancedTools ? () => handleEdit(preset) : undefined
-              }
-              onDelete={
-                showAdvancedTools ? () => handleDelete(preset.id) : undefined
-              }
+              onEdit={() => handleEditCustom(preset)}
+              onExport={() => handleExportCustom(preset)}
+              onDelete={() => handleDelete(preset.id)}
             />
           ))}
-          {showAdvancedTools ? (
-            <button
-              type="button"
-              onClick={handleCreate}
-              className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border p-2.5 transition-colors hover:border-primary/50 hover:bg-surface2 min-w-[90px]"
-              title="Create custom theme"
-            >
-              <Plus className="h-4 w-4 text-text-muted" />
-              <span className="text-xs text-text-muted leading-none">Create</span>
-            </button>
-          ) : null}
         </div>
-        {!showAdvancedTools ? (
-          <p className="text-xs text-text-muted">
-            {t(
-              "generalSettings.settings.themePreset.advancedHint",
-              "Advanced theme token editing is hidden by default."
-            )}
-          </p>
-        ) : null}
+
+        {/* Action buttons row */}
+        <div className="flex flex-wrap gap-2 mt-1">
+          <Button
+            size="small"
+            icon={<Palette className="h-3.5 w-3.5" />}
+            onClick={handleOpenQuick}
+          >
+            Quick Customize
+          </Button>
+          <Button
+            size="small"
+            icon={<SlidersHorizontal className="h-3.5 w-3.5" />}
+            onClick={handleOpenAdvanced}
+          >
+            Advanced Editor
+          </Button>
+          <Button
+            size="small"
+            icon={<Upload className="h-3.5 w-3.5" />}
+            onClick={handleImportClick}
+          >
+            Import Theme
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+        </div>
       </div>
 
-      <ThemeEditorModal
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
+      <ThemeQuickEditor
+        open={quickEditorOpen}
+        onClose={() => setQuickEditorOpen(false)}
+        onSave={handleSave}
+        isDark={isDark}
+        editingTheme={editingTheme}
+        activeTheme={themeDefinition}
+        onOpenAdvanced={handleQuickToAdvanced}
+      />
+      <ThemeAdvancedEditor
+        open={advancedEditorOpen}
+        onClose={() => setAdvancedEditorOpen(false)}
         onSave={handleSave}
         onDelete={handleDelete}
-        editingTheme={editingTheme}
         isDark={isDark}
+        editingTheme={editingTheme}
+        activeTheme={themeDefinition}
       />
     </div>
   )

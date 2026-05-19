@@ -15,8 +15,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
-from fastapi import status
-from httpx import AsyncClient
+from fastapi import FastAPI, status
+from httpx import ASGITransport, AsyncClient
 
 # Import centralized test configuration
 import sys
@@ -27,37 +27,55 @@ from test_config import test_config
 test_config.setup_test_environment()
 test_config.reset_settings()
 
-# Import the FastAPI app
-from tldw_Server_API.app.main import app
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import router as evaluations_router
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     UnifiedEvaluationService, get_unified_evaluation_service
 )
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
+from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import EvaluationListResponse, RunListResponse
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 # Use configuration from test_config
 DEFAULT_API_KEY = test_config.TEST_API_KEY
 TEST_SK_KEY = test_config.TEST_SK_KEY
 
 
+def test_cursor_list_responses_backfill_has_more_from_pagination() -> None:
+    """Evaluation cursor list aliases should reflect canonical pagination metadata."""
+    pagination = CursorPaginationMeta(limit=10, cursor=None, next_cursor="next", has_more=True)
+
+    evaluations = EvaluationListResponse(data=[], pagination=pagination)
+    runs = RunListResponse(data=[], pagination=pagination)
+
+    assert evaluations.has_more is True
+    assert runs.has_more is True
+
+
 @pytest.fixture(scope="function")
-def client():
+def evaluations_test_app():
+    app = FastAPI()
+    app.include_router(evaluations_router, prefix="/api/v1")
+    return app
+
+
+@pytest.fixture(scope="function")
+def client(evaluations_test_app):
     """Create a test client"""
-    with TestClient(app) as c:
+    with TestClient(evaluations_test_app) as c:
         yield c
 
 
 import pytest_asyncio
 @pytest_asyncio.fixture(scope="function")
-async def async_client():
+async def async_client(evaluations_test_app):
     """Create an async test client"""
-    from httpx import ASGITransport
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=evaluations_test_app), base_url="http://test") as ac:
         yield ac
 
 
 @pytest.fixture(autouse=True)
-def use_temp_evaluations_db(temp_db_path, monkeypatch, event_loop):
+def use_temp_evaluations_db(temp_db_path, monkeypatch, event_loop, evaluations_test_app):
     """Route all evaluation storage to the per-test temporary database."""
 
     from tldw_Server_API.app.core.Evaluations import unified_evaluation_service as _svc_module
@@ -113,7 +131,7 @@ def use_temp_evaluations_db(temp_db_path, monkeypatch, event_loop):
     async def _dependency_override():
         return service
 
-    app.dependency_overrides[get_unified_evaluation_service] = _dependency_override
+    evaluations_test_app.dependency_overrides[get_unified_evaluation_service] = _dependency_override
 
     try:
         yield
@@ -128,7 +146,7 @@ def use_temp_evaluations_db(temp_db_path, monkeypatch, event_loop):
         except Exception:
             _ = None
         event_loop.run_until_complete(service.shutdown())
-        app.dependency_overrides.pop(get_unified_evaluation_service, None)
+        evaluations_test_app.dependency_overrides.pop(get_unified_evaluation_service, None)
 
 
 @pytest.fixture
@@ -645,6 +663,16 @@ class TestDatasetManagement:
         assert data["sample_count"] == len(sample_dataset_request["samples"])
         assert len(data["samples"]) == 1
         assert data["samples"][0]["input"]["question"] == "What is ML?"
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": len(sample_dataset_request["samples"]),
+            "has_more": False,
+            "next_offset": None,
+        }
+        assert data["has_more"] is False
+        assert data["next_offset"] is None
 
     def test_list_datasets(self, client, auth_headers, sample_dataset_request):
 
@@ -661,6 +689,15 @@ class TestDatasetManagement:
         data = response.json()
         assert data["object"] == "list"
         assert len(data["data"]) <= 2
+        assert data["total"] == 3
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 2,
+            "offset": 0,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
 
     def test_delete_dataset(self, client, auth_headers, sample_dataset_request):
 

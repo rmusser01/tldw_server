@@ -95,8 +95,8 @@ async def run_mcp_tool_adapter(config: dict[str, Any], context: dict[str, Any]) 
                 if tool.get("name") == tool_name:
                     tool_def = tool
                     break
-        except _MCP_ADAPTER_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"MCP tool adapter: failed to get tool definitions for {tool_name}: {exc}")
+        except _MCP_ADAPTER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP tool adapter: failed to get tool definitions")
 
     required_scopes = extract_tool_scopes(tool_def)
     if required_scopes:

@@ -86,10 +86,14 @@ async def run_reminder_jobs_worker(stop_event: asyncio.Event | None = None) -> N
             await asyncio.sleep(poll_sleep)
 
 
-async def start_reminder_jobs_worker() -> asyncio.Task | None:
+async def start_reminder_jobs_worker(stop_event: asyncio.Event | None = None) -> asyncio.Task | None:
     if not env_flag_enabled("REMINDER_JOBS_WORKER_ENABLED"):
         return None
-    return asyncio.create_task(run_reminder_jobs_worker(), name="reminder_jobs_worker")
+    managed_stop_event = stop_event or asyncio.Event()
+    return asyncio.create_task(
+        run_reminder_jobs_worker(managed_stop_event),
+        name="reminder_jobs_worker",
+    )
 
 
 __all__ = [

@@ -951,6 +951,28 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({ onNavigateToTake, onNa
         size="small"
       >
         <div className="space-y-4">
+          {!isLoadingList && loadedMediaItems.length === 0 && (
+            <Alert
+              type="info"
+              showIcon
+              data-testid="quiz-generate-no-media"
+              message={t("option:quiz.generate.noMedia", { defaultValue: "No media content found" })}
+              description={
+                <>
+                  {t("option:quiz.generate.noMediaHint", {
+                    defaultValue: "Import videos, articles, or documents in your "
+                  })}
+                  <a href="/media">
+                    {t("option:quiz.generate.mediaLibrary", { defaultValue: "Media Library" })}
+                  </a>
+                  {t("option:quiz.generate.noMediaSuffix", {
+                    defaultValue: ", then return here to generate quizzes."
+                  })}
+                </>
+              }
+              className="mb-4"
+            />
+          )}
           <div className="space-y-2">
             <div className="text-xs font-medium text-text-subtle">
               {t("option:quiz.mediaSources", { defaultValue: "Media" })}

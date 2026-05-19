@@ -29,7 +29,7 @@ export function useDictionariesAvailability({
     "option:dictionaries.offlineDescription",
     {
       defaultValue:
-        "This tldw server does not advertise the /api/v1/chat/dictionaries endpoints. Upgrade your server to a version that includes chat dictionaries to use this workspace.",
+        "Chat dictionaries are not available on your current server version. Update your server or contact your administrator to enable this feature.",
     }
   )
   const dictionariesUnsupportedPrimaryActionLabel = t(

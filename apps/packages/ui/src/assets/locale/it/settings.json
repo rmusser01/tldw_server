@@ -3,7 +3,13 @@
     "serverAndAuth": "Server e Auth",
     "knowledgeTools": "Strumenti di conoscenza",
     "workspace": "Area di lavoro",
-    "about": "Informazioni"
+    "about": "Informazioni",
+    "connect": "Connessione",
+    "aiModels": "IA e modelli",
+    "experience": "Esperienza",
+    "knowledgeWorkspace": "Conoscenza e area di lavoro",
+    "safetyAdmin": "Sicurezza e amministrazione",
+    "dataManagement": "Gestione dati"
   },
   "healthNav": "Stato",
   "worldBooksNav": "Libri del mondo",
@@ -1670,5 +1676,11 @@
     "subtitle": "Configura valori predefiniti, preset e comportamento di Importazione rapida."
   },
   "acpPlaygroundNav": "Area ACP",
-  "skillsNav": "Competenze"
+  "skillsNav": "Competenze",
+  "providerKeys": {
+    "navTitle": "Chiavi provider"
+  },
+  "dataManagement": {
+    "navTitle": "Gestione dati"
+  }
 }

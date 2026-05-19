@@ -36,8 +36,16 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TransactionError
+from tldw_Server_API.app.core.AuthNZ.api_key_audit import (
+    emit_mandatory_api_key_management_audit,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditEventCategory,
+    AuditEventType,
+    MandatoryAuditWriteError,
+)
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
@@ -124,7 +132,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> set[str]:
 
     Examples:
         >>> normalize_scope(None)
-        {'read'}
+        set()
         >>> normalize_scope("write")
         {'write'}
         >>> normalize_scope(["read", "write"])
@@ -133,7 +141,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> set[str]:
         {'read', 'admin'}
     """
     if scope is None:
-        return {"read"}
+        return set()
 
     if isinstance(scope, str):
         scope_str = scope.strip()
@@ -151,7 +159,7 @@ def normalize_scope(scope: Optional[Union[str, list[str]]]) -> set[str]:
     if isinstance(scope, (list, tuple)):
         return {s.strip().lower() for s in scope if isinstance(s, str) and s.strip()}
 
-    return {"read"}
+    return set()
 
 
 def has_scope(key_scopes: set[str], required_scope: str) -> bool:
@@ -551,7 +559,11 @@ class APIKeyManager:
         expires_in_days: Optional[int] = 90,
         rate_limit: Optional[int] = None,
         allowed_ips: Optional[list[str]] = None,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[dict[str, Any]] = None,
+        actor_user_id: Optional[int] = None,
+        actor_subject: Optional[str] = None,
+        actor_kind: Optional[str] = None,
+        actor_roles: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """
         Create a new API key for a user
@@ -586,23 +598,42 @@ class APIKeyManager:
         if expires_in_days is not None:
             expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
 
+        repo = self._get_repo()
         try:
-            repo = self._get_repo()
-            key_id = await repo.create_api_key_row(
-                user_id=user_id,
-                key_hash=key_hash,
-                key_identifier=key_identifier,
-                key_prefix=key_prefix,
-                name=name,
-                description=description,
-                scope=stored_scope,
-                expires_at=expires_at,
-                rate_limit=rate_limit,
-                allowed_ips=allowed_ips,
-                metadata=metadata,
-            )
+            async with self.db_pool.transaction() as conn:
+                key_id = await repo.create_api_key_row(
+                    user_id=user_id,
+                    key_hash=key_hash,
+                    key_identifier=key_identifier,
+                    key_prefix=key_prefix,
+                    name=name,
+                    description=description,
+                    scope=stored_scope,
+                    expires_at=expires_at,
+                    rate_limit=rate_limit,
+                    allowed_ips=allowed_ips,
+                    metadata=metadata,
+                    conn=conn,
+                )
 
-            # Log the creation (audit rows are still written here)
+                await emit_mandatory_api_key_management_audit(
+                    user_id=user_id,
+                    event_type=AuditEventType.DATA_WRITE,
+                    category=AuditEventCategory.DATA_MODIFICATION,
+                    action="api_key.create",
+                    resource_id=str(key_id),
+                    metadata={
+                        "scope": scope,
+                        "name": name,
+                        "expires_in_days": expires_in_days,
+                    },
+                    actor_user_id=actor_user_id,
+                    actor_subject=actor_subject,
+                    actor_kind=actor_kind,
+                    actor_roles=actor_roles,
+                )
+
+            # Keep legacy API-key audit mirror as best-effort compatibility.
             await self._log_action(key_id, "created", user_id)
 
             if self.settings.PII_REDACT_LOGS:
@@ -620,6 +651,8 @@ class APIKeyManager:
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "message": "Store this key securely - it will not be shown again"
             }
+        except MandatoryAuditWriteError:
+            raise
         except Exception as e:
             logger.exception("Failed to create API key")
             raise DatabaseError(
@@ -649,6 +682,10 @@ class APIKeyManager:
         allowed_paths: Optional[list[str]] = None,
         max_calls: Optional[int] = None,
         max_runs: Optional[int] = None,
+        actor_user_id: Optional[int] = None,
+        actor_subject: Optional[str] = None,
+        actor_kind: Optional[str] = None,
+        actor_roles: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """Create a Virtual API Key with LLM endpoint scope and budgets."""
         if not self._initialized:
@@ -666,33 +703,54 @@ class APIKeyManager:
             allowed_endpoints=allowed_endpoints,
         )
 
+        repo = self._get_repo()
         try:
-            repo = self._get_repo()
-            key_id = await repo.create_virtual_key_row(
-                user_id=user_id,
-                key_hash=key_hash,
-                key_identifier=key_identifier,
-                key_prefix=key_prefix,
-                name=name,
-                description=description,
-                expires_at=expires_at,
-                org_id=org_id,
-                team_id=team_id,
-                scope=effective_scope,
-                allowed_endpoints=allowed_endpoints,
-                allowed_providers=allowed_providers,
-                allowed_models=allowed_models,
-                budget_day_tokens=budget_day_tokens,
-                budget_month_tokens=budget_month_tokens,
-                budget_day_usd=budget_day_usd,
-                budget_month_usd=budget_month_usd,
-                parent_key_id=parent_key_id,
-                allowed_methods=allowed_methods,
-                allowed_paths=allowed_paths,
-                max_calls=max_calls,
-                max_runs=max_runs,
-            )
+            async with self.db_pool.transaction() as conn:
+                key_id = await repo.create_virtual_key_row(
+                    user_id=user_id,
+                    key_hash=key_hash,
+                    key_identifier=key_identifier,
+                    key_prefix=key_prefix,
+                    name=name,
+                    description=description,
+                    expires_at=expires_at,
+                    org_id=org_id,
+                    team_id=team_id,
+                    scope=effective_scope,
+                    allowed_endpoints=allowed_endpoints,
+                    allowed_providers=allowed_providers,
+                    allowed_models=allowed_models,
+                    budget_day_tokens=budget_day_tokens,
+                    budget_month_tokens=budget_month_tokens,
+                    budget_day_usd=budget_day_usd,
+                    budget_month_usd=budget_month_usd,
+                    parent_key_id=parent_key_id,
+                    allowed_methods=allowed_methods,
+                    allowed_paths=allowed_paths,
+                    max_calls=max_calls,
+                    max_runs=max_runs,
+                    conn=conn,
+                )
 
+                await emit_mandatory_api_key_management_audit(
+                    user_id=user_id,
+                    event_type=AuditEventType.DATA_WRITE,
+                    category=AuditEventCategory.DATA_MODIFICATION,
+                    action="api_key.create_virtual",
+                    resource_id=str(key_id),
+                    metadata={
+                        "scope": effective_scope,
+                        "org_id": org_id,
+                        "team_id": team_id,
+                        "allowed_endpoints": allowed_endpoints or [],
+                    },
+                    actor_user_id=actor_user_id,
+                    actor_subject=actor_subject,
+                    actor_kind=actor_kind,
+                    actor_roles=actor_roles,
+                )
+
+            # Keep legacy API-key audit mirror as best-effort compatibility.
             await self._log_action(key_id, "created_virtual", user_id, {
                 "org_id": org_id, "team_id": team_id, "budgets": {
                     "day_tokens": budget_day_tokens,
@@ -715,6 +773,8 @@ class APIKeyManager:
                 "message": "Store this key securely - it will not be shown again"
             }
 
+        except MandatoryAuditWriteError:
+            raise
         except Exception as e:
             logger.exception("Failed to create virtual API key")
             raise DatabaseError(
@@ -904,7 +964,11 @@ class APIKeyManager:
         self,
         key_id: int,
         user_id: int,
-        expires_in_days: Optional[int] = 90
+        expires_in_days: Optional[int] = 90,
+        actor_user_id: Optional[int] = None,
+        actor_subject: Optional[str] = None,
+        actor_kind: Optional[str] = None,
+        actor_roles: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """
         Rotate an API key - atomically create new one and revoke old one.
@@ -924,57 +988,72 @@ class APIKeyManager:
         if not self._initialized:
             await self.initialize()
 
+        repo = self._get_repo()
         try:
-            repo = self._get_repo()
-            # Get existing key info (authorization check remains here)
-            old_key = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id)
+            async with self.db_pool.transaction() as conn:
+                old_key = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id, conn=conn)
 
-            if not old_key:
-                raise ValueError("API key not found or unauthorized")
+                if not old_key:
+                    raise ValueError("API key not found or unauthorized")
+                if str(old_key.get("status") or "").lower() != APIKeyStatus.ACTIVE.value:
+                    raise ValueError("API key not found or unauthorized")
 
-            # Decode stored JSON fields in a fail-closed way for security-
-            # sensitive allowlists like allowed_ips.
-            raw_allowed_ips = old_key.get("allowed_ips")
-            allowed_ips: Optional[list[str]] = None
-            if raw_allowed_ips:
-                decoded_allowed_ips = self._coerce_json_field(raw_allowed_ips)
-                if decoded_allowed_ips is None or not isinstance(decoded_allowed_ips, list):
-                    raise TypeError("API key allowlist must be stored as JSON array")
-                allowed_ips = decoded_allowed_ips  # type: ignore[assignment]
+                raw_allowed_ips = old_key.get("allowed_ips")
+                allowed_ips: Optional[list[str]] = None
+                if raw_allowed_ips:
+                    decoded_allowed_ips = self._coerce_json_field(raw_allowed_ips)
+                    if decoded_allowed_ips is None or not isinstance(decoded_allowed_ips, list):
+                        raise TypeError("API key allowlist must be stored as JSON array")
+                    allowed_ips = decoded_allowed_ips  # type: ignore[assignment]
 
-            # Generate new key credentials
-            full_key, key_hash, key_identifier = self.generate_api_key()
-            key_prefix = full_key[:10] + "..."
+                full_key, key_hash, key_identifier = self.generate_api_key()
+                key_prefix = full_key[:10] + "..."
 
-            # Calculate expiration for new key
-            expires_at = None
-            if expires_in_days is not None:
-                expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+                expires_at = None
+                if expires_in_days is not None:
+                    expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
 
-            # Prepare new key metadata
-            new_name = f"{old_key['name']} (rotated)" if old_key['name'] else "Rotated key"
-            new_metadata = self._coerce_json_field(old_key.get('metadata'))
+                new_name = f"{old_key['name']} (rotated)" if old_key['name'] else "Rotated key"
+                new_metadata = self._coerce_json_field(old_key.get('metadata'))
 
-            # Atomically create new key and mark old key as rotated
-            new_key_id = await repo.rotate_key_atomic(
-                user_id=user_id,
-                old_key_id=key_id,
-                new_key_hash=key_hash,
-                new_key_identifier=key_identifier,
-                new_key_prefix=key_prefix,
-                new_name=new_name,
-                new_description=old_key['description'],
-                new_scope=old_key['scope'],
-                new_expires_at=expires_at,
-                new_rate_limit=old_key['rate_limit'],
-                new_allowed_ips=allowed_ips,
-                new_metadata=new_metadata,
-                rotated_status=APIKeyStatus.ROTATED.value,
-                reason="Key rotation",
-                revoked_at=datetime.now(timezone.utc),
-            )
+                new_key_id = await repo.rotate_key_atomic(
+                    user_id=user_id,
+                    old_key_id=key_id,
+                    new_key_hash=key_hash,
+                    new_key_identifier=key_identifier,
+                    new_key_prefix=key_prefix,
+                    new_name=new_name,
+                    new_description=old_key['description'],
+                    new_scope=old_key['scope'],
+                    new_expires_at=expires_at,
+                    new_rate_limit=old_key['rate_limit'],
+                    new_allowed_ips=allowed_ips,
+                    new_metadata=new_metadata,
+                    active_status=APIKeyStatus.ACTIVE.value,
+                    rotated_status=APIKeyStatus.ROTATED.value,
+                    reason="Key rotation",
+                    revoked_at=datetime.now(timezone.utc),
+                    conn=conn,
+                )
 
-            # Log the rotation (non-critical, outside transaction)
+                await emit_mandatory_api_key_management_audit(
+                    user_id=user_id,
+                    event_type=AuditEventType.DATA_UPDATE,
+                    category=AuditEventCategory.DATA_MODIFICATION,
+                    action="api_key.rotate",
+                    resource_id=str(new_key_id),
+                    metadata={
+                        "old_key_id": key_id,
+                        "new_key_id": new_key_id,
+                        "expires_in_days": expires_in_days,
+                    },
+                    actor_user_id=actor_user_id,
+                    actor_subject=actor_subject,
+                    actor_kind=actor_kind,
+                    actor_roles=actor_roles,
+                )
+
+            # Keep legacy API-key audit mirror as best-effort compatibility.
             await self._log_action(key_id, "rotated", user_id)
             await self._log_action(new_key_id, "created_from_rotation", user_id)
 
@@ -998,6 +1077,19 @@ class APIKeyManager:
         except (ValueError, InvalidTokenError):
             # Preserve auth/not-found semantics; callers map to appropriate 4xx.
             raise
+        except MandatoryAuditWriteError:
+            raise
+        except TransactionError as exc:
+            message = str(exc)
+            if (
+                "API key not found or inactive" in message
+                or "API key not found or unauthorized" in message
+            ):
+                raise ValueError("API key not found or unauthorized") from exc
+            logger.exception("Failed to rotate API key")
+            raise DatabaseError(
+                f"Failed to rotate API key {self._db_context_hint()}"
+            ) from exc
         except Exception as e:
             logger.exception("Failed to rotate API key")
             raise DatabaseError(
@@ -1008,7 +1100,11 @@ class APIKeyManager:
         self,
         key_id: int,
         user_id: int,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        actor_user_id: Optional[int] = None,
+        actor_subject: Optional[str] = None,
+        actor_kind: Optional[str] = None,
+        actor_roles: Optional[list[str]] = None,
     ) -> bool:
         """
         Revoke an API key
@@ -1024,23 +1120,43 @@ class APIKeyManager:
         if not self._initialized:
             await self.initialize()
 
+        repo = self._get_repo()
+        reason_text = reason or "Manual revocation"
         try:
-            repo = self._get_repo()
-            success = await repo.revoke_api_key_for_user(
-                key_id=key_id,
-                user_id=user_id,
-                revoked_status=APIKeyStatus.REVOKED.value,
-                active_status=APIKeyStatus.ACTIVE.value,
-                reason=reason or "Manual revocation",
-                revoked_at=datetime.now(timezone.utc),
-            )
+            async with self.db_pool.transaction() as conn:
+                success = await repo.revoke_api_key_for_user(
+                    key_id=key_id,
+                    user_id=user_id,
+                    revoked_status=APIKeyStatus.REVOKED.value,
+                    active_status=APIKeyStatus.ACTIVE.value,
+                    reason=reason_text,
+                    revoked_at=datetime.now(timezone.utc),
+                    conn=conn,
+                )
+
+                if success:
+                    await emit_mandatory_api_key_management_audit(
+                        user_id=user_id,
+                        event_type=AuditEventType.DATA_UPDATE,
+                        category=AuditEventCategory.DATA_MODIFICATION,
+                        action="api_key.revoke",
+                        resource_id=str(key_id),
+                        metadata={"reason": reason_text},
+                        actor_user_id=actor_user_id,
+                        actor_subject=actor_subject,
+                        actor_kind=actor_kind,
+                        actor_roles=actor_roles,
+                    )
 
             if success:
-                await self._log_action(key_id, "revoked", user_id, {"reason": reason})
+                # Keep legacy API-key audit mirror as best-effort compatibility.
+                await self._log_action(key_id, "revoked", user_id, {"reason": reason_text})
                 logger.info(f"Revoked API key {key_id}")
 
             return success
 
+        except MandatoryAuditWriteError:
+            raise
         except Exception as e:
             logger.exception("Failed to revoke API key")
             raise DatabaseError(

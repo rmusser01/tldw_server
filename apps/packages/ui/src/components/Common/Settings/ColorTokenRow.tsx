@@ -1,10 +1,10 @@
 import React, { useCallback } from "react"
 import { ColorPicker } from "antd"
 import type { Color } from "antd/es/color-picker"
-import type { ThemeColorTokens } from "@/themes/types"
+import type { ThemeRgbTokenKey } from "@/themes/types"
 import { rgbTripleToHex, hexToRgbTriple } from "@/themes/conversion"
 
-const TOKEN_LABELS: Record<keyof ThemeColorTokens, string> = {
+const TOKEN_LABELS: Record<ThemeRgbTokenKey, string> = {
   bg: "Background",
   surface: "Surface",
   surface2: "Surface Alt",
@@ -25,9 +25,9 @@ const TOKEN_LABELS: Record<keyof ThemeColorTokens, string> = {
 }
 
 interface ColorTokenRowProps {
-  tokenKey: keyof ThemeColorTokens
+  tokenKey: ThemeRgbTokenKey
   value: string // RGB triple
-  onChange: (key: keyof ThemeColorTokens, value: string) => void
+  onChange: (key: ThemeRgbTokenKey, value: string) => void
 }
 
 export function ColorTokenRow({ tokenKey, value, onChange }: ColorTokenRowProps) {

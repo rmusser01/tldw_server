@@ -181,7 +181,9 @@ describe("WorldBooksManager error-handling stage-2 import diagnostics", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+    // Open Tools dropdown then click Import JSON
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Import JSON"))
 
     const parseErrorFile = new File(["{}"], "broken.json", { type: "application/json" })
     ;(parseErrorFile as any).text = async () => {
@@ -201,7 +203,9 @@ describe("WorldBooksManager error-handling stage-2 import diagnostics", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+    // Open Tools dropdown then click Import JSON
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Import JSON"))
 
     const missingWorldBookPayload = JSON.stringify({
       entries: [{ keywords: ["k"], content: "c" }]

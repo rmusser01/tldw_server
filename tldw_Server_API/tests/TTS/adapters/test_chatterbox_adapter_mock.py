@@ -8,6 +8,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS.adapters import chatterbox_adapter as chatterbox_mod
 from tldw_Server_API.app.core.TTS.adapters.chatterbox_adapter import ChatterboxAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
@@ -23,6 +24,24 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 #######################################################################################################################
 #
 # Mock Tests for Chatterbox Adapter
+
+class _LogCapture:
+    def __init__(self, level: str = "ERROR"):
+        self.messages: list[str] = []
+        self._level = level
+        self._sink_id: int | None = None
+
+    def __enter__(self):
+        self._sink_id = chatterbox_mod.logger.add(
+            lambda message: self.messages.append(message.record["message"]),
+            level=self._level,
+        )
+        return self.messages
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._sink_id is not None:
+            chatterbox_mod.logger.remove(self._sink_id)
+
 
 @pytest.mark.asyncio
 class TestChatterboxAdapterMock:
@@ -231,6 +250,88 @@ class TestChatterboxAdapterMock:
             )
 
             assert request.speed == speed
+
+
+@pytest.mark.asyncio
+class TestChatterboxAdapterSanitizedLogs:
+    async def test_initialization_failure_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_CHATTERBOX_INIT_SECRET_MARKER token=init-secret /tmp/chatterbox-init.wav"
+        adapter = ChatterboxAdapter({})
+
+        with _LogCapture() as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.adapters.chatterbox_adapter._get_torch",
+                return_value=MagicMock(),
+            ):
+                with patch("builtins.__import__", side_effect=RuntimeError(raw_marker)):
+                    success = await adapter.initialize()
+
+        assert success is False
+        assert adapter._status == ProviderStatus.ERROR
+        assert any("Initialization failed" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+        assert all("init-secret" not in message for message in messages)
+
+    async def test_voice_reference_processing_log_sanitizes_error_text(self):
+        raw_marker = "RAW_CHATTERBOX_REFERENCE_PROCESSING_SECRET_MARKER token=voice-secret"
+        adapter = ChatterboxAdapter({})
+
+        with _LogCapture() as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.audio_utils.process_voice_reference_async",
+                new=AsyncMock(return_value=(b"", raw_marker)),
+            ):
+                result = await adapter._prepare_voice_reference(b"audio")
+
+        assert result is None
+        assert any("Voice reference processing failed" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+        assert all("voice-secret" not in message for message in messages)
+
+    async def test_voice_reference_prepared_log_sanitizes_temp_path(self):
+        raw_path = "/tmp/RAW_CHATTERBOX_REFERENCE_PATH_MARKER/token=path-secret/reference.wav"
+        adapter = ChatterboxAdapter({})
+
+        class _TempFile:
+            name = raw_path
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+            def write(self, data):
+                return len(data)
+
+        with _LogCapture("INFO") as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.audio_utils.process_voice_reference_async",
+                new=AsyncMock(return_value=(b"wav-bytes", None)),
+            ):
+                with patch("tempfile.NamedTemporaryFile", return_value=_TempFile()):
+                    result = await adapter._prepare_voice_reference(b"audio")
+
+        assert result == raw_path
+        assert any("Voice reference prepared" in message for message in messages)
+        assert all(raw_path not in message for message in messages)
+        assert all("path-secret" not in message for message in messages)
+
+    async def test_prepare_voice_reference_fallback_log_sanitizes_exception_text(self):
+        raw_marker = "RAW_CHATTERBOX_PREPARE_REFERENCE_SECRET_MARKER token=prepare-secret"
+        adapter = ChatterboxAdapter({})
+
+        with _LogCapture() as messages:
+            with patch(
+                "tldw_Server_API.app.core.TTS.audio_utils.process_voice_reference_async",
+                new=AsyncMock(side_effect=RuntimeError(raw_marker)),
+            ):
+                result = await adapter._prepare_voice_reference(b"audio")
+
+        assert result is None
+        assert any("Failed to prepare voice reference" in message for message in messages)
+        assert all(raw_marker not in message for message in messages)
+        assert all("prepare-secret" not in message for message in messages)
 
 #######################################################################################################################
 #

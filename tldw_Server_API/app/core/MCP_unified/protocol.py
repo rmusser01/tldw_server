@@ -120,6 +120,8 @@ _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
     InvalidParamsException,
 )
 
+_MCP_TOOL_EXECUTION_ERROR = "tool_execution_error"
+
 
 class MCPRequest(BaseModel):
     """MCP request following JSON-RPC 2.0 specification"""
@@ -534,7 +536,6 @@ class MCPProtocol:
         self.rate_limiter = get_rate_limiter()
         self.protocol_version = "2024-11-05"
         self.metrics = get_metrics_collector()
-        self.telemetry = get_telemetry_manager()
         # Strict tool name validation regex
         self._tool_name_re = re.compile(r'^[A-Za-z0-9_.:-]{1,100}$')
         # Idempotency manager for write-capable tools
@@ -546,7 +547,8 @@ class MCPProtocol:
         self._governance_store: Any | None = None
         self._governance_lock = asyncio.Lock()
 
-        # Method handlers
+        # Method handlers — telemetry is accessed via a property so that
+        # a shutdown/re-init cycle is picked up automatically.
         self.handlers: dict[str, Callable] = {
             "initialize": self._handle_initialize,
             "ping": self._handle_ping,
@@ -561,6 +563,12 @@ class MCPProtocol:
         }
 
         logger.info("MCP Protocol handler initialized")
+
+    @property
+    def telemetry(self):
+        """Always return the *current* global telemetry manager so that a
+        shutdown/re-init cycle is picked up automatically."""
+        return get_telemetry_manager()
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
         if not user_id:
@@ -947,7 +955,7 @@ class MCPProtocol:
                 status=status,
             )
             if error:
-                log.error("MCP tool execution failed", error_type=error.__class__.__name__, error_message=str(error)[:200])
+                log.error("MCP tool execution failed", error_type=error.__class__.__name__)
             else:
                 log.info("MCP tool executed")
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
@@ -1239,7 +1247,7 @@ class MCPProtocol:
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 log.debug(
                     "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced",
-                    error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 skip_rate_limit = False
             if not skip_rate_limit:
@@ -1334,9 +1342,16 @@ class MCPProtocol:
                     result = await handler(request.params or {}, context)
                     span.set_attribute("mcp.status", "success")
                 except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _span_e:
+                    sanitized = self._sanitize_exception_for_telemetry(_span_e)
                     span.set_attribute("mcp.status", "failure")
-                    span.set_attribute("mcp.error_type", _span_e.__class__.__name__)
-                    span.set_attribute("mcp.error_message", str(_span_e)[:200])
+                    span.set_attribute("mcp.error_type", sanitized.__class__.__name__)
+                    span.set_attribute("mcp.error_message", str(sanitized)[:200])
+                    raise
+                except Exception as _span_e:
+                    sanitized = self._sanitize_exception_for_telemetry(_span_e)
+                    span.set_attribute("mcp.status", "failure")
+                    span.set_attribute("mcp.error_type", sanitized.__class__.__name__)
+                    span.set_attribute("mcp.error_message", str(sanitized)[:200])
                     raise
                 finally:
                     span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - start_exec) * 1000.0))
@@ -1389,10 +1404,18 @@ class MCPProtocol:
             )
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
             # Log error
-            log.exception(
-                f"MCP request failed: method={request.method}, error={self._mask_secrets(str(e))}",
-                extra={"audit": True}
-            )
+            masked = self._mask_secrets(str(e))
+            secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
+            if secret_redacted:
+                log.error(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
+            else:
+                log.exception(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
             try:
                 elapsed = max(0.0, time.time() - start_ts)
                 self.metrics.record_request(method=request.method, duration=elapsed, status="failure")
@@ -1405,12 +1428,36 @@ class MCPProtocol:
             # Return error response with reduced leakage when not in debug mode
             try:
                 cfg = get_config()
-                msg = self._mask_secrets(str(e)) if getattr(cfg, "debug_mode", False) else "Internal error"
+                debug_mode = bool(getattr(cfg, "debug_mode", False))
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                msg = "Internal error"
+                debug_mode = False
+            msg = masked if debug_mode and not secret_redacted else "Internal error"
             return self._error_response(
                 ErrorCode.INTERNAL_ERROR,
                 msg,
+                request.id if isinstance(request, MCPRequest) else None,
+            )
+        except Exception as e:
+            masked = self._mask_secrets(str(e))
+            secret_redacted = bool(getattr(e, "_mcp_masked_secret", False)) or masked != str(e)
+            if secret_redacted:
+                log.error(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
+            else:
+                log.exception(
+                    f"MCP request failed: method={request.method}, error={masked}",
+                    extra={"audit": True},
+                )
+            with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
+                elapsed = max(0.0, time.time() - start_ts)
+                self.metrics.record_request(method=request.method, duration=elapsed, status="failure")
+            if isinstance(request, MCPRequest) and request.id is None:
+                return None
+            return self._error_response(
+                ErrorCode.INTERNAL_ERROR,
+                "Internal error",
                 request.id if isinstance(request, MCPRequest) else None,
             )
 
@@ -1434,6 +1481,42 @@ class MCPProtocol:
             return text
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
             return text
+
+    def _sanitize_exception_for_telemetry(self, exc: Exception) -> Exception:
+        """Redact secret-bearing exception messages before tracing records them."""
+        original = str(exc)
+        masked = self._mask_secrets(original)
+        if masked == original:
+            with contextlib.suppress(Exception):
+                setattr(exc, "_mcp_masked_secret", False)
+            return exc
+        try:
+            sanitized = exc.__class__(masked)
+        except Exception:
+            sanitized = RuntimeError(masked)
+        with contextlib.suppress(Exception):
+            setattr(sanitized, "_mcp_masked_secret", True)
+        if hasattr(sanitized, "__dict__") and hasattr(exc, "__dict__"):
+            with contextlib.suppress(Exception):
+                for attr in ("errno", "code", "name", "lineno"):
+                    if hasattr(exc, attr):
+                        setattr(sanitized, attr, getattr(exc, attr))
+        with contextlib.suppress(Exception):
+            sanitized.args = (masked,)
+        with contextlib.suppress(Exception):
+            setattr(sanitized, "_mcp_masked_secret", True)
+        return sanitized
+
+    @staticmethod
+    def _generic_exception_like(exc: Exception, message: str) -> Exception:
+        """Return an exception of the same class when possible, with safe text only."""
+        try:
+            sanitized = exc.__class__(message)
+        except Exception:
+            sanitized = RuntimeError(message)
+        with contextlib.suppress(Exception):
+            setattr(sanitized, "_mcp_sanitized_error", True)
+        return sanitized
 
     def _error_response(
         self,
@@ -2493,10 +2576,14 @@ class MCPProtocol:
                             self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
                         raise InvalidParamsException(str(_tool_e)) from _tool_e
                     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _tool_e:
+                        sanitized_tool_error = self._generic_exception_like(
+                            _tool_e,
+                            _MCP_TOOL_EXECUTION_ERROR,
+                        )
                         span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        raise
+                        span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
+                        span.set_attribute("mcp.error_message", _MCP_TOOL_EXECUTION_ERROR)
+                        raise sanitized_tool_error from None
                     finally:
                         span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - t0) * 1000.0))
 
@@ -2530,8 +2617,7 @@ class MCPProtocol:
                 return response_payload
 
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                sanitized_error = self._mask_secrets(str(e))
-                context.logger.exception(f"Tool execution failed: {tool_name} - {sanitized_error}")
+                context.logger.error("Tool execution failed", error_type=e.__class__.__name__)
                 try:
                     duration = max(0.0, time.time() - t0)
                     self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)

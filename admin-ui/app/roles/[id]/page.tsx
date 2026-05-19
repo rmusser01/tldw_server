@@ -22,8 +22,9 @@ import {
 } from '@/lib/rate-limits';
 import { Role, Permission, User } from '@/types';
 import { Label } from '@/components/ui/label';
+import { FormSkeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
-import { CardSkeleton } from '@/components/ui/skeleton';
+import { logger } from '@/lib/logger';
 
 type RateLimits = {
   requests_per_minute?: number | null;
@@ -272,14 +273,14 @@ export default function RoleDetailPage() {
       } else {
         const reason = formatReason(toolPermsData.reason);
         setToolPermissionsError(reason);
-        console.warn('Failed to load tool permissions:', toolPermsData.reason);
+        logger.warn('Failed to load tool permissions', { component: 'RoleDetailPage', error: toolPermsData.reason instanceof Error ? toolPermsData.reason.message : String(toolPermsData.reason) });
       }
 
       if (errors.length > 0) {
         setWarning(errors.join(' | '));
       }
     } catch (err: unknown) {
-      console.error('Failed to load role data:', err);
+      logger.error('Failed to load role data', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to load role data');
     } finally {
       setLoading(false);
@@ -318,7 +319,7 @@ export default function RoleDetailPage() {
         setSuccess('Permission assigned');
       }
     } catch (err: unknown) {
-      console.error('Failed to update permission:', err);
+      logger.error('Failed to update permission', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to update permission');
     }
   };
@@ -345,7 +346,7 @@ export default function RoleDetailPage() {
       setEditMode(false);
       await loadData();
     } catch (err: unknown) {
-      console.error('Failed to update role:', err);
+      logger.error('Failed to update role', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to update role');
     } finally {
       setSaving(false);
@@ -425,7 +426,7 @@ export default function RoleDetailPage() {
       }
       setSuccess('Rate limits updated');
     } catch (err: unknown) {
-      console.error('Failed to update rate limits:', err);
+      logger.error('Failed to update rate limits', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to update rate limits');
     } finally {
       setRateLimitsSaving(false);
@@ -451,7 +452,7 @@ export default function RoleDetailPage() {
       setEditRpd('');
       setSuccess('Rate limits cleared');
     } catch (err: unknown) {
-      console.error('Failed to clear rate limits:', err);
+      logger.error('Failed to clear rate limits', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to clear rate limits');
     } finally {
       setRateLimitsSaving(false);
@@ -485,7 +486,7 @@ export default function RoleDetailPage() {
         setError(message);
       }
     } catch (err: unknown) {
-      console.error('Failed to grant tool permissions:', err);
+      logger.error('Failed to grant tool permissions', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to grant tool permissions');
     } finally {
       setToolPermissionsLoading(false);
@@ -527,7 +528,7 @@ export default function RoleDetailPage() {
         setError(message);
       }
     } catch (err: unknown) {
-      console.error('Failed to revoke tool permissions:', err);
+      logger.error('Failed to revoke tool permissions', { component: 'RoleDetailPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to revoke tool permissions');
     } finally {
       setToolPermissionsLoading(false);
@@ -551,7 +552,7 @@ export default function RoleDetailPage() {
       <ResponsiveLayout>
         <div className="p-4 lg:p-8">
           {loading ? (
-            <CardSkeleton />
+            <FormSkeleton />
           ) : !role ? (
             <>
               <Alert variant="destructive">

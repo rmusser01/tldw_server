@@ -228,7 +228,7 @@ describe("WorldBooksManager stage-2 filtering and sorting", () => {
       expect(firstRowText).toContain("Legacy Notes")
     })
 
-    await user.click(screen.getByRole("columnheader", { name: "Enabled" }))
+    await user.click(screen.getByRole("columnheader", { name: "Status" }))
     await waitFor(() => {
       const firstRowText = document.querySelector("tbody tr")?.textContent || ""
       expect(firstRowText).toContain("Legacy Notes")

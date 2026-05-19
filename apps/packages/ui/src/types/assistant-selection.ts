@@ -1,16 +1,22 @@
 import type { Character } from "@/types/character"
+import {
+  normalizePersonaBuddySummary,
+  type PersonaBuddySummary
+} from "@/types/persona-buddy"
 
 export type AssistantKind = "character" | "persona"
 
 export type AssistantSelection = {
   kind: AssistantKind
   id: string
+  slug?: string | null
   name: string
   avatar_url?: string | null
   greeting?: string | null
   system_prompt?: string | null
   extensions?: Record<string, unknown> | null
-  [key: string]: unknown
+  buddy_summary?: PersonaBuddySummary | null
+  metadata?: Record<string, unknown> | null
 }
 
 type StoredSelectionRecord = Record<string, unknown>
@@ -49,6 +55,7 @@ export const normalizeAssistantSelection = (
   if (!value || typeof value !== "object") return null
 
   const candidate = value as StoredSelectionRecord
+  const { buddySummary: _buddySummary, ...rest } = candidate
   const kind = candidate.kind
   if (!isAssistantKind(kind)) return null
 
@@ -57,14 +64,23 @@ export const normalizeAssistantSelection = (
 
   const name = resolveAssistantName(candidate.name ?? candidate.title, kind)
 
+  const rawBuddySummary = Object.prototype.hasOwnProperty.call(
+    candidate,
+    "buddy_summary"
+  )
+    ? candidate.buddy_summary
+    : candidate.buddySummary
+
   return {
-    ...candidate,
+    ...rest,
     kind,
     id,
+    slug: normalizeOptionalText(candidate.slug),
     name,
     avatar_url: normalizeOptionalText(candidate.avatar_url),
     greeting: normalizeOptionalText(candidate.greeting),
     system_prompt: normalizeOptionalText(candidate.system_prompt),
+    buddy_summary: normalizePersonaBuddySummary(rawBuddySummary),
     extensions:
       candidate.extensions &&
       typeof candidate.extensions === "object" &&

@@ -205,6 +205,81 @@ if OTEL_AVAILABLE:
         logger.debug(f"Trace propagation not available: {e}")
 
 
+SERVICE_NAME_KEY = "service.name"
+SERVICE_VERSION_KEY = "service.version"
+if OTEL_AVAILABLE:
+    SERVICE_NAME_KEY = SERVICE_NAME
+    SERVICE_VERSION_KEY = SERVICE_VERSION
+
+
+def _install_global_tracer_provider(provider: Any) -> None:
+    if trace is not None:
+        trace.set_tracer_provider(provider)
+
+
+def _install_global_meter_provider(provider: Any) -> None:
+    if metrics is not None:
+        metrics.set_meter_provider(provider)
+
+
+def _get_global_tracer_provider() -> Any:
+    if trace is None:
+        return None
+    with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+        return trace.get_tracer_provider()
+    return None
+
+
+def _get_global_meter_provider() -> Any:
+    if metrics is None:
+        return None
+    with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+        return metrics.get_meter_provider()
+    return None
+
+
+def _is_unconfigured_tracer_provider(provider: Any) -> bool:
+    if provider is None:
+        return True
+    return "ProxyTracerProvider" in provider.__class__.__name__
+
+
+def _is_unconfigured_meter_provider(provider: Any) -> bool:
+    if provider is None:
+        return True
+    return "ProxyMeterProvider" in provider.__class__.__name__
+
+
+def _is_global_tracer_provider(provider: Any) -> bool:
+    return provider is not None and provider is _get_global_tracer_provider()
+
+
+def _is_global_meter_provider(provider: Any) -> bool:
+    return provider is not None and provider is _get_global_meter_provider()
+
+
+def _adopt_or_install_global_tracer_provider(provider: Any) -> Any:
+    current_provider = _get_global_tracer_provider()
+    if _is_unconfigured_tracer_provider(current_provider):
+        with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+            _install_global_tracer_provider(provider)
+        current_provider = _get_global_tracer_provider()
+    if current_provider is None:
+        return provider
+    return current_provider
+
+
+def _adopt_or_install_global_meter_provider(provider: Any) -> Any:
+    current_provider = _get_global_meter_provider()
+    if _is_unconfigured_meter_provider(current_provider):
+        with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+            _install_global_meter_provider(provider)
+        current_provider = _get_global_meter_provider()
+    if current_provider is None:
+        return provider
+    return current_provider
+
+
 class TelemetryConfig:
     """Configuration for OpenTelemetry setup."""
 
@@ -355,8 +430,8 @@ class TelemetryConfig:
     def get_resource_attributes(self) -> dict[str, Any]:
         """Get resource attributes for telemetry."""
         return {
-            SERVICE_NAME: self.service_name,
-            SERVICE_VERSION: self.service_version,
+            SERVICE_NAME_KEY: self.service_name,
+            SERVICE_VERSION_KEY: self.service_version,
             "service.namespace": self.service_namespace,
             "deployment.environment": self.deployment_environment,
             "host.name": self.hostname,
@@ -376,33 +451,70 @@ class TelemetryManager:
             config: TelemetryConfig instance or None to use defaults
         """
         self.config = config or TelemetryConfig()
-        self.tracer_provider: TracerProvider | None = None
-        self.meter_provider: MeterProvider | None = None
-        self.tracer: Tracer | None = None
-        self.meter: Meter | None = None
-        self.initialized = False
         # Hold pending views if provider not yet available
         self._pending_views = []  # list[tuple[str, list[float]]]
+        self._registered_histogram_views: set[tuple[str, tuple[float, ...]]] = set()
+        self._reset_runtime_state()
 
         if getattr(self.config, "sdk_disabled", False):
             logger.info("OpenTelemetry SDK disabled via OTEL_SDK_DISABLED")
-            self.tracer = DummyTracer()
-            self.meter = DummyMeter()
             return
 
         if not OTEL_AVAILABLE:
             logger.info("OpenTelemetry not available, using fallback implementations")
-            self.tracer = DummyTracer()
-            self.meter = DummyMeter()
             return
 
         self._initialize()
+
+    def _reset_runtime_state(self) -> None:
+        """Reset provider references and fallback runtime instruments."""
+        self.initialized = False
+        self.tracer_provider = None
+        self.meter_provider = None
+        self.tracer = DummyTracer()
+        self.meter = DummyMeter()
+
+    def _rollback_failed_initialization(self) -> None:
+        """Best-effort rollback after partial initialization failures."""
+        with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+            if self.tracer_provider and not _is_global_tracer_provider(self.tracer_provider):
+                self.tracer_provider.shutdown()
+        with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+            if self.meter_provider and not _is_global_meter_provider(self.meter_provider):
+                self.meter_provider.shutdown()
+        self._reset_runtime_state()
+
+    def _align_with_current_global_providers(self) -> None:
+        """Align manager runtime state with current SDK-global providers."""
+        global_tracer_provider = _get_global_tracer_provider()
+        if global_tracer_provider is not None:
+            self.tracer_provider = global_tracer_provider
+            with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                if hasattr(self.tracer_provider, "get_tracer"):
+                    self.tracer = self.tracer_provider.get_tracer(
+                        self.config.service_name,
+                        self.config.service_version
+                    )
+
+        global_meter_provider = _get_global_meter_provider()
+        if global_meter_provider is not None:
+            self.meter_provider = global_meter_provider
+            with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                if hasattr(self.meter_provider, "get_meter"):
+                    self.meter = self.meter_provider.get_meter(
+                        self.config.service_name,
+                        self.config.service_version
+                    )
+
+        if self.tracer_provider is not None or self.meter_provider is not None:
+            self.initialized = True
 
     def _initialize(self):
         """Initialize OpenTelemetry providers and exporters."""
         if self.initialized:
             return
 
+        global_provider_phase_reached = False
         try:
             # Create resource
             resource = Resource.create(self.config.get_resource_attributes())
@@ -422,17 +534,52 @@ class TelemetryManager:
             # Auto-instrumentation
             self._setup_auto_instrumentation()
 
+            global_provider_phase_reached = True
+            if self.tracer_provider is not None:
+                local_tracer_provider = self.tracer_provider
+                self.tracer_provider = _adopt_or_install_global_tracer_provider(self.tracer_provider)
+                if local_tracer_provider is not self.tracer_provider and not _is_global_tracer_provider(local_tracer_provider):
+                    with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                        local_tracer_provider.shutdown()
+                if hasattr(self.tracer_provider, "get_tracer"):
+                    self.tracer = self.tracer_provider.get_tracer(
+                        self.config.service_name,
+                        self.config.service_version
+                    )
+            if self.meter_provider is not None:
+                local_meter_provider = self.meter_provider
+                self.meter_provider = _adopt_or_install_global_meter_provider(self.meter_provider)
+                if local_meter_provider is not self.meter_provider and not _is_global_meter_provider(local_meter_provider):
+                    with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                        local_meter_provider.shutdown()
+                if hasattr(self.meter_provider, "get_meter"):
+                    self.meter = self.meter_provider.get_meter(
+                        self.config.service_name,
+                        self.config.service_version
+                    )
+
             self.initialized = True
             logger.info(f"Telemetry initialized for service: {self.config.service_name}")
 
         except _TELEMETRY_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to initialize telemetry: {e}")
-            # Fall back to dummy implementations
-            self.tracer = DummyTracer()
-            self.meter = DummyMeter()
+            if global_provider_phase_reached:
+                self._align_with_current_global_providers()
+            else:
+                self._rollback_failed_initialization()
 
     def _initialize_tracing(self, resource: Resource):
         """Initialize tracing with configured exporters."""
+        existing_global_provider = _get_global_tracer_provider()
+        if not _is_unconfigured_tracer_provider(existing_global_provider):
+            self.tracer_provider = existing_global_provider
+            if hasattr(self.tracer_provider, "get_tracer"):
+                self.tracer = self.tracer_provider.get_tracer(
+                    self.config.service_name,
+                    self.config.service_version
+                )
+            return
+
         self.tracer_provider = TracerProvider(resource=resource)
 
         # Add exporters based on configuration
@@ -454,15 +601,23 @@ class TelemetryManager:
                 processor = BatchSpanProcessor(exporter, **processor_kwargs)
                 self.tracer_provider.add_span_processor(processor)
 
-        # Set as global tracer provider
-        trace.set_tracer_provider(self.tracer_provider)
-        self.tracer = trace.get_tracer(
+        self.tracer = self.tracer_provider.get_tracer(
             self.config.service_name,
             self.config.service_version
         )
 
     def _initialize_metrics(self, resource: Resource):
         """Initialize metrics with configured exporters."""
+        existing_global_provider = _get_global_meter_provider()
+        if not _is_unconfigured_meter_provider(existing_global_provider):
+            self.meter_provider = existing_global_provider
+            if hasattr(self.meter_provider, "get_meter"):
+                self.meter = self.meter_provider.get_meter(
+                    self.config.service_name,
+                    self.config.service_version
+                )
+            return
+
         readers = []
 
         # Add metric readers based on configuration
@@ -478,9 +633,7 @@ class TelemetryManager:
                 metric_readers=readers,
             )
 
-            # Set as global meter provider
-            metrics.set_meter_provider(self.meter_provider)
-            self.meter = metrics.get_meter(
+            self.meter = self.meter_provider.get_meter(
                 self.config.service_name,
                 self.config.service_version
             )
@@ -666,12 +819,10 @@ class TelemetryManager:
         if getattr(self.config, "sdk_disabled", False):
             return self.tracer or DummyTracer()
 
-        if not self.tracer:
-            return DummyTracer()
-
-        if name and OTEL_AVAILABLE and trace is not None:
-            return trace.get_tracer(name, self.config.service_version)
-        return self.tracer
+        if name and OTEL_AVAILABLE and self.tracer_provider and hasattr(self.tracer_provider, "get_tracer"):
+            with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                return self.tracer_provider.get_tracer(name, self.config.service_version)
+        return self.tracer or DummyTracer()
 
     def get_meter(self, name: str | None = None) -> Meter:
         """
@@ -686,12 +837,10 @@ class TelemetryManager:
         if getattr(self.config, "sdk_disabled", False):
             return self.meter or DummyMeter()
 
-        if not self.meter:
-            return DummyMeter()
-
-        if name and OTEL_AVAILABLE and metrics is not None:
-            return metrics.get_meter(name, self.config.service_version)
-        return self.meter
+        if name and OTEL_AVAILABLE and self.meter_provider and hasattr(self.meter_provider, "get_meter"):
+            with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                return self.meter_provider.get_meter(name, self.config.service_version)
+        return self.meter or DummyMeter()
 
     def register_histogram_view(self, instrument_name: str, boundaries: list[float]) -> None:
         """Register a histogram view for custom bucket boundaries.
@@ -700,6 +849,9 @@ class TelemetryManager:
         otherwise, queue it to be applied after initialization.
         """
         if not OTEL_AVAILABLE or not instrument_name or not boundaries:
+            return
+        view_key = (instrument_name, tuple(boundaries))
+        if view_key in self._registered_histogram_views:
             return
         try:
             if hasattr(self, "meter_provider") and self.meter_provider and hasattr(self.meter_provider, "register_view") \
@@ -713,6 +865,7 @@ class TelemetryManager:
             else:
                 # Queue for later application
                 self._pending_views.append((instrument_name, list(boundaries)))
+            self._registered_histogram_views.add(view_key)
         except _TELEMETRY_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Failed to register histogram view for {instrument_name}: {e}")
 
@@ -748,19 +901,32 @@ class TelemetryManager:
 
     def shutdown(self):
         """Shutdown telemetry providers and flush data."""
-        if not OTEL_AVAILABLE or not self.initialized:
-            return
-
-        try:
+        if OTEL_AVAILABLE and self.initialized:
             if self.tracer_provider:
-                self.tracer_provider.shutdown()
+                if _is_global_tracer_provider(self.tracer_provider):
+                    with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                        if hasattr(self.tracer_provider, "force_flush"):
+                            self.tracer_provider.force_flush()
+                else:
+                    try:
+                        self.tracer_provider.shutdown()
+                    except _TELEMETRY_NONCRITICAL_EXCEPTIONS as e:
+                        logger.error(f"Error shutting down tracer provider: {e}")
 
             if self.meter_provider:
-                self.meter_provider.shutdown()
+                if _is_global_meter_provider(self.meter_provider):
+                    with suppress(_TELEMETRY_NONCRITICAL_EXCEPTIONS):
+                        if hasattr(self.meter_provider, "force_flush"):
+                            self.meter_provider.force_flush()
+                else:
+                    try:
+                        self.meter_provider.shutdown()
+                    except _TELEMETRY_NONCRITICAL_EXCEPTIONS as e:
+                        logger.error(f"Error shutting down meter provider: {e}")
 
-            logger.info("Telemetry providers shut down successfully")
-        except _TELEMETRY_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Error shutting down telemetry: {e}")
+            if self.tracer_provider or self.meter_provider:
+                logger.info("Telemetry providers shut down successfully")
+        self._reset_runtime_state()
 
 
 # Global telemetry manager instance
@@ -840,5 +1006,7 @@ def initialize_telemetry(config: TelemetryConfig | None = None) -> TelemetryMana
 
 def shutdown_telemetry():
     """Shutdown the global telemetry manager."""
+    global _telemetry_manager
     if _telemetry_manager:
         _telemetry_manager.shutdown()
+        _telemetry_manager = None

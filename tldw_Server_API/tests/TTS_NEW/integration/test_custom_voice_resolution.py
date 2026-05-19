@@ -34,6 +34,11 @@ def _make_wav_bytes(
     return buffer.getvalue()
 
 
+def _make_reference_wav(duration_seconds: float, *, sample_rate: int = 24000) -> bytes:
+    frame_count = max(1, int(duration_seconds * sample_rate))
+    return _make_wav_bytes(payload=b"\x00\x01" * frame_count, sample_rate=sample_rate)
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
@@ -194,6 +199,82 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
 
     payload = {
         "model": "pocket_tts_cpp",
+        "input": "Hello world",
+        "voice": "custom:voice-1",
+        "response_format": "pcm",
+        "stream": False,
+    }
+    try:
+        r = client.post(
+            "/api/v1/audio/speech",
+            json=payload,
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.content == b"ok"
+    finally:
+        client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
+
+
+def test_omnivoice_custom_voice_resolution_injects_reference_text(client, monkeypatch):
+    expected_wav = _make_reference_wav(3.5)
+
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            assert str(user_id) == "1"
+            assert voice_id == "voice-1"
+            return expected_wav
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="reference transcript",
+                provider_artifacts={
+                    "omnivoice": {
+                        "reference_text": "reference transcript",
+                    }
+                },
+            )
+
+    class _FakeAdapter:
+        provider_name = "omnivoice"
+        provider_key = "omnivoice"
+
+        async def generate(self, request):
+            assert request.voice_reference == expected_wav
+            assert request.extra_params.get("reference_text") == "reference transcript"
+            return TTSResponse(audio_data=b"ok", format=request.format, sample_rate=24000)
+
+    def _fake_get_voice_manager():
+        return _FakeVoiceManager()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        _fake_get_voice_manager,
+        raising=True,
+    )
+
+    class _FakeFactory:
+        def get_provider_for_model(self, _model):
+            return "omnivoice"
+
+    service = TTSServiceV2()
+    service._ensure_factory = AsyncMock(return_value=_FakeFactory())
+    service._get_adapter = AsyncMock(return_value=_FakeAdapter())
+
+    async def _fake_get_tts_service_v2():
+        return service
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.tts_service_v2.get_tts_service_v2",
+        _fake_get_tts_service_v2,
+        raising=True,
+    )
+
+    client.app.dependency_overrides[audio_endpoints.get_tts_service] = _fake_get_tts_service_v2
+
+    payload = {
+        "model": "omnivoice",
         "input": "Hello world",
         "voice": "custom:voice-1",
         "response_format": "pcm",

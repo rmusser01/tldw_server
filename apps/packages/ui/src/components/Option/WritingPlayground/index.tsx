@@ -20,10 +20,12 @@ import {
 } from "antd"
 import type { MenuProps } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
+import type { JSONContent } from "@tiptap/react"
 import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 import {
+  Activity,
   Columns2,
   Copy,
   Download,
@@ -43,6 +45,7 @@ import {
 } from "lucide-react"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useServerOnline } from "@/hooks/useServerOnline"
+import { READY_STATE_LABEL } from "@/design-system"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
 import { TldwChatService } from "@/services/tldw/TldwChat"
@@ -85,10 +88,18 @@ import {
 } from "./writing-generation-stats-utils"
 import { buildDiagnosticsSummary } from "./writing-diagnostics-utils"
 import { WritingPlaygroundActiveSessionGuard } from "./WritingPlaygroundActiveSessionGuard"
+import { ManuscriptTreePanel } from "./ManuscriptTreePanel"
+import { resolveTipTapDocument } from "./writing-tiptap-utils"
 import { WritingPlaygroundShell } from "./WritingPlaygroundShell"
 import { WritingPlaygroundLibraryPanel } from "./WritingPlaygroundLibraryPanel"
 import { WritingPlaygroundEditorPanel } from "./WritingPlaygroundEditorPanel"
 import { WritingPlaygroundInspectorPanel } from "./WritingPlaygroundInspectorPanel"
+import { CharacterWorldTab } from "./CharacterWorldTab"
+import { ResearchTab } from "./ResearchTab"
+import { AIAgentTab } from "./AIAgentTab"
+import { FeedbackTab } from "./FeedbackTab"
+import { MOOD_COLORS } from "./feedback-constants"
+import { WritingAnalysisModalHost } from "./WritingAnalysisModalHost"
 import { WritingPlaygroundDiagnosticsPanel } from "./WritingPlaygroundDiagnosticsPanel"
 import { WritingWorldInfoImportControls } from "./WritingWorldInfoImportControls"
 import {
@@ -106,12 +117,18 @@ import {
   applyTextAtRange
 } from "./writing-editor-actions-utils"
 import {
+  createTextareaEditorAdapter,
+  type WritingEditorAdapter,
+  type WritingEditorSelection
+} from "./writing-editor-adapter"
+import {
   useWritingSessionManagement,
   useWritingTemplateLibrary,
   useWritingGenerationSettings,
   useWritingContextComposition,
   useWritingInspectorPanels,
-  useWritingImportExport
+  useWritingImportExport,
+  useWritingFeedback
 } from "./hooks"
 import {
   ADVANCED_NUMBER_PARAMS,
@@ -133,6 +150,7 @@ import {
   PREDICT_SYSTEM_PROMPT,
   resolveGenerationPlan,
   applyFimTemplate,
+  getPromptRichFromPayload,
   WRITING_SPEECH_PREFS_STORAGE_KEY,
   type EditorViewMode,
   type GenerationHistoryEntry,
@@ -148,6 +166,12 @@ const LazyWritingPlaygroundModalHost = React.lazy(() =>
   })),
 )
 
+const LazyWritingTipTapEditor = React.lazy(() =>
+  import("./WritingTipTapEditor").then((module) => ({
+    default: module.WritingTipTapEditor,
+  })),
+)
+
 export const WritingPlayground = () => {
   const { t } = useTranslation(["option"])
   const isOnline = useServerOnline()
@@ -156,8 +180,16 @@ export const WritingPlayground = () => {
     activeSessionId,
     activeSessionName,
     setActiveSessionId,
-    setActiveSessionName
+    setActiveSessionName,
+    editorMode,
+    setEditorMode,
+    focusMode,
+    setFocusMode,
+    activeNodeId,
+    setActiveNodeId,
+    setAnalysisModalOpen,
   } = useWritingPlaygroundStore()
+  // TODO Phase 2: React to activeNodeId changes to load scene content into editor
   const [selectedModel, setSelectedModel] = useStorage<string>("selectedModel")
   const apiProviderOverride = useStoreChatModelSettings(
     (state) => state.apiProvider
@@ -174,6 +206,9 @@ export const WritingPlayground = () => {
     })
 
   // --- Local-only state (not managed by hooks) ---
+  const [libraryView, setLibraryView] = React.useState<"sessions" | "manuscript">("sessions")
+  const [tipTapContent, setTipTapContent] = React.useState<JSONContent | null>(null)
+  const editorTextChangedByTipTap = React.useRef(false)
   const [editorView, setEditorView] = React.useState<EditorViewMode>("edit")
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -210,6 +245,9 @@ export const WritingPlayground = () => {
   const generationCancelledRef = React.useRef(false)
   const speechUtteranceRef = React.useRef<SpeechSynthesisUtterance | null>(null)
   const editorRef = React.useRef<TextAreaRef | null>(null)
+  const activeEditorAdapterRef = React.useRef<WritingEditorAdapter | null>(null)
+  const pendingEditorSelectionRef =
+    React.useRef<WritingEditorSelection | null>(null)
   const previewRef = React.useRef<HTMLDivElement | null>(null)
   const isSyncingScrollRef = React.useRef(false)
 
@@ -270,6 +308,68 @@ export const WritingPlayground = () => {
     handleTemplateChange, handleThemeChange, handleChatModeChange,
     canCreateSession, canRenameSession
   } = sessionMgmt
+
+  const textareaEditorAdapter = React.useMemo(
+    () => createTextareaEditorAdapter(editorRef),
+    []
+  )
+
+  const applyPendingEditorSelection = React.useCallback(
+    (adapter: WritingEditorAdapter | null) => {
+      const pendingSelection = pendingEditorSelectionRef.current
+      if (!adapter || !pendingSelection) return
+      if (
+        adapter === textareaEditorAdapter &&
+        !editorRef.current?.resizableTextArea?.textArea
+      ) {
+        return
+      }
+      adapter.focus()
+      adapter.setSelection(pendingSelection)
+      pendingEditorSelectionRef.current = null
+    },
+    [textareaEditorAdapter]
+  )
+
+  const setActiveEditorAdapter = React.useCallback(
+    (adapter: WritingEditorAdapter | null) => {
+      activeEditorAdapterRef.current = adapter
+      applyPendingEditorSelection(adapter)
+    },
+    [applyPendingEditorSelection]
+  )
+
+  // Sync TipTap content when editorText changes from an external source (e.g. session load, undo/redo, generate)
+  React.useEffect(() => {
+    if (editorMode !== "tiptap") {
+      setActiveEditorAdapter(textareaEditorAdapter)
+      setTipTapContent(null)
+      editorTextChangedByTipTap.current = false
+      return
+    }
+
+    if (!editorTextChangedByTipTap.current) {
+      setTipTapContent(
+        resolveTipTapDocument(
+          editorText,
+          getPromptRichFromPayload(activeSessionDetail?.payload)
+        )
+      )
+    }
+    editorTextChangedByTipTap.current = false
+  }, [
+    activeSessionDetail?.id,
+    activeSessionDetail?.payload,
+    editorMode,
+    editorText,
+    setActiveEditorAdapter,
+    textareaEditorAdapter
+  ])
+
+  React.useEffect(() => {
+    if (editorMode === "tiptap" || editorView === "preview") return
+    applyPendingEditorSelection(activeEditorAdapterRef.current)
+  }, [applyPendingEditorSelection, editorMode, editorView])
 
   const settingsDisabled = isGenerating || !activeSessionDetail
 
@@ -387,6 +487,16 @@ export const WritingPlayground = () => {
     handleSnapshotImport, handleSessionImport,
     sessionImportDisabled, snapshotImportDisabled, snapshotExportDisabled
   } = importExport
+
+  // =====================================================================
+  // Hook 7: Writing Feedback (mood + echo chamber)
+  // =====================================================================
+  const feedback = useWritingFeedback({
+    editorText,
+    isOnline,
+    isGenerating,
+    selectedModel: selectedModel ?? undefined,
+  })
 
   // --- Diagnostics ---
   const showOffline = !isOnline
@@ -709,6 +819,10 @@ export const WritingPlayground = () => {
   // =====================================================================
   // Speech (unique - not in hooks)
   // =====================================================================
+  const getCurrentEditorAdapter = React.useCallback((): WritingEditorAdapter | null => {
+    return activeEditorAdapterRef.current
+  }, [])
+
   const stopSpeech = React.useCallback(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel()
@@ -761,13 +875,8 @@ export const WritingPlayground = () => {
       )
       return
     }
-    const editorEl = editorRef.current?.resizableTextArea?.textArea
-    const selectionStart = editorEl?.selectionStart ?? 0
-    const selectionEnd = editorEl?.selectionEnd ?? 0
     const selectedText =
-      selectionEnd > selectionStart
-        ? editorText.slice(selectionStart, selectionEnd)
-        : ""
+      getCurrentEditorAdapter()?.getSelectedText(editorText) ?? ""
     const sourceText = selectedText.trim().length > 0 ? selectedText : editorText
     const utteranceText = markdownToText(sourceText).trim()
     if (!utteranceText) {
@@ -801,7 +910,7 @@ export const WritingPlayground = () => {
     setIsSpeaking(true)
     setIsSpeechPaused(false)
     window.speechSynthesis.speak(utterance)
-  }, [editorText, speechRate, speechVoiceURI, speechVoices, t])
+  }, [editorText, getCurrentEditorAdapter, speechRate, speechVoiceURI, speechVoices, t])
 
   // --- Speech effects ---
   React.useEffect(() => {
@@ -867,17 +976,15 @@ export const WritingPlayground = () => {
 
   const focusEditorSelection = React.useCallback(
     (start: number, end: number) => {
+      pendingEditorSelectionRef.current = { start, end }
       if (editorView === "preview") {
         setEditorView("edit")
       }
       window.setTimeout(() => {
-        const editorEl = editorRef.current?.resizableTextArea?.textArea
-        if (!editorEl) return
-        editorEl.focus()
-        editorEl.setSelectionRange(start, end)
+        applyPendingEditorSelection(getCurrentEditorAdapter())
       }, 0)
     },
-    [editorView]
+    [applyPendingEditorSelection, editorView, getCurrentEditorAdapter]
   )
 
   const syncScroll = React.useCallback((source: "editor" | "preview") => {
@@ -899,54 +1006,54 @@ export const WritingPlayground = () => {
 
   const insertPlaceholder = React.useCallback(
     (placeholder: "{predict}" | "{fill}") => {
-      const editorEl = editorRef.current?.resizableTextArea?.textArea
       const currentValue = editorText
-      if (!editorEl) {
+      const selection = getCurrentEditorAdapter()?.getSelection()
+      if (!selection) {
         applyPromptValue(currentValue + placeholder, {
           start: currentValue.length + placeholder.length,
           end: currentValue.length + placeholder.length
         })
         return
       }
-      const start = editorEl.selectionStart ?? currentValue.length
-      const end = editorEl.selectionEnd ?? currentValue.length
+      const start = selection.start
+      const end = selection.end
       const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, placeholder)
       applyPromptValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText]
+    [applyPromptValue, editorText, getCurrentEditorAdapter]
   )
 
   const fillSelectionAtCursor = React.useCallback(() => {
-    const editorEl = editorRef.current?.resizableTextArea?.textArea
     const currentValue = editorText
-    const start = editorEl?.selectionStart ?? currentValue.length
-    const end = editorEl?.selectionEnd ?? currentValue.length
+    const selection = getCurrentEditorAdapter()?.getSelection()
+    const start = selection?.start ?? currentValue.length
+    const end = selection?.end ?? currentValue.length
     if (end <= start) {
       message.info(t("option:writingPlayground.fillSelectionRequired", "Select text to replace with {fill}."))
       return
     }
     const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, "{fill}")
     applyPromptValue(nextValue, { start: cursor, end: cursor })
-  }, [applyPromptValue, editorText, t])
+  }, [applyPromptValue, editorText, getCurrentEditorAdapter, t])
 
   const insertTokenTextAtCursor = React.useCallback(
     (tokenText: string) => {
-      const editorEl = editorRef.current?.resizableTextArea?.textArea
       const currentValue = editorText
-      if (!editorEl) {
+      const selection = getCurrentEditorAdapter()?.getSelection()
+      if (!selection) {
         applyPromptValue(currentValue + tokenText, {
           start: currentValue.length + tokenText.length,
           end: currentValue.length + tokenText.length
         })
         return
       }
-      const start = editorEl.selectionStart ?? currentValue.length
-      const end = editorEl.selectionEnd ?? currentValue.length
+      const start = selection.start
+      const end = selection.end
       const { nextValue, cursor } = applyTextAtRange(currentValue, start, end, tokenText)
       applyPromptValue(nextValue, { start: cursor, end: cursor })
       message.success(t("option:writingPlayground.tokenInspectorInsertSuccess", "Token text inserted."))
     },
-    [applyPromptValue, editorText, t]
+    [applyPromptValue, editorText, getCurrentEditorAdapter, t]
   )
 
   const insertTemplateBlock = React.useCallback(
@@ -975,17 +1082,17 @@ export const WritingPlayground = () => {
         )
         return
       }
-      const editorEl = editorRef.current?.resizableTextArea?.textArea
       const currentValue = editorText
-      const start = editorEl?.selectionStart ?? currentValue.length
-      const end = editorEl?.selectionEnd ?? currentValue.length
+      const selection = getCurrentEditorAdapter()?.getSelection()
+      const start = selection?.start ?? currentValue.length
+      const end = selection?.end ?? currentValue.length
       const selected = currentValue.slice(start, end)
       const nextValue =
         currentValue.slice(0, start) + block.prefix + selected + block.suffix + currentValue.slice(end)
       const cursor = start + block.prefix.length + selected.length
       applyPromptValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText, effectiveTemplate, t]
+    [applyPromptValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
   )
 
   // =====================================================================
@@ -1050,14 +1157,28 @@ export const WritingPlayground = () => {
       }
       if (event.key !== "Enter") return
       if (!event.ctrlKey && !event.metaKey) return
+      const activeElement = document.activeElement
       const editorEl = editorRef.current?.resizableTextArea?.textArea
-      if (!editorEl || document.activeElement !== editorEl) return
+      const isPlainEditorFocused = Boolean(editorEl && activeElement === editorEl)
+      const isTipTapFocused =
+        activeElement instanceof HTMLElement &&
+        Boolean(activeElement.closest(".ProseMirror"))
+      const isEditorFocused =
+        editorMode === "tiptap" ? editorView !== "preview" && isTipTapFocused : isPlainEditorFocused
+      if (!isEditorFocused) return
       event.preventDefault()
       void handleGenerate()
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => { window.removeEventListener("keydown", handleKeyDown) }
-  }, [handleCancelGeneration, handleGenerate, isGenerating, settings.token_streaming])
+  }, [
+    editorMode,
+    editorView,
+    handleCancelGeneration,
+    handleGenerate,
+    isGenerating,
+    settings.token_streaming
+  ])
 
   // =====================================================================
   // Search & replace (unique)
@@ -1099,6 +1220,20 @@ export const WritingPlayground = () => {
   React.useEffect(() => {
     if (activeMatchIndex >= searchMatches.length) { setActiveMatchIndex(0) }
   }, [activeMatchIndex, searchMatches.length])
+
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault()
+        setFocusMode(!focusMode)
+      }
+      if (e.key === "Escape" && focusMode) {
+        setFocusMode(false)
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [focusMode, setFocusMode])
 
   const navigateMatch = React.useCallback(
     (direction: "next" | "prev") => {
@@ -1952,8 +2087,23 @@ export const WritingPlayground = () => {
           </Dropdown>
         </div>
       </div>
+      <div className="px-3 py-2 border-b border-border">
+        <Segmented
+          block
+          size="small"
+          value={libraryView}
+          onChange={(v) => setLibraryView(v as "sessions" | "manuscript")}
+          options={[
+            { value: "sessions", label: "Sessions" },
+            { value: "manuscript", label: "Manuscript" },
+          ]}
+        />
+      </div>
       <div className="flex-1 overflow-y-auto px-2 py-1">
-        {sessionsLoading ? (<Skeleton active />) : sessionsError ? (
+        {libraryView === "manuscript" ? (
+          <ManuscriptTreePanel isOnline={isOnline} />
+        ) : (
+        sessionsLoading ? (<Skeleton active />) : sessionsError ? (
           <Alert type="error" showIcon title={t("option:writingPlayground.sessionsError", "Unable to load sessions.")} />
         ) : sortedSessions.length === 0 ? (
           <Empty description={t("option:writingPlayground.sessionsEmpty", "Create your first session to start writing.")} />
@@ -1994,10 +2144,16 @@ export const WritingPlayground = () => {
               )
             })}
           </div>
+        )
         )}
       </div>
     </div>
   )
+
+  const charactersTabContent = <CharacterWorldTab isOnline={isOnline} />
+  const researchTabContent = <ResearchTab isOnline={isOnline} />
+  const agentTabContent = <AIAgentTab isOnline={isOnline} />
+  const feedbackTabContent = <FeedbackTab {...feedback} />
 
   const inspectorDrawerContent = (
     <div className="p-3">
@@ -2008,7 +2164,11 @@ export const WritingPlayground = () => {
           sampling: t("option:writingPlayground.sidebarSampling", "Sampling"),
           context: t("option:writingPlayground.sidebarContext", "Context"),
           setup: t("option:writingPlayground.sidebarSetup", "Setup"),
-          inspect: t("option:writingPlayground.sidebarInspect", "Analysis")
+          inspect: t("option:writingPlayground.sidebarInspect", "Analysis"),
+          characters: t("option:writingPlayground.sidebarCharacters", "Characters"),
+          research: t("option:writingPlayground.sidebarResearch", "Research"),
+          agent: t("option:writingPlayground.sidebarAgent", "Agent"),
+          feedback: t("option:writingPlayground.sidebarFeedback", "Feedback")
         }}
         tabBadges={{
           inspect: responseInspectorRowsAll.length > 0 ? (<Tag color="blue" className="!m-0 !px-1 !text-[10px]">{responseInspectorRowsAll.length}</Tag>) : null
@@ -2047,6 +2207,10 @@ export const WritingPlayground = () => {
         context={contextTabContent}
         setup={setupTabContent}
         inspect={inspectTabContent}
+        characters={charactersTabContent}
+        research={researchTabContent}
+        agent={agentTabContent}
+        feedback={feedbackTabContent}
       />
     </div>
   )
@@ -2066,6 +2230,7 @@ export const WritingPlayground = () => {
       )}
       {!showOffline && !showUnsupported && (
         <WritingPlaygroundShell
+          focusMode={focusMode}
           libraryOpen={libraryOpen}
           inspectorOpen={inspectorOpen}
           onLibraryToggle={() => setLibraryOpen((prev) => !prev)}
@@ -2091,7 +2256,7 @@ export const WritingPlayground = () => {
               </Button>
             </Tooltip>
             <Tag color={diagnosticsSummary.status === "warning" ? "gold" : diagnosticsSummary.status === "busy" ? "blue" : "green"} className="!m-0">
-              {diagnosticsSummary.status === "warning" ? t("option:writingPlayground.diagnosticsWarning", "Warning") : diagnosticsSummary.status === "busy" ? t("option:writingPlayground.diagnosticsBusy", "Busy") : t("option:writingPlayground.diagnosticsReady", "Ready")}
+              {diagnosticsSummary.status === "warning" ? t("option:writingPlayground.diagnosticsWarning", "Warning") : diagnosticsSummary.status === "busy" ? t("option:writingPlayground.diagnosticsBusy", "Busy") : t("option:writingPlayground.diagnosticsReady", READY_STATE_LABEL)}
             </Tag>
             <Button type="text" size="small" icon={<Settings className="h-4 w-4" />} onClick={() => setInspectorOpen((prev) => !prev)} aria-label={t("option:writingPlayground.toggleInspector", "Toggle settings")} className={inspectorOpen ? "text-primary" : ""} />
           </div>
@@ -2109,6 +2274,18 @@ export const WritingPlayground = () => {
                         <Button size="small" icon={<Undo2 className="h-3.5 w-3.5" />} disabled={isGenerating || !canUndoGeneration} onClick={handleUndoGeneration} title={t("option:writingPlayground.undoGeneration", "Undo generation")} />
                         <Button size="small" icon={<Redo2 className="h-3.5 w-3.5" />} disabled={isGenerating || !canRedoGeneration} onClick={handleRedoGeneration} title={t("option:writingPlayground.redoGeneration", "Redo generation")} />
                       </div>
+                      <div className="h-4 w-px bg-border" />
+                      <Segmented
+                        size="small"
+                        value={editorMode}
+                        onChange={(value) => {
+                          setEditorMode(value as "plain" | "tiptap")
+                        }}
+                        options={[
+                          { value: "plain", label: "Plain" },
+                          { value: "tiptap", label: "Rich" },
+                        ]}
+                      />
                       <div className="h-4 w-px bg-border" />
                       <Segmented
                         size="small"
@@ -2134,6 +2311,16 @@ export const WritingPlayground = () => {
                         trigger={["click"]}
                         disabled={isGenerating}>
                         <Button size="small" icon={<MoreHorizontal className="h-3.5 w-3.5" />}>{t("option:writingPlayground.moreActions", "More")}</Button>
+                      </Dropdown>
+                      <Dropdown menu={{
+                        items: [
+                          { key: "pulse", label: t("option:writingPlayground.analysisStoryPulse", "Story Pulse"), onClick: () => setAnalysisModalOpen("pulse") },
+                          { key: "plot", label: t("option:writingPlayground.analysisPlotTracker", "Plot Tracker"), onClick: () => setAnalysisModalOpen("plot") },
+                          { key: "timeline", label: t("option:writingPlayground.analysisEventLine", "Event Line"), onClick: () => setAnalysisModalOpen("timeline") },
+                          { key: "web", label: t("option:writingPlayground.analysisConnectionWeb", "Connection Web"), onClick: () => setAnalysisModalOpen("web") },
+                        ]
+                      }} trigger={["click"]}>
+                        <Button size="small" icon={<Activity className="h-3.5 w-3.5" />}>{t("option:writingPlayground.analysisButton", "Analysis")}</Button>
                       </Dropdown>
                       <Button size="small" icon={searchOpen ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />} onClick={() => setSearchOpen((open) => !open)} title={searchOpen ? t("option:writingPlayground.searchClose", "Close search") : t("option:writingPlayground.searchToggle", "Find")} />
                     </div>
@@ -2165,11 +2352,30 @@ export const WritingPlayground = () => {
                       </div>
                     )}
                   {editorView === "edit" && (
-                    <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
-                      <div className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
-                          <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
-                      </div>
-                    </Dropdown>
+                    editorMode === "tiptap" ? (
+                      <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                        <LazyWritingTipTapEditor
+                          content={tipTapContent}
+                          onContentChange={(json, plain) => {
+                            editorTextChangedByTipTap.current = true
+                            setTipTapContent(json)
+                            applyPromptValue(plain, { promptRich: json })
+                          }}
+                          onAdapterReady={(adapter) => {
+                            setActiveEditorAdapter(adapter)
+                          }}
+                          editable={!isGenerating}
+                          placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                          className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                        />
+                      </React.Suspense>
+                    ) : (
+                      <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
+                        <div className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
+                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                        </div>
+                      </Dropdown>
+                    )
                   )}
                     {editorView === "preview" && (
                       <div ref={previewRef} className="flex-1 overflow-y-auto rounded-md border border-border bg-surface p-4" onScroll={() => syncScroll("preview")}>
@@ -2179,11 +2385,30 @@ export const WritingPlayground = () => {
                     {editorView === "split" && (
                       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
                         <div className={cn("flex-1", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
-                          <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
-                            <div>
-                              <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
-                            </div>
-                          </Dropdown>
+                          {editorMode === "tiptap" ? (
+                            <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                              <LazyWritingTipTapEditor
+                                content={tipTapContent}
+                                onContentChange={(json, plain) => {
+                                  editorTextChangedByTipTap.current = true
+                                  setTipTapContent(json)
+                                  applyPromptValue(plain, { promptRich: json })
+                                }}
+                                onAdapterReady={(adapter) => {
+                                  setActiveEditorAdapter(adapter)
+                                }}
+                                editable={!isGenerating}
+                                placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                                className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                              />
+                            </React.Suspense>
+                          ) : (
+                            <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
+                              <div>
+                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                              </div>
+                            </Dropdown>
+                          )}
                         </div>
                         <div ref={previewRef} className="flex-1 overflow-y-auto rounded-md border border-border bg-surface p-4" onScroll={() => syncScroll("preview")}>
                           {editorText.trim() ? (<MarkdownPreview content={editorText} size="sm" />) : (<Paragraph type="secondary" className="!mb-0 italic">{t("option:writingPlayground.editorEmptyPreview", "Nothing to preview yet.")}</Paragraph>)}
@@ -2254,6 +2479,14 @@ export const WritingPlayground = () => {
               {generationTokenCount > 0 && (<span>{t("option:writingPlayground.generationTokensLabel", "{{count}} tokens", { count: generationTokenCount })}</span>)}
               {generationTokensPerSec > 0 && (<span>{t("option:writingPlayground.generationRateLabel", "{{rate}} tok/s", { rate: generationTokensPerSec >= 10 ? generationTokensPerSec.toFixed(1) : generationTokensPerSec.toFixed(2) })}</span>)}
               {isGenerating && generationElapsed > 0 && (<span>{generationElapsed}s</span>)}
+              {feedback.moodEnabled && feedback.currentMood && (
+                <Tag
+                  color={MOOD_COLORS[feedback.currentMood]}
+                  className="!text-xs !m-0"
+                >
+                  {feedback.currentMood}
+                </Tag>
+              )}
               <div className="flex-1" />
               {saveStatusLabel && (<span>{saveStatusLabel}</span>)}
               <span className="text-text-muted/60">{t("option:writingPlayground.shortcutsHint", "Ctrl+Enter to generate")}</span>
@@ -2353,6 +2586,7 @@ export const WritingPlayground = () => {
       ) : null}
       <input ref={sessionFileInputRef} type="file" accept=".json,application/json" onChange={handleSessionImport} data-testid="writing-session-import" className="hidden" />
       <input ref={snapshotFileInputRef} type="file" accept=".json,application/json" onChange={handleSnapshotImport} data-testid="writing-snapshot-import" className="hidden" />
+      <WritingAnalysisModalHost />
     </div>
   )
 }

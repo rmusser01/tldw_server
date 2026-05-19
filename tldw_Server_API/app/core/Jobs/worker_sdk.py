@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import random
+import secrets
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -73,12 +73,32 @@ class WorkerSDK:
             self._max_iters = 0
 
     async def _sleep_chunked(self, total_seconds: float) -> None:
-        """Compatibility helper retained for potential future use.
+        """Sleep until the delay elapses or stop() is requested.
 
-        Tests patch `self._sleep` to a stub that yields immediately, so using
-        direct sleeps in code paths under test is safe and deterministic.
+        The worker loop spends most of its idle time in backoff sleeps. When
+        shutdown calls stop(), we need those sleeps to wake promptly instead of
+        waiting out the full backoff interval.
         """
-        await self._sleep(max(0.0, float(total_seconds)))
+        delay = max(0.0, float(total_seconds))
+        if delay <= 0 or self._stop.is_set():
+            return
+
+        sleep_task = asyncio.create_task(self._sleep(delay))
+        stop_task = asyncio.create_task(self._stop.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {sleep_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if sleep_task in done:
+                await sleep_task
+        finally:
+            for task in (sleep_task, stop_task):
+                if task.done():
+                    continue
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     def stop(self) -> None:
         self._stop.set()
@@ -92,8 +112,8 @@ class WorkerSDK:
         iters = 0
         while not self._stop.is_set():
             # Sleep for lease - threshold, plus small jitter
-            sleep_for = max(1, lease - threshold) + (random.randint(0, jitter) if jitter else 0)
-            await self._sleep(float(sleep_for))
+            sleep_for = max(1, lease - threshold) + (secrets.randbelow(jitter + 1) if jitter else 0)
+            await self._sleep_chunked(float(sleep_for))
             if self._stop.is_set():
                 return
             kwargs = {"job_id": job_id, "seconds": lease, "worker_id": self.cfg.worker_id, "lease_id": lease_id}
@@ -149,7 +169,9 @@ class WorkerSDK:
                 job = None
             if not job:
                 # Sleep with backoff
-                await self._sleep(float(min(backoff, backoff_max)))
+                await self._sleep_chunked(float(min(backoff, backoff_max)))
+                if self._stop.is_set():
+                    break
                 backoff = min(backoff * 2, backoff_max)
                 continue
             backoff = max(1, int(self.cfg.backoff_base_seconds))
@@ -163,6 +185,7 @@ class WorkerSDK:
             def _finalize_failure(exc: Exception) -> None:
                 retryable = self.cfg.retry_on_exception and bool(getattr(exc, "retryable", True))
                 backoff_s = int(getattr(exc, "backoff_seconds", self.cfg.retry_backoff_seconds))
+                error_code = str(getattr(exc, "failure_code", "worker_exception") or "worker_exception")
                 try:
                     self.jm.fail_job(
                         job_id,
@@ -173,7 +196,7 @@ class WorkerSDK:
                         lease_id=lease_id_str,
                         completion_token=(lease_id_str if is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN")) else None),
                         enforce=enforce,
-                        error_code="worker_exception",
+                        error_code=error_code,
                         error_class=type(exc).__name__,
                     )
                 except _WORKER_SDK_NONCRITICAL_EXCEPTIONS:

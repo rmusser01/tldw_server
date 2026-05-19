@@ -20,7 +20,7 @@
       {
         "name": "method",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": "label_values(http_requests_total, method)",
         "multi": true,
         "includeAll": true,
@@ -33,7 +33,7 @@
       "type": "timeseries",
       "title": "Request Rate by Endpoint",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "sum(rate(http_requests_total{method=~\"$method\"}[5m])) by (handler)",
@@ -46,7 +46,7 @@
       "type": "timeseries",
       "title": "Latency by Endpoint (p95)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{method=~\"$method\"}[5m])) by (le, handler))",
@@ -59,7 +59,7 @@
       "type": "timeseries",
       "title": "Error Rate by Endpoint",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "sum(rate(http_requests_total{status=~\"[45]..\", method=~\"$method\"}[5m])) by (handler, status)",
@@ -72,7 +72,7 @@
       "type": "table",
       "title": "Top 10 Slowest Endpoints (p95, last 5m)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "topk(10, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler)))",

@@ -20,8 +20,14 @@ import {
   getManageServerOrderBy
 } from "../../hooks"
 
-const { trackShortcutHintTelemetryMock } = vi.hoisted(() => ({
-  trackShortcutHintTelemetryMock: vi.fn().mockResolvedValue(undefined)
+const { trackShortcutHintTelemetryMock, markdownSnippetMock, markdownWithBoundaryMock } = vi.hoisted(() => ({
+  trackShortcutHintTelemetryMock: vi.fn().mockResolvedValue(undefined),
+  markdownSnippetMock: vi.fn(({ content }: { content: string }) => (
+    <div data-testid="markdown-snippet">{content}</div>
+  )),
+  markdownWithBoundaryMock: vi.fn(({ content }: { content: string }) => (
+    <div data-testid="markdown-with-boundary">{content}</div>
+  ))
 }))
 
 vi.mock("react-i18next", () => ({
@@ -100,7 +106,8 @@ vi.mock("../../hooks", () => ({
 }))
 
 vi.mock("../../components", () => ({
-  MarkdownWithBoundary: ({ content }: { content: string }) => <div>{content}</div>,
+  FlashcardMarkdownSnippet: (props: { content: string }) => markdownSnippetMock(props),
+  MarkdownWithBoundary: (props: { content: string }) => markdownWithBoundaryMock(props),
   FlashcardActionsMenu: () => <div />,
   FlashcardEditDrawer: () => null,
   FlashcardCreateDrawer: () => null
@@ -161,6 +168,8 @@ describe("ManageTab scheduling metadata visibility", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    markdownSnippetMock.mockClear()
+    markdownWithBoundaryMock.mockClear()
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
@@ -250,6 +259,37 @@ describe("ManageTab scheduling metadata visibility", () => {
     expect(screen.getByText("Sort: Due date")).toBeInTheDocument()
   }, 15000)
 
+  it("uses the markdown renderer for compact flashcard snippets", () => {
+    const markdownFront = "**Important** concept"
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [
+          {
+            ...sampleCard,
+            front: markdownFront
+          }
+        ],
+        count: 1,
+        total: 1
+      },
+      isFetching: false
+    } as any)
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive
+      />
+    )
+
+    expect(
+      markdownSnippetMock.mock.calls.some(
+        ([props]) => (props as { content?: string }).content === markdownFront
+      )
+    ).toBe(true)
+  })
+
   it("shows scheduling metadata in expanded list rows", () => {
     render(
       <ManageTab
@@ -267,6 +307,52 @@ describe("ManageTab scheduling metadata visibility", () => {
     expect(screen.getByText("Relearns 1")).toBeInTheDocument()
     expect(screen.getByText("Media #42")).toBeInTheDocument()
   }, 15000)
+
+  it("uses lightweight snippets in expanded rows and the full renderer for the answer preview", () => {
+    const markdownFront = "## Heading"
+    const markdownBack = "*Answer* details"
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [
+          {
+            ...sampleCard,
+            front: markdownFront,
+            back: markdownBack
+          }
+        ],
+        count: 1,
+        total: 1
+      },
+      isFetching: false
+    } as any)
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-density-toggle"))
+    fireEvent.click(screen.getByTestId(`flashcard-item-${sampleCard.uuid}`))
+
+    expect(
+      markdownSnippetMock.mock.calls.some(
+        ([props]) => (props as { content?: string }).content === markdownFront
+      )
+    ).toBe(true)
+    expect(
+      markdownSnippetMock.mock.calls.some(
+        ([props]) => (props as { content?: string }).content === markdownBack
+      )
+    ).toBe(true)
+    expect(
+      markdownWithBoundaryMock.mock.calls.some(
+        ([props]) => (props as { content?: string }).content === markdownBack
+      )
+    ).toBe(true)
+  })
 
   it("does not render source badges for manual cards", () => {
     vi.mocked(useManageQuery).mockReturnValue({
@@ -386,7 +472,7 @@ describe("ManageTab scheduling metadata visibility", () => {
             },
             {
               id: 9,
-              name: "Workspace Biology",
+              name: "Biology",
               description: "Scoped deck",
               workspace_id: "workspace-77",
               deleted: false,
@@ -432,18 +518,24 @@ describe("ManageTab scheduling metadata visibility", () => {
     )
 
     expect(screen.getByText("Deck 9")).toBeInTheDocument()
-    expect(screen.queryByText("Workspace Biology")).not.toBeInTheDocument()
+    expect(screen.queryByText("Biology · workspace-77")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Show workspace decks/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("Workspace Biology")).toBeInTheDocument()
+      expect(screen.getByText("Biology · workspace-77")).toBeInTheDocument()
     })
     expect(vi.mocked(useDecksQuery)).toHaveBeenLastCalledWith(
       expect.objectContaining({
         include_workspace_items: true
       })
     )
+
+    const deckSelect = within(
+      screen.getByTestId("flashcards-manage-deck-select")
+    ).getByRole("combobox")
+    fireEvent.mouseDown(deckSelect)
+    expect(screen.getAllByText("Biology · workspace-77").length).toBeGreaterThan(1)
   })
 
   it("filters decks and card queries to a selected workspace", async () => {
@@ -499,6 +591,7 @@ describe("ManageTab scheduling metadata visibility", () => {
         deckId: 1,
         update: {
           workspace_id: "workspace-77",
+          parent_deck_id: null,
           expected_version: 1
         }
       })

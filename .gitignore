@@ -157,7 +157,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*.bak
 .venv
+.setup-venv
 env/
 venv/
 ENV/
@@ -287,6 +289,7 @@ errors.log
 !Docs/Product/WebUI/M1_4_Alias_Rollup_Week3_Natural_2026_02_13.json
 !Docs/Deployment/sidecar_workers_manifest.json
 !Docs/Monitoring/claims_grafana_dashboard.json
+!tools/macos-vz-helper/Tests/TemplateFixtures/**/*.json
 !Docs/Development/schema/embeddings_v1.schema.json
 !Docs/Development/schema/embeddings_registry.json
 !Docs/Monitoring/http_client_grafana_dashboard.json
@@ -369,6 +372,7 @@ Config_Files/session_encryption.key
 :memory:
 /tldw_Server_API/WebUI/node_modules
 /apps/node_modules
+/apps/**/node_modules/
 /node_modules
 /.mkdocs-venv
 /tmp_dir
@@ -401,3 +405,5 @@ Dockerfiles/Monitoring/secrets/
 /.hypothesis
 /admin-ui/.next
 /.playwright-cli
+/output
+/apps/tldw-frontend/output

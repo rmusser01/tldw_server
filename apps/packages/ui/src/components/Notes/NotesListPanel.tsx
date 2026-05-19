@@ -111,7 +111,9 @@ type NotesListPanelProps = {
   onExportAllCsv: () => void
   onExportAllJson: () => void
   onImportNotes?: () => void
+  onSyncFolder?: () => void
   importInProgress?: boolean
+  syncFolderInProgress?: boolean
   exportProgress?: {
     format: 'md' | 'csv' | 'json'
     fetchedNotes: number
@@ -148,7 +150,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onExportAllCsv,
   onExportAllJson,
   onImportNotes,
+  onSyncFolder,
   importInProgress = false,
+  syncFolderInProgress = false,
   exportProgress = null
 }) => {
   const { t } = useTranslation(['option', 'settings'])
@@ -168,6 +172,47 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const isExporting = exportProgress != null
   const exportDisabled = !isOnline || !hasNotes || isTrashView || isExporting
   const importDisabled = !isOnline || isTrashView || importInProgress
+  const canSyncFolder =
+    isOnline &&
+    !isTrashView &&
+    !capsLoading &&
+    Boolean(capabilities?.hasNotes) &&
+    Boolean(capabilities?.hasIngestionSources) &&
+    capabilities?.canCreateLocalDirectoryIngestionSource !== false
+  const syncFolderDisabled = !canSyncFolder || syncFolderInProgress
+  const syncFolderDisabledReason = (() => {
+    if (syncFolderInProgress) {
+      return t('option:notesSearch.syncFolderOpening', {
+        defaultValue: 'Opening folder sync...'
+      })
+    }
+    if (isTrashView) {
+      return t('option:notesSearch.syncFolderTrashDisabled', {
+        defaultValue: 'Switch to Notes view to sync folders'
+      })
+    }
+    if (!isOnline) {
+      return t('option:notesSearch.syncFolderOfflineDisabled', {
+        defaultValue: 'Connect to sync folders'
+      })
+    }
+    if (capsLoading) {
+      return t('option:notesSearch.syncFolderChecking', {
+        defaultValue: 'Checking folder sync availability'
+      })
+    }
+    if (!capabilities?.hasNotes || !capabilities?.hasIngestionSources) {
+      return t('option:notesSearch.syncFolderSourcesUnsupported', {
+        defaultValue: 'Sources are not available on this server'
+      })
+    }
+    if (capabilities?.canCreateLocalDirectoryIngestionSource === false) {
+      return t('option:notesSearch.syncFolderEntitlementDisabled', {
+        defaultValue: 'Ask an administrator to enable server folder sync for this account'
+      })
+    }
+    return undefined
+  })()
 
   const renderEmptyStateSurface = (
     variant: 'demo' | 'connect' | 'unsupported' | 'empty',
@@ -215,6 +260,21 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
               >
                 {t('option:notesSearch.importMenuTrigger', {
                   defaultValue: 'Import'
+                })}
+              </Button>
+            </Tooltip>
+            <Tooltip title={syncFolderDisabled ? syncFolderDisabledReason : undefined}>
+              <Button
+                size="small"
+                type="text"
+                className="text-xs"
+                disabled={syncFolderDisabled}
+                loading={syncFolderInProgress}
+                title={syncFolderDisabled ? syncFolderDisabledReason : undefined}
+                onClick={() => onSyncFolder?.()}
+              >
+                {t('option:notesSearch.syncFolder', {
+                  defaultValue: 'Sync folder'
                 })}
               </Button>
             </Tooltip>
@@ -293,9 +353,12 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 defaultValue: 'Exporting {{format}}'
               })
                 .replace('{{format}}', exportProgress.format.toUpperCase())}
-              {`: ${exportProgress.fetchedNotes} notes across ${exportProgress.fetchedPages} batch${
-                exportProgress.fetchedPages === 1 ? '' : 'es'
-              }`}
+              {' '}
+              {t('option:notesSearch.exportProgressCount', {
+                defaultValue: '{{count}} notes exported so far...',
+                count: exportProgress.fetchedNotes
+              })
+                .replace('{{count}}', String(exportProgress.fetchedNotes))}
             </span>
             {exportProgress.failedBatches > 0 && (
               <span>
@@ -322,7 +385,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         renderEmptyStateSurface('unsupported')
       ) : Array.isArray(notes) && notes.length > 0 ? (
         <>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-border" role="listbox">
             {notes.map((item) => (
               (() => {
                 const itemIdText = String(item.id)
@@ -391,9 +454,24 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         onSelectNote(item.id)
                       }}
                       className="w-full text-left"
+                      role="option"
                       aria-selected={isSelectedNote}
                       aria-current={isSelectedNote ? "true" : undefined}
                       data-testid={`notes-open-button-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                      data-notes-list-item
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                          e.preventDefault()
+                          const buttons = Array.from(
+                            e.currentTarget.closest('[data-testid="notes-list-region"]')
+                              ?.querySelectorAll<HTMLButtonElement>('[data-notes-list-item]') ?? []
+                          )
+                          const idx = buttons.indexOf(e.currentTarget as HTMLButtonElement)
+                          if (idx < 0) return
+                          const next = e.key === 'ArrowDown' ? buttons[idx + 1] : buttons[idx - 1]
+                          next?.focus()
+                        }
+                      }}
                     >
                       <div className="w-full">
                         {(() => {
@@ -426,7 +504,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                                   {hasKeywords && (
                                     <Tooltip
                                       title={t('option:notesSearch.badgeHasKeywords', {
-                                        defaultValue: 'Has keywords'
+                                        defaultValue: 'Has tags'
                                       })}
                                     >
                                       <TagIcon className="h-3.5 w-3.5" aria-hidden="true" />

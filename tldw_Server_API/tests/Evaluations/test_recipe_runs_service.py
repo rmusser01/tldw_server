@@ -253,6 +253,33 @@ def test_recipe_service_validates_rag_retrieval_tuning_dataset(tmp_path) -> None
     assert result["corpus_scope"]["sources"] == ["media_db", "notes"]
 
 
+def test_recipe_service_preserves_embeddings_guided_validation_config(tmp_path) -> None:
+    _, service, _ = _service(tmp_path)
+    dataset = [{"query_id": "q-1", "input": "alpha query"}]
+    run_config = {
+        "comparison_mode": "embedding_only",
+        "guided_source_labeling": True,
+        "source_id_contract": "media_id",
+        "candidates": [],
+    }
+
+    result = service.validate_dataset(
+        "embeddings_model_selection",
+        dataset=dataset,
+        run_config=run_config,
+    )
+
+    assert result["valid"] is True
+    assert result["dataset_mode"] == "unlabeled"
+    assert any("expected sources" in warning for warning in result["warnings"])
+    with pytest.raises(ValueError, match="candidates"):
+        service.create_run(
+            "embeddings_model_selection",
+            dataset=dataset,
+            run_config=run_config,
+        )
+
+
 def test_recipe_runs_ignore_unapproved_synthetic_drafts(tmp_path) -> None:
     _, service, _ = _service(tmp_path)
 

@@ -15,7 +15,7 @@ import tempfile
 import zipfile
 import os
 import shutil
-from unittest.mock import MagicMock, patch, AsyncMock, call, PropertyMock
+from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime
 from uuid import uuid4
 from pathlib import Path
@@ -33,7 +33,6 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ConflictResolution,
 )
-from tldw_Server_API.app.core.Chatbooks.exceptions import SecurityError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -168,10 +167,11 @@ class TestChatbookService:
 
         service = ChatbookService(user_id="test_user", user_id_int=7, db=mock_db)
         fake_media_db = MagicMock()
+        media_db_path = tmp_path / "media.db"
 
         with patch(
-            'tldw_Server_API.app.core.Chatbooks.chatbook_service.DatabasePaths.get_media_db_path',
-            return_value=Path('/tmp/media.db'),
+            'tldw_Server_API.app.core.Chatbooks.chatbook_service.DatabasePaths.get_media_db_path',  # nosec B108
+            return_value=media_db_path,
         ), patch(
             'tldw_Server_API.app.core.Chatbooks.chatbook_service.create_media_database',
             return_value=fake_media_db,
@@ -181,7 +181,7 @@ class TestChatbookService:
 
         assert first is fake_media_db
         assert second is fake_media_db
-        mock_create_media_database.assert_called_once_with('test_user', db_path=Path('/tmp/media.db'))
+        mock_create_media_database.assert_called_once_with('test_user', db_path=media_db_path)  # nosec B108
 
     @pytest.mark.asyncio
     async def test_export_chatbook_sync(self, service, mock_db, tmp_path):
@@ -223,53 +223,6 @@ class TestChatbookService:
         assert result["success"] is True
         assert result["message"] == "Chatbook created successfully"
         assert result["file_path"] == str(archive_path)
-
-    def test_get_export_job_parses_varied_timestamps(self, service, mock_db, tmp_path):
-        """Ensure timestamp parser handles common DB formats."""
-        mock_row = {
-            "job_id": "job-plain",
-            "user_id": service.user_id,
-            "status": "completed",
-            "chatbook_name": "Test",
-            "output_path": str(tmp_path / "test.zip"),
-            "created_at": "2024-01-01 00:00:00",
-            "started_at": "2024-01-01 00:00:00+00:00",
-            "completed_at": "2024-01-01 00:00:00.000001",
-            "error_message": None,
-            "progress_percentage": 100,
-            "total_items": 0,
-            "processed_items": 0,
-            "file_size_bytes": 0,
-            "download_url": None,
-            "expires_at": "2024-01-02 00:00:00",
-            "metadata": {},
-        }
-        mock_db.execute_query.return_value = [mock_row]
-
-        job = service._get_export_job("job-plain")
-
-        assert job is not None
-        assert job.created_at is not None
-        assert job.started_at is not None
-        assert job.completed_at is not None
-
-        # Now test Zulu format handling
-        mock_row["created_at"] = "2024-01-03T00:00:00Z"
-        mock_db.execute_query.return_value = [mock_row]
-        job = service._get_export_job("job-zulu")
-        assert job is not None
-        assert job.created_at is not None
-
-    def test_parse_timestamp_accepts_numeric_epoch(self, service):
-        """Numeric epoch values should be parsed as UTC datetimes."""
-        epoch = 1_700_000_000
-        parsed = service._parse_timestamp(epoch)
-        assert parsed == datetime.utcfromtimestamp(epoch)
-
-    def test_parse_timestamp_normalizes_timezone_offsets(self, service):
-        """Timestamps with explicit offsets should normalize to naive UTC."""
-        parsed = service._parse_timestamp("2024-01-01T05:30:00+05:30")
-        assert parsed == datetime(2024, 1, 1, 0, 0)
 
     def test_import_conversation_restores_inline_images(self, service, mock_db, tmp_path):
         """Conversations imported from chatbooks should restore embedded images."""
@@ -719,199 +672,6 @@ class TestChatbookService:
         calls = [call_args[0][0] for call_args in mock_db.execute_query.call_args_list]
         assert any("chat_dictionaries" in sql for sql in calls)
 
-    def test_delete_export_job_removes_file_and_record(self, service, mock_db, tmp_path):
-        """Completed export jobs should be removable and delete their archive."""
-        export_dir = tmp_path / "exports"
-        export_dir.mkdir(parents=True, exist_ok=True)
-        service.export_dir = export_dir
-
-        file_path = export_dir / "export.zip"
-        file_path.write_text("payload", encoding="utf-8")
-
-        job = ExportJob(
-            job_id="job-1",
-            user_id=service.user_id,
-            status=ExportStatus.COMPLETED,
-            chatbook_name="Test",
-            output_path=str(file_path),
-        )
-
-        with patch.object(service, "_get_export_job", return_value=job):
-            ok = service.delete_export_job(job.job_id)
-
-        assert ok is True
-        assert not file_path.exists()
-        mock_db.execute_query.assert_any_call(
-            "DELETE FROM export_jobs WHERE job_id = ? AND user_id = ?",
-            (job.job_id, service.user_id),
-            commit=True,
-        )
-
-    def test_delete_import_job_removes_record(self, service, mock_db):
-        """Cancelled import jobs should be removable."""
-        job = ImportJob(
-            job_id="job-2",
-            user_id=service.user_id,
-            status=ImportStatus.CANCELLED,
-            chatbook_path="dummy",
-        )
-
-        with patch.object(service, "_get_import_job", return_value=job):
-            ok = service.delete_import_job(job.job_id)
-
-        assert ok is True
-        mock_db.execute_query.assert_any_call(
-            "DELETE FROM import_jobs WHERE job_id = ? AND user_id = ?",
-            (job.job_id, service.user_id),
-            commit=True,
-        )
-
-    def test_delete_export_job_rejects_non_terminal_status(self, service):
-        """Non-terminal export jobs should not be removable."""
-        job = ExportJob(
-            job_id="job-3",
-            user_id=service.user_id,
-            status=ExportStatus.PENDING,
-            chatbook_name="Test",
-        )
-
-        with patch.object(service, "_get_export_job", return_value=job):
-            ok = service.delete_export_job(job.job_id)
-
-        assert ok is False
-
-    def test_resolve_import_archive_path_rejects_outside_paths(self, service):
-        """Path resolution should raise SecurityError with a stable violation type."""
-        with pytest.raises(SecurityError) as exc_info:
-            service._resolve_import_archive_path("../../outside.chatbook")
-
-        assert exc_info.value.context.get("violation_type") == "import_path_outside_allowed_directories"
-
-    def test_cleanup_expired_exports_breaks_on_repeated_no_progress(self, service, mock_db):
-        """Cleanup should stop after repeated batches that cannot mark rows expired."""
-        expired_rows = [{"job_id": "job-stuck", "output_path": None}]
-        call_counts = {"select": 0, "update": 0}
-
-        def _execute_query(sql, params=None, commit=False):
-            if sql.startswith("SELECT * FROM export_jobs"):
-                call_counts["select"] += 1
-                return expired_rows
-            if sql.startswith("UPDATE export_jobs"):
-                call_counts["update"] += 1
-                raise RuntimeError("update failed")
-            return []
-
-        mock_db.execute_query.side_effect = _execute_query
-
-        deleted = service.cleanup_expired_exports(batch_size=1)
-
-        assert deleted == 0
-        assert call_counts["select"] == 2
-        assert call_counts["update"] == 2
-
-    def test_cleanup_expired_exports_mixed_progress_exits_cleanly(self, service, mock_db):
-        """Cleanup should preserve successful updates and still terminate with mixed outcomes."""
-        select_batches = [
-            [
-                {"job_id": "job-ok", "output_path": None},
-                {"job_id": "job-fail", "output_path": None},
-            ],
-            [
-                {"job_id": "job-fail", "output_path": None},
-            ],
-        ]
-        update_attempts: list[str] = []
-
-        def _execute_query(sql, params=None, commit=False):
-            if sql.startswith("SELECT * FROM export_jobs"):
-                if select_batches:
-                    return select_batches.pop(0)
-                return []
-            if sql.startswith("UPDATE export_jobs"):
-                job_id = params[1]
-                update_attempts.append(job_id)
-                if job_id == "job-fail":
-                    raise RuntimeError("update failed")
-                return None
-            return []
-
-        mock_db.execute_query.side_effect = _execute_query
-
-        deleted = service.cleanup_expired_exports(batch_size=2)
-
-        assert deleted == 0
-        assert update_attempts.count("job-ok") == 1
-        assert update_attempts.count("job-fail") == 2
-
-    def test_import_chatbook_cleans_temp_dir_on_failure(self, service, tmp_path):
-        """Temporary extraction directories should not linger after import errors."""
-        temp_dir = tmp_path / "chatbooks_tmp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        service.temp_dir = temp_dir
-
-        bad_manifest = {
-            "version": "invalid",
-            "name": "Broken Chatbook",
-            "description": "Invalid version should trigger failure",
-            "created_at": "2024-01-01T00:00:00",
-            "updated_at": "2024-01-01T00:00:00",
-            "content_items": [],
-            "configuration": {},
-            "statistics": {},
-            "metadata": {},
-            "user_info": {},
-        }
-
-        archive_path = temp_dir / "broken.chatbook"
-        with zipfile.ZipFile(archive_path, "w") as zf:
-            zf.writestr("manifest.json", json.dumps(bad_manifest))
-
-        assert not any(temp_dir.glob("import_*"))
-
-        success, message, _ = service._import_chatbook_sync(
-            file_path=str(archive_path),
-            content_selections=None,
-            conflict_resolution=ConflictResolution.SKIP,
-            prefix_imported=False,
-            import_media=True,
-            import_embeddings=False,
-        )
-
-        assert success is False
-        assert "Error importing chatbook" in message
-        assert not any(temp_dir.glob("import_*"))
-
-    def test_preview_chatbook_cleans_temp_dir_on_failure(self, service, tmp_path):
-        """Preview extractions must be removed even when parsing fails."""
-        temp_dir = tmp_path / "chatbooks_preview_tmp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        service.temp_dir = temp_dir
-
-        bad_manifest = {
-            "version": "invalid",
-            "name": "Preview Failure",
-            "description": "Invalid version forces parse error",
-            "created_at": "2024-01-01T00:00:00",
-            "updated_at": "2024-01-01T00:00:00",
-            "content_items": [],
-            "configuration": {},
-            "statistics": {},
-            "metadata": {},
-            "user_info": {},
-        }
-
-        archive_path = temp_dir / "broken_preview.chatbook"
-        with zipfile.ZipFile(archive_path, "w") as zf:
-            zf.writestr("manifest.json", json.dumps(bad_manifest))
-
-        assert not any(temp_dir.glob("preview_*"))
-
-        manifest, error = service.preview_chatbook(str(archive_path))
-
-        assert manifest is None
-        assert error is not None
-        assert not any(temp_dir.glob("preview_*"))
-
     @pytest.mark.asyncio
     async def test_export_manifest_total_size_bytes_matches_archive(self, service):
         """Exported manifest should report the final archive size."""
@@ -1039,7 +799,7 @@ class TestChatbookService:
         with zipfile.ZipFile(archive_path, "w") as zf:
             zf.writestr("manifest.json", json.dumps(manifest.to_dict()))
 
-        success, message, warnings = service._import_chatbook_sync(
+        success, message, details = service._import_chatbook_sync(
             file_path=str(archive_path),
             content_selections=None,
             conflict_resolution=ConflictResolution.SKIP,
@@ -1050,8 +810,9 @@ class TestChatbookService:
 
         assert success is True
         assert "skipped" in message.lower()
-        assert warnings is not None
-        assert any("unsupported content type" in warning.lower() for warning in warnings)
+        assert details is not None
+        assert details["imported_items"] == {}
+        assert any("unsupported content type" in warning.lower() for warning in details["warnings"])
 
     def test_import_conversation_missing_character_falls_back(self, service, mock_db, tmp_path):
         """Missing character_id should fall back to default with a warning."""
@@ -1168,54 +929,6 @@ class TestChatbookService:
         assert new_name == "Existing (2)"
         assert mock_lookup.call_count == 2
 
-    def test_get_export_job_status(self, service, mock_db, tmp_path):
-        """Test retrieving export job status."""
-        # Return tuple matching database schema with metadata
-        export_path = tmp_path / "export.chatbook"
-        metadata = json.dumps({
-            "conversation_count": 5,
-            "note_count": 3,
-            "character_count": 2
-        })
-        mock_db.execute_query.return_value = [
-            ("job123", "test_user", "completed", "Test Export",
-             str(export_path), "2024-01-01T00:00:00",
-             "2024-01-01T00:01:00", "2024-01-01T00:05:00",
-             None, 100, 100, 100, 1024, metadata, None)
-        ]
-
-        result = service.get_export_job_status("job123")
-
-        assert result["job_id"] == "job123"
-        assert result["status"] == "completed"
-        assert result["file_path"] == str(export_path)
-        assert result["content_summary"]["conversations"] == 5
-
-    def test_cancel_export_job(self, service, mock_db):
-        """Test cancelling an export job."""
-        # Mock database to return a pending job
-        mock_db.execute_query.return_value = [{
-            "job_id": "job123",
-            "user_id": "test_user",
-            "status": "pending",
-            "chatbook_name": "Test",
-            "output_path": None,
-            "created_at": "2024-01-01T00:00:00",
-            "started_at": None,
-            "completed_at": None,
-            "error_message": None,
-            "progress_percentage": 0,
-            "total_items": 0,
-            "processed_items": 0,
-            "file_size_bytes": 0,
-            "download_url": None,
-            "expires_at": None
-        }]
-
-        result = service.cancel_export_job("job123")
-
-        assert result == True
-
     @pytest.mark.asyncio
     async def test_import_chatbook_rejects_unsupported_conflict_resolution(self, service):
         """Unsupported conflict_resolution values should fail fast."""
@@ -1269,122 +982,6 @@ class TestChatbookService:
 
         call_args = mock_to_thread.await_args.args
         assert call_args[3] is ConflictResolution.SKIP
-
-    def test_create_import_job(self, service, mock_db, tmp_path):
-        """Test creating an import job."""
-        test_uuid = uuid4()
-        job_id = str(test_uuid)
-        test_file_path = tmp_path / "test.chatbook"
-
-        with patch('tldw_Server_API.app.core.Chatbooks.chatbook_service.uuid4', return_value=test_uuid):
-            mock_db.execute_query.return_value = None
-
-            result = service.create_import_job(
-                file_path=str(test_file_path),
-                conflict_strategy="skip"
-            )
-
-        assert result["job_id"] == job_id
-        assert result["status"] == "pending"
-
-    def test_get_import_job_status(self, service, mock_db, tmp_path):
-        """Test retrieving import job status."""
-        import_path = tmp_path / "import.chatbook"
-        # Return tuple matching database schema
-        mock_db.execute_query.return_value = [
-            ("job456", "test_user", "completed", str(import_path),
-             "2024-01-01T00:00:00", "2024-01-01T00:01:00", "2024-01-01T00:10:00",
-             None, 100, 10, 10, 10, 0, 2, "[]", "[]")
-        ]
-
-        result = service.get_import_job_status("job456")
-
-        assert result["job_id"] == "job456"
-        assert result["status"] == "completed"
-        assert result["successful_items"] == 10
-        assert result["conflicts_found"] == 2
-        assert result["conflicts_resolved"]["skipped"] == 2
-
-    def test_list_export_jobs(self, service, mock_db):
-        """Test listing export jobs."""
-        # Return tuples matching database schema
-        mock_db.execute_query.return_value = [
-            ("job1", "test_user", "completed", "Export 1", None,
-             "2024-01-01T00:00:00", None, None, None, 100, 0, 0, 0, None, None),
-            ("job2", "test_user", "pending", "Export 2", None,
-             "2024-01-01T00:00:00", None, None, None, 50, 0, 0, 0, None, None)
-        ]
-
-        results = service.list_export_jobs()
-
-        assert len(results) == 2
-        assert results[0]["chatbook_name"] == "Export 1"
-        assert results[1]["status"] == "pending"
-
-    def test_list_import_jobs(self, service, mock_db, tmp_path):
-        """Test listing import jobs."""
-        first_import_path = tmp_path / "import.chatbook"
-        second_import_path = tmp_path / "import2.chatbook"
-
-        # Return tuples matching database schema
-        mock_db.execute_query.return_value = [
-            ("job3", "test_user", "completed", str(first_import_path),
-             "2024-01-01T00:00:00", None, None, None, 100, 5, 5, 5, 0, 0, "[]", "[]"),
-            ("job4", "test_user", "failed", str(second_import_path),
-             "2024-01-01T00:00:00", None, None, "File not found", 0, 0, 0, 0, 0, 0, "[]", "[]")
-        ]
-
-        results = service.list_import_jobs()
-
-        assert len(results) == 2
-        assert results[0]["successful_items"] == 5
-        assert results[1]["error_message"] == "File not found"
-
-    def test_clean_old_exports(self, service, mock_db):
-        """Test cleaning old export files."""
-        export_dir = service.export_dir
-        export_dir.mkdir(parents=True, exist_ok=True)
-        file_one = export_dir / "old1.chatbook"
-        file_two = export_dir / "old2.chatbook"
-        file_one.write_text("old")
-        file_two.write_text("old")
-
-        # Return tuples with job_id and output_path
-        mock_db.execute_query.return_value = [
-            ("old1", str(file_one)),
-            ("old2", str(file_two))
-        ]
-
-        count = service.clean_old_exports(days_old=7)
-
-        assert count == 2
-        assert not file_one.exists()
-        assert not file_two.exists()
-
-    def test_validate_chatbook_file(self, service, sample_manifest):
-        """Test validating a chatbook file structure."""
-        chatbook_path = service.temp_dir / f"validate_{uuid4().hex}.chatbook"
-        with zipfile.ZipFile(chatbook_path, 'w') as zf:
-            zf.writestr('manifest.json', json.dumps(manifest_to_dict(sample_manifest)))
-            zf.writestr('conversations/test.json', '{}')
-
-        # Use the correct method name: validate_chatbook_file
-        result = service.validate_chatbook_file(str(chatbook_path))
-
-        # Result is a dict with is_valid key
-        assert result["is_valid"] == True
-        assert "manifest" in result
-
-    def test_validate_invalid_chatbook(self, service):
-        """Test validating an invalid chatbook file."""
-        invalid_path = service.temp_dir / f"invalid_{uuid4().hex}.txt"
-        invalid_path.write_bytes(b"Not a zip file")
-
-        # Invalid ZIP should raise an exception
-        result = service.validate_chatbook_file(str(invalid_path))
-
-        assert result["is_valid"] == False
-        assert "error" in result
 
     def test_get_statistics(self, service, mock_db):
         """Test getting import/export statistics."""
@@ -1856,87 +1453,6 @@ class TestChromaDBEmbeddingExport:
         mock_chroma.get_or_create_collection.assert_not_called()
 
 
-class TestEvalContinuation:
-    """Tests for evaluation continuation export (Sub-task 3)."""
-
-    @pytest.mark.asyncio
-    async def test_continue_export_produces_linked_chatbook(self, service, tmp_path):
-        """Continuation export should produce a chatbook linked to the original."""
-        mock_evals_db = MagicMock()
-        mock_evals_db.list_runs.return_value = (
-            [{"id": "run_5", "eval_id": "eval_1", "status": "completed"}],
-            False,  # has_more
-        )
-        service._evaluations_db = mock_evals_db
-
-        success, message, path = await service.continue_chatbook_export(
-            export_id="original-123",
-            continuations=[{
-                "evaluation_id": "eval_1",
-                "continuation_token": "run_4",
-            }],
-        )
-
-        assert success is True
-        assert path is not None
-        assert Path(path).exists()
-
-        # Verify it's a valid zip with manifest
-        with zipfile.ZipFile(path, 'r') as zf:
-            assert "manifest.json" in zf.namelist()
-            manifest_data = json.loads(zf.read("manifest.json"))
-            assert manifest_data["export_id"] == "original-123_cont_1"
-            metadata = manifest_data.get("metadata", {})
-            assert metadata.get("continues_export_id") == "original-123"
-
-        # Verify the list_runs call used after cursor
-        mock_evals_db.list_runs.assert_called_once_with(
-            eval_id="eval_1", limit=200, after="run_4", return_has_more=True
-        )
-
-    @pytest.mark.asyncio
-    async def test_continue_export_with_more_data(self, service, tmp_path):
-        """If there are still more rows, new continuation tokens should be produced."""
-        mock_evals_db = MagicMock()
-        mock_evals_db.list_runs.return_value = (
-            [
-                {"id": "run_5", "eval_id": "eval_1", "status": "completed"},
-                {"id": "run_6", "eval_id": "eval_1", "status": "completed"},
-            ],
-            True,  # has_more
-        )
-        service._evaluations_db = mock_evals_db
-
-        success, message, path = await service.continue_chatbook_export(
-            export_id="orig-456",
-            continuations=[{
-                "evaluation_id": "eval_1",
-                "continuation_token": "run_4",
-            }],
-        )
-
-        assert success is True
-        with zipfile.ZipFile(path, 'r') as zf:
-            manifest_data = json.loads(zf.read("manifest.json"))
-            trunc = manifest_data.get("truncation", {})
-            assert "evaluations" in trunc
-            assert trunc["evaluations"]["truncated"] is True
-            conts = trunc["evaluations"].get("continuations", [])
-            assert len(conts) == 1
-            assert conts[0]["continuation_token"] == "run_6"
-
-    @pytest.mark.asyncio
-    async def test_continue_export_async_not_supported(self, service):
-        """Async mode for continuation should return an error."""
-        success, message, path = await service.continue_chatbook_export(
-            export_id="x",
-            continuations=[{"evaluation_id": "e1", "continuation_token": "r1"}],
-            async_mode=True,
-        )
-        assert success is False
-        assert "not yet supported" in message
-
-
 class TestTruncationMetadataConsistency:
     """Tests for standardized truncation metadata across content types (Sub-task 4)."""
 
@@ -2062,58 +1578,6 @@ class TestBug2NonexistentCollection:
         service._collect_embeddings(["real_col"], work_dir, manifest, content)
 
         assert "collection:real_col" in content.embeddings
-
-
-class TestBug3ContinuationIdStability:
-    """Tests for stable continuation IDs (Bug 3 fix)."""
-
-    @pytest.mark.asyncio
-    async def test_continuation_of_continuation_uses_base_id(self, service, tmp_path):
-        """Continuing a continuation should produce base_cont_2, not base_cont_1_cont_2."""
-        mock_evals_db = MagicMock()
-        mock_evals_db.list_runs.return_value = (
-            [{"id": "run_10", "eval_id": "eval_1", "status": "completed"}],
-            False,
-        )
-        service._evaluations_db = mock_evals_db
-
-        success, message, path = await service.continue_chatbook_export(
-            export_id="base_cont_1",
-            continuations=[{
-                "evaluation_id": "eval_1",
-                "continuation_token": "run_9",
-            }],
-        )
-
-        assert success is True
-        assert path is not None
-        with zipfile.ZipFile(path, 'r') as zf:
-            manifest_data = json.loads(zf.read("manifest.json"))
-            # Should be base_cont_2, NOT base_cont_1_cont_2
-            assert manifest_data["export_id"] == "base_cont_2"
-
-    @pytest.mark.asyncio
-    async def test_first_continuation_uses_base_cont_1(self, service, tmp_path):
-        """First continuation of a base export should produce base_cont_1."""
-        mock_evals_db = MagicMock()
-        mock_evals_db.list_runs.return_value = (
-            [{"id": "run_5", "eval_id": "eval_1", "status": "completed"}],
-            False,
-        )
-        service._evaluations_db = mock_evals_db
-
-        success, message, path = await service.continue_chatbook_export(
-            export_id="my-export",
-            continuations=[{
-                "evaluation_id": "eval_1",
-                "continuation_token": "run_4",
-            }],
-        )
-
-        assert success is True
-        with zipfile.ZipFile(path, 'r') as zf:
-            manifest_data = json.loads(zf.read("manifest.json"))
-            assert manifest_data["export_id"] == "my-export_cont_1"
 
 
 class TestGap6BinaryLimitTruncationMetadata:

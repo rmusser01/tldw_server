@@ -43,6 +43,9 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from tldw_Server_API.app.core.DB_Management.db_path_utils import (
+    resolve_trusted_database_path,
+)
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     begin_immediate_if_needed,
     configure_sqlite_connection,
@@ -110,7 +113,18 @@ class TopicMonitoringDB:
             )
             logger.error(msg)
             raise RuntimeError(msg)
-        self.db_path = str(path_obj)
+        extra_roots = (
+            [path_obj.expanduser().resolve(strict=False).parent]
+            if path_obj.is_absolute()
+            else None
+        )
+        self.db_path = str(
+            resolve_trusted_database_path(
+                db_path,
+                label="topic monitoring db",
+                extra_roots=extra_roots,
+            )
+        )
         self._lock = threading.RLock()
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._ensure_schema()
@@ -681,6 +695,25 @@ class TopicMonitoringDB:
                     item = {key: r[key] for key in r.keys()}
                     out.append(item)
                 return out
+            finally:
+                conn.close()
+
+    def get_alert(self, alert_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    """
+                    SELECT id, created_at, user_id, scope_type, scope_id, source,
+                           watchlist_id, rule_id, rule_category, rule_severity, pattern,
+                           source_id, chunk_id, chunk_seq, text_snippet, metadata, is_read, read_at
+                    FROM topic_alerts
+                    WHERE id = ?
+                    """,
+                    (int(alert_id),),
+                )
+                row = cur.fetchone()
+                return {key: row[key] for key in row.keys()} if row else None
             finally:
                 conn.close()
 

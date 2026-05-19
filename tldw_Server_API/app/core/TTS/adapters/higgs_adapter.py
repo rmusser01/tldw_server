@@ -83,6 +83,11 @@ def _torch_cuda_available(*, allow_import: bool = False) -> bool:
     except Exception:
         return False
 
+
+def _safe_log_error_type(error: object) -> str:
+    return type(error).__name__
+
+
 class HiggsAdapter(TTSAdapter):
     """Adapter for Higgs Audio V2 TTS model from Boson AI"""
 
@@ -288,7 +293,10 @@ class HiggsAdapter(TTSAdapter):
                 ) from e
             raise
         except Exception as e:
-            logger.error(f"{self.provider_name}: Initialization failed: {e}")
+            logger.error(
+                f"{self.provider_name}: Initialization failed "
+                f"(error_type={_safe_log_error_type(e)})"
+            )
             self._status = ProviderStatus.ERROR
             raise TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
@@ -337,7 +345,10 @@ class HiggsAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider=self.provider_key)
         except Exception as e:
-            logger.error(f"{self.provider_name} request validation failed: {e}")
+            logger.error(
+                f"{self.provider_name} request validation failed "
+                f"(error_type={_safe_log_error_type(e)})"
+            )
             raise
 
         # Prepare generation parameters
@@ -379,7 +390,10 @@ class HiggsAdapter(TTSAdapter):
                 )
 
         except Exception as e:
-            logger.error(f"{self.provider_name} generation error: {e}")
+            logger.error(
+                f"{self.provider_name} generation error "
+                f"(error_type={_safe_log_error_type(e)})"
+            )
             raise
 
     async def _stream_audio_higgs(
@@ -451,7 +465,10 @@ class HiggsAdapter(TTSAdapter):
             logger.debug(f"Generated text: {output.generated_text}")
 
         except Exception as e:
-            logger.error(f"{self.provider_name} streaming error: {e}")
+            logger.error(
+                f"{self.provider_name} streaming error "
+                f"(error_type={_safe_log_error_type(e)})"
+            )
             raise
         finally:
             writer.close()
@@ -462,7 +479,10 @@ class HiggsAdapter(TTSAdapter):
                     Path(voice_reference_path).unlink(missing_ok=True)
                     logger.debug(f"Cleaned up voice reference: {voice_reference_path}")
                 except Exception as e:
-                    logger.warning(f"Failed to clean up voice reference: {e}")
+                    logger.warning(
+                        "Failed to clean up voice reference "
+                        f"(error_type={_safe_log_error_type(e)})"
+                    )
 
     async def _generate_complete_higgs(
         self,
@@ -591,7 +611,10 @@ class HiggsAdapter(TTSAdapter):
             )
 
             if error:
-                logger.error(f"Voice reference processing failed: {error}")
+                logger.error(
+                    "Voice reference processing failed "
+                    f"(error_type={_safe_log_error_type(error)})"
+                )
                 return None
 
             # Save to temporary file
@@ -607,7 +630,10 @@ class HiggsAdapter(TTSAdapter):
             return tmp_path
 
         except Exception as e:
-            logger.error(f"Failed to prepare voice reference: {e}")
+            logger.error(
+                "Failed to prepare voice reference "
+                f"(error_type={_safe_log_error_type(e)})"
+            )
             return None
 
     def map_voice(self, voice_id: str) -> str:

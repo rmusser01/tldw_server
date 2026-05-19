@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 type QueryOptions = {
@@ -24,13 +24,47 @@ const updateStoredValue = (
   storageValues.set(key, resolvedValue)
 }
 
-const { invalidateQueriesMock, transcribeAudioMock, getTranscriptionModelsMock } =
+const createDeferred = <T,>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason?: unknown) => void
+} => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
+const {
+  invalidateQueriesMock,
+  transcribeAudioMock,
+  getTranscriptionModelsMock,
+  getElevenLabsVoicesMock,
+  getElevenLabsModelsMock,
+  setTTSSettingsMock,
+  ttsSettingsRef,
+} =
   vi.hoisted(() => ({
     invalidateQueriesMock: vi.fn(),
     transcribeAudioMock: vi.fn(),
     getTranscriptionModelsMock: vi.fn(async () => ({
       all_models: ["whisper-1"],
     })),
+    getElevenLabsVoicesMock: vi.fn(),
+    getElevenLabsModelsMock: vi.fn(),
+    setTTSSettingsMock: vi.fn(async () => undefined),
+    ttsSettingsRef: {
+      current: {
+        ttsProvider: "",
+        ttsEnabled: true,
+        tldwTtsSpeed: 1,
+        tldwTtsStreaming: false,
+        responseSplitting: "punctuation",
+      } as any,
+    },
   }))
 
 const { storageValues, setSpeechModeMock, setSpeechHistoryMock } = vi.hoisted(() => ({
@@ -82,13 +116,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: vi.fn((options: QueryOptions | undefined) => {
     if (options?.queryKey?.[0] === "fetchTTSSettings") {
       return {
-        data: {
-          ttsProvider: "",
-          ttsEnabled: true,
-          tldwTtsSpeed: 1,
-          tldwTtsStreaming: false,
-          responseSplitting: "punctuation",
-        },
+        data: ttsSettingsRef.current,
         isLoading: false,
       }
     }
@@ -242,14 +270,8 @@ vi.mock("@/services/tts-providers", () => ({
 
 vi.mock("@/services/tts", () => ({
   getTTSProvider: vi.fn(async () => "tldw"),
-  getTTSSettings: vi.fn(async () => ({
-    ttsProvider: "",
-    ttsEnabled: true,
-    responseSplitting: "punctuation",
-    tldwTtsSpeed: 1,
-    tldwTtsStreaming: false,
-  })),
-  setTTSSettings: vi.fn(async () => undefined),
+  getTTSSettings: vi.fn(async () => ttsSettingsRef.current),
+  setTTSSettings: setTTSSettingsMock,
   SUPPORTED_TLDW_TTS_FORMATS: ["mp3"],
   setTldwTTSSpeed: vi.fn(),
   setTldwTTSResponseFormat: vi.fn(),
@@ -258,6 +280,11 @@ vi.mock("@/services/tts", () => ({
   DEFAULT_TTS_PROVIDER: "tldw",
   DEFAULT_TLDW_TTS_MODEL: "KittenML/kitten-tts-nano-0.8",
   DEFAULT_TLDW_TTS_VOICE: "Bella",
+}))
+
+vi.mock("@/services/elevenlabs", () => ({
+  getVoices: getElevenLabsVoicesMock,
+  getModels: getElevenLabsModelsMock,
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -315,6 +342,16 @@ describe("SpeechPlaygroundPage", () => {
     invalidateQueriesMock.mockReset()
     transcribeAudioMock.mockReset()
     getTranscriptionModelsMock.mockClear()
+    getElevenLabsVoicesMock.mockReset()
+    getElevenLabsModelsMock.mockReset()
+    setTTSSettingsMock.mockClear()
+    ttsSettingsRef.current = {
+      ttsProvider: "",
+      ttsEnabled: true,
+      tldwTtsSpeed: 1,
+      tldwTtsStreaming: false,
+      responseSplitting: "punctuation",
+    }
     storageValues.clear()
     storageValues.set("speechPlaygroundMode", "roundtrip")
     storageValues.set("speechPlaygroundHistory", [])
@@ -326,6 +363,9 @@ describe("SpeechPlaygroundPage", () => {
     render(<SpeechPlaygroundPage />)
 
     expect(screen.getByTestId("speech-page-shell")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Speech Playground" })
+    ).toBeInTheDocument()
   })
 
   it("passes the resolved provider to the tldw strip when the stored provider is empty", (): void => {
@@ -351,7 +391,9 @@ describe("SpeechPlaygroundPage", () => {
   it("uses TTS-specific page copy and history controls when locked to listen mode", (): void => {
     render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
 
-    expect(screen.getByText("TTS Playground")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Text to Speech" })
+    ).toBeInTheDocument()
     expect(
       screen.getByText("Draft text, choose a voice, and generate audio in one place.")
     ).toBeInTheDocument()
@@ -405,5 +447,155 @@ describe("SpeechPlaygroundPage", () => {
     expect(
       screen.getByLabelText("Speech playground input source")
     ).toBeInTheDocument()
+  })
+
+  it("offers inline ElevenLabs API key entry when ElevenLabs is selected without a key", (): void => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: "",
+    }
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    expect(screen.getByLabelText("ElevenLabs API key")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Enter your ElevenLabs API key below to load voices and models. You can also manage it in Settings."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Test & Save" })
+    ).toBeDisabled()
+    expect(screen.queryByText("Set API key in Settings")).not.toBeInTheDocument()
+  })
+
+  it("validates and saves the inline ElevenLabs API key to local TTS settings", async (): Promise<void> => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: "",
+    }
+    getElevenLabsVoicesMock.mockResolvedValue([
+      { voice_id: "voice-1", name: "Voice 1" },
+    ])
+    getElevenLabsModelsMock.mockResolvedValue([
+      { model_id: "model-1", name: "Model 1" },
+    ])
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.change(screen.getByLabelText("ElevenLabs API key"), {
+      target: { value: "sk_test_inline" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }))
+
+    await waitFor(() => {
+      expect(setTTSSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ttsProvider: "elevenlabs",
+          elevenLabsApiKey: "sk_test_inline",
+        })
+      )
+    })
+    expect(getElevenLabsVoicesMock).toHaveBeenCalledWith("sk_test_inline", {
+      timeoutMs: 10_000,
+    })
+    expect(getElevenLabsModelsMock).toHaveBeenCalledWith("sk_test_inline", {
+      timeoutMs: 10_000,
+    })
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ["fetchTTSSettings"],
+    })
+  })
+
+  it("keeps the inline key details collapsed across input rerenders", (): void => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: "",
+    }
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    const details = screen.getByText("Enter API key").closest("details") as HTMLDetailsElement
+    expect(details.open).toBe(true)
+
+    fireEvent.click(screen.getByText("Enter API key"))
+    expect(details.open).toBe(false)
+
+    fireEvent.change(screen.getByLabelText("ElevenLabs API key"), {
+      target: { value: "sk_test_inline" },
+    })
+    expect(details.open).toBe(false)
+  })
+
+  it("does not force ElevenLabs as the provider if provider changes while validation is pending", async (): Promise<void> => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: "",
+    }
+    const voices = createDeferred<Array<{ voice_id: string; name: string }>>()
+    const models = createDeferred<Array<{ model_id: string; name: string }>>()
+    getElevenLabsVoicesMock.mockReturnValue(voices.promise)
+    getElevenLabsModelsMock.mockReturnValue(models.promise)
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.change(screen.getByLabelText("ElevenLabs API key"), {
+      target: { value: "sk_test_inline" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }))
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "browser",
+    }
+    voices.resolve([{ voice_id: "voice-1", name: "Voice 1" }])
+    models.resolve([{ model_id: "model-1", name: "Model 1" }])
+
+    await waitFor(() => {
+      expect(setTTSSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ttsProvider: "browser",
+          elevenLabsApiKey: "sk_test_inline",
+        })
+      )
+    })
+    expect(setTTSSettingsMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        ttsProvider: "elevenlabs",
+        elevenLabsApiKey: "sk_test_inline",
+      })
+    )
+  })
+
+  it("shows stable validation errors without exposing raw ElevenLabs details", async (): Promise<void> => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: "",
+    }
+    getElevenLabsVoicesMock.mockRejectedValue(
+      Object.assign(new Error("Request failed for sk_secret_inline"), {
+        response: { status: 401 },
+      })
+    )
+    getElevenLabsModelsMock.mockResolvedValue([
+      { model_id: "model-1", name: "Model 1" },
+    ])
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.change(screen.getByLabelText("ElevenLabs API key"), {
+      target: { value: "sk_secret_inline" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Test & Save" }))
+
+    expect(
+      await screen.findByText("Invalid ElevenLabs API key. Check the key and try again.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/sk_secret_inline/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument()
   })
 })

@@ -2,11 +2,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+    WORKSPACES_DELETE_RATE_LIMIT,
+    WORKSPACES_READ_RATE_LIMIT,
+    WORKSPACES_WRITE_RATE_LIMIT,
+)
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     StatusResponse,
     WorkspaceArtifactCreateRequest,
+    WorkspaceArtifactExportRequest,
+    WorkspaceArtifactExportResponse,
     WorkspaceArtifactResponse,
     WorkspaceArtifactUpdateRequest,
     WorkspaceListResponse,
@@ -22,13 +31,17 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceSourceUpdateRequest,
     WorkspaceUpsertRequest,
 )
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
-    WORKSPACES_DELETE_RATE_LIMIT,
-    WORKSPACES_READ_RATE_LIMIT,
-    WORKSPACES_WRITE_RATE_LIMIT,
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+    InputError,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.exceptions import WorkspaceArtifactExportStateError
+from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
+    export_workspace_artifact_version,
+)
 
 router = APIRouter()
 
@@ -72,6 +85,7 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
 
 def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
     """Convert a workspace artifact DB row dict to a WorkspaceArtifactResponse schema."""
+    version = art.get("version") or 1
     return WorkspaceArtifactResponse(
         id=art["id"],
         workspace_id=art["workspace_id"],
@@ -79,12 +93,62 @@ def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
         title=art["title"],
         status=art.get("status", "pending"),
         content=art.get("content"),
+        content_type=art.get("content_type") or "text/markdown",
+        preview_text=art.get("preview_text"),
+        summary=art.get("summary"),
+        review_state=art.get("review_state") or "draft",
+        owner_scope=art.get("owner_scope") or "user",
+        owner_id=art.get("owner_id"),
+        project_id=art.get("project_id"),
+        task_id=art.get("task_id"),
+        source_collection_id=art.get("source_collection_id"),
+        root_artifact_id=art.get("root_artifact_id") or art["id"],
+        artifact_version_id=art.get("artifact_version_id") or f"{art['id']}:v{version}",
+        previous_version_id=art.get("previous_version_id"),
+        producer_metadata=art.get("producer_metadata") or {},
+        source_lineage=art.get("source_lineage") or {},
+        review_metadata=art.get("review_metadata") or {},
+        version_metadata=art.get("version_metadata") or {},
+        export_refs=art.get("export_refs") or [],
+        redaction=art.get("redaction") or {"support_safe": True, "redacted": False},
+        schema_version=art.get("schema_version") or 1,
         total_tokens=art.get("total_tokens"),
         total_cost_usd=art.get("total_cost_usd"),
         created_at=str(art.get("created_at", "")),
         completed_at=str(art["completed_at"]) if art.get("completed_at") else None,
-        version=art.get("version", 1),
+        version=version,
     )
+
+
+def _workspace_artifact_version_for_export(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    artifact_id: str,
+    artifact_version_id: str | None,
+) -> dict:
+    """Fetch the current artifact or a version snapshot for export."""
+    artifact = db.get_workspace_artifact(workspace_id, artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Workspace artifact not found")
+    if artifact_version_id is None:
+        return artifact
+
+    version = db.get_workspace_artifact_version(workspace_id, artifact_id, artifact_version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Workspace artifact version not found")
+    merged = {**artifact, **version}
+    merged["id"] = artifact_id
+    merged["workspace_id"] = workspace_id
+    merged["artifact_type"] = artifact.get("artifact_type")
+    merged["content_type"] = artifact.get("content_type") or "text/markdown"
+    merged["status"] = artifact.get("status")
+    merged["owner_scope"] = artifact.get("owner_scope")
+    merged["owner_id"] = artifact.get("owner_id")
+    merged["project_id"] = artifact.get("project_id")
+    merged["task_id"] = artifact.get("task_id")
+    merged["source_collection_id"] = artifact.get("source_collection_id")
+    merged["schema_version"] = artifact.get("schema_version") or 1
+    return merged
 
 
 def _note_to_response(note: dict) -> WorkspaceNoteResponse:
@@ -122,7 +186,10 @@ async def list_workspaces(
     current_user: User = Depends(get_request_user),
 ):
     """List non-deleted workspaces for the current user."""
-    items = db.list_workspaces()
+    try:
+        items = db.list_workspaces()
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspaces") from exc
     return WorkspaceListResponse(
         items=[_ws_to_response(w) for w in items],
         total=len(items),
@@ -141,7 +208,10 @@ async def get_workspace(
     current_user: User = Depends(get_request_user),
 ):
     """Fetch a workspace by ID."""
-    ws = _require_workspace(db, workspace_id)
+    try:
+        ws = _require_workspace(db, workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace") from exc
     return _ws_to_response(ws)
 
 
@@ -158,11 +228,14 @@ async def upsert_workspace(
     current_user: User = Depends(get_request_user),
 ):
     """Create or update a workspace (idempotent)."""
-    ws = db.upsert_workspace(
-        workspace_id,
-        body.name,
-        study_materials_policy=body.study_materials_policy,
-    )
+    try:
+        ws = db.upsert_workspace(
+            workspace_id,
+            body.name,
+            study_materials_policy=body.study_materials_policy,
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create or update workspace") from exc
     return _ws_to_response(ws)
 
 
@@ -187,8 +260,8 @@ async def patch_workspace(
         )
     try:
         ws = db.update_workspace(workspace_id, updates, body.version)
-    except ConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update workspace") from exc
     return _ws_to_response(ws)
 
 
@@ -207,8 +280,8 @@ async def delete_workspace(
     ws = _require_workspace(db, workspace_id)
     try:
         db.delete_workspace(workspace_id, ws["version"])
-    except ConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
 
 
 # ── Sources ─────────────────────────────────────────────────────
@@ -226,7 +299,11 @@ async def list_sources(
 ) -> list[WorkspaceSourceResponse]:
     """List all sources belonging to a workspace."""
     _require_workspace(db, workspace_id)
-    return [_src_to_response(s) for s in db.list_workspace_sources(workspace_id)]
+    try:
+        sources = db.list_workspace_sources(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace sources") from exc
+    return [_src_to_response(s) for s in sources]
 
 
 @router.post(
@@ -244,8 +321,55 @@ async def add_source(
 ) -> WorkspaceSourceResponse:
     """Add a media source to a workspace."""
     _require_workspace(db, workspace_id)
-    src = db.add_workspace_source(workspace_id, body.model_dump())
+    try:
+        src = db.add_workspace_source(workspace_id, body.model_dump())
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to add workspace source") from exc
     return _src_to_response(src)
+
+
+@router.put(
+    "/{workspace_id}/sources/selection",
+    response_model=StatusResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Batch-update source selection",
+)
+async def update_source_selection(
+    workspace_id: str,
+    body: WorkspaceSourceSelectionRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> StatusResponse:
+    """Set which sources are selected in a workspace (batch operation)."""
+    _require_workspace(db, workspace_id)
+    try:
+        db.update_workspace_source_selection(workspace_id, selected_ids=body.selected_ids)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc, default_detail="Failed to update workspace source selection"
+        ) from exc
+    return StatusResponse()
+
+
+@router.put(
+    "/{workspace_id}/sources/reorder",
+    response_model=StatusResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Reorder workspace sources",
+)
+async def reorder_sources(
+    workspace_id: str,
+    body: WorkspaceSourceReorderRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> StatusResponse:
+    """Reorder workspace sources by providing an ordered list of IDs."""
+    _require_workspace(db, workspace_id)
+    try:
+        db.reorder_workspace_sources(workspace_id, body.ordered_ids)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to reorder workspace sources") from exc
+    return StatusResponse()
 
 
 @router.put(
@@ -266,8 +390,8 @@ async def update_source(
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     try:
         src = db.update_workspace_source(workspace_id, source_id, updates, expected_version=body.version)
-    except ConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update workspace source") from exc
     return _src_to_response(src)
 
 
@@ -285,43 +409,10 @@ async def delete_source(
 ):
     """Remove a source from a workspace."""
     _require_workspace(db, workspace_id)
-    db.delete_workspace_source(workspace_id, source_id)
-
-
-@router.put(
-    "/{workspace_id}/sources/selection",
-    response_model=StatusResponse,
-    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
-    summary="Batch-update source selection",
-)
-async def update_source_selection(
-    workspace_id: str,
-    body: WorkspaceSourceSelectionRequest,
-    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user),
-) -> StatusResponse:
-    """Set which sources are selected in a workspace (batch operation)."""
-    _require_workspace(db, workspace_id)
-    db.update_workspace_source_selection(workspace_id, selected_ids=body.selected_ids)
-    return StatusResponse()
-
-
-@router.put(
-    "/{workspace_id}/sources/reorder",
-    response_model=StatusResponse,
-    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
-    summary="Reorder workspace sources",
-)
-async def reorder_sources(
-    workspace_id: str,
-    body: WorkspaceSourceReorderRequest,
-    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user),
-) -> StatusResponse:
-    """Reorder workspace sources by providing an ordered list of IDs."""
-    _require_workspace(db, workspace_id)
-    db.reorder_workspace_sources(workspace_id, body.ordered_ids)
-    return StatusResponse()
+    try:
+        db.delete_workspace_source(workspace_id, source_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete workspace source") from exc
 
 
 # ── Artifacts ───────────────────────────────────────────────────
@@ -339,7 +430,11 @@ async def list_artifacts(
 ) -> list[WorkspaceArtifactResponse]:
     """List all artifacts belonging to a workspace."""
     _require_workspace(db, workspace_id)
-    return [_art_to_response(a) for a in db.list_workspace_artifacts(workspace_id)]
+    try:
+        artifacts = db.list_workspace_artifacts(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace artifacts") from exc
+    return [_art_to_response(a) for a in artifacts]
 
 
 @router.post(
@@ -357,7 +452,10 @@ async def add_artifact(
 ) -> WorkspaceArtifactResponse:
     """Add an artifact to a workspace."""
     _require_workspace(db, workspace_id)
-    art = db.add_workspace_artifact(workspace_id, body.model_dump())
+    try:
+        art = db.add_workspace_artifact(workspace_id, body.model_dump())
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to add workspace artifact") from exc
     return _art_to_response(art)
 
 
@@ -379,9 +477,60 @@ async def update_artifact(
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     try:
         art = db.update_workspace_artifact(workspace_id, artifact_id, updates, expected_version=body.version)
-    except ConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update workspace artifact") from exc
     return _art_to_response(art)
+
+
+@router.post(
+    "/{workspace_id}/artifacts/{artifact_id}/exports",
+    response_model=WorkspaceArtifactExportResponse,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Export accepted workspace artifact version",
+)
+async def export_artifact(
+    workspace_id: str,
+    artifact_id: str,
+    body: WorkspaceArtifactExportRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceArtifactExportResponse:
+    """Export an accepted workspace artifact version as Markdown, HTML, or JSON."""
+    try:
+        _require_workspace(db, workspace_id)
+        artifact = _workspace_artifact_version_for_export(
+            db,
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+        )
+        payload = export_workspace_artifact_version(artifact, export_format=body.format)
+        db.append_workspace_artifact_export_ref(workspace_id, artifact_id, payload["export_ref"])
+    except WorkspaceArtifactExportStateError as exc:
+        logger.warning(
+            "Workspace artifact export rejected: workspace_id={} artifact_id={} artifact_version_id={} "
+            "format={} reason={}",
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+            body.format,
+            str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        logger.exception(
+            "Workspace artifact export failed: workspace_id={} artifact_id={} artifact_version_id={} format={}",
+            workspace_id,
+            artifact_id,
+            body.artifact_version_id,
+            body.format,
+        )
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to export workspace artifact",
+            log_error=False,
+        ) from exc
+    return WorkspaceArtifactExportResponse(**payload)
 
 
 @router.delete(
@@ -398,7 +547,10 @@ async def delete_artifact(
 ):
     """Remove an artifact from a workspace."""
     _require_workspace(db, workspace_id)
-    db.delete_workspace_artifact(workspace_id, artifact_id)
+    try:
+        db.delete_workspace_artifact(workspace_id, artifact_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete workspace artifact") from exc
 
 
 # ── Notes ───────────────────────────────────────────────────────
@@ -416,7 +568,11 @@ async def list_notes(
 ) -> list[WorkspaceNoteResponse]:
     """List all notes belonging to a workspace."""
     _require_workspace(db, workspace_id)
-    return [_note_to_response(n) for n in db.list_workspace_notes(workspace_id)]
+    try:
+        notes = db.list_workspace_notes(workspace_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace notes") from exc
+    return [_note_to_response(n) for n in notes]
 
 
 @router.post(
@@ -434,7 +590,10 @@ async def add_note(
 ) -> WorkspaceNoteResponse:
     """Add a note to a workspace."""
     _require_workspace(db, workspace_id)
-    note = db.add_workspace_note(workspace_id, body.model_dump())
+    try:
+        note = db.add_workspace_note(workspace_id, body.model_dump())
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to add workspace note") from exc
     return _note_to_response(note)
 
 
@@ -456,8 +615,8 @@ async def update_note(
     updates = body.model_dump(exclude_unset=True, exclude={"version"})
     try:
         note = db.update_workspace_note(workspace_id, note_id, updates, expected_version=body.version)
-    except ConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update workspace note") from exc
     return _note_to_response(note)
 
 
@@ -475,4 +634,7 @@ async def delete_note(
 ):
     """Remove a note from a workspace."""
     _require_workspace(db, workspace_id)
-    db.delete_workspace_note(workspace_id, note_id)
+    try:
+        db.delete_workspace_note(workspace_id, note_id)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete workspace note") from exc

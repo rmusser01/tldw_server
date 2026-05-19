@@ -38,8 +38,8 @@ def _inject_nonce_into_html(html: bytes, nonce: str) -> bytes:
 
     try:
         return _SCRIPT_TAG_RE.sub(_repl, html)
-    except Exception as exc:
-        logger.debug(f"Nonce injection regex failed: {exc}")
+    except Exception:
+        logger.debug("Nonce injection regex failed")
         return html
 
 
@@ -103,9 +103,9 @@ class SetupCSPMiddleware(BaseHTTPMiddleware):
                 "Content-Security-Policy",
                 _build_setup_csp(nonce, allow_inline_scripts=allow_inline_scripts, allow_eval=allow_eval),
             )
-        except Exception as csp_header_error:
+        except Exception:
             # Best-effort header set; return original response
-            logger.debug("Setup CSP middleware failed to attach CSP header", exc_info=csp_header_error)
+            logger.debug("Setup CSP middleware failed to attach CSP header")
         return response
 
 

@@ -2,11 +2,12 @@
 Simplified chat endpoint tests using real database and authentication.
 """
 
-import pytest
 from typing import Optional
-from fastapi import status
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi import status
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user

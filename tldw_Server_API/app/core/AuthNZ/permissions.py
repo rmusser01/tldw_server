@@ -86,7 +86,7 @@ def check_permission(user: User, permission: str) -> bool:
     try:
         user_db = get_user_database()
         return user_db.has_permission(user.id, permission)
-    except Exception as e:
+    except Exception:
         try:
             redact = get_settings().PII_REDACT_LOGS
         except Exception as settings_err:  # noqa: BLE001  # best-effort PII redaction
@@ -95,9 +95,9 @@ def check_permission(user: User, permission: str) -> bool:
             )
             redact = False
         if redact:
-            logger.error(f"Error checking permission {permission} for authenticated user (details redacted): {e}")
+            logger.error("Error checking permission")
         else:
-            logger.error(f"Error checking permission {permission} for user {user.id}: {e}")
+            logger.error("Error checking permission")
         return False
 
 def check_role(user: User, role: str) -> bool:
@@ -151,7 +151,7 @@ def check_role(user: User, role: str) -> bool:
     try:
         user_db = get_user_database()
         return user_db.has_role(user.id, role)
-    except Exception as e:
+    except Exception:
         try:
             redact = get_settings().PII_REDACT_LOGS
         except Exception as settings_err:  # noqa: BLE001  # best-effort PII redaction
@@ -160,9 +160,9 @@ def check_role(user: User, role: str) -> bool:
             )
             redact = False
         if redact:
-            logger.error(f"Error checking role {role} for authenticated user (details redacted): {e}")
+            logger.error("Error checking role")
         else:
-            logger.error(f"Error checking role {role} for user {user.id}: {e}")
+            logger.error("Error checking role")
         return False
 
 
@@ -328,6 +328,12 @@ EMBEDDINGS_ADMIN = "embeddings.admin"
 # Claims permissions
 CLAIMS_REVIEW = "claims.review"
 CLAIMS_ADMIN = "claims.admin"
+
+# Moderation review permissions
+MODERATION_REVIEW_READ = "moderation.review.read"
+MODERATION_REVIEW_DECIDE = "moderation.review.decide"
+MODERATION_REVIEW_BULK_DECIDE = "moderation.review.bulk_decide"
+MODERATION_AUDIT_READ = "moderation.audit.read"
 
 # Reminders / notifications permissions
 TASKS_READ = "tasks.read"

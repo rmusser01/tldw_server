@@ -36,4 +36,13 @@ describe("AcpProfilesTab", () => {
     await user.click(screen.getByRole("button", { name: /create profile/i }))
     expect(screen.getByLabelText(/profile name/i)).toBeTruthy()
   })
+
+  it("renders load failures through the shared Alert primitive", async () => {
+    mocks.listAcpProfiles.mockRejectedValueOnce(new Error("offline"))
+
+    const { container } = render(<AcpProfilesTab />)
+
+    expect(await screen.findByText("Failed to load ACP profiles.")).toBeTruthy()
+    expect(container.querySelector('[data-ds-component="Alert"]')).toBeTruthy()
+  })
 })

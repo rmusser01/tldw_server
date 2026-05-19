@@ -11,6 +11,11 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_db_transaction,
 )
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
+    ApiKeyUsageSummary,
+    ApiKeyUsageTopResponse,
+    ApiKeyUsageTopItem,
+)
 from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
     APIKeyAuditListResponse,
     APIKeyCreateRequest,
@@ -24,6 +29,10 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import VirtualKeyCreateRequest
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services import admin_api_keys_service
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    get_api_key_usage as svc_get_api_key_usage,
+    list_api_key_usage as svc_list_api_key_usage,
+)
 
 router = APIRouter()
 
@@ -151,6 +160,36 @@ async def admin_list_virtual_keys(
         created_before=created_before,
         is_pg_fn=_get_is_pg_fn(),
     )
+
+
+@router.get("/api-keys/usage/top", response_model=ApiKeyUsageTopResponse)
+async def admin_get_top_api_key_usage(
+    limit: int = Query(10, ge=1, le=100, description="Max keys to return"),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> ApiKeyUsageTopResponse:
+    """Return top API keys ranked by total token consumption (admin)."""
+    items_raw = svc_list_api_key_usage(limit=limit)
+    items = [
+        ApiKeyUsageTopItem(
+            key_id=str(item.get("key_id", "")),
+            request_count=int(item.get("request_count", 0)),
+            total_tokens=int(item.get("total_tokens", 0)),
+            estimated_cost_usd=float(item.get("estimated_cost_usd", 0.0)),
+            last_used_at=item.get("last_used_at"),
+        )
+        for item in items_raw
+    ]
+    return ApiKeyUsageTopResponse(items=items)
+
+
+@router.get("/api-keys/{key_id}/usage", response_model=ApiKeyUsageSummary)
+async def admin_get_api_key_usage(
+    key_id: str,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> ApiKeyUsageSummary:
+    """Return usage summary for a specific API key (admin)."""
+    data = svc_get_api_key_usage(key_id)
+    return ApiKeyUsageSummary(**data)
 
 
 @router.delete("/users/{user_id}/virtual-keys/{key_id}", response_model=MessageResponse)

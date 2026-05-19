@@ -159,8 +159,8 @@ def _safe_config_or_env(name: str, config_fn, env_key: str, default: str = "") -
         return os.getenv(env_key, default)
     try:
         return str(config_fn())
-    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, configparser.Error) as exc:
-        logger.debug(f"RG audio context failed to resolve {name}: {exc}")
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, configparser.Error):
+        logger.debug(f"RG audio context failed to resolve {name}")
         return os.getenv(env_key, default)
 
 
@@ -175,8 +175,8 @@ def _rg_audio_context() -> dict[str, str]:
     )
     try:
         policy_path_resolved = os.path.abspath(policy_path)
-    except OSError as exc:
-        logger.debug(f"RG audio context failed to resolve policy_path_resolved: {exc}")
+    except OSError:
+        logger.debug("RG audio context failed to resolve policy_path_resolved")
         policy_path_resolved = policy_path
     reload_enabled = _safe_config_or_env(
         "policy_reload_enabled",
@@ -192,8 +192,8 @@ def _rg_audio_context() -> dict[str, str]:
     )  # type: ignore[arg-type]
     try:
         cwd = os.getcwd()
-    except OSError as exc:
-        logger.debug(f"RG audio context failed to resolve cwd: {exc}")
+    except OSError:
+        logger.debug("RG audio context failed to resolve cwd")
         cwd = ""
     return {
         "backend": str(backend),
@@ -363,8 +363,8 @@ def _get_stream_ttl_seconds() -> int:
         try:
             v = int(val_env)
             return max(30, min(3600, v))
-        except (TypeError, ValueError) as exc:
-            logger.debug(f"Audio stream TTL: invalid AUDIO_STREAM_TTL_SECONDS='{val_env}': {exc}")
+        except (TypeError, ValueError):
+            logger.debug("Audio stream TTL: invalid AUDIO_STREAM_TTL_SECONDS")
     # 2) Config default
     try:
         from tldw_Server_API.app.core.config import load_comprehensive_config  # lazy import
@@ -372,12 +372,12 @@ def _get_stream_ttl_seconds() -> int:
         if cfg and cfg.has_section('Audio-Quota'):
             try:
                 v = int(cfg.get('Audio-Quota', 'stream_ttl_seconds', fallback='120'))
-            except (TypeError, ValueError, configparser.Error) as exc:
-                logger.debug(f"Audio stream TTL: invalid config value: {exc}")
+            except (TypeError, ValueError, configparser.Error):
+                logger.debug("Audio stream TTL: invalid config value")
                 v = 120
             return max(30, min(3600, v))
-    except (OSError, RuntimeError, configparser.Error, TypeError, ValueError) as exc:
-        logger.debug(f"Audio stream TTL: failed to load config: {exc}")
+    except (OSError, RuntimeError, configparser.Error, TypeError, ValueError):
+        logger.debug("Audio stream TTL: failed to load config")
     # 3) Hard default
     return 120
 
@@ -499,8 +499,8 @@ async def _ensure_tables(pool: DatabasePool) -> None:
                 )
                 """
             )
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"audio_usage_daily ensure failed: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("audio_usage_daily ensure failed")
 
 
 async def get_user_tier(user_id: int) -> str:
@@ -513,8 +513,8 @@ async def get_user_tier(user_id: int) -> str:
         if row and row.get("tier"):
             return str(row["tier"]).strip()
         return "free"
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"get_user_tier failed: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("get_user_tier failed")
         return "free"
 
 
@@ -535,8 +535,8 @@ async def set_user_tier(user_id: int, tier: str) -> None:
                 int(user_id),
                 tier,
             )
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"set_user_tier failed for user_id={user_id}, tier={tier}: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("set_user_tier failed")
         raise
 
 
@@ -569,8 +569,8 @@ async def _get_user_override_limits(user_id: int) -> dict[str, float | None]:
             elif key == "limits.audio_concurrent_jobs":
                 overrides["concurrent_jobs"] = int(value)
         return overrides
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Audio quota overrides unavailable for user {}: {}", user_id, exc)
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Audio quota overrides unavailable")
         return {}
 
 
@@ -593,8 +593,8 @@ async def get_daily_minutes_used(user_id: int) -> float:
                 day,
             )
             return float(rows[0][0]) if rows else 0.0
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"get_daily_minutes_used failed: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("get_daily_minutes_used failed")
         return 0.0
 
 
@@ -635,14 +635,14 @@ async def _get_daily_ledger() -> ResourceDailyLedger | None:
                 # accurate immediately after deploy. This runs once per process
                 # and is idempotent via LedgerEntry.op_id.
                 await _backfill_audio_usage_daily_to_ledger(ledger)
-            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as backfill_exc:  # pragma: no cover - defensive
+            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
                 logger.debug(
-                    f"Audio quotas: legacy audio_usage_daily backfill failed; continuing without backfill: {backfill_exc}"
+                    "Audio quotas: legacy audio_usage_daily backfill failed; continuing without backfill"
                 )
             _daily_ledger = ledger
             return ledger
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:  # pragma: no cover - best-effort shadow path
-            logger.debug(f"Audio quotas: ResourceDailyLedger init failed; continuing without ledger: {e}")
+        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - best-effort shadow path
+            logger.debug("Audio quotas ResourceDailyLedger init failed; continuing without ledger")
             _daily_ledger = None
             return None
 
@@ -672,8 +672,8 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
                     day,
                 )
                 iterable = [(int(r["user_id"]), float(r["minutes_used"])) for r in rows or []]
-            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Audio quotas: legacy backfill query (Postgres) failed: {e}")
+            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Audio quotas: legacy backfill query (Postgres) failed")
                 iterable = []
         else:
             try:
@@ -682,8 +682,8 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
                     day,
                 )
                 iterable = [(int(r[0]), float(r[1])) for r in rows or []]
-            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Audio quotas: legacy backfill query (SQLite) failed: {e}")
+            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Audio quotas: legacy backfill query (SQLite) failed")
                 iterable = []
 
         for user_id, minutes_used in iterable:
@@ -700,14 +700,14 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
             )
             try:
                 await ledger.add(entry)
-            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as le:
+            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
                 logger.debug(
-                    f"Audio quotas: ResourceDailyLedger legacy backfill add failed for user_id={user_id}: {le}"
+                    "Audio quotas: ResourceDailyLedger legacy backfill add failed"
                 )
         _audio_minutes_legacy_backfill_done = True
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as exc:
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
         logger.debug(
-            f"Audio quotas: legacy audio_usage_daily backfill to ResourceDailyLedger failed; continuing without backfill: {exc}"
+            "Audio quotas: legacy audio_usage_daily backfill to ResourceDailyLedger failed; continuing without backfill"
         )
 
 
@@ -734,10 +734,10 @@ async def add_daily_minutes(user_id: int, minutes: float) -> None:
             )
             try:
                 await ledger.add(entry)
-            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as le:
-                logger.debug(f"Audio quotas: ResourceDailyLedger add failed; shadow-only: {le}")
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as outer:
-        logger.debug(f"Audio quotas: ResourceDailyLedger shadow path failed; ignoring: {outer}")
+            except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Audio quotas ResourceDailyLedger add failed; shadow-only")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Audio quotas: ResourceDailyLedger shadow path failed; ignoring")
 
     # Legacy audio_usage_daily writes have been removed; usage is tracked
     # solely via ResourceDailyLedger for new events.
@@ -762,8 +762,8 @@ async def _ledger_remaining_minutes(user_id: int, daily_limit_minutes: float) ->
             daily_cap=cap_units,
         )
         return float(remaining_units) / 60.0
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Audio quotas: ledger remaining check failed; fallback to legacy: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Audio quotas ledger remaining check failed; fallback to legacy")
         return None
 
 
@@ -792,8 +792,8 @@ async def increment_jobs_started(user_id: int) -> None:
                 user_id,
                 day,
             )
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"increment_jobs_started failed: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("increment_jobs_started failed")
 
 
 async def can_start_job(user_id: int) -> tuple[bool, str]:
@@ -836,8 +836,8 @@ async def can_start_job(user_id: int) -> tuple[bool, str]:
             return True, "OK"
         # Fail-open is intentional: if RG is temporarily unavailable, don't deny audio jobs.
         # Operators control overall service availability via infrastructure decisions, not exceptions here.
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RG reserve failed for jobs, failing open: {e}")
+        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG reserve failed for jobs, failing open")
             await _log_rg_audio_fallback("rg_reserve_failed_jobs")
             return True, "OK"
 
@@ -872,8 +872,8 @@ async def finish_job(user_id: int) -> None:
                     handle_id = handles.pop()
                     try:
                         await gov.release(handle_id)
-                    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug(f"RG finish_job release failed: {e}")
+                    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                        logger.debug("RG finish_job release failed")
                 remaining_handles = _rg_job_handles.get(user_key)
                 remaining = len(remaining_handles or [])
                 if remaining == 0:
@@ -885,8 +885,8 @@ async def finish_job(user_id: int) -> None:
             # Even when RG is in use, do not touch Redis/in-process counters here
             # to avoid double-decrement; legacy state is not used when RG is active.
             return
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RG error in finish_job: {e}")
+        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG error in finish_job")
             return
     return
 
@@ -921,8 +921,8 @@ async def can_start_stream(user_id: int) -> tuple[bool, str]:
             handles.append(handle_id)
             _metrics_set_gauge("audio_streaming_active", float(len(handles)), {"user_id": str(int(user_id))})
             return True, "OK"
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RG reserve failed for streams, failing open: {e}")
+        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG reserve failed for streams, failing open")
             await _log_rg_audio_fallback("rg_reserve_failed_streams")
             return True, "OK"
 
@@ -950,15 +950,15 @@ async def finish_stream(user_id: int) -> None:
                 handle_id = handles.pop()
                 try:
                     await gov.release(handle_id)
-                except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"RG finish_stream release failed: {e}")
+                except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("RG finish_stream release failed")
             remaining = len(_rg_stream_handles.get(int(user_id)) or [])
             if remaining == 0:
                 await _cleanup_stream_handles(int(user_id))
             _metrics_set_gauge("audio_streaming_active", float(remaining), {"user_id": str(int(user_id))})
             return
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RG error in finish_stream: {e}")
+        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG error in finish_stream")
             return
     return
 
@@ -1035,10 +1035,10 @@ async def heartbeat_stream(user_id: int) -> None:
             for handle_id in list(_rg_stream_handles.get(int(user_id)) or []):
                 try:
                     await gov.renew(handle_id, ttl_s=ttl)
-                except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"RG heartbeat_stream renew failed for handle {handle_id}: {e}")
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RG error in heartbeat_stream: {e}")
+                except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("RG heartbeat_stream renew failed")
+        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG error in heartbeat_stream")
     return
 
 
@@ -1049,8 +1049,8 @@ def _get_job_ttl_seconds() -> int:
         try:
             v = int(val_env)
             return max(30, min(3600, v))
-        except (TypeError, ValueError) as exc:
-            logger.debug(f"Audio job TTL: invalid AUDIO_JOB_TTL_SECONDS='{val_env}': {exc}")
+        except (TypeError, ValueError):
+            logger.debug("Audio job TTL: invalid AUDIO_JOB_TTL_SECONDS")
     try:
         from tldw_Server_API.app.core.config import load_comprehensive_config  # lazy import
 
@@ -1058,12 +1058,12 @@ def _get_job_ttl_seconds() -> int:
         if cfg and cfg.has_section("Audio-Quota"):
             try:
                 v = int(cfg.get("Audio-Quota", "job_ttl_seconds", fallback="600"))
-            except (TypeError, ValueError, configparser.Error) as exc:
-                logger.debug(f"Audio job TTL: invalid config value: {exc}")
+            except (TypeError, ValueError, configparser.Error):
+                logger.debug("Audio job TTL: invalid config value")
                 v = 600
             return max(30, min(3600, v))
-    except (OSError, RuntimeError, configparser.Error, TypeError, ValueError) as exc:
-        logger.debug(f"Audio job TTL: failed to load config: {exc}")
+    except (OSError, RuntimeError, configparser.Error, TypeError, ValueError):
+        logger.debug("Audio job TTL: failed to load config")
     return 600
 
 
@@ -1095,10 +1095,10 @@ async def heartbeat_jobs(user_id: int) -> None:
             for handle_id in list(_rg_job_handles.get(int(user_id)) or []):
                 try:
                     await gov.renew(handle_id, ttl_s=ttl)
-                except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"RG heartbeat_jobs renew failed for handle {handle_id}: {e}")
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"RG error in heartbeat_jobs: {e}")
+                except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("RG heartbeat_jobs renew failed")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("RG error in heartbeat_jobs")
 
 
 async def active_streams_count(user_id: int) -> int:
@@ -1151,8 +1151,8 @@ def _apply_tier_overrides_from_config(base: dict[str, dict[str, float | None]]) 
                 for tier, vals in data.items():
                     if tier in merged and isinstance(vals, dict):
                         merged[tier].update(vals)
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"AUDIO_TIER_LIMITS_JSON parse failed: {e}")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("AUDIO_TIER_LIMITS_JSON parse failed")
     # Config file overrides
     try:
         from tldw_Server_API.app.core.config import load_comprehensive_config
@@ -1169,12 +1169,10 @@ def _apply_tier_overrides_from_config(base: dict[str, dict[str, float | None]]) 
                         else:
                             try:
                                 merged[tier][key] = float(val) if key == "daily_minutes" else int(val)
-                            except (TypeError, ValueError) as exc:
-                                logger.debug(
-                                    f"Audio-Quota override parse failed for {tier}.{key}={val!r}: {exc}"
-                                )
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Audio-Quota config overrides failed: {e}")
+                            except (TypeError, ValueError):
+                                logger.debug("Audio-Quota override parse failed")
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Audio-Quota config overrides failed")
     return merged
 
 

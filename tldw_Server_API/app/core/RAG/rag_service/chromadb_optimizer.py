@@ -222,8 +222,8 @@ class ChromaDBOptimizer:
                 where,
                 include
             ))
-        except Exception as e:
-            logger.error(f"ChromaDB search failed: {e}")
+        except Exception:
+            logger.error("ChromaDB search failed")
             result = {"ids": [[]], "distances": [[]], "documents": [[]], "metadatas": [[]]}
 
         # Cache result
@@ -510,8 +510,8 @@ class ChromaDBOptimizer:
 
             if batch_num % 10 == 0:  # Log every 10th batch
                 logger.debug(f"Added batch {batch_num} ({len(documents)} documents)")
-        except Exception as e:
-            logger.error(f"Failed to add batch {batch_num}: {e}")
+        except Exception:
+            logger.error(f"Failed to add batch {batch_num}")
             raise
 
     def get_collection_strategy(self, num_documents: int,
@@ -574,8 +574,8 @@ class ChromaDBOptimizer:
                 # 2. Optimize storage for frequently accessed metadata
                 # 3. Consider denormalization for performance
 
-        except Exception as e:
-            logger.warning(f"Could not optimize metadata indexing: {e}")
+        except Exception:
+            logger.warning("Could not optimize metadata indexing")
 
     def get_stats(self) -> dict[str, Any]:
         """Get optimization statistics"""
@@ -648,8 +648,8 @@ class OptimizedChromaStore:
             count = self.collection.count()
             if count > 50000:
                 logger.warning(f"Collection {collection_name} has {count} documents. Consider partitioning.")
-        except Exception as e:
-            logger.debug(f"Chroma get_collection failed, creating new: name={collection_name}, error={e}")
+        except Exception:
+            logger.debug("Chroma get_collection failed, creating new collection")
             self.collection = self.client.create_collection(
                 name=collection_name,
                 metadata={"hnsw:space": "cosine"}  # Optimize for cosine similarity
@@ -766,8 +766,8 @@ class OptimizedChromaStore:
 
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to add documents: {e}")
+        except Exception:
+            logger.error("Failed to add documents")
             return False
 
     def get_performance_stats(self) -> dict[str, Any]:

@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import React from "react"
 import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
 import { useMessage } from "~/hooks/useMessage"
-import { toBase64 } from "~/libs/to-base64"
 import {
   Checkbox,
   Dropdown,
@@ -36,31 +35,22 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { getVariable } from "@/utils/select-variable"
-import { useSpeechRecognition } from "@/hooks/useSpeechRecognition"
 import { useTldwStt } from "@/hooks/useTldwStt"
 import { useMicStream } from "@/hooks/useMicStream"
-import type {
-  DictationErrorClass,
-  DictationModePreference,
-  DictationResolvedMode,
-  DictationServerErrorTransition
-} from "@/hooks/useDictationStrategy"
-import { useDictationStrategy } from "@/hooks/useDictationStrategy"
+import type { DictationModePreference } from "@/hooks/useDictationStrategy"
 import { BsIncognito } from "react-icons/bs"
 import { handleChatInputKeyDown } from "@/utils/key-down"
 import { getIsSimpleInternetSearch } from "@/services/search"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useSttSettings } from "@/hooks/useSttSettings"
-import { useServerDictation } from "@/hooks/useServerDictation"
 import { useVoiceChatSettings } from "@/hooks/useVoiceChatSettings"
 import { useVoiceChatStream } from "@/hooks/useVoiceChatStream"
 import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages"
 import { useComposerEvents } from "@/hooks/useComposerEvents"
 import { useTemporaryChatToggle } from "@/hooks/useTemporaryChatToggle"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
-import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
-import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import {
   COMPOSER_CONSTANTS,
   SPACING,
@@ -70,7 +60,9 @@ import {
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 import { useFocusShortcuts } from "@/hooks/keyboard"
 import { isFirefoxTarget } from "@/config/platform"
-import { useDraftPersistence } from "@/hooks/useDraftPersistence"
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
+import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
+import { useComposerAttachments } from "@/components/Chat/composer/hooks/useComposerAttachments"
 import { useSlashCommands, type SlashCommandItem } from "@/hooks/useSlashCommands"
 import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
@@ -111,20 +103,23 @@ import { useSetting } from "@/hooks/useSetting"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import {
+  createQuickIngestSessionSeedFromOpenDetail,
+  type QuickIngestOpenDetail
+} from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
 import { Button } from "@/components/Common/Button"
-import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { generateID } from "@/db/dexie/helpers"
 import type { UploadedFile } from "@/db/dexie/types"
 import type { ChatDocuments } from "@/models/ChatTypes"
 import { formatFileSize } from "@/utils/format"
 import { formatPinnedResults } from "@/utils/rag-format"
-import { emitDictationDiagnostics } from "@/utils/dictation-diagnostics"
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
-import { useQueuedRequests } from "@/hooks/chat/useQueuedRequests"
-import { resolveAudioCapturePlan, type AudioCaptureRequestedSource } from "@/audio"
+import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
+import { useConversationContextComposition } from "@/hooks/chat/useConversationContextComposition"
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
@@ -139,6 +134,11 @@ import {
   shouldResetDefaultCharacterBootstrap
 } from "@/utils/default-character-preference"
 import { CONTEXT_FILE_SIZE_MB_SETTING } from "@/services/settings/ui-settings"
+import {
+  ChatComposer,
+  useComposerVariantPreference,
+} from "@/components/Chat/composer/ChatComposer"
+import { useComposerEnabledPreference } from "@/components/Chat/composer/hooks/useComposerEnabledPreference"
 import { browser } from "wxt/browser"
 import type { Character } from "@/types/character"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
@@ -170,7 +170,6 @@ export const SidepanelForm = ({
   const formContainerRef = React.useRef<HTMLDivElement>(null)
   const localTextareaRef = React.useRef<HTMLTextAreaElement>(null)
   const textareaRef = inputRef ?? localTextareaRef
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const contextFileInputRef = React.useRef<HTMLInputElement>(null)
   const { sendWhenEnter, setSendWhenEnter } = useWebUI()
   const setOptionalPanelVisible = useChatSurfaceCoordinatorStore(
@@ -310,12 +309,36 @@ export const SidepanelForm = ({
     ? COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_PRO
     : COMPOSER_CONSTANTS.TEXTAREA_MIN_HEIGHT_CASUAL
   const storageKey = draftKey || STORAGE_KEYS.SIDEPANEL_CHAT_DRAFT
-  const form = useSimpleForm({
-    initialValues: {
-      message: "",
-      image: ""
+  // Shared primitive: form state + draft persistence.
+  // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
+  // Sidepanel intentionally keeps its own local `textAreaFocus` below (plain
+  // .focus() without the mobile blur heuristic) to preserve exact behavior —
+  // adopt the primitive's `textAreaFocus` in a follow-up if desired.
+  const { form, draftSaved, clearDraft } = useComposerText({
+    draftKey: storageKey,
+    textareaRef,
+    isProMode
+  })
+
+  // Experimental Primer composer wire-up — opt in via ?nextgenComposer=1
+  // query param OR the Settings "Enable new composer" toggle. Mirrors
+  // the Playground integration: when ON, renders <ChatComposer> via the
+  // shared message + submitForm pipeline.
+  //
+  // URL flag is mount-static; the toggle uses the live-syncing hook so
+  // cross-tab flips update this surface without a reload.
+  const [urlFlagEnabled] = React.useState(() => {
+    if (typeof window === "undefined") return false
+    try {
+      const params = new URLSearchParams(window.location.search)
+      return params.get("nextgenComposer") === "1"
+    } catch {
+      return false
     }
   })
+  const [toggleEnabled] = useComposerEnabledPreference()
+  const nextgenComposerEnabled = urlFlagEnabled || toggleEnabled
+  const [nextgenComposerVariant] = useComposerVariantPreference()
   const { deferredInput: deferredComposerInput } = useDeferredComposerInput(
     form.values.message || ""
   )
@@ -376,14 +399,6 @@ export const SidepanelForm = ({
   }, [form.values.image])
   const [contextFiles, setContextFiles] = React.useState<UploadedFile[]>([])
   const [mentionActiveIndex, setMentionActiveIndex] = React.useState(0)
-  const {
-    transcript,
-    isListening,
-    resetTranscript,
-    start: startListening,
-    stop: stopSpeechRecognition,
-    supported: browserSupportsSpeechRecognition
-  } = useSpeechRecognition()
   const [dictationAutoFallbackEnabled] = useStorage(
     "dictation_auto_fallback",
     false
@@ -392,16 +407,8 @@ export const SidepanelForm = ({
     "dictationModeOverride",
     null
   )
-  const {
-    preference: dictationAudioSourcePreference,
-    isLoading: dictationSourceLoading,
-    setPreference: setDictationAudioSourcePreference
-  } = useAudioSourcePreferences("dictation")
-  const {
-    devices: audioInputDevices,
-    isSettled: hasAudioCatalogSettled
-  } = useAudioSourceCatalog()
-  const [pendingDictationStart, setPendingDictationStart] = React.useState(false)
+  // Voice/dictation orchestration is wired below via `useComposerVoiceChat`,
+  // after `canUseServerStt` and `speechToTextLanguage` are computed.
 
   const {
     tabMentionsEnabled,
@@ -419,18 +426,6 @@ export const SidepanelForm = ({
     handleMentionsOpen
   } = useTabMentions(textareaRef, { includeActive: true })
 
-  const stopListening = async () => {
-    if (isListening) {
-      stopSpeechRecognition()
-    }
-  }
-
-  // Draft persistence - saves/restores message draft to local-only storage
-  const { draftSaved } = useDraftPersistence({
-    storageKey,
-    getValue: () => form.values.message,
-    setValue: (value) => form.setFieldValue("message", value)
-  })
   const hasWarnedPrivateMode = React.useRef(false)
 
   // Warn Firefox private mode users on mount that data won't persist
@@ -496,12 +491,14 @@ export const SidepanelForm = ({
   const {
     quickIngestSession,
     createDraftQuickIngestSession,
+    upsertQuickIngestSession,
     showQuickIngestSession,
     hideQuickIngestSession
   } = useQuickIngestSessionStore(
     (state) => ({
       quickIngestSession: state.session,
       createDraftQuickIngestSession: state.createDraftSession,
+      upsertQuickIngestSession: state.upsertSession,
       showQuickIngestSession: state.showSession,
       hideQuickIngestSession: state.hideSession
     }),
@@ -548,8 +545,8 @@ export const SidepanelForm = ({
   const canUseServerAudio =
     hasServerVoiceChat && audioHealthState !== "unhealthy"
   const canUseServerStt = hasServerStt && sttHealthState !== "unhealthy"
-  const hasVoiceInputControls =
-    browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
+  // `hasVoiceInputControls` is computed below, after `useComposerVoiceChat`
+  // exposes `browserSupportsSpeechRecognition`.
   const voiceConversationTtsConfig = React.useMemo(
     () =>
       resolveVoiceConversationTtsConfig({
@@ -611,72 +608,6 @@ export const SidepanelForm = ({
     ]
   )
   const voiceChatAvailable = voiceConversationAvailability.available
-  const dictationCapturePlan = React.useMemo(
-    () =>
-      resolveAudioCapturePlan({
-        featureGroup: "dictation",
-        requestedSource: dictationAudioSourcePreference,
-        requestedSpeechPath:
-          dictationModeOverride === "browser"
-            ? "browser_dictation"
-            : "server_dictation",
-        capabilities: {
-          browserDictationSupported: browserSupportsSpeechRecognition,
-          serverDictationSupported: canUseServerStt,
-          liveVoiceSupported: false,
-          secureContextAvailable:
-            typeof window === "undefined" ? true : window.isSecureContext
-        }
-      }),
-    [
-      browserSupportsSpeechRecognition,
-      canUseServerStt,
-      dictationAudioSourcePreference,
-      dictationModeOverride
-    ]
-  )
-  const dictationSourceReady = hasAudioCatalogSettled && !dictationSourceLoading
-  const resolvedDictationSourcePreference = React.useMemo(() => {
-    if (!dictationSourceReady) {
-      return dictationAudioSourcePreference
-    }
-
-    if (dictationAudioSourcePreference.sourceKind !== "mic_device") {
-      return dictationAudioSourcePreference
-    }
-
-    const requestedDeviceId = String(dictationAudioSourcePreference.deviceId || "").trim()
-    const deviceStillAvailable = audioInputDevices.some(
-      (device) => device.deviceId === requestedDeviceId
-    )
-
-    if (deviceStillAvailable) {
-      return dictationAudioSourcePreference
-    }
-
-    return {
-      featureGroup: "dictation" as const,
-      sourceKind: "default_mic" as const,
-      deviceId: null,
-      lastKnownLabel: null
-    }
-  }, [audioInputDevices, dictationAudioSourcePreference, dictationSourceReady])
-  const resolvedDictationSourceKind = resolvedDictationSourcePreference.sourceKind
-  const browserDictationCompatible =
-    resolvedDictationSourcePreference.sourceKind === "default_mic"
-  const resolvedModeOverride =
-    dictationModeOverride === "browser" && !browserDictationCompatible
-      ? (canUseServerStt ? ("server" as const) : ("unavailable" as const))
-      : null
-  const requestedServerDictationSource = React.useMemo<
-    AudioCaptureRequestedSource | undefined
-  >(
-    () =>
-      resolvedDictationSourcePreference.sourceKind === "mic_device"
-        ? resolvedDictationSourcePreference
-        : undefined,
-    [resolvedDictationSourcePreference]
-  )
 
   const voiceChat = useVoiceChatStream({
     active: voiceChatEnabled && voiceChatAvailable,
@@ -745,6 +676,7 @@ export const SidepanelForm = ({
     toolChoice,
     setToolChoice,
     historyId,
+    history,
     chatLoopState = {
       status: "idle",
       pendingApprovals: [],
@@ -756,6 +688,11 @@ export const SidepanelForm = ({
     setQueuedMessages,
     serverChatId
   } = useMessage()
+  const { settings: conversationContextSettings, updateSettings } =
+    useChatSettingsRecord({
+      historyId,
+      serverChatId
+    })
   const previousServerChatIdRef = React.useRef<string | null | undefined>(
     serverChatId
   )
@@ -877,60 +814,46 @@ export const SidepanelForm = ({
       ? (t("playground:sendWhenEnter") as string)
       : undefined
 
-  const openUploadDialog = React.useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
-
-  const onInputChange = React.useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement> | File) => {
-      try {
-        let file: File
-        if (e instanceof File) {
-          file = e
-        } else if (e.target.files && e.target.files[0]) {
-          file = e.target.files[0]
-        } else {
-          return
-        }
-
-        // Validate that the file is an image
-        if (!file.type.startsWith("image/")) {
-          message.error({
-            content: t(
-              "sidepanel:composer.imageTypeError",
-              "Please select an image file"
-            ),
-            duration: 3
-          })
-          return
-        }
-
-        const base64 = await toBase64(file)
-        form.setFieldValue("image", base64)
-
-        // Show success feedback
-        message.success({
-          content: t("sidepanel:composer.imageUploaded", {
-            defaultValue: "Image added: {{name}}",
-            name:
-              file.name.length > 20
-                ? `${file.name.slice(0, 17)}...`
-                : file.name
-          }),
-          duration: 2
-        })
-      } catch {
-        message.error({
-          content: t(
-            "sidepanel:composer.imageUploadError",
-            "Failed to process image"
-          ),
-          duration: 3
-        })
-      }
+  // Sidepanel is image-only — images are read to base64 and written to the
+  // form; non-images trigger a toast. The shared primitive centralizes
+  // the decision tree (unsupported-type check, image vs non-image branch,
+  // base64 encoding); we supply Sidepanel-specific toast callbacks.
+  const attachmentHandler = useComposerAttachments({
+    chatMode: "normal",
+    setImageField: (base64) => form.setFieldValue("image", base64),
+    onImageAccepted: (file) => {
+      message.success({
+        content: t("sidepanel:composer.imageUploaded", {
+          defaultValue: "Image added: {{name}}",
+          name:
+            file.name.length > 20
+              ? `${file.name.slice(0, 17)}...`
+              : file.name
+        }),
+        duration: 2
+      })
     },
-    [form.setFieldValue, t]
-  )
+    onNonImageRejected: () => {
+      message.error({
+        content: t(
+          "sidepanel:composer.imageTypeError",
+          "Please select an image file"
+        ),
+        duration: 3
+      })
+    },
+    onImageReadError: () => {
+      message.error({
+        content: t(
+          "sidepanel:composer.imageUploadError",
+          "Failed to process image"
+        ),
+        duration: 3
+      })
+    },
+  })
+  const onInputChange = attachmentHandler.onInputChange
+  const openUploadDialog = attachmentHandler.handleDocumentUpload
   const textAreaFocus = React.useCallback(() => {
     if (textareaRef.current) {
       textareaRef.current.focus()
@@ -940,116 +863,47 @@ export const SidepanelForm = ({
   // When sidepanel connection transitions to CONNECTED, focus the composer
   useFocusComposerOnConnect(phase)
 
-  const dictationDiagnosticsSnapshotRef = React.useRef<{
-    requestedMode: DictationModePreference
-    resolvedMode: DictationResolvedMode
-    requestedSourceKind: "default_mic" | "mic_device" | "tab_audio" | "system_audio"
-    resolvedSourceKind: "default_mic" | "mic_device" | "tab_audio" | "system_audio"
-    speechAvailable: boolean
-    speechUsesServer: boolean
-    fallbackReason: DictationErrorClass | null
-  }>({
-    requestedMode: "auto",
-    resolvedMode: "unavailable",
-    requestedSourceKind: "default_mic",
-    resolvedSourceKind: "default_mic",
-    speechAvailable: false,
-    speechUsesServer: false,
-    fallbackReason: null
-  })
-  const serverDictationErrorBridgeRef = React.useRef<
-    (error: unknown) => DictationServerErrorTransition
-  >(
-    () => ({
-      errorClass: "unknown_error",
-      appliedFallback: false,
-      requestedMode: "auto",
-      resolvedModeBeforeError: "unavailable",
-      speechAvailableBeforeError: false,
-      speechUsesServerBeforeError: false,
-      browserSupportsSpeechRecognition: false,
-      autoFallbackEnabled: false
-    })
-  )
-  const serverDictationSuccessBridgeRef = React.useRef<() => void>(() => {})
-  const handleServerDictationError = React.useCallback((error: unknown) => {
-    const transition = serverDictationErrorBridgeRef.current(error)
-    const snapshot = dictationDiagnosticsSnapshotRef.current
-    emitDictationDiagnostics({
-      surface: "sidepanel",
-      kind: "server_error",
-      requestedMode: transition.requestedMode,
-      resolvedMode: transition.resolvedModeBeforeError,
-      requestedSourceKind: snapshot.requestedSourceKind,
-      resolvedSourceKind: snapshot.resolvedSourceKind,
-      speechAvailable: transition.speechAvailableBeforeError,
-      speechUsesServer: transition.speechUsesServerBeforeError,
-      errorClass: transition.errorClass,
-      fallbackApplied: transition.appliedFallback,
-      fallbackReason: transition.appliedFallback ? transition.errorClass : null
-    })
-  }, [])
-  const handleServerDictationSuccess = React.useCallback(() => {
-    serverDictationSuccessBridgeRef.current()
-    const snapshot = dictationDiagnosticsSnapshotRef.current
-    emitDictationDiagnostics({
-      surface: "sidepanel",
-      kind: "server_success",
-      requestedMode: snapshot.requestedMode,
-      resolvedMode: snapshot.resolvedMode,
-      requestedSourceKind: snapshot.requestedSourceKind,
-      resolvedSourceKind: snapshot.resolvedSourceKind,
-      speechAvailable: snapshot.speechAvailable,
-      speechUsesServer: snapshot.speechUsesServer,
-      fallbackReason: snapshot.fallbackReason
-    })
-  }, [])
-
-  // Server-side dictation hook
+  // Voice/dictation orchestration — delegates the full browser+server STT
+  // pipeline (source preferences, capture plan, strategy, diagnostics,
+  // toggle handler, transcript streaming) to the shared composer primitive.
+  // Sidepanel writes transcripts straight into the message field; it does
+  // not auto-submit on dictation end.
   const {
+    isListening,
+    browserSupportsSpeechRecognition,
     isServerDictating,
-    startServerDictation,
-    stopServerDictation
-  } = useServerDictation({
+    stopServerDictation,
+    dictationAudioSourcePreference,
+    setDictationAudioSourcePreference,
+    dictationResolvedSourceKind: resolvedDictationSourceKind,
+    audioInputDevices,
+    speechAvailable,
+    speechUsesServer,
+    stopListening,
+    handleDictationToggle
+  } = useComposerVoiceChat({
+    surface: "sidepanel",
     canUseServerStt,
     speechToTextLanguage,
     sttSettings,
-    onTranscript: (text) => form.setFieldValue("message", text),
-    onError: handleServerDictationError,
-    onSuccess: handleServerDictationSuccess
+    dictationModeOverride,
+    dictationAutoFallbackEnabled: Boolean(dictationAutoFallbackEnabled),
+    onTranscript: (text) => form.setFieldValue("message", text)
   })
-
-  const dictationStrategy = useDictationStrategy({
-    canUseServerStt,
-    browserSupportsSpeechRecognition,
-    browserDictationCompatible,
-    resolvedModeOverride,
-    isServerDictating,
-    isBrowserDictating: isListening,
-    modeOverride: dictationModeOverride,
-    autoFallbackEnabled: Boolean(dictationAutoFallbackEnabled)
-  })
-  serverDictationErrorBridgeRef.current = dictationStrategy.recordServerError
-  serverDictationSuccessBridgeRef.current = dictationStrategy.recordServerSuccess
-  dictationDiagnosticsSnapshotRef.current = {
-    requestedMode: dictationStrategy.requestedMode,
-    resolvedMode: dictationStrategy.resolvedMode,
-    requestedSourceKind: dictationCapturePlan.requestedSourceKind,
-    resolvedSourceKind: resolvedDictationSourceKind,
-    speechAvailable: dictationStrategy.speechAvailable,
-    speechUsesServer: dictationStrategy.speechUsesServer,
-    fallbackReason: dictationStrategy.autoFallbackErrorClass
-  }
-  const speechAvailable = dictationStrategy.speechAvailable
-  const speechUsesServer = dictationStrategy.speechUsesServer
+  const hasVoiceInputControls =
+    browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
 
   // Composer window events hook
-  const handleOpenQuickIngest = React.useCallback(() => {
+  const handleOpenQuickIngest = React.useCallback((detail?: QuickIngestOpenDetail) => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
+      if (seed) {
+        upsertQuickIngestSession(seed)
+      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession()
+      createDraftQuickIngestSession(seed ?? undefined)
     }
     setIngestOpen(true)
     requestAnimationFrame(() => {
@@ -1058,7 +912,8 @@ export const SidepanelForm = ({
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession
+    showQuickIngestSession,
+    upsertQuickIngestSession
   ])
 
   const {
@@ -1229,6 +1084,19 @@ export const SidepanelForm = ({
     setStoredCharacter,
     storedCharacterId
   ])
+
+  const conversationContextComposition = useConversationContextComposition({
+    draftMessage: form.values.message,
+    selection: {
+      chatId: serverChatId ?? undefined,
+      characterId: selectedCharacterId,
+      worldBookIds: [],
+      dictionaryIds: []
+    },
+    settings: conversationContextSettings,
+    debounceMs: 250,
+    updateSettings
+  })
 
   const {
     filteredSlashCommands,
@@ -1710,28 +1578,44 @@ export const SidepanelForm = ({
         return
       }
     }
-    form.reset()
-    textAreaFocus()
-    await sendMessage({
-      image: intent.isImageCommand ? "" : image,
-      message: trimmed,
-      docs: intent.isImageCommand
-        ? []
-        : selectedDocuments.map((doc) => ({
-            type: "tab",
-            tabId: doc.id,
-            title: doc.title,
-            url: doc.url,
-            favIconUrl: doc.favIconUrl
-          })),
-      uploadedFiles: intent.isImageCommand ? [] : contextFiles,
-      imageBackendOverride: intent.isImageCommand
-        ? intent.imageBackendOverride
-        : undefined
-    })
-    clearSelectedDocuments()
-    setContextFiles([])
-    setKnowledgeMentionActive(false)
+    const contextSend = intent.isImageCommand
+      ? null
+      : await conversationContextComposition.composeForSend({
+          message: trimmed,
+          history
+        })
+    await submitDispatch(
+      {
+        image: intent.isImageCommand ? "" : image,
+        message: trimmed,
+        docs: intent.isImageCommand
+          ? []
+          : selectedDocuments.map((doc) => ({
+              type: "tab",
+              tabId: doc.id,
+              title: doc.title,
+              url: doc.url,
+              favIconUrl: doc.favIconUrl
+            })),
+        uploadedFiles: intent.isImageCommand ? [] : contextFiles,
+        imageBackendOverride: intent.isImageCommand
+          ? intent.imageBackendOverride
+          : undefined,
+        requestOverrides: contextSend?.requestOverrides
+      },
+      {
+        beforeSend: () => {
+          form.reset()
+          textAreaFocus()
+        },
+        afterSend: () => {
+          clearDraft()
+          clearSelectedDocuments()
+          setContextFiles([])
+          setKnowledgeMentionActive(false)
+        }
+      }
+    )
   }
   const sendCurrentFormMessageRef = React.useRef(sendCurrentFormMessage)
   React.useEffect(() => {
@@ -1884,96 +1768,10 @@ export const SidepanelForm = ({
     setContextFiles([])
   }, [])
 
-  const startBrowserDictation = React.useCallback(() => {
-    resetTranscript()
-    startListening({
-      continuous: true,
-      lang: speechToTextLanguage
-    })
-  }, [resetTranscript, speechToTextLanguage, startListening])
-  const runPendingDictationStart = React.useCallback(() => {
-    switch (dictationStrategy.toggleIntent) {
-      case "start_server":
-        void startServerDictation(requestedServerDictationSource)
-        return true
-      case "start_browser":
-        startBrowserDictation()
-        return true
-      default:
-        return false
-    }
-  }, [
-    dictationStrategy.toggleIntent,
-    requestedServerDictationSource,
-    startBrowserDictation,
-    startServerDictation
-  ])
-
-  const handleDictationToggle = React.useCallback(() => {
-    if (pendingDictationStart) {
-      setPendingDictationStart(false)
-      return
-    }
-
-    switch (dictationStrategy.toggleIntent) {
-      case "start_server":
-        if (!dictationSourceReady) {
-          setPendingDictationStart(true)
-          return
-        }
-        void startServerDictation(requestedServerDictationSource)
-        break
-      case "stop_server":
-        setPendingDictationStart(false)
-        stopServerDictation()
-        break
-      case "start_browser":
-        if (!dictationSourceReady) {
-          setPendingDictationStart(true)
-          return
-        }
-        startBrowserDictation()
-        break
-      case "stop_browser":
-        setPendingDictationStart(false)
-        stopListening()
-        break
-      default:
-        break
-    }
-    const snapshot = dictationDiagnosticsSnapshotRef.current
-    emitDictationDiagnostics({
-      surface: "sidepanel",
-      kind: "toggle",
-      requestedMode: snapshot.requestedMode,
-      resolvedMode: snapshot.resolvedMode,
-      requestedSourceKind: snapshot.requestedSourceKind,
-      resolvedSourceKind: snapshot.resolvedSourceKind,
-      speechAvailable: snapshot.speechAvailable,
-      speechUsesServer: snapshot.speechUsesServer,
-      toggleIntent: dictationStrategy.toggleIntent,
-      fallbackReason: snapshot.fallbackReason
-    })
-  }, [
-    dictationSourceReady,
-    dictationStrategy.toggleIntent,
-    pendingDictationStart,
-    requestedServerDictationSource,
-    startBrowserDictation,
-    startServerDictation,
-    stopListening,
-    stopServerDictation
-  ])
-
-  React.useEffect(() => {
-    if (!pendingDictationStart) return
-    if (!dictationSourceReady) return
-    if (!runPendingDictationStart()) {
-      setPendingDictationStart(false)
-      return
-    }
-    setPendingDictationStart(false)
-  }, [dictationSourceReady, pendingDictationStart, runPendingDictationStart])
+  // Dictation toggle + transcript streaming + pending-start handling are
+  // owned by `useComposerVoiceChat` (see top of component); nothing extra to
+  // wire here. `handleDictationToggle` and `stopListening` are destructured
+  // above for the controls below to consume.
 
   const voiceChatStatusLabel = React.useMemo(() => {
     switch (voiceChat.state) {
@@ -2201,26 +1999,27 @@ export const SidepanelForm = ({
     setChatMode(chatMode === "vision" ? "normal" : "vision")
   }, [chatMode, setChatMode])
 
-  const handleImageUpload = React.useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
-
   const handleRagToggle = React.useCallback(() => {
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
   }, [])
 
-  const handleQuickIngestOpen = React.useCallback(() => {
+  const handleQuickIngestOpen = React.useCallback((detail?: QuickIngestOpenDetail) => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
+      if (seed) {
+        upsertQuickIngestSession(seed)
+      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession()
+      createDraftQuickIngestSession(seed ?? undefined)
     }
     setIngestOpen(true)
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession
+    showQuickIngestSession,
+    upsertQuickIngestSession
   ])
 
   const handleProcessQueuedIngest = React.useCallback(() => {
@@ -2280,11 +2079,8 @@ export const SidepanelForm = ({
 
   useDynamicTextareaSize(textareaRef, form.values.message, textareaMaxHeight)
 
-  React.useEffect(() => {
-    if (isListening) {
-      form.setFieldValue("message", transcript)
-    }
-  }, [transcript])
+  // Browser-dictation transcript streaming is handled by `useComposerVoiceChat`
+  // via its `onTranscript` callback above; no local effect needed here.
 
   React.useEffect(() => {
     if (selectedQuickPrompt) {
@@ -2311,6 +2107,11 @@ export const SidepanelForm = ({
       textAreaFocus()
     }
   })
+
+  // Shared composer dispatch. Wraps sendMessage with before/after hooks so
+  // Sidepanel's "reset + focus before, clear attachments after" pattern
+  // mirrors Playground's. See Chat/composer/hooks/useComposerSubmit.ts.
+  const { dispatch: submitDispatch } = useComposerSubmit({ sendMessage })
 
   const buildQueuedDocuments = React.useCallback(
     (): ChatDocuments =>
@@ -2464,14 +2265,86 @@ export const SidepanelForm = ({
     ]
   )
 
-  const queuedRequestActions = useQueuedRequests({
+  const resolveQueueConversationId = React.useCallback(
+    () => historyId ?? serverChatId ?? null,
+    [historyId, serverChatId]
+  )
+
+  const handleQueueEnqueueBlocked = React.useCallback(() => {
+    notification.warning({
+      message: t(
+        "playground:composer.queue.attachmentsNeedManualRepairTitle",
+        "Queue needs a simpler draft"
+      ),
+      description: t(
+        "playground:composer.queue.attachmentsNeedManualRepairBody",
+        "Queued requests currently support text, images, and selected tabs. Clear attached files/context before queueing this draft."
+      )
+    })
+  }, [notification, t])
+
+  const handleQueueEnqueueSuccess = React.useCallback(
+    (isStreamingAtEnqueue: boolean) => {
+      clearDraft()
+      form.reset()
+      clearSelectedDocuments()
+      setContextFiles([])
+      setKnowledgeMentionActive(false)
+      textAreaFocus()
+      notification.info({
+        message: t("playground:composer.queue.requestQueued", "Request queued"),
+        description: isStreamingAtEnqueue
+          ? t(
+              "playground:composer.queue.requestQueuedWhileBusy",
+              "We'll run it after the current response finishes."
+            )
+          : t(
+              "playground:composer.queue.requestQueuedWhileOffline",
+              "We'll send it when your tldw server reconnects."
+            )
+      })
+    },
+    [
+      clearDraft,
+      clearSelectedDocuments,
+      form,
+      notification,
+      setContextFiles,
+      setKnowledgeMentionActive,
+      t,
+      textAreaFocus
+    ]
+  )
+
+  const sidepanelQueueCancelReasonText =
+    isSending && serverChatId
+      ? t(
+          "playground:composer.queue.cancelAndRunDisabled",
+          "Cancel current & run now is not available for server-backed turns yet."
+        )
+      : null
+
+  const queue = useComposerQueue({
     isConnectionReady,
     isStreaming: isSending,
-    queue: queuedMessages,
-    setQueue: setQueuedMessages,
+    queuedMessages,
+    setQueuedMessages,
     sendQueuedRequest,
-    stopStreamingRequest
+    stopStreamingRequest,
+    resolveConversationId: resolveQueueConversationId,
+    buildQueuedDocuments,
+    buildQueuedRequestSnapshot,
+    isQueuedDispatchBlocked: isQueuedDispatchBlockedByComposerState,
+    onEnqueueBlocked: handleQueueEnqueueBlocked,
+    onEnqueueSuccess: handleQueueEnqueueSuccess,
+    cancelCurrentAndRunDisabledReasonText: sidepanelQueueCancelReasonText
   })
+
+  const queuedRequestActions = queue.queuedRequestActions
+  const cancelCurrentAndRunDisabledReason =
+    queue.cancelCurrentAndRunDisabledReason
+  const handleRunQueuedRequest = queue.handleRunQueuedRequest
+  const handleRunNextQueuedRequest = queue.handleRunNextQueuedRequest
 
   const queueSubmission = React.useCallback(
     ({
@@ -2483,23 +2356,8 @@ export const SidepanelForm = ({
       image: string
       intent: ReturnType<typeof resolveSubmissionIntent>
     }) => {
-      if (isQueuedDispatchBlockedByComposerState) {
-        notification.warning({
-          message: t(
-            "playground:composer.queue.attachmentsNeedManualRepairTitle",
-            "Queue needs a simpler draft"
-          ),
-          description: t(
-            "playground:composer.queue.attachmentsNeedManualRepairBody",
-            "Queued requests currently support text, images, and selected tabs. Clear attached files/context before queueing this draft."
-          )
-        })
-        return null
-      }
-
       const documents = buildQueuedDocuments()
-      const queuedItem = queuedRequestActions.enqueue({
-        conversationId: historyId ?? serverChatId ?? null,
+      return queue.enqueue({
         promptText,
         image: intent.isImageCommand ? "" : image,
         attachments: documents,
@@ -2510,115 +2368,17 @@ export const SidepanelForm = ({
             : undefined,
           isImageCommand: intent.isImageCommand
         },
-        snapshot: buildQueuedRequestSnapshot()
+        blockedReason: isQueuedDispatchBlockedByComposerState
+          ? "draft-attachments-conflict"
+          : null
       })
-
-      form.reset()
-      clearSelectedDocuments()
-      setContextFiles([])
-      setKnowledgeMentionActive(false)
-      textAreaFocus()
-      notification.info({
-        message: t("playground:composer.queue.requestQueued", "Request queued"),
-        description: isSending
-          ? t(
-              "playground:composer.queue.requestQueuedWhileBusy",
-              "We'll run it after the current response finishes."
-            )
-          : t(
-              "playground:composer.queue.requestQueuedWhileOffline",
-              "We'll send it when your tldw server reconnects."
-            )
-      })
-      return queuedItem
     },
     [
       buildQueuedDocuments,
-      buildQueuedRequestSnapshot,
-      clearSelectedDocuments,
-      form,
-      historyId,
       isQueuedDispatchBlockedByComposerState,
-      isSending,
-      notification,
-      queuedRequestActions,
-      serverChatId,
-      setContextFiles,
-      t,
-      textAreaFocus
+      queue
     ]
   )
-
-  const cancelCurrentAndRunDisabledReason =
-    isSending && serverChatId
-      ? t(
-          "playground:composer.queue.cancelAndRunDisabled",
-          "Cancel current & run now is not available for server-backed turns yet."
-        )
-      : null
-
-  const handleRunQueuedRequest = React.useCallback(
-    async (requestId: string) => {
-      if (isSending && cancelCurrentAndRunDisabledReason) {
-        return
-      }
-      await queuedRequestActions.runNow(requestId)
-      if (!isSending && isConnectionReady) {
-        await queuedRequestActions.flushNext()
-      }
-    },
-    [
-      cancelCurrentAndRunDisabledReason,
-      isConnectionReady,
-      isSending,
-      queuedRequestActions
-    ]
-  )
-
-  const handleRunNextQueuedRequest = React.useCallback(async () => {
-    const next = queuedMessages[0]
-    if (!next) return
-    if (isSending && cancelCurrentAndRunDisabledReason) {
-      return
-    }
-    if (next.status === "blocked") {
-      await handleRunQueuedRequest(next.id)
-      return
-    }
-    await queuedRequestActions.flushNext()
-  }, [
-    cancelCurrentAndRunDisabledReason,
-    handleRunQueuedRequest,
-    isSending,
-    queuedMessages,
-    queuedRequestActions
-  ])
-
-  const autoDrainingQueuedRequestsRef = React.useRef(false)
-  React.useEffect(() => {
-    const next = queuedMessages[0]
-    if (
-      autoDrainingQueuedRequestsRef.current ||
-      !next ||
-      !isConnectionReady ||
-      isSending ||
-      next.status !== "queued" ||
-      isQueuedDispatchBlockedByComposerState
-    ) {
-      return
-    }
-
-    autoDrainingQueuedRequestsRef.current = true
-    void queuedRequestActions.flushNext().finally(() => {
-      autoDrainingQueuedRequestsRef.current = false
-    })
-  }, [
-    isConnectionReady,
-    isQueuedDispatchBlockedByComposerState,
-    isSending,
-    queuedMessages,
-    queuedRequestActions
-  ])
 
   const submitCurrentRequest = React.useCallback(
     async (
@@ -2896,13 +2656,13 @@ export const SidepanelForm = ({
                     name="file-upload"
                     type="file"
                     className="sr-only"
-                    ref={fileInputRef}
+                    ref={attachmentHandler.fileInputRef}
                     accept="image/*"
                     multiple={false}
                     tabIndex={-1}
                     aria-hidden="true"
                     aria-label={t("playground:actions.attachImage", "Attach image") as string}
-                    onChange={onInputChange}
+                    onChange={attachmentHandler.onFileInputChange}
                   />
                   <input
                     id="context-file-upload"
@@ -2987,7 +2747,9 @@ export const SidepanelForm = ({
                         )}
                       </div>
                     )}
-                    <div className="relative">
+                    {(() => {
+                      const composerTextareaShellNode = (
+                        <div className="relative">
                       {wrapComposerProfile(
                         "sidepanel-textarea-shell",
                         <div className="relative rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
@@ -3082,52 +2844,58 @@ export const SidepanelForm = ({
                           {t("sidepanel:composer.draftSaved", "Draft saved")}
                         </span>
                       )}
-                    </div>
-                    {/* Inline error message - positioned right after textarea for visibility */}
-                    {form.errors.message && (
-                      <div
-                        role="alert"
-                        aria-live="assertive"
-                        aria-atomic="true"
-                        className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
-                      >
-                        <div className="flex items-center gap-2">
-                          <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          <span>{form.errors.message}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => form.clearFieldError("message")}
-                          className="flex-shrink-0 text-danger hover:text-danger"
-                          aria-label={t("common:dismiss", "Dismiss")}
-                          title={t("common:dismiss", "Dismiss")}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                    {/* Proactive validation hints - show why send might be disabled */}
-                    {!form.errors.message && isConnectionReady && !streaming && isProMode && (
-                      <div className="px-2 py-1 text-label text-text-subtle">
-                        {!selectedModel ? (
-                          <span className="flex items-center gap-1">
-                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
-                          </span>
-                        ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
-                          <span>
-                            {sendWhenEnter
-                              ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
-                              : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                    <div className="mt-2 flex flex-col gap-2">
+                      )
+
+                      const composerInlineMessagesNode = (
+                        <>
+                          {form.errors.message && (
+                            <div
+                              role="alert"
+                              aria-live="assertive"
+                              aria-atomic="true"
+                              className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-danger animate-shake"
+                            >
+                              <div className="flex items-center gap-2">
+                                <svg className="h-3.5 w-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span>{form.errors.message}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => form.clearFieldError("message")}
+                                className="flex-shrink-0 text-danger hover:text-danger"
+                                aria-label={t("common:dismiss", "Dismiss")}
+                                title={t("common:dismiss", "Dismiss")}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          )}
+                          {!form.errors.message && isConnectionReady && !streaming && isProMode && (
+                            <div className="px-2 py-1 text-label text-text-subtle">
+                              {!selectedModel ? (
+                                <span className="flex items-center gap-1">
+                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  {t("sidepanel:composer.hints.selectModel", "Select a model above to start chatting")}
+                                </span>
+                              ) : form.values.message.trim().length === 0 && form.values.image.length === 0 ? (
+                                <span>
+                                  {sendWhenEnter
+                                    ? t("sidepanel:composer.hints.typeAndEnter", "Type a message and press Enter to send")
+                                    : t("sidepanel:composer.hints.typeAndClick", "Type a message and click Send")}
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                        </>
+                      )
+
+                      const composerControlAreaNode = (
+                        <div className="mt-2 flex flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
                         <div className="flex items-center gap-2">
                           <Switch
@@ -3156,6 +2924,16 @@ export const SidepanelForm = ({
                               setSelectedQuickPrompt={setSelectedQuickPrompt}
                               selectedCharacterId={selectedCharacterId}
                               setSelectedCharacterId={setSelectedCharacterId}
+                              serverChatId={serverChatId}
+                              conversationContextComposition={
+                                conversationContextComposition.composition
+                              }
+                              conversationContextStatus={
+                                conversationContextComposition.status
+                              }
+                              conversationContextSaveSelection={
+                                conversationContextComposition.saveSelection
+                              }
                               webSearch={webSearch}
                               setWebSearch={setWebSearch}
                               chatMode={chatMode}
@@ -3182,6 +2960,26 @@ export const SidepanelForm = ({
                               <>
                                 {!streaming ? (
                                   <>
+                                    <Tooltip
+                                      title={t("playground:actions.upload", "Attach image")}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={openUploadDialog}
+                                        data-testid="chat-upload-image-inline"
+                                        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        aria-label={t(
+                                          "playground:actions.upload",
+                                          "Attach image"
+                                        )}
+                                        title={t(
+                                          "playground:actions.upload",
+                                          "Attach image"
+                                        )}
+                                      >
+                                        <ImageIcon className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
                                     <div className="flex items-center gap-1">
                                       <Tooltip
                                         title={
@@ -3646,8 +3444,133 @@ export const SidepanelForm = ({
                           </div>
                         </>
                       )}
-                    </div>
-                  </div>
+                        </div>
+                        </div>
+                      )
+
+                      if (nextgenComposerEnabled) {
+                        const sharedNoticesSlot = composerInlineMessagesNode
+
+                        // Compact brief for V3 in the sidepanel — same idea
+                        // as Playground's, trimmed to the data Sidepanel
+                        // actually has (no character picker, no source list
+                        // beyond chat-with-page mode). Click handlers route
+                        // to the same actions the legacy controls expose.
+                        const briefSections = [
+                          {
+                            id: "sidepanel-brief",
+                            label: "Brief",
+                            fields: [
+                              {
+                                id: "model",
+                                fieldKey: "mdl",
+                                value: selectedModel || "—",
+                                active: Boolean(selectedModel),
+                                onClick: () => setOpenModelSettings(true),
+                                "aria-label": selectedModel
+                                  ? `Change model (current: ${selectedModel})`
+                                  : "Pick a model",
+                              },
+                              {
+                                id: "mode",
+                                fieldKey: "mod",
+                                value: chatMode,
+                                active: chatMode !== "normal",
+                                onClick: () =>
+                                  setChatMode(
+                                    chatMode === "rag" ? "normal" : "rag"
+                                  ),
+                                "aria-label":
+                                  chatMode === "rag"
+                                    ? "Switch to normal chat mode"
+                                    : "Switch to chat-with-page (RAG) mode",
+                              },
+                              {
+                                id: "web",
+                                fieldKey: "web",
+                                value: webSearch ? "on" : "off",
+                                active: webSearch,
+                                onClick: () => setWebSearch(!webSearch),
+                                "aria-label": webSearch
+                                  ? "Turn web search off"
+                                  : "Turn web search on",
+                              },
+                            ],
+                          },
+                        ]
+
+                        const variantNode =
+                          nextgenComposerVariant === "v5" ? (
+                            <ChatComposer
+                              variant="v5"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => void submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              onPaletteTrigger={() => {
+                                // V5 design: ⌘K injects `/` to open the
+                                // textarea's existing slash menu.
+                                const current = form.values.message
+                                form.setFieldValue(
+                                  "message",
+                                  current.endsWith("/") ? current : `${current}/`
+                                )
+                                textareaRef.current?.focus()
+                              }}
+                              textareaSlot={composerTextareaShellNode}
+                              facetsSlot={composerControlAreaNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          ) : nextgenComposerVariant === "v3" ? (
+                            <ChatComposer
+                              variant="v3"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => void submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              briefSections={briefSections}
+                              textareaSlot={composerTextareaShellNode}
+                              bottomBarSlot={composerControlAreaNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          ) : (
+                            <ChatComposer
+                              variant="v1"
+                              message={form.values.message}
+                              onMessageChange={(value) =>
+                                form.setFieldValue("message", value)
+                              }
+                              onSend={() => void submitForm()}
+                              sending={isSending}
+                              stopStreaming={stopStreamingRequest}
+                              density="compact"
+                              textareaSlot={composerTextareaShellNode}
+                              bottomBarSlot={composerControlAreaNode}
+                              noticesSlot={sharedNoticesSlot}
+                            />
+                          )
+
+                        return (
+                          <div data-testid="nextgen-composer-wrapper">
+                            {variantNode}
+                          </div>
+                        )
+                      }
+
+                      return (
+                        <>
+                          {composerTextareaShellNode}
+                          {composerInlineMessagesNode}
+                          {composerControlAreaNode}
+                        </>
+                      )
+                    })()}
                   </div>
                 </form>
               </div>

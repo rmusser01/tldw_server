@@ -7,7 +7,16 @@ import React, { useState, useMemo, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { getAllPrompts } from "@/db/dexie/helpers"
 import type { Prompt } from "@/db/dexie/types"
+import { getDesignSystemState } from "@/design-system"
 import { useStorage } from "@plasmohq/storage/hook"
+import {
+  OPEN_PROMPT_SELECT_EVENT,
+  type PromptSelectOpenDetail
+} from "@/utils/prompt-select-events"
+import {
+  normalizeFocusSelector,
+  scheduleFocusFirstVisibleElement
+} from "@/utils/focus-return"
 import { IconButton } from "./IconButton"
 import {
   normalizeSystemPromptOverrideValue,
@@ -44,6 +53,15 @@ export const PromptSelect: React.FC<Props> = ({
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
   const [editorOverrideActive, setEditorOverrideActive] = useState(false)
   const searchInputRef = useRef<InputRef | null>(null)
+  const returnFocusSelectorRef = useRef<string | null>(null)
+
+  const restorePromptSelectFocus = React.useCallback(() => {
+    const returnFocusSelector =
+      returnFocusSelectorRef.current ?? "[data-testid='chat-prompt-select']"
+    returnFocusSelectorRef.current = null
+
+    scheduleFocusFirstVisibleElement(returnFocusSelector)
+  }, [])
 
   const { data } = useQuery({
     queryKey: ["getAllPromptsForSelect"],
@@ -126,12 +144,58 @@ export const PromptSelect: React.FC<Props> = ({
 
   // Group prompts by category: Favorites, System, Quick
   const groupedMenuItems = useMemo<ItemType[]>(() => {
+    const hasCurrentSystemPrompt =
+      typeof systemPrompt === "string" && systemPrompt.trim().length > 0
+    const currentSystemPromptRecoveryItems: ItemType[] = hasCurrentSystemPrompt
+      ? [
+          {
+            key: "__edit_current_system_prompt__",
+            label: t(
+              "promptSelect.editCurrentSystemPrompt",
+              "Edit current system prompt"
+            ),
+            onClick: () => {
+              void openSystemPromptEditor()
+            }
+          },
+          {
+            key: "__clear_current_system_prompt__",
+            label: t(
+              "promptSelect.clearCurrentSystemPrompt",
+              "Clear current system prompt"
+            ),
+            onClick: () => {
+              setSystemPrompt("")
+              setDropdownOpen(false)
+              restorePromptSelectFocus()
+            }
+          }
+        ]
+      : []
+
     if (filteredData.length === 0) {
       return [
         {
-        key: "empty",
-        label: <Empty description={searchText ? t("noMatchingPrompts", "No matching prompts") : undefined} />
-      }
+          key: "empty",
+          label: (
+            <Empty
+              description={
+                searchText
+                  ? t("noMatchingPrompts", "No matching prompts")
+                  : t("promptSelect.noSavedPrompts", "No saved prompts")
+              }
+            />
+          )
+        },
+        ...(currentSystemPromptRecoveryItems.length > 0
+          ? [
+              {
+                key: "__current_system_prompt_divider__",
+                type: "divider" as const
+              },
+              ...currentSystemPromptRecoveryItems
+            ]
+          : [])
       ]
     }
 
@@ -172,6 +236,7 @@ export const PromptSelect: React.FC<Props> = ({
           handlePromptChange(prompt.id)
         }
         setDropdownOpen(false)
+        restorePromptSelectFocus()
       }
     })
 
@@ -203,6 +268,7 @@ export const PromptSelect: React.FC<Props> = ({
 
     if (items.length > 0) {
       items.push({
+        key: "__prompt_actions_divider__",
         type: "divider"
       })
     }
@@ -215,6 +281,10 @@ export const PromptSelect: React.FC<Props> = ({
       }
     })
 
+    if (currentSystemPromptRecoveryItems.length > 0) {
+      items.push(...currentSystemPromptRecoveryItems)
+    }
+
     // If no groups (shouldn't happen, but fallback)
     if (items.length === 0) {
       return filteredData.map(createPromptItem)
@@ -225,14 +295,34 @@ export const PromptSelect: React.FC<Props> = ({
     filteredData,
     searchText,
     selectedSystemPrompt,
+    systemPrompt,
     t,
     handlePromptChange,
     openSystemPromptEditor,
+    restorePromptSelectFocus,
     setDropdownOpen,
-    setSelectedSystemPrompt
+    setSelectedSystemPrompt,
+    setSystemPrompt
   ])
 
   // Focus search input when dropdown opens
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const handleOpenPromptSelect = (event: Event) => {
+      const detail = (event as CustomEvent<PromptSelectOpenDetail>).detail
+      returnFocusSelectorRef.current = normalizeFocusSelector(
+        detail?.returnFocusSelector
+      )
+      setDropdownOpen(true)
+    }
+
+    window.addEventListener(OPEN_PROMPT_SELECT_EVENT, handleOpenPromptSelect)
+    return () => {
+      window.removeEventListener(OPEN_PROMPT_SELECT_EVENT, handleOpenPromptSelect)
+    }
+  }, [])
+
   useEffect(() => {
     if (!dropdownOpen) {
       setSearchText("") // Clear search when closed
@@ -264,13 +354,35 @@ export const PromptSelect: React.FC<Props> = ({
     }
   }, [dropdownOpen])
 
+  useEffect(() => {
+    if (!dropdownOpen) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setDropdownOpen(false)
+      restorePromptSelectFocus()
+    }
+
+    window.addEventListener("keydown", handleEscape)
+    window.addEventListener("keyup", handleEscape)
+    return () => {
+      window.removeEventListener("keydown", handleEscape)
+      window.removeEventListener("keyup", handleEscape)
+    }
+  }, [dropdownOpen, restorePromptSelectFocus])
+
   return (
     <>
       {data && (
         <>
           <Dropdown
             open={dropdownOpen}
-            onOpenChange={setDropdownOpen}
+            onOpenChange={(nextOpen) => {
+              setDropdownOpen(nextOpen)
+              if (!nextOpen) {
+                restorePromptSelectFocus()
+              }
+            }}
             menu={{
               items: groupedMenuItems,
               style: {
@@ -281,8 +393,25 @@ export const PromptSelect: React.FC<Props> = ({
               activeKey: selectedSystemPrompt
             }}
             popupRender={(menu) => (
-              <div className="bg-surface rounded-lg shadow-lg border border-border">
-                <div className="p-2 border-b border-border">
+              <div
+                className="bg-surface rounded-lg shadow-lg border border-border"
+                onKeyDown={(e) => {
+                  if (e.key !== "Escape") return
+                  setDropdownOpen(false)
+                  restorePromptSelectFocus()
+                  e.stopPropagation()
+                }}
+              >
+                <div
+                  className="p-2 border-b border-border"
+                  onKeyDownCapture={(e) => {
+                    if (e.key !== "Escape") return
+                    e.preventDefault()
+                    setDropdownOpen(false)
+                    restorePromptSelectFocus()
+                    e.stopPropagation()
+                  }}
+                >
                   <Input
                     ref={searchInputRef}
                     placeholder={t("searchPrompts", "Search prompts...")}
@@ -291,7 +420,9 @@ export const PromptSelect: React.FC<Props> = ({
                     onChange={(e) => setSearchText(e.target.value)}
                     allowClear
                     size="small"
-                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                    }}
                   />
                 </div>
                 {menu}
@@ -355,7 +486,7 @@ export const PromptSelect: React.FC<Props> = ({
               />
               {editorLoading ? (
                 <div className="text-xs text-text-subtle">
-                  {t("common:loading", "Loading")}
+                  {t("common:loading", getDesignSystemState("loading")?.label)}
                 </div>
               ) : null}
             </div>

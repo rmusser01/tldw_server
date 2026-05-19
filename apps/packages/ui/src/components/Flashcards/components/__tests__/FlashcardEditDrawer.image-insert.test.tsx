@@ -46,6 +46,12 @@ vi.mock("../MarkdownWithBoundary", () => ({
   MarkdownWithBoundary: ({ content }: { content: string }) => <div>{content}</div>
 }))
 
+vi.mock("../FlashcardTagPicker", () => ({
+  FlashcardTagPicker: ({ dataTestId }: { dataTestId?: string }) => (
+    <div data-testid={dataTestId ?? "flashcard-tag-picker"} />
+  )
+}))
+
 vi.mock("@/services/flashcard-assets", () => ({
   uploadFlashcardAsset
 }))

@@ -906,6 +906,16 @@ class TestExportEndpoints:
         assert data["message"] == "No active keywords found."
         assert data["file_content_b64"] is None
 
+    def test_export_keywords_db_error_is_sanitized(self, client: TestClient):
+        self.mock_db_export_prompt_keywords_to_csv.side_effect = DatabaseError(
+            "keyword export query failed"
+        )
+
+        response = client.get(f"{API_V1_PROMPTS_PREFIX}/keywords/export-csv")
+
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert response.json()["detail"] == "Database error during keyword export."
+
 
 #######################################################################################################################
 # Sync Log Endpoint Integration Tests

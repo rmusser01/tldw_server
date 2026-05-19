@@ -1,18 +1,6 @@
-# -----------------------------------------------------------------------
-# Essential sections for first-time setup: [Setup], [Server]
-# Everything else can be left at defaults until you need the feature.
-#
-# Configuration precedence: Environment variables > .env file > config.txt
-#
-# When to use which:
-#   .env        — secrets (API keys, passwords, JWT tokens)
-#   config.txt  — runtime tuning (chunking, RAG, TTS, provider URLs)
-#   env vars    — CI/Docker overrides that should not be persisted
-# -----------------------------------------------------------------------
-
 [Setup]
-enable_first_time_setup = false
-setup_completed = true
+enable_first_time_setup = true
+setup_completed = false
 # When true, bypasses the local-only guard for setup API requests.
 allow_remote_setup_access = false
 # Optional: restrict which remote clients can access /setup
@@ -64,6 +52,7 @@ sd_cpp_timeout_seconds = 120
 
 # SwarmUI backend settings
 # Base URL for SwarmUI (eg http://localhost:7801)
+# Dev default — override via .env for deployment
 swarmui_base_url = http://127.0.0.1:7801
 # Optional default model to use when payload.model is omitted.
 swarmui_default_model =
@@ -117,10 +106,14 @@ runner_args = ["run", "./cmd/tldw-agent-acp"]
 # Working directory for the runner process (e.g. ../tldw-agent).
 runner_cwd = ../tldw-agent
 # Runner environment (comma-separated key=value or JSON).
-# If you point HOME at a local ACP stub config, use an absolute path to avoid Go GOMODCACHE errors.
-runner_env = HOME=/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/Config_Files/acp_runner_home,PYTHONUNBUFFERED=1
+# Relative HOME values are resolved against this Config_Files directory.
+runner_env = HOME=./acp_runner_home,PYTHONUNBUFFERED=1
 # Startup timeout for runner initialize.
 startup_timeout_ms = 10000
+# Phase 2b default-on rollout for the stable provider:model cohort.
+run_first_rollout_mode = default_on
+run_first_provider_allowlist = openai:gpt-4o-mini,anthropic:claude-3-7-sonnet,openai:gpt-4o,google:gemini-2.5-flash
+run_first_presentation_variant = acp_phase2b_v1
 
 [ACP-WORKSPACE]
 # Optional. If set, workspace root_path must be under one of these paths (comma-separated).
@@ -147,6 +140,7 @@ read_only_root = true
 # SSH settings
 ssh_enabled = true
 ssh_user = acp
+# Dev default — override via .env for deployment
 ssh_host = 127.0.0.1
 # Container-internal SSH listen port (host port remains allocated from ssh_port_min/max).
 ssh_container_port = 2222
@@ -160,6 +154,12 @@ agent_command =
 agent_args = []
 # JSON or comma-separated key=value env
 agent_env = {}
+# Active-session close windows and hard-delete retention. Retention deletes only
+# closed/error sessions; messages are removed by cascade.
+session_ttl_seconds = 86400
+max_session_duration_seconds = 14400
+session_retention_days = 30
+audit_retention_days = 30
 
 [Audit]
 # Auto-switch audit exports to streaming when max_rows exceeds this threshold to avoid large in-memory buffers.
@@ -236,6 +236,24 @@ rate_limit_per_minute = 60
 rate_limit_per_conversation_per_minute = 20
 # Per-user token budget (legacy limiter). Default is 10000 if omitted.
 rate_limit_tokens_per_minute = 100000
+# Phase 2b default-on rollout for the stable provider:model cohort.
+run_first_rollout_mode = default_on
+run_first_provider_allowlist = openai:gpt-4o-mini,anthropic:claude-3-7-sonnet,openai:gpt-4o,google:gemini-2.5-flash
+run_first_presentation_variant = chat_phase2b_v1
+# Pre-dispatch prompt/cost guardrails for chat and character chat.
+# Disabled by default; when enabled, warning thresholds are non-blocking unless
+# prompt_guardrails_default_action = block or a hard-cap threshold is exceeded.
+# Env overrides use upper-case names such as CHAT_PROMPT_GUARDRAILS_ENABLED.
+prompt_guardrails_enabled = false
+prompt_guardrails_default_action = warn
+# prompt_guardrails_warn_total_estimated_tokens = 32000
+# prompt_guardrails_block_total_estimated_tokens = 128000
+# prompt_guardrails_warn_static_segment_tokens = 12000
+# prompt_guardrails_warn_world_book_tokens = 8000
+# prompt_guardrails_warn_max_output_tokens = 8192
+# prompt_guardrails_warn_choice_count = 1
+prompt_guardrails_warn_reasoning_efforts = high,xhigh
+prompt_guardrails_warn_on_fingerprint_churn = true
 # Controls how much historical context is loaded for each chat request.
 # Accepts 1-500; values outside range are clamped. Default: 20.
 history_messages_limit = 20
@@ -365,6 +383,7 @@ sqlite_wal_mode = true
 sqlite_foreign_keys = true
 backup_path = ./tldw_DB_Backups/
 pg_connection_string =
+# Dev default — override via .env for deployment
 pg_host = localhost
 pg_port = 5432
 pg_database = tldw_content
@@ -374,6 +393,7 @@ pg_sslmode = prefer
 pg_pool_size = 20
 pg_max_overflow = 40
 pg_pool_timeout = 30.0
+# Dev default — override via .env for deployment
 elasticsearch_host = localhost
 elasticsearch_port = 9200
 chroma_db_path = Databases/chroma_db
@@ -578,6 +598,7 @@ embedding_provider = huggingface
 embedding_model = Qwen/Qwen3-Embedding-0.6B
 onnx_model_path = ./App_Function_Libraries/models/onnx_models/
 model_dir = ./App_Function_Libraries/models/embedding_models
+# Dev default — override via .env for deployment
 embedding_api_url = http://localhost:8080/v1/embeddings
 chunk_size = 400
 overlap = 200
@@ -1005,7 +1026,9 @@ mlx_trust_remote_code = false
 # Local-API: OpenAI-compatible servers expect a 'model' in requests (per OpenAI spec + server docs).
 # If your server does not expose a default, add a placeholder model name here so the UI/clients can send one.
 [Local-API]
+# Dev default — override via .env for deployment
 kobold_api_IP = http://127.0.0.1:5001/api/v1/generate
+# Dev default — override via .env for deployment
 kobold_openai_api_IP = http://127.0.0.1:5001/v1/chat/completions
 # Koboldcpp OpenAI endpoint follows OpenAI spec and expects a model id (README "OpenAI API" section).
 # kobold_model = <model_name_for_openai_endpoint>
@@ -1018,6 +1041,7 @@ kobold_max_tokens = 4096
 kobold_api_timeout = 90
 kobold_api_retry = 3
 kobold_api_retry_delay = 1
+# Dev default — override via .env for deployment
 llama_api_IP = http://127.0.0.1:8080/completion
 # llama.cpp (llama-server) is OpenAI-compatible and expects model (OpenAI Chat API spec; llama-server docs).
 # llama_model = <model_name_for_openai_endpoint>
@@ -1043,6 +1067,7 @@ ooba_max_tokens = 4096
 ooba_api_timeout = 90
 ooba_api_retry = 3
 ooba_api_retry_delay = 1
+# Dev default — override via .env for deployment
 tabby_api_IP = http://127.0.0.1:5000/v1/chat/completions
 # TabbyAPI is OpenAI-compatible; send a model string per the OpenAI spec.
 # tabby_model = <model_name_for_openai_endpoint>
@@ -1053,6 +1078,7 @@ tabby_max_tokens = 4096
 tabby_api_timeout = 90
 tabby_api_retry = 3
 tabby_api_retry_delay = 1
+# Dev default — override via .env for deployment
 vllm_api_IP = http://127.0.0.1:8000/v1/chat/completions
 # vLLM OpenAI server examples include model (docs: OpenAI-Compatible Server -> chat.completions).
 vllm_model =
@@ -1075,6 +1101,7 @@ ollama_max_tokens = 4096
 ollama_api_timeout = 9009
 ollama_api_retry = 3
 ollama_api_retry_delay = 1
+# Dev default — override via .env for deployment
 aphrodite_api_IP = http://127.0.0.1:8080/completion
 # Aphrodite Engine exposes an OpenAI-compatible server; include model (README run examples).
 aphrodite_model =
@@ -1100,6 +1127,7 @@ min_p = 0.05
 enabled = false
 executable_path = vendor/llama.cpp/server
 models_dir = models/gguf_models
+# Dev default — override via .env for deployment
 default_host = 127.0.0.1
 default_port = 8080
 default_threads =
@@ -1111,15 +1139,17 @@ port_autoselect = true
 port_probe_max = 10
 # Comma-separated list of additional directories where models/logs may reside
 allowed_paths =
+# Comma-separated list of explicit local GGUF model files registered for inventory display
+registered_model_paths =
 # Optional path to a log file for llama.cpp server stdout/stderr
 log_output_file =
 
 [STT-Settings]
 default_transcriber = parakeet
 default_stt_provider = parakeet
-default_batch_transcription_model = parakeet-onnx
-default_streaming_transcription_model = parakeet-onnx
-nemo_model_variant = mlx
+default_batch_transcription_model = parakeet-tdt-0.6b-v3-onnx
+default_streaming_transcription_model = parakeet-tdt-0.6b-v3-onnx
+nemo_model_variant = onnx
 nemo_device = cpu
 nemo_cache_dir = ./models/nemo
 nemo_chunk_duration = 120
@@ -1257,14 +1287,15 @@ default_eleven_tts_voice_pronunciation_dictionary_locators_dict_id =
 default_eleven_tts_voice_pronunciation_dictionary_locators_version_id =
 default_eleven_tts_speed = 1
 default_eleven_tts_output_format = mp3_44100_128
-default_google_tts_model = FIXME
-default_google_tts_voice = FIXME
+default_google_tts_model =
+default_google_tts_voice =
 default_google_tts_speed = 1
-edge_tts_voice = FIXME
+edge_tts_voice = en-US-AriaNeural
 default_alltalk_tts_speed = 1.0
 default_alltalk_tts_voice = alloy
 default_alltalk_tts_model = alltalk
 default_alltalk_tts_output_format = mp3
+# Dev default — override via .env for deployment
 alltalk_api_ip = http://127.0.0.1:7851/v1/audio/speech
 kokoro_model_path = ./App_Function_Libraries/models/kokoro_models/
 default_kokoro_tts_speed = 1.0
@@ -1275,6 +1306,7 @@ default_custom_openai_tts_speed = 1
 default_custom_openai_tts_model = tts-1-hd
 default_custom_openai_tts_output_format = mp3
 # Placeholder; override with your custom OpenAI-compatible endpoint
+# Dev default — override via .env for deployment
 default_custom_openai_api_ip = http://localhost:8000/v1
 # VibeVoice TTS Provider Configuration
 # VibeVoice is a local, voice-cloning TTS engine. Configure model paths, inference parameters (CFG scale, diffusion steps),
@@ -1368,7 +1400,7 @@ stable_only = false
 disable =
 
 # Comma-separated list of route keys to force-enable (useful when stable_only = true)
-enable = tools, jobs, acp, workflows, scheduler
+enable = tools, jobs, acp, workflows, scheduler, ingestion-sources
 
 # Optionally extend the curated experimental set (comma-separated)
 experimental_routes =
@@ -1432,6 +1464,8 @@ custom_scrapers_yaml_path = tldw_Server_API/Config_Files/custom_scrapers.yaml
 web_scraper_default_backend = auto
 web_scraper_ua_mode = fixed
 web_scraper_respect_robots = True
+# Shared outbound safety mode for scraping and websearch data-plane callers: compat|strict
+web_outbound_policy_mode = compat
 web_scraper_preflight_analyzers = False
 web_scraper_preflight_timeout_s = 0
 web_scraper_preflight_scan_depth = default
@@ -1468,6 +1502,7 @@ runtime_overrides_file = tldw_Server_API/Config_Files/moderation_runtime_overrid
 
 [Redis]
 redis_enabled = False
+# Dev default — override via .env for deployment
 redis_host = localhost
 redis_port = 6379
 redis_db = 0
@@ -1496,6 +1531,28 @@ stt = faster_whisper
 max_tool_steps = 3
 persona_memory_read_mode = legacy_only
 persona_memory_write_mode = legacy_only
+# Persona dialogue-tree eval/runtime controls.
+# Environment overrides use the uppercase names in comments below.
+# PERSONA_DIALOGUE_TREE_EVAL_ENABLED
+dialogue_tree_eval_enabled = false
+# PERSONA_RUNTIME_EXPLORER_ENABLED: runtime exploration is off by default.
+runtime_explorer_enabled = false
+# PERSONA_RUNTIME_EXPLORER_MAX_DEPTH
+runtime_explorer_max_depth = 1
+# PERSONA_RUNTIME_EXPLORER_MAX_BRANCHING
+runtime_explorer_max_branching = 2
+# PERSONA_RUNTIME_EXPLORER_MAX_PROVIDER_CALLS
+runtime_explorer_max_provider_calls = 1
+# PERSONA_RUNTIME_EXPLORER_TIMEOUT_MS
+runtime_explorer_timeout_ms = 750
+# PERSONA_RUNTIME_EXPLORER_MAX_TOKENS
+runtime_explorer_max_tokens = 256
+# PERSONA_RUNTIME_EXPLORER_P95_ADDED_LATENCY_MS
+runtime_explorer_p95_added_latency_ms = 1000
+# PERSONA_RUNTIME_EXPLORER_LLM_JUDGES_ENABLED: LLM judges cannot authorize actions.
+runtime_explorer_llm_judges_enabled = false
+# PERSONA_DIALOGUE_TREE_TRACE_RETENTION_DAYS
+dialogue_tree_trace_retention_days = 7
 
 [persona.rbac]
 allow_export = false

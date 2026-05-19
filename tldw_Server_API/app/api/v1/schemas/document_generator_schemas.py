@@ -14,6 +14,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 class DocumentType(str, Enum):
     """Enumeration of supported document types."""
@@ -130,6 +132,7 @@ class DocumentListResponse(BaseModel):
     """Response schema for listing generated documents."""
     documents: list[GeneratedDocument] = Field(..., description="List of generated documents")
     total: int = Field(..., description="Total number of documents")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical offset pagination metadata")
     conversation_id: Optional[str] = Field(None, description="Conversation ID if filtered")
     document_type: Optional[DocumentType] = Field(None, description="Document type if filtered")
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.guardian_deps import get_guardian_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
     CrisisResource,
     CrisisResourceList,
@@ -43,7 +44,7 @@ from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
     SelfMonitoringRuleResponse,
     SelfMonitoringRuleUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 from tldw_Server_API.app.core.Monitoring.self_monitoring_service import (
     CRISIS_DISCLAIMER,
@@ -261,7 +262,15 @@ def list_alerts(
         offset=offset,
     )
     items = [_alert_response(a) for a in alerts]
-    return SelfMonitoringAlertList(items=items, total=len(items))
+    total = db.count_self_monitoring_alerts(_user_id(user), rule_id=rule_id, unread_only=unread_only)
+    pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(items))
+    return SelfMonitoringAlertList(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 @router.post("/alerts/mark-read", response_model=DetailResponse)

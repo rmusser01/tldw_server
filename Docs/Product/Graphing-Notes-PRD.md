@@ -281,7 +281,7 @@ Config keys (env → config.txt → defaults):
 - Rate limits should follow existing `rbac_rate_limit(...)` mechanism across endpoints.
 
 Token scopes:
-- When a JWT is presented, require the `notes` scope; when no token is present (single-user mode), proceed with RBAC checks only. Implementation follows `require_token_scope("notes", require_if_present=True)`.
+- When a JWT is presented, require the `notes` scope; when no token is present (single-user mode), proceed with RBAC checks only. Implementation follows `TokenScopeGuard("notes", require_if_present=True)`.
 
 ## 13. Performance and Caching
 

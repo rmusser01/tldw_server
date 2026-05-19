@@ -3,6 +3,7 @@ import base64
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import List, Dict, Any, Optional, Generator
 from io import BytesIO
 
@@ -15,7 +16,7 @@ from PIL import Image as PILImage, PngImagePlugin  # Corrected PIL import
 # Third-party imports
 from hypothesis import given, strategies as st, settings, HealthCheck, assume, event, Verbosity, note
 import os
-from unittest.mock import patch, MagicMock  # For unit tests
+from unittest.mock import AsyncMock, patch, MagicMock  # For unit tests
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.character_schemas import CharacterUpdate, MAX_NAME_LENGTH
@@ -161,6 +162,22 @@ def create_sample_character_payload(name_suffix: str = "", **overrides) -> Dict[
     }
     payload.update(overrides)
     return payload
+
+
+def build_character_import_files(
+    filename: str = "character.json",
+    content: bytes = b'{"name":"Import Test"}',
+    content_type: str = "application/json",
+) -> dict[str, tuple[str, bytes, str]]:
+    return {"character_file": (filename, content, content_type)}
+
+
+def build_import_rate_limiter_stub() -> MagicMock:
+    limiter = MagicMock()
+    limiter.check_rate_limit = AsyncMock(return_value=None)
+    limiter.check_import_size = MagicMock(return_value=None)
+    limiter.check_character_limit = AsyncMock(return_value=None)
+    return limiter
 
 
 # --- Hypothesis Strategies for PBT ---
@@ -369,6 +386,17 @@ def test_unit_create_character_input_error_from_lib(mock_create: MagicMock, clie
     assert "Lib-level Invalid input for character." in response.json()["detail"]
 
 
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.create_new_character_from_data")
+def test_unit_create_character_db_error_from_lib(mock_create: MagicMock, client: TestClient):
+    mock_create.side_effect = CharactersRAGDBError("character create backend unavailable")
+    payload = {"name": "DbFailureChar", "description": "Desc"}
+
+    response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=payload)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create character"
+
+
 def test_unit_create_character_pydantic_error(client: TestClient):  # No mock needed for Pydantic
     payload = {"name": "", "description": "Desc"}  # Pydantic CharacterCreate requires non-empty name
     response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/", json=payload)
@@ -394,6 +422,16 @@ def test_unit_get_character_not_found(mock_get_details: MagicMock, client: TestC
     response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/999")
     assert response.status_code == 404, response.text
     assert "not found" in response.json()["detail"]
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_get_character_db_error_from_lib(mock_get_details: MagicMock, client: TestClient):
+    mock_get_details.side_effect = CharactersRAGDBError("character read backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/1")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to get character"
 
 
 @patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
@@ -428,6 +466,57 @@ def test_unit_update_character_version_mismatch(mock_get_details: MagicMock, cli
     assert "Version mismatch" in response.json()["detail"]
 
 
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_update_character_input_error_from_lib(
+    mock_get_details: MagicMock, mock_update: MagicMock, client: TestClient
+):
+    mock_get_details.return_value = {"id": 1, "name": "Old Name", "version": 1}
+    mock_update.side_effect = InputError("invalid update payload")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1?expected_version=1",
+        json={"description": "Updated"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid update payload"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_update_character_conflict_from_lib(
+    mock_get_details: MagicMock, mock_update: MagicMock, client: TestClient
+):
+    mock_get_details.return_value = {"id": 1, "name": "Old Name", "version": 1}
+    mock_update.side_effect = ConflictError("update conflict")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1?expected_version=1",
+        json={"description": "Updated"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "update conflict"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_update_character_db_error_from_lib(
+    mock_get_details: MagicMock, mock_update: MagicMock, client: TestClient
+):
+    mock_get_details.return_value = {"id": 1, "name": "Old Name", "version": 1}
+    mock_update.side_effect = CharactersRAGDBError("update backend unavailable")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1?expected_version=1",
+        json={"description": "Updated"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update character"
+
+
 @patch(f"{UNIT_TEST_PATCH_PREFIX}.delete_character_from_db")
 @patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
 def test_unit_delete_character_success(mock_get_details: MagicMock, mock_delete: MagicMock, client: TestClient):
@@ -437,6 +526,180 @@ def test_unit_delete_character_success(mock_get_details: MagicMock, mock_delete:
     assert response.status_code == 200, response.text
     assert response.json()["message"] == "Character 'ToDelete' (ID: 1) soft-deleted."
     mock_delete.assert_called_once_with(mock_delete.call_args[0][0], 1, 1)
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.delete_character_from_db")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_delete_character_conflict_from_lib(
+    mock_get_details: MagicMock, mock_delete: MagicMock, client: TestClient
+):
+    mock_get_details.return_value = {"id": 1, "name": "ToDelete", "version": 1}
+    mock_delete.side_effect = ConflictError("delete conflict")
+
+    response = client.delete(f"{CHARACTERS_ENDPOINT_PREFIX}/1?expected_version=1")
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "delete conflict"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.delete_character_from_db")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_delete_character_db_error_from_lib(
+    mock_get_details: MagicMock, mock_delete: MagicMock, client: TestClient
+):
+    mock_get_details.return_value = {"id": 1, "name": "ToDelete", "version": 1}
+    mock_delete.side_effect = CharactersRAGDBError("delete backend unavailable")
+
+    response = client.delete(f"{CHARACTERS_ENDPOINT_PREFIX}/1?expected_version=1")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete character"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.restore_character_from_db")
+def test_unit_restore_character_conflict_from_lib(mock_restore: MagicMock, client: TestClient):
+    mock_restore.side_effect = ConflictError("restore conflict")
+
+    response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/1/restore?expected_version=1")
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "restore conflict"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.restore_character_from_db")
+def test_unit_restore_character_db_error_from_lib(mock_restore: MagicMock, client: TestClient):
+    mock_restore.side_effect = CharactersRAGDBError("restore backend unavailable")
+
+    response = client.post(f"{CHARACTERS_ENDPOINT_PREFIX}/1/restore?expected_version=1")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to restore character"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_revert_character_input_error_from_lib(
+    mock_get_details: MagicMock,
+    mock_update: MagicMock,
+    client: TestClient,
+    test_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Current Name", "version": 2, "description": "Current"}
+    monkeypatch.setattr(
+        test_db,
+        "get_character_version_history",
+        lambda character_id, limit=500: [
+            {"version": 1, "payload": {"name": "Snapshot Name", "description": "Baseline"}}
+        ],
+    )
+    mock_update.side_effect = InputError("invalid revert payload")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1/revert",
+        json={"target_version": 1},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid revert payload"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_revert_character_conflict_from_lib(
+    mock_get_details: MagicMock,
+    mock_update: MagicMock,
+    client: TestClient,
+    test_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Current Name", "version": 2, "description": "Current"}
+    monkeypatch.setattr(
+        test_db,
+        "get_character_version_history",
+        lambda character_id, limit=500: [
+            {"version": 1, "payload": {"name": "Snapshot Name", "description": "Baseline"}}
+        ],
+    )
+    mock_update.side_effect = ConflictError("revert conflict")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1/revert",
+        json={"target_version": 1},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "revert conflict"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.update_existing_character_details")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_revert_character_db_error_from_lib(
+    mock_get_details: MagicMock,
+    mock_update: MagicMock,
+    client: TestClient,
+    test_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Current Name", "version": 2, "description": "Current"}
+    monkeypatch.setattr(
+        test_db,
+        "get_character_version_history",
+        lambda character_id, limit=500: [
+            {"version": 1, "payload": {"name": "Snapshot Name", "description": "Baseline"}}
+        ],
+    )
+    mock_update.side_effect = CharactersRAGDBError("revert backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1/revert",
+        json={"target_version": 1},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to revert character"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_get_character_version_diff_db_error_from_lib(
+    mock_get_details: MagicMock,
+    client: TestClient,
+    test_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Versioned", "version": 2}
+
+    def _raise_db_error(character_id: int, limit: int = 500):
+        raise CharactersRAGDBError("version diff backend unavailable")
+
+    monkeypatch.setattr(test_db, "get_character_version_history", _raise_db_error)
+
+    response = client.get(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1/versions/diff?from_version=1&to_version=2"
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to get character version diff"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_get_character_versions_db_error_from_lib(
+    mock_get_details: MagicMock,
+    client: TestClient,
+    test_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Versioned", "version": 2}
+
+    def _raise_db_error(character_id: int, limit: int = 50):
+        raise CharactersRAGDBError("version history backend unavailable")
+
+    monkeypatch.setattr(test_db, "get_character_version_history", _raise_db_error)
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/1/versions?limit=10")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to list character versions"
 
 
 @patch(f"{UNIT_TEST_PATCH_PREFIX}.create_new_character_from_data")
@@ -506,6 +769,27 @@ def test_unit_attach_world_book_permission_denied(
 
 
 @patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_attach_world_book_db_error(
+    mock_get_details: MagicMock,
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Permission Char"}
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "Broken Book"}
+    service.attach_to_character.side_effect = CharactersRAGDBError("attachment backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/1/world-books",
+        json={"world_book_id": 9, "enabled": True, "priority": 0},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to attach world book to character"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
 def test_unit_detach_world_book_permission_denied(
     mock_world_book_service: MagicMock,
     client: TestClient,
@@ -517,6 +801,20 @@ def test_unit_detach_world_book_permission_denied(
 
     assert response.status_code == 403, response.text
     assert "Insufficient permissions" in response.json()["detail"]
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_detach_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.detach_from_character.side_effect = CharactersRAGDBError("detach backend unavailable")
+
+    response = client.delete(f"{CHARACTERS_ENDPOINT_PREFIX}/1/world-books/9")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to detach world book from character"
 
 
 @patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
@@ -534,6 +832,825 @@ def test_unit_list_character_world_books_permission_denied(
 
     assert response.status_code == 403, response.text
     assert "Insufficient permissions" in response.json()["detail"]
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.get_character_details")
+def test_unit_list_character_world_books_db_error(
+    mock_get_details: MagicMock,
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    mock_get_details.return_value = {"id": 1, "name": "Permission Char"}
+    service = mock_world_book_service.return_value
+    service.get_character_world_books.side_effect = CharactersRAGDBError("attachment list backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/1/world-books")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to list character world books"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_list_world_books_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.list_world_books.side_effect = CharactersRAGDBError("world book list backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to list world books"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_get_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.side_effect = CharactersRAGDBError("world book read backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to get world book"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_delete_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "Delete Me"}
+    service.delete_world_book.side_effect = CharactersRAGDBError("world book delete backend unavailable")
+
+    response = client.delete(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete world book"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_create_world_book_input_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.create_world_book.side_effect = InputError("invalid world book input")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books",
+        json={
+            "name": "Invalid WB",
+            "description": "desc",
+            "scan_depth": 3,
+            "token_budget": 500,
+            "recursive_scanning": False,
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid world book input"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_create_world_book_conflict(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.create_world_book.side_effect = ConflictError("world book already exists")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books",
+        json={
+            "name": "Duplicate WB",
+            "description": "desc",
+            "scan_depth": 3,
+            "token_budget": 500,
+            "recursive_scanning": False,
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "world book already exists"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_create_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.create_world_book.side_effect = CharactersRAGDBError("world book create backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books",
+        json={
+            "name": "Broken WB",
+            "description": "desc",
+            "scan_depth": 3,
+            "token_budget": 500,
+            "recursive_scanning": False,
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create world book"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_update_world_book_conflict(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "WB", "version": 1}
+    service.update_world_book.side_effect = ConflictError("world book update conflict")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9?expected_version=1",
+        json={"name": "Updated WB"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "world book update conflict"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_update_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "WB", "version": 1}
+    service.update_world_book.side_effect = CharactersRAGDBError("world book update backend unavailable")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9?expected_version=1",
+        json={"name": "Updated WB"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update world book"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_add_world_book_entry_input_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "WB"}
+    service.add_entry.side_effect = InputError("invalid world book entry")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9/entries",
+        json={
+            "keywords": ["keyword"],
+            "content": "Entry content",
+            "priority": 1,
+            "enabled": True,
+            "case_sensitive": False,
+            "regex_match": False,
+            "whole_word_match": True,
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid world book entry"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_add_world_book_entry_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "WB"}
+    service.add_entry.side_effect = CharactersRAGDBError("world book entry create backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9/entries",
+        json={
+            "keywords": ["keyword"],
+            "content": "Entry content",
+            "priority": 1,
+            "enabled": True,
+            "case_sensitive": False,
+            "regex_match": False,
+            "whole_word_match": True,
+        },
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create world book entry"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_list_world_book_entries_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.return_value = {"id": 9, "name": "WB"}
+    service.get_entries.side_effect = CharactersRAGDBError("world book entry list backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9/entries")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to list world book entries"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_update_world_book_entry_input_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.update_entry.side_effect = InputError("invalid world book entry update")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/entries/7",
+        json={"content": "Updated entry"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid world book entry update"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_update_world_book_entry_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.update_entry.side_effect = CharactersRAGDBError("world book entry update backend unavailable")
+
+    response = client.put(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/entries/7",
+        json={"content": "Updated entry"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update world book entry"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_delete_world_book_entry_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.delete_entry.side_effect = CharactersRAGDBError("world book entry delete backend unavailable")
+
+    response = client.delete(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/entries/7")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete world book entry"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_process_world_book_context_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.process_context.side_effect = CharactersRAGDBError("world book processing backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/process",
+        json={"text": "hello world", "token_budget": 500, "scan_depth": 3},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to process world book context"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_import_world_book_input_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.import_world_book.side_effect = InputError("invalid import payload")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/import",
+        json={"world_book": {"name": "WB"}, "entries": [], "merge_on_conflict": False},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid import payload"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_import_world_book_conflict(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.import_world_book.side_effect = ConflictError("world book import conflict")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/import",
+        json={"world_book": {"name": "WB"}, "entries": [], "merge_on_conflict": False},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "world book import conflict"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_import_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.import_world_book.side_effect = CharactersRAGDBError("world book import backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/import",
+        json={"world_book": {"name": "WB"}, "entries": [], "merge_on_conflict": False},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to import world book"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_export_world_book_input_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.export_world_book.side_effect = InputError("world book not found for export")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9/export")
+
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "world book not found for export"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_export_world_book_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.export_world_book.side_effect = CharactersRAGDBError("world book export backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9/export")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to export world book"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_world_book_statistics_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    service = mock_world_book_service.return_value
+    service.get_world_book.side_effect = CharactersRAGDBError("world book statistics backend unavailable")
+
+    response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/9/statistics")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to get world book statistics"
+
+
+@patch(f"{UNIT_TEST_PATCH_PREFIX}.WorldBookService")
+def test_unit_bulk_world_book_entry_operations_db_error(
+    mock_world_book_service: MagicMock,
+    client: TestClient,
+):
+    mock_world_book_service.side_effect = CharactersRAGDBError("bulk world book entry backend unavailable")
+
+    response = client.post(
+        f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/entries/bulk",
+        json={"entry_ids": [7, 8], "operation": "delete"},
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to perform bulk world book entry operation"
+
+
+def test_unit_create_character_exemplar_input_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "add_character_exemplar",
+            side_effect=InputError("invalid exemplar payload"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars",
+            json={"text": "Example exemplar"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid exemplar payload"
+
+
+def test_unit_create_character_exemplar_conflict(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "add_character_exemplar",
+            side_effect=ConflictError("exemplar already exists"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars",
+            json={"text": "Example exemplar"},
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "exemplar already exists"
+
+
+def test_unit_create_character_exemplar_db_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "add_character_exemplar",
+            side_effect=CharactersRAGDBError("exemplar create backend unavailable"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars",
+            json={"text": "Example exemplar"},
+        )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to create character exemplar"
+
+
+def test_unit_get_character_exemplar_db_error(
+    client: TestClient,
+):
+    with patch.object(
+        characters_api_module.CharactersRAGDB,
+        "get_character_exemplar_by_id",
+        side_effect=CharactersRAGDBError("exemplar fetch backend unavailable"),
+    ):
+        response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/ex-1")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to get character exemplar"
+
+
+def test_unit_update_character_exemplar_input_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "update_character_exemplar",
+            side_effect=InputError("invalid exemplar update"),
+        ),
+    ):
+        response = client.put(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/ex-1",
+            json={"text": "Updated exemplar"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid exemplar update"
+
+
+def test_unit_update_character_exemplar_db_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "update_character_exemplar",
+            side_effect=CharactersRAGDBError("exemplar update backend unavailable"),
+        ),
+    ):
+        response = client.put(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/ex-1",
+            json={"text": "Updated exemplar"},
+        )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to update character exemplar"
+
+
+def test_unit_delete_character_exemplar_db_error(
+    client: TestClient,
+):
+    with patch.object(
+        characters_api_module.CharactersRAGDB,
+        "get_character_exemplar_by_id",
+        side_effect=CharactersRAGDBError("exemplar delete backend unavailable"),
+    ):
+        response = client.delete(f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/ex-1")
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to delete character exemplar"
+
+
+def test_unit_search_character_exemplars_input_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module,
+            "_search_character_exemplars_hybrid_best_effort",
+            side_effect=InputError("invalid exemplar search"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/search",
+            json={"query": "hello exemplar"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid exemplar search"
+
+
+def test_unit_search_character_exemplars_db_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module,
+            "_search_character_exemplars_hybrid_best_effort",
+            side_effect=CharactersRAGDBError("exemplar search backend unavailable"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/search",
+            json={"query": "hello exemplar"},
+        )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to search character exemplars"
+
+
+def test_unit_select_character_exemplars_debug_input_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module,
+            "select_character_exemplars",
+            side_effect=InputError("invalid exemplar selection"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/select/debug",
+            json={"user_turn": "hello exemplar"},
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid exemplar selection"
+
+
+def test_unit_select_character_exemplars_debug_db_error(
+    client: TestClient,
+):
+    with (
+        patch.object(
+            characters_api_module.CharactersRAGDB,
+            "get_character_card_by_id",
+            return_value={"id": 7},
+        ),
+        patch.object(
+            characters_api_module,
+            "select_character_exemplars",
+            side_effect=CharactersRAGDBError("exemplar debug backend unavailable"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/7/exemplars/select/debug",
+            json={"user_turn": "hello exemplar"},
+        )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"] == "Failed to select character exemplars"
+
+
+def test_unit_import_character_conflict_returns_existing_payload(
+    client: TestClient,
+):
+    rate_limiter = build_import_rate_limiter_stub()
+    conflict_payload = MagicMock()
+    conflict_payload.model_dump.return_value = {
+        "id": 9,
+        "name": "Existing Import Character",
+        "message": "already exists",
+        "character": {
+            "id": 9,
+            "name": "Existing Import Character",
+            "description": "Existing description",
+            "personality": None,
+            "scenario": None,
+            "first_message": None,
+            "message_example": None,
+            "creator_notes": None,
+            "system_prompt": None,
+            "post_history_instructions": None,
+            "alternate_greetings": [],
+            "tags": [],
+            "creator": None,
+            "character_version": "1.0",
+            "extensions": {},
+            "image_base64": None,
+            "image_present": False,
+            "id_source": None,
+            "created_at": None,
+            "updated_at": None,
+            "last_modified": None,
+            "version": 1,
+            "is_deleted": False,
+        },
+    }
+
+    with (
+        patch.object(
+            characters_api_module,
+            "get_character_limits",
+            return_value=SimpleNamespace(max_import_size_mb=10),
+        ),
+        patch.object(
+            characters_api_module,
+            "get_character_rate_limiter",
+            return_value=rate_limiter,
+        ),
+        patch.object(
+            characters_api_module,
+            "import_and_save_character_from_file",
+            side_effect=ConflictError("character already exists"),
+        ),
+        patch.object(
+            characters_api_module,
+            "_build_conflict_import_response",
+            return_value=conflict_payload,
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/import",
+            files=build_character_import_files(),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == 9
+    assert response.json()["name"] == "Existing Import Character"
+
+
+def test_unit_import_character_conflict_without_existing_payload_returns_409(
+    client: TestClient,
+):
+    rate_limiter = build_import_rate_limiter_stub()
+
+    with (
+        patch.object(
+            characters_api_module,
+            "get_character_limits",
+            return_value=SimpleNamespace(max_import_size_mb=10),
+        ),
+        patch.object(
+            characters_api_module,
+            "get_character_rate_limiter",
+            return_value=rate_limiter,
+        ),
+        patch.object(
+            characters_api_module,
+            "import_and_save_character_from_file",
+            side_effect=ConflictError("character already exists"),
+        ),
+        patch.object(
+            characters_api_module,
+            "_build_conflict_import_response",
+            return_value=None,
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/import",
+            files=build_character_import_files(),
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "character already exists"
+
+
+def test_unit_import_character_input_error_maps_to_400(
+    client: TestClient,
+):
+    rate_limiter = build_import_rate_limiter_stub()
+
+    with (
+        patch.object(
+            characters_api_module,
+            "get_character_limits",
+            return_value=SimpleNamespace(max_import_size_mb=10),
+        ),
+        patch.object(
+            characters_api_module,
+            "get_character_rate_limiter",
+            return_value=rate_limiter,
+        ),
+        patch.object(
+            characters_api_module,
+            "import_and_save_character_from_file",
+            side_effect=InputError("invalid character import payload"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/import",
+            files=build_character_import_files(),
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "invalid character import payload"
+
+
+def test_unit_import_character_db_error_maps_to_400(
+    client: TestClient,
+):
+    rate_limiter = build_import_rate_limiter_stub()
+
+    with (
+        patch.object(
+            characters_api_module,
+            "get_character_limits",
+            return_value=SimpleNamespace(max_import_size_mb=10),
+        ),
+        patch.object(
+            characters_api_module,
+            "get_character_rate_limiter",
+            return_value=rate_limiter,
+        ),
+        patch.object(
+            characters_api_module,
+            "import_and_save_character_from_file",
+            side_effect=CharactersRAGDBError("character import backend unavailable"),
+        ),
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/import",
+            files=build_character_import_files(),
+        )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Failed to import character"
 
 
 # ============================= INTEGRATION TESTS ==============================
@@ -686,6 +1803,12 @@ class TestCharacterAPIIntegration:
         assert page_data["page"] == 1
         assert page_data["page_size"] == 2
         assert isinstance(page_data["has_more"], bool)
+        assert page_data["pagination"]["total"] >= 3
+        assert page_data["pagination"]["limit"] == 2
+        assert page_data["pagination"]["offset"] == 0
+        assert page_data["pagination"]["has_more"] is True
+        assert page_data["pagination"]["next_offset"] == 2
+        assert page_data["next_offset"] == 2
         assert len(page_data["items"]) <= 2
         assert page_data["total"] >= 3
 
@@ -743,6 +1866,32 @@ class TestCharacterAPIIntegration:
         }
         assert char_deleted_id in deleted_only_ids
         assert char_with_conversation not in deleted_only_ids
+
+    def test_list_characters_maps_db_error(
+        self, client: TestClient, test_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+    ):
+        def _raise_db_error(*args, **kwargs):
+            raise CharactersRAGDBError("character list backend unavailable")
+
+        monkeypatch.setattr(test_db, "list_character_cards", _raise_db_error)
+
+        response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/")
+
+        assert response.status_code == 500, response.text
+        assert response.json()["detail"] == "Failed to list characters"
+
+    def test_query_characters_maps_db_error(
+        self, client: TestClient, test_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch
+    ):
+        def _raise_db_error(*args, **kwargs):
+            raise CharactersRAGDBError("character query backend unavailable")
+
+        monkeypatch.setattr(test_db, "query_character_cards", _raise_db_error)
+
+        response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/query?page=1&page_size=20")
+
+        assert response.status_code == 500, response.text
+        assert response.json()["detail"] == "Failed to query characters"
 
     def test_query_characters_image_payload_controls(self, client: TestClient):
         creator = f"CreatorImagePayload_{uuid.uuid4().hex[:6]}"
@@ -986,6 +2135,56 @@ class TestCharacterAPIIntegration:
         )
         assert response.status_code == 422, response.text
 
+    def test_manage_character_tags_maps_input_error(self, client: TestClient, test_db: CharactersRAGDB, monkeypatch):
+        def _raise_input_error(*args, **kwargs):
+            raise InputError("invalid tag operation")
+
+        monkeypatch.setattr(test_db, "manage_character_tags", _raise_input_error)
+
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/tags/operations",
+            json={
+                "operation": "rename",
+                "source_tag": "legacy",
+                "target_tag": "modern",
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "invalid tag operation"
+
+    def test_manage_character_tags_maps_db_error(self, client: TestClient, test_db: CharactersRAGDB, monkeypatch):
+        def _raise_db_error(*args, **kwargs):
+            raise CharactersRAGDBError("tag operation backend unavailable")
+
+        monkeypatch.setattr(test_db, "manage_character_tags", _raise_db_error)
+
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/tags/operations",
+            json={
+                "operation": "rename",
+                "source_tag": "legacy",
+                "target_tag": "modern",
+            },
+        )
+
+        assert response.status_code == 500, response.text
+        assert response.json()["detail"] == "Failed to update character tags"
+
+    def test_create_character_strips_whitespace_from_tags_integration(
+        self, client: TestClient
+    ):
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/",
+            json=create_sample_character_payload(
+                name=f"TagTrim_{uuid.uuid4().hex[:6]}",
+                tags=["  alpha  "],
+            ),
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["tags"] == ["alpha"]
+
     def test_character_world_book_attachment_lifecycle_integration(
         self, client: TestClient
     ):
@@ -1033,6 +2232,10 @@ class TestCharacterAPIIntegration:
             f"{CHARACTERS_ENDPOINT_PREFIX}/{character_id}/world-books/{world_book_id}"
         )
         assert detach_response.status_code == 200, detach_response.text
+        detach_payload = detach_response.json()
+        assert int(detach_payload["world_book_id"]) == world_book_id
+        assert int(detach_payload["detached_from_character_id"]) == character_id
+        assert "character_id" not in detach_payload
 
         detached_list_response = client.get(
             f"{CHARACTERS_ENDPOINT_PREFIX}/{character_id}/world-books"
@@ -1044,6 +2247,55 @@ class TestCharacterAPIIntegration:
             if "world_book_id" in item
         }
         assert world_book_id not in detached_ids
+
+    def test_world_book_delete_and_entry_delete_report_explicit_resource_ids(
+        self, client: TestClient
+    ):
+        world_book_response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/world-books",
+            json={
+                "name": f"WBDelete_{uuid.uuid4().hex[:6]}",
+                "description": "Delete response integration test",
+                "scan_depth": 3,
+                "token_budget": 500,
+                "recursive_scanning": False,
+                "enabled": True,
+            },
+        )
+        assert world_book_response.status_code == 201, world_book_response.text
+        world_book_id = int(world_book_response.json()["id"])
+
+        entry_response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/{world_book_id}/entries",
+            json={
+                "keywords": ["delete-response-keyword"],
+                "content": "Delete response entry content",
+                "priority": 1,
+                "enabled": True,
+                "case_sensitive": False,
+                "regex_match": False,
+                "whole_word_match": True,
+                "metadata": {"source": "integration"},
+            },
+        )
+        assert entry_response.status_code == 201, entry_response.text
+        entry_id = int(entry_response.json()["id"])
+
+        entry_delete_response = client.delete(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/entries/{entry_id}"
+        )
+        assert entry_delete_response.status_code == 200, entry_delete_response.text
+        entry_delete_payload = entry_delete_response.json()
+        assert int(entry_delete_payload["entry_id"]) == entry_id
+        assert "character_id" not in entry_delete_payload
+
+        world_book_delete_response = client.delete(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/world-books/{world_book_id}"
+        )
+        assert world_book_delete_response.status_code == 200, world_book_delete_response.text
+        world_book_delete_payload = world_book_delete_response.json()
+        assert int(world_book_delete_payload["world_book_id"]) == world_book_id
+        assert "character_id" not in world_book_delete_payload
 
     def test_character_world_book_attachment_missing_references_integration(
         self, client: TestClient
@@ -1287,6 +2539,21 @@ class TestCharacterAPIIntegration:
         assert restored_db is not None
         assert int(restored_db["deleted"]) == 0
 
+    def test_restore_character_active_row_returns_409(self, client: TestClient):
+        create_response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/",
+            json=create_sample_character_payload("RestoreActiveAPI"),
+        )
+        assert create_response.status_code == 201, create_response.text
+        created = create_response.json()
+
+        response = client.post(
+            f"{CHARACTERS_ENDPOINT_PREFIX}/{created['id']}/restore?expected_version={created['version']}"
+        )
+
+        assert response.status_code == 409, response.text
+        assert "already active" in response.json()["detail"].lower()
+
     def test_restore_character_version_conflict_integration(
         self, client: TestClient, test_db: CharactersRAGDB
     ):
@@ -1388,6 +2655,19 @@ class TestCharacterAPIIntegration:
         data_keyword = response_keyword.json()
         assert len(data_keyword) == 1
         assert data_keyword[0]["name"] == unique_name_search
+
+    def test_search_character_maps_db_error(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ):
+        def _raise_db_error(*args, **kwargs):
+            raise CharactersRAGDBError("character search backend unavailable")
+
+        monkeypatch.setattr(characters_api_module, "search_characters_by_query_text", _raise_db_error)
+
+        response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/search/?query=test")
+
+        assert response.status_code == 500, response.text
+        assert response.json()["detail"] == "Failed to search characters"
 
     def test_import_character_png_integration(self, client: TestClient, test_db: CharactersRAGDB):
         char_name_for_png = f"PNG Import Char {uuid.uuid4().hex[:4]}"

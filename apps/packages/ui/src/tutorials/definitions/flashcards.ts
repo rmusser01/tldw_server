@@ -22,7 +22,7 @@ const flashcardsBasics: TutorialDefinition = {
       titleFallback: "Study, Manage, Transfer",
       contentKey: "tutorials:flashcards.basics.tabsContent",
       contentFallback:
-        "Switch tabs to study cards, manage deck contents, and import or export card data.",
+        "Switch tabs to study cards, manage deck contents, and import / export card data.",
       placement: "bottom",
       disableBeacon: true
     },

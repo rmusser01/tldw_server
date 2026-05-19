@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import * as Sentry from '@sentry/nextjs';
 
 interface GlobalErrorProps {
   error: Error & { digest?: string };
@@ -10,65 +11,42 @@ interface GlobalErrorProps {
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
     console.error('Global error:', error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (
     <html lang="en">
       <head>
         <style dangerouslySetInnerHTML={{ __html: `
-          @media (prefers-color-scheme: dark) {
-            .global-error-bg { background-color: #1a1a2e !important; }
-            .global-error-card { background-color: #16213e !important; color: #e0e0e0 !important; }
-            .global-error-card p { color: #a0a0b0 !important; }
-            .global-error-title { color: #e0e0e0 !important; }
-            .global-error-detail { background-color: #1e2a3a !important; }
-            .global-error-icon { background-color: #3b1d1d !important; }
-            .global-error-icon svg { stroke: #f87171 !important; }
-            .global-error-message { color: #f87171 !important; }
-            .global-error-retry,
-            .global-error-btn { background-color: #2563eb !important; color: white !important; border-color: #2563eb !important; }
-            .global-error-home { background-color: #16213e !important; color: #e0e0e0 !important; border-color: #334155 !important; }
+          .ge-page { min-height:100vh; display:flex; align-items:center; justify-content:center; background:#f8f9fa; padding:1rem; font-family:system-ui,-apple-system,sans-serif; color:#111827; }
+          .ge-card { max-width:28rem; width:100%; background:white; border-radius:0.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.1); padding:2rem; text-align:center; }
+          .ge-icon { width:3rem; height:3rem; margin:0 auto 1rem; border-radius:50%; background:#fee2e2; display:flex; align-items:center; justify-content:center; }
+          .ge-title { font-size:1.25rem; font-weight:600; margin-bottom:0.5rem; }
+          .ge-desc { color:#6b7280; margin-bottom:1.5rem; font-size:0.875rem; }
+          .ge-detail { background:#f3f4f6; border-radius:0.375rem; padding:0.75rem; margin-bottom:1.5rem; }
+          .ge-error { color:#dc2626; font-size:0.875rem; font-weight:500; }
+          .ge-digest { color:#9ca3af; font-size:0.75rem; margin-top:0.25rem; }
+          .ge-actions { display:flex; gap:0.5rem; }
+          .ge-btn { flex:1; padding:0.5rem 1rem; border-radius:0.375rem; cursor:pointer; font-size:0.875rem; font-weight:500; border:none; }
+          .ge-btn-primary { background:#3b82f6; color:white; }
+          .ge-btn-secondary { background:white; color:#374151; border:1px solid #d1d5db; }
+          @media(prefers-color-scheme:dark){
+            .ge-page { background:#1a1a2e; color:#e0e0e0; }
+            .ge-card { background:#2d2d44; box-shadow:0 1px 3px rgba(0,0,0,0.3); }
+            .ge-icon { background:#5b2121; }
+            .ge-desc { color:#a0a0b0; }
+            .ge-detail { background:#3a3a55; }
+            .ge-error { color:#f87171; }
+            .ge-digest { color:#8888a0; }
+            .ge-btn-primary { background:#3b82f6; color:white; }
+            .ge-btn-secondary { background:#3a3a55; color:#e0e0e0; border:1px solid #555570; }
           }
-        `}} />
+        ` }} />
       </head>
       <body>
-        <div
-          className="global-error-bg"
-          style={{
-            minHeight: '100vh',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#f8f9fa',
-            padding: '1rem',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-          }}
-        >
-          <div
-            className="global-error-card"
-            style={{
-              maxWidth: '28rem',
-              width: '100%',
-              backgroundColor: 'white',
-              borderRadius: '0.5rem',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-              padding: '2rem',
-              textAlign: 'center',
-            }}
-          >
-            <div
-              className="global-error-icon"
-              style={{
-                width: '3rem',
-                height: '3rem',
-                margin: '0 auto 1rem',
-                borderRadius: '50%',
-                backgroundColor: '#fee2e2',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
+        <div className="ge-page">
+          <div className="ge-card">
+            <div className="ge-icon">
               <svg
                 width="24"
                 height="24"
@@ -85,65 +63,27 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
               </svg>
             </div>
 
-            <h1 className="global-error-title" style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-              Critical Error
-            </h1>
-            <p style={{ color: '#6b7280', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+            <h1 className="ge-title">Critical Error</h1>
+            <p className="ge-desc">
               A critical error occurred. Please reload the page.
             </p>
 
-            <div
-              className="global-error-detail"
-              style={{
-                backgroundColor: '#f3f4f6',
-                borderRadius: '0.375rem',
-                padding: '0.75rem',
-                marginBottom: '1.5rem',
-              }}
-            >
-              <p className="global-error-message" style={{ color: '#dc2626', fontSize: '0.875rem', fontWeight: 500 }}>
+            <div className="ge-detail">
+              <p className="ge-error">
                 {error.message || 'Unknown error'}
               </p>
               {error.digest && (
-                <p style={{ color: '#9ca3af', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                <p className="ge-digest">
                   Error ID: {error.digest}
                 </p>
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                className="global-error-retry global-error-btn"
-                onClick={reset}
-                style={{
-                  flex: 1,
-                  padding: '0.5rem 1rem',
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '0.375rem',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem',
-                  fontWeight: 500,
-                }}
-              >
+            <div className="ge-actions">
+              <button onClick={reset} className="ge-btn ge-btn-primary">
                 Try Again
               </button>
-              <button
-                className="global-error-home"
-                onClick={() => (window.location.href = '/')}
-                style={{
-                  flex: 1,
-                  padding: '0.5rem 1rem',
-                  backgroundColor: 'white',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '0.375rem',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem',
-                  fontWeight: 500,
-                }}
-              >
+              <button onClick={() => (window.location.href = '/')} className="ge-btn ge-btn-secondary">
                 Go Home
               </button>
             </div>

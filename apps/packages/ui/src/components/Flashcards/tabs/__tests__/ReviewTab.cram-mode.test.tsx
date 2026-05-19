@@ -11,11 +11,13 @@ import {
   useCramQueueQuery,
   useReviewQuery,
   useReviewFlashcardMutation,
+  useGlobalFlashcardTagSuggestionsQuery,
   useFlashcardAssistantQuery,
   useFlashcardAssistantRespondMutation,
   useUpdateFlashcardMutation,
   useResetFlashcardSchedulingMutation,
   useDeleteFlashcardMutation,
+  useRecentFlashcardReviewSessionsQuery,
   useFlashcardShortcuts,
   useDebouncedFormField,
   useDueCountsQuery,
@@ -58,6 +60,14 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return {
+    ...actual,
+    useNavigate: () => vi.fn()
+  }
+})
+
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => messageSpies
 }))
@@ -86,6 +96,9 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useFlashcardAssistantQuery: vi.fn(),
   useFlashcardAssistantRespondMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
@@ -188,6 +201,10 @@ describe("ReviewTab cram mode", () => {
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: reviewMutateAsync
     } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false
+    } as any)
     vi.mocked(useFlashcardAssistantQuery).mockReturnValue({
       data: null,
       isLoading: false,
@@ -208,6 +225,12 @@ describe("ReviewTab cram mode", () => {
     vi.mocked(useDeleteFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
+    } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false
     } as any)
     vi.mocked(useFlashcardShortcuts).mockImplementation(() => undefined)
     vi.mocked(useDebouncedFormField).mockReturnValue(undefined as any)
@@ -264,5 +287,39 @@ describe("ReviewTab cram mode", () => {
         screen.getByText("1 cards practiced in this cram session")
       ).toBeInTheDocument()
     })
+  })
+
+  it("keeps cram queue progression unchanged when the prompt side flips", async () => {
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={1}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByText("Cram"))
+    fireEvent.click(screen.getByText("Back first"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Back")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Cram back")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+
+    expect(reviewMutateAsync).not.toHaveBeenCalled()
+    expect(messageSpies.success).toHaveBeenCalledWith(
+      "Practice saved. Scheduling unchanged."
+    )
+    await waitFor(() => {
+      expect(
+        screen.getByText("1 cards practiced in this cram session")
+      ).toBeInTheDocument()
+    })
+    expect(screen.getByTestId("flashcards-review-empty-card")).toBeInTheDocument()
   })
 })

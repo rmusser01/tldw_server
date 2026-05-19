@@ -39,6 +39,12 @@ vi.mock("@/hooks/useAntdMessage", () => ({
   })
 }))
 
+vi.mock("../FlashcardTagPicker", () => ({
+  FlashcardTagPicker: ({ dataTestId }: { dataTestId?: string }) => (
+    <div data-testid={dataTestId ?? "flashcard-tag-picker"} />
+  )
+}))
+
 if (!(globalThis as any).ResizeObserver) {
   ;(globalThis as any).ResizeObserver = class ResizeObserver {
     observe() {}
@@ -106,6 +112,7 @@ describe("FlashcardEditDrawer save handling", () => {
             id: 1,
             name: "Deck 1",
             description: null,
+            review_prompt_side: "front",
             deleted: false,
             client_id: "1",
             version: 1,
@@ -151,6 +158,7 @@ describe("FlashcardEditDrawer save handling", () => {
             id: 1,
             name: "Deck 1",
             description: null,
+            review_prompt_side: "front",
             deleted: false,
             client_id: "1",
             version: 1,
@@ -162,7 +170,7 @@ describe("FlashcardEditDrawer save handling", () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText("Card template")).toBeInTheDocument()
+      expect(screen.getByText("Card model")).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -192,6 +200,7 @@ describe("FlashcardEditDrawer save handling", () => {
             id: 1,
             name: "Deck 1",
             description: null,
+            review_prompt_side: "front",
             deleted: false,
             client_id: "1",
             version: 1,

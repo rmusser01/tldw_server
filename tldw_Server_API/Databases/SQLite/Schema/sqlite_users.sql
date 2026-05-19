@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_prefix TEXT,
     name TEXT,
     description TEXT,
-    scope TEXT DEFAULT 'read',
+    scope TEXT,
     status TEXT DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME,

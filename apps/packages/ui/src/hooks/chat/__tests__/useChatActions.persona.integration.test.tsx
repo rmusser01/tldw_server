@@ -243,8 +243,7 @@ describe("useChatActions persona integration", () => {
         assistant_kind: "persona",
         assistant_id: "garden-helper",
         persona_memory_mode: "read_only"
-      }),
-      undefined
+      })
     )
     expect(normalChatModeMock).toHaveBeenCalledWith(
       "Hello persona",

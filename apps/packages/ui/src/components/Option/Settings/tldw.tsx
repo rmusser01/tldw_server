@@ -1,21 +1,14 @@
-import { CheckIcon, XMarkIcon } from "@heroicons/react/24/outline"
 import {
-  Segmented,
-  Space,
-  Input,
   Alert,
   Form,
   Modal,
   Spin,
   Button,
-  Select,
-  Collapse,
-  Tag
+  Space
 } from "antd"
 import { Link, useNavigate } from "react-router-dom"
 import React, { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { isFirefoxTarget } from "@/config/platform"
 import { tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { SettingsSkeleton } from "@/components/Common/Settings/SettingsSkeleton"
@@ -28,102 +21,24 @@ import { mapMultiUserLoginErrorMessage } from "@/services/auth-errors"
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
-import {
-  getCoreStatusLabel,
-  getRagStatusLabel,
-  type CoreStatus,
-  type RagStatus
-} from "./tldw-connection-status"
+import type { CoreStatus, RagStatus } from "./tldw-connection-status"
+import { TldwSettingsTabs } from "./tldw-settings-tabs"
 import { probeServerHealth } from "./server-health-probe"
-
-type TimeoutPresetKey = 'balanced' | 'extended'
-type LoginMethod = 'magic-link' | 'password'
-
-type TimeoutValues = {
-  request: number
-  stream: number
-  chatRequest: number
-  chatStartup: number
-  chatStream: number
-  ragRequest: number
-  media: number
-  upload: number
-}
-
-type BillingPlan = {
-  name: string
-  display_name: string
-  description?: string
-  price_usd_monthly?: number
-  price_usd_yearly?: number
-  limits?: Record<string, any>
-}
-
-type BillingSubscription = {
-  plan_name: string
-  plan_display_name: string
-  status: string
-  billing_cycle?: string | null
-  current_period_end?: string | null
-  trial_end?: string | null
-  cancel_at_period_end?: boolean
-  limits?: Record<string, any>
-}
-
-type BillingUsage = {
-  plan_name?: string
-  limits?: Record<string, any>
-  usage?: Record<string, number>
-  limit_checks?: Record<string, {
-    limit?: number | null
-    current?: number
-    exceeded?: boolean
-    warning?: boolean
-    unlimited?: boolean
-    percent_used?: number
-  }>
-  has_warnings?: boolean
-  has_exceeded?: boolean
-}
-
-type BillingInvoice = {
-  id: number
-  amount_cents: number
-  currency?: string
-  status?: string
-  description?: string | null
-  invoice_pdf_url?: string | null
-  created_at?: string | null
-  amount_display?: string
-}
-
-type BillingInvoiceList = {
-  items: BillingInvoice[]
-  total: number
-}
-
-const TIMEOUT_PRESETS: Record<TimeoutPresetKey, TimeoutValues> = {
-  balanced: {
-    request: 10,
-    stream: 15,
-    chatRequest: 10,
-    chatStartup: 10,
-    chatStream: 15,
-    ragRequest: 10,
-    media: 60,
-    upload: 60
-  },
-  extended: {
-    request: 20,
-    stream: 30,
-    chatRequest: 20,
-    chatStartup: 20,
-    chatStream: 30,
-    ragRequest: 20,
-    media: 90,
-    upload: 90
-  }
-}
+import { TldwConnectionSettings, type LoginMethod } from "./TldwConnectionSettings"
+import {
+  TldwTimeoutSettings,
+  TIMEOUT_PRESETS,
+  determinePreset,
+  type TimeoutPresetKey
+} from "./TldwTimeoutSettings"
+import {
+  TldwBillingSettings,
+  type BillingPlan,
+  type BillingSubscription,
+  type BillingUsage,
+  type BillingInvoice,
+  type BillingInvoiceList
+} from "./TldwBillingSettings"
 
 const BILLING_BASE_URL = "https://vademhq.com"
 const BILLING_SUCCESS_URL = `${BILLING_BASE_URL}/billing/success`
@@ -177,189 +92,7 @@ export const TldwSettings = () => {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
 
-  const determinePreset = (values: TimeoutValues): TimeoutPresetKey | 'custom' => {
-    for (const [key, presetValues] of Object.entries(TIMEOUT_PRESETS) as [TimeoutPresetKey, typeof TIMEOUT_PRESETS[TimeoutPresetKey]][]) {
-      const matches =
-        presetValues.request === values.request &&
-        presetValues.stream === values.stream &&
-        presetValues.chatRequest === values.chatRequest &&
-        presetValues.chatStartup === values.chatStartup &&
-        presetValues.chatStream === values.chatStream &&
-        presetValues.ragRequest === values.ragRequest &&
-        presetValues.media === values.media &&
-        presetValues.upload === values.upload
-      if (matches) {
-        return key
-      }
-    }
-    return 'custom'
-  }
-
-  const applyTimeoutPreset = (preset: TimeoutPresetKey) => {
-    const presetValues = TIMEOUT_PRESETS[preset]
-    setRequestTimeoutSec(presetValues.request)
-    setStreamIdleTimeoutSec(presetValues.stream)
-    setChatRequestTimeoutSec(presetValues.chatRequest)
-    setChatStartupTimeoutSec(presetValues.chatStartup)
-    setChatStreamIdleTimeoutSec(presetValues.chatStream)
-    setRagRequestTimeoutSec(presetValues.ragRequest)
-    setMediaRequestTimeoutSec(presetValues.media)
-    setUploadRequestTimeoutSec(presetValues.upload)
-    setTimeoutPreset(preset)
-  }
-
-  const parseSeconds = (value: string, fallback: number) => {
-    const parsed = parseInt(value, 10)
-    return Number.isNaN(parsed) ? fallback : parsed
-  }
-
-  const coreStatusColor = (status: CoreStatus) => {
-    switch (status) {
-      case "connected":
-        return "green"
-      case "failed":
-        return "red"
-      default:
-        return "default"
-    }
-  }
-
-  const ragStatusColor = (status: RagStatus) => {
-    switch (status) {
-      case "healthy":
-        return "green"
-      case "unhealthy":
-        return "red"
-      default:
-        return "default"
-    }
-  }
-
-  const formatNumber = (value?: number | null) => {
-    if (value === null || value === undefined) {
-      return t('settings:tldw.billing.unknown', '—')
-    }
-    if (Number.isFinite(value)) {
-      return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-    }
-    return String(value)
-  }
-
-  const formatLimitValue = (value?: number | null, unlimited?: boolean) => {
-    if (unlimited) {
-      return t('settings:tldw.billing.unlimited', 'Unlimited')
-    }
-    if (value === null || value === undefined) {
-      return t('settings:tldw.billing.unknown', '—')
-    }
-    if (value === -1) {
-      return t('settings:tldw.billing.unlimited', 'Unlimited')
-    }
-    return formatNumber(value)
-  }
-
-  const formatUsageLabel = (key: string) => {
-    const map: Record<string, string> = {
-      api_calls_day: t('settings:tldw.billing.usage.apiCallsDay', 'API calls / day'),
-      llm_tokens_month: t('settings:tldw.billing.usage.llmTokensMonth', 'LLM tokens / month'),
-      storage_mb: t('settings:tldw.billing.usage.storageMb', 'Storage (MB)'),
-      team_members: t('settings:tldw.billing.usage.teamMembers', 'Team members'),
-      transcription_minutes_month: t('settings:tldw.billing.usage.transcriptionMinutes', 'Transcription minutes / month'),
-      rag_queries_day: t('settings:tldw.billing.usage.ragQueriesDay', 'RAG queries / day'),
-      concurrent_jobs: t('settings:tldw.billing.usage.concurrentJobs', 'Concurrent jobs')
-    }
-    return map[key] || key.replace(/_/g, ' ')
-  }
-
-  const formatPlanPrice = (plan: BillingPlan, cycle: 'monthly' | 'yearly') => {
-    const price =
-      cycle === 'yearly'
-        ? plan.price_usd_yearly
-        : plan.price_usd_monthly
-    if (typeof price === 'number' && !Number.isNaN(price)) {
-      const suffix = cycle === 'yearly' ? 'yr' : 'mo'
-      return `$${price.toLocaleString()}/${suffix}`
-    }
-    return t('settings:tldw.billing.customPrice', 'Custom')
-  }
-
-  const formatDate = (value?: string | null) => {
-    if (!value) return t('settings:tldw.billing.unknown', '—')
-    const parsed = new Date(value)
-    if (Number.isNaN(parsed.getTime())) {
-      return value
-    }
-    return parsed.toLocaleDateString()
-  }
-
-  const billingStatusColor = (status?: string | null) => {
-    switch (status) {
-      case "active":
-        return "green"
-      case "trialing":
-        return "blue"
-      case "past_due":
-        return "orange"
-      case "canceling":
-        return "gold"
-      case "canceled":
-        return "red"
-      default:
-        return "default"
-    }
-  }
-
-  const billingStatusLabel = (status?: string | null) => {
-    switch (status) {
-      case "active":
-        return t('settings:tldw.billing.status.active', 'Active')
-      case "trialing":
-        return t('settings:tldw.billing.status.trialing', 'Trialing')
-      case "past_due":
-        return t('settings:tldw.billing.status.pastDue', 'Past due')
-      case "canceling":
-        return t('settings:tldw.billing.status.canceling', 'Canceling')
-      case "canceled":
-        return t('settings:tldw.billing.status.canceled', 'Canceled')
-      default:
-        return t('settings:tldw.billing.status.unknown', 'Unknown')
-    }
-  }
-
-  const invoiceStatusColor = (status?: string | null) => {
-    switch (status) {
-      case "succeeded":
-        return "green"
-      case "failed":
-        return "red"
-      case "pending":
-        return "orange"
-      default:
-        return "default"
-    }
-  }
-
-  const invoiceStatusLabel = (status?: string | null) => {
-    switch (status) {
-      case "succeeded":
-        return t('settings:tldw.billing.invoice.status.paid', 'Paid')
-      case "failed":
-        return t('settings:tldw.billing.invoice.status.failed', 'Failed')
-      case "pending":
-        return t('settings:tldw.billing.invoice.status.pending', 'Pending')
-      default:
-        return t('settings:tldw.billing.invoice.status.unknown', 'Unknown')
-    }
-  }
-
-  const formatInvoiceAmount = (invoice: BillingInvoice) => {
-    if (invoice.amount_display) {
-      return invoice.amount_display
-    }
-    const currency = (invoice.currency || "usd").toUpperCase()
-    const amount = typeof invoice.amount_cents === "number" ? invoice.amount_cents / 100 : 0
-    return `$${amount.toFixed(2)} ${currency}`
-  }
+  // ── Config load ──────────────────────────────────────────────────
 
   useEffect(() => {
     loadConfig()
@@ -397,8 +130,7 @@ export const TldwSettings = () => {
           apiKey: config.apiKey,
           authMode: config.authMode
         })
-        
-        // Check if logged in for multi-user mode
+
         if (config.authMode === 'multi-user' && config.accessToken) {
           setIsLoggedIn(true)
         }
@@ -418,6 +150,8 @@ export const TldwSettings = () => {
     }
   }
 
+  // ── Save handler ─────────────────────────────────────────────────
+
   const handleSave = async (values: any) => {
     setLoading(true)
     try {
@@ -433,7 +167,6 @@ export const TldwSettings = () => {
       }> = {
         serverUrl: values.serverUrl,
         authMode: values.authMode,
-        // Clamp timeout values to prevent integer overflow (max ~24 days in seconds = 2147483 to avoid JS int overflow)
         requestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(requestTimeoutSec) || 10)) * 1000),
         streamIdleTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(streamIdleTimeoutSec) || 15)) * 1000),
         chatRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
@@ -446,12 +179,10 @@ export const TldwSettings = () => {
 
       if (values.authMode === 'single-user') {
         config.apiKey = values.apiKey
-        // Clear multi-user tokens
         config.accessToken = undefined
         config.refreshToken = undefined
       }
 
-      // Request optional host permission for the configured origin on Chromium-based browsers
       requestOptionalHostPermission(
         values.serverUrl,
         (granted, origin) => {
@@ -466,8 +197,7 @@ export const TldwSettings = () => {
 
       await tldwClient.updateConfig(config)
       message.success(t("settings:savedSuccessfully"))
-      
-      // Test connection after saving
+
       await testConnection({
         triggerSplashOnSuccess: values.authMode === "single-user"
       })
@@ -478,6 +208,8 @@ export const TldwSettings = () => {
       setLoading(false)
     }
   }
+
+  // ── Billing loaders ──────────────────────────────────────────────
 
   const loadBilling = async () => {
     if (authMode !== 'multi-user' || !isLoggedIn) return
@@ -595,13 +327,15 @@ export const TldwSettings = () => {
     }
   }, [authMode, isLoggedIn])
 
+  // ── Connection test ──────────────────────────────────────────────
+
   const testConnection = async (options?: { triggerSplashOnSuccess?: boolean }) => {
     setTestingConnection(true)
     setConnectionStatus(null)
     setConnectionDetail("")
     setCoreStatus("checking")
     setRagStatus("unknown")
-    
+
     let values: any = {}
     try {
       values = form.getFieldsValue()
@@ -611,8 +345,6 @@ export const TldwSettings = () => {
       }
       let success = false
 
-      // Test core connectivity via the health endpoint only, so we never
-      // rely on the LLM provider for connection checks.
       const baseUrl = String(values.serverUrl || '').replace(/\/$/, '')
       const singleUser = values.authMode === "single-user"
       const hasApiKey =
@@ -681,7 +413,6 @@ export const TldwSettings = () => {
       }
 
       setConnectionStatus(success ? 'success' : 'error')
-      // Probe RAG health after core connection test when server URL is present
       try {
         setRagStatus("checking")
         await tldwClient.initialize()
@@ -690,7 +421,7 @@ export const TldwSettings = () => {
       } catch (e) {
         setRagStatus('unhealthy')
       }
-      
+
       if (success) {
         message.success(t('settings:tldw.connection.success', 'Connection successful!'))
         if (options?.triggerSplashOnSuccess) {
@@ -707,8 +438,6 @@ export const TldwSettings = () => {
         }
         await tldwClient.initialize()
         try {
-          // Refresh shared connection state so entry views transition
-          // from the connection card to the live chat/media UI.
           await useConnectionStore.getState().checkOnce()
         } catch {
           // Best-effort only; ignore failures here.
@@ -753,6 +482,8 @@ export const TldwSettings = () => {
     }
   }
 
+  // ── Site access ──────────────────────────────────────────────────
+
   const grantSiteAccess = async () => {
     try {
       const values = form.getFieldsValue()
@@ -787,23 +518,23 @@ export const TldwSettings = () => {
     }
   }
 
+  // ── Auth handlers ────────────────────────────────────────────────
+
   const handleLogin = async () => {
     try {
       const values = await form.validateFields(['username', 'password'])
       setLoading(true)
-      
+
       await tldwAuth.login({
         username: values.username,
         password: values.password
       })
-      
+
       setIsLoggedIn(true)
       message.success(t('settings:tldw.login.success', 'Login successful!'))
-      
-      // Clear password field
+
       form.setFieldValue('password', '')
-      
-      // Test connection after login
+
       await testConnection()
     } catch (error: any) {
       const friendly = mapMultiUserLoginErrorMessage(
@@ -877,6 +608,8 @@ export const TldwSettings = () => {
       setLoading(false)
     }
   }
+
+  // ── Billing action handlers ──────────────────────────────────────
 
   const handleCheckout = async () => {
     if (!selectedPlan) {
@@ -1011,41 +744,7 @@ export const TldwSettings = () => {
     navigate("/settings/health")
   }
 
-  const selectedPlanDetails = billingPlans.find((plan) => plan.name === selectedPlan) || null
-  const planOptions = billingPlans.map((plan) => ({
-    value: plan.name,
-    label: (
-      <div className="flex items-center justify-between gap-2">
-        <span>{plan.display_name}</span>
-        <span className="text-xs text-text-muted">
-          {formatPlanPrice(plan, billingCycle)}
-        </span>
-      </div>
-    )
-  }))
-
-  const usageOrder = [
-    "api_calls_day",
-    "llm_tokens_month",
-    "storage_mb",
-    "team_members",
-    "transcription_minutes_month",
-    "rag_queries_day",
-    "concurrent_jobs"
-  ]
-  const usageEntries = Object.entries(billingUsage?.usage ?? {})
-  const usageChecks = billingUsage?.limit_checks ?? {}
-  const sortedUsageEntries = usageEntries.sort((a, b) => {
-    const aIndex = usageOrder.indexOf(a[0])
-    const bIndex = usageOrder.indexOf(b[0])
-    const aRank = aIndex === -1 ? usageOrder.length + 1 : aIndex
-    const bRank = bIndex === -1 ? usageOrder.length + 1 : bIndex
-    if (aRank !== bRank) return aRank - bRank
-    return a[0].localeCompare(b[0])
-  })
-
-  const isSamePlan = !!billingStatus?.plan_name && selectedPlan === billingStatus?.plan_name
-  const isSameCycle = !!billingStatus?.billing_cycle && billingStatus?.billing_cycle === billingCycle
+  // ── Render ───────────────────────────────────────────────────────
 
   if (initializing) {
     return (
@@ -1115,8 +814,12 @@ export const TldwSettings = () => {
             <Button type="primary" onClick={() => { void testConnection() }} loading={testingConnection}>{t('settings:tldw.buttons.recheck', 'Recheck')}</Button>
           </Space>
         </div>
-        <h2 className="text-base font-semibold mb-4 text-text">{t('settings:tldw.serverConfigTitle', 'tldw Server Configuration')}</h2>
-        
+        <TldwSettingsTabs authMode={authMode} isLoggedIn={isLoggedIn} />
+        <h2
+          id="tldw-settings-connection"
+          className="mb-4 scroll-mt-24 text-base font-semibold text-text">
+          {t('settings:tldw.serverConfigTitle', 'tldw Server Configuration')}
+        </h2>
         <Form
           form={form}
           onFinish={handleSave}
@@ -1126,959 +829,86 @@ export const TldwSettings = () => {
             apiKey: ''
           }}
         >
-          <Form.Item
-            label={t('settings:tldw.fields.serverUrl.label', 'Server URL')}
-            name="serverUrl"
-            rules={[
-              { required: true, message: t('settings:tldw.fields.serverUrl.required', 'Please enter the server URL') as string },
-              { type: 'url', message: t('settings:tldw.fields.serverUrl.invalid', 'Please enter a valid URL') as string }
-            ]}
-            extra={t(
-              'settings:tldw.fields.serverUrl.extra',
-              'The URL of your tldw_server instance. Default address for local installs: http://127.0.0.1:8000'
-            )}
-          >
-            <Input
-              placeholder={t(
-                'settings:tldw.fields.serverUrl.placeholder',
-                'http://127.0.0.1:8000'
-              ) as string}
-            />
-          </Form.Item>
-          <Form.Item
-            label={t('settings:tldw.authMode.label', 'Authentication Mode')}
-            name="authMode"
-            rules={[{ required: true }]}
-          >
-            <Segmented
-              options={[
-                { label: t('settings:tldw.authMode.single', 'Single User (API Key)'), value: 'single-user' },
-                { label: t('settings:tldw.authMode.multi', 'Multi User (Login)'), value: 'multi-user' }
-              ]}
-              onChange={(value) => {
-                if (authMode !== value) {
-                  Modal.confirm({
-                    title: t('settings:tldw.authModeChangeWarning.title', 'Change authentication mode?'),
-                    content: t('settings:tldw.authModeChangeWarning.content',
-                      'Switching authentication modes will clear your current credentials. You will need to re-enter them after saving.'),
-                    okText: t('common:continue', 'Continue'),
-                    cancelText: t('common:cancel', 'Cancel'),
-                    centered: true,
-                    onOk: () => {
-                      setAuthMode(value as 'single-user' | 'multi-user')
-                      // Reset form fields for the new auth mode
-                      if (value === 'multi-user') {
-                        form.setFieldValue('apiKey', '')
-                      } else {
-                        form.setFieldValue('username', '')
-                        form.setFieldValue('password', '')
-                        setIsLoggedIn(false)
-                      }
-                    },
-                    onCancel: () => {
-                      // Reset the Segmented back to current value
-                      form.setFieldValue('authMode', authMode)
-                    }
-                  })
-                }
-              }}
-            />
-          </Form.Item>
-          {authMode === 'single-user' && (
-            <Form.Item
-              label={t('settings:tldw.fields.apiKey.label', 'API Key')}
-              name="apiKey"
-              rules={[{ required: true, message: t('settings:tldw.fields.apiKey.required', 'Please enter your API key') }]}
-              extra={t('settings:tldw.fields.apiKey.extra', 'Your tldw_server API key for authentication')}
-            >
-              <Input.Password placeholder={t('settings:tldw.fields.apiKey.placeholder', 'Enter your API key')} />
-            </Form.Item>
-          )}
-
-          {authMode === 'multi-user' && !isLoggedIn && (
-            <>
-              <Alert
-                title={t('settings:tldw.loginRequired.title', 'Login Required')}
-                description={t('settings:tldw.loginRequired.description', 'Please login with your tldw_server credentials')}
-                type="info"
-                showIcon
-                className="mb-4"
-              />
-              <Form.Item
-                label={t('settings:tldw.loginMethod.label', 'Login Method')}
-              >
-                <Segmented
-                  options={[
-                    { label: t('settings:tldw.loginMethod.magic', 'Magic link'), value: 'magic-link' },
-                    { label: t('settings:tldw.loginMethod.password', 'Password'), value: 'password' }
-                  ]}
-                  value={loginMethod}
-                  onChange={(value) => {
-                    if (value === 'magic-link' || value === 'password') {
-                      setLoginMethod(value)
-                    }
-                  }}
-                />
-              </Form.Item>
-
-              {loginMethod === 'password' ? (
-                <>
-                  <Form.Item
-                    label={t('settings:tldw.fields.username.label', 'Username')}
-                    name="username"
-                    rules={[{ required: true, message: t('settings:tldw.fields.username.required', 'Please enter your username') }]}
-                  >
-                    <Input placeholder={t('settings:tldw.fields.username.placeholder', 'Enter username')} />
-                  </Form.Item>
-
-                  <Form.Item
-                    label={t('settings:tldw.fields.password.label', 'Password')}
-                    name="password"
-                    rules={[{ required: true, message: t('settings:tldw.fields.password.required', 'Please enter your password') }]}
-                  >
-                    <Input.Password placeholder={t('settings:tldw.fields.password.placeholder', 'Enter password')} />
-                  </Form.Item>
-
-                  <Form.Item>
-                    <Button type="primary" onClick={handleLogin}>
-                      {t('settings:tldw.buttons.login', 'Login')}
-                    </Button>
-                  </Form.Item>
-                </>
-              ) : (
-                <>
-                  <Form.Item
-                    label={t('settings:tldw.magicLink.email.label', 'Email')}
-                    name="magicEmail"
-                    rules={[{ required: true, message: t('settings:tldw.magicLink.email.required', 'Please enter your email') }]}
-                  >
-                    <Input
-                      placeholder={t('settings:tldw.magicLink.email.placeholder', 'you@company.com')}
-                      value={magicEmail}
-                      onChange={(e) => setMagicEmail(e.target.value)}
-                    />
-                  </Form.Item>
-
-                  <Form.Item
-                    label={t('settings:tldw.magicLink.token.label', 'Magic link token')}
-                    name="magicToken"
-                    rules={[{ required: true, message: t('settings:tldw.magicLink.token.required', 'Please paste your magic link token') }]}
-                  >
-                    <Input
-                      placeholder={t('settings:tldw.magicLink.token.placeholder', 'Paste the token from your email')}
-                      value={magicToken}
-                      onChange={(e) => setMagicToken(e.target.value)}
-                    />
-                  </Form.Item>
-
-                  <Form.Item>
-                    <Space>
-                      <Button onClick={handleSendMagicLink} loading={magicSending}>
-                        {magicSent
-                          ? t('settings:tldw.magicLink.resend', 'Resend magic link')
-                          : t('settings:tldw.magicLink.send', 'Send magic link')}
-                      </Button>
-                      <Button type="primary" onClick={handleVerifyMagicLink}>
-                        {t('settings:tldw.magicLink.verify', 'Verify & Login')}
-                      </Button>
-                    </Space>
-                  </Form.Item>
-                </>
-              )}
-            </>
-          )}
-
-          {authMode === 'multi-user' && isLoggedIn && (
-            <Alert
-              title={t('settings:tldw.loggedIn.title', 'Logged In')}
-              description={t('settings:tldw.loggedIn.description', 'You are currently logged in to tldw_server')}
-              type="success"
-              showIcon
-              action={
-                <Button size="small" danger onClick={handleLogout}>
-                  {t('settings:tldw.buttons.logout', 'Logout')}
-                </Button>
-              }
-              className="mb-4"
-            />
-          )}
-
-          <Space className="w-full justify-between">
-            <Space>
-              <Button type="primary" htmlType="submit">
-                {t('common:save')}
-              </Button>
-
-              <Button
-                onClick={() => {
-                  void testConnection()
-                }}
-                loading={testingConnection}
-                icon={
-                  connectionStatus === 'success' ? (
-                    <CheckIcon className="w-4 h-4 text-success" />
-                  ) : connectionStatus === 'error' ? (
-                    <XMarkIcon className="w-4 h-4 text-danger" />
-                  ) : null
-                }
-              >
-                {t('settings:tldw.buttons.testConnection', 'Test Connection')}
-              </Button>
-
-              {!isFirefoxTarget && (
-                <Button onClick={grantSiteAccess}>
-                  {t('settings:tldw.buttons.grantSiteAccess', 'Grant Site Access')}
-                </Button>
-              )}
-            </Space>
-
-            <div className="flex flex-col items-start gap-1 ml-4">
-              {testingConnection && (
-                <span className="text-xs text-text-subtle">
-                  {t(
-                    "settings:tldw.connection.checking",
-                    "Checking connection and RAG health…"
-                  )}
-                </span>
-              )}
-              {connectionStatus && !testingConnection && (
-                <span
-                  className={`text-sm ${
-                    connectionStatus === "success"
-                      ? "font-medium text-text"
-                      : "text-danger"
-                  }`}>
-                  {connectionStatus === "success"
-                    ? t(
-                        "settings:tldw.connection.success",
-                        "Connection successful!"
-                      )
-                    : t(
-                        "settings:tldw.connection.failed",
-                        "Connection failed. Please check your settings."
-                      )}
-                </span>
-              )}
-              {connectionDetail && connectionStatus !== "success" && (
-                <span className="flex flex-wrap items-center gap-2 text-xs text-text-subtle">
-                  <span>{connectionDetail}</span>
-                  <button
-                    type="button"
-                    className="underline text-primary hover:text-primaryStrong"
-                    onClick={openHealthDiagnostics}>
-                    {t(
-                      "settings:healthSummary.diagnostics",
-                      "Health & diagnostics"
-                    )}
-                  </button>
-                </span>
-              )}
-              <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                <span className="font-medium">
-                  {t("settings:tldw.connection.checksLabel", "Checks")}
-                </span>
-                <Tag
-                  color={coreStatusColor(coreStatus)}>
-                  {getCoreStatusLabel(t, coreStatus)}
-                </Tag>
-                <Tag
-                  color={ragStatusColor(ragStatus)}>
-                  {getRagStatusLabel(t, ragStatus)}
-                </Tag>
-              </div>
-            </div>
-          </Space>
-          <Collapse
-            className="mt-4"
-            items={[
-              {
-                key: 'adv',
-                label: t('settings:tldw.advancedTimeouts'),
-                children: (
-                  <div className="space-y-3">
-                    <div className="flex flex-col gap-2">
-                      <span className="text-sm font-medium">
-                        {t('settings:tldw.timeoutPresetLabel')}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <Segmented
-                          value={timeoutPreset === 'extended' ? 'extended' : 'balanced'}
-                          onChange={(value) => applyTimeoutPreset(value as TimeoutPresetKey)}
-                          options={[
-                            {
-                              label: t('settings:tldw.timeoutPresetBalanced'),
-                              value: 'balanced'
-                            },
-                            {
-                              label: t('settings:tldw.timeoutPresetExtended'),
-                              value: 'extended'
-                            }
-                          ]}
-                        />
-                        {timeoutPreset === 'custom' && (
-                          <Tag color="default">
-                            {t('settings:tldw.timeoutPresetCustom')}
-                          </Tag>
-                        )}
-                      </div>
-                      <span className="text-xs text-text-subtle">
-                        {t('settings:tldw.timeoutPresetHint')}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.requestTimeout')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={requestTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.request
-                            )
-                            setRequestTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: newValue,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: mediaRequestTimeoutSec,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          placeholder="10"
-                          suffix="s"
-                        />
-                        <div className="text-xs text-text-subtle mt-1">
-                          {t('settings:tldw.hints.requestTimeout', {
-                            defaultValue:
-                              'Abort initial requests if no response within this time. Default: {{seconds}}s.',
-                            seconds: TIMEOUT_PRESETS.balanced.request
-                          })}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.streamingIdle')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={streamIdleTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.stream
-                            )
-                            setStreamIdleTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: newValue,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: mediaRequestTimeoutSec,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          placeholder="15"
-                          suffix="s"
-                        />
-                        <div className="text-xs text-text-subtle mt-1">
-                          {t('settings:tldw.hints.streamingIdle', {
-                            defaultValue:
-                              'Abort streaming if no updates received within this time. Default: {{seconds}}s.',
-                            seconds: TIMEOUT_PRESETS.balanced.stream
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.chatRequest')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={chatRequestTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.chatRequest
-                            )
-                            setChatRequestTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: newValue,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: mediaRequestTimeoutSec,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          suffix="s"
-                        />
-                        <div className="text-xs text-text-subtle mt-1">
-                          {t('settings:tldw.hints.chatRequest', {
-                            defaultValue:
-                              'Applies to non-stream chat request timeout handling. Use startup timeout below for first visible token.',
-                          })}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.chatStartup', {
-                            defaultValue: 'Chat startup timeout'
-                          })}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={chatStartupTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.chatStartup
-                            )
-                            setChatStartupTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: newValue,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: mediaRequestTimeoutSec,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          suffix="s"
-                        />
-                        <div className="text-xs text-text-subtle mt-1">
-                          {t('settings:tldw.hints.chatStartup', {
-                            defaultValue:
-                              'Abort streaming if no visible assistant output arrives within this time. Default: {{seconds}}s.',
-                            seconds: TIMEOUT_PRESETS.balanced.chatStartup
-                          })}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.chatStreamIdle')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={chatStreamIdleTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.chatStream
-                            )
-                            setChatStreamIdleTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: newValue,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: mediaRequestTimeoutSec,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          suffix="s"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.ragRequest')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={ragRequestTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.ragRequest
-                            )
-                            setRagRequestTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: newValue,
-                                media: mediaRequestTimeoutSec,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          suffix="s"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.mediaRequest')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={mediaRequestTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.media
-                            )
-                            setMediaRequestTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: newValue,
-                                upload: uploadRequestTimeoutSec
-                              })
-                            )
-                          }}
-                          suffix="s"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          {t('settings:tldw.uploadRequest')}
-                        </label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={uploadRequestTimeoutSec}
-                          onChange={(e) => {
-                            const newValue = parseSeconds(
-                              e.target.value,
-                              TIMEOUT_PRESETS.balanced.upload
-                            )
-                            setUploadRequestTimeoutSec(newValue)
-                            setTimeoutPreset(
-                              determinePreset({
-                                request: requestTimeoutSec,
-                                stream: streamIdleTimeoutSec,
-                                chatRequest: chatRequestTimeoutSec,
-                                chatStartup: chatStartupTimeoutSec,
-                                chatStream: chatStreamIdleTimeoutSec,
-                                ragRequest: ragRequestTimeoutSec,
-                                media: mediaRequestTimeoutSec,
-                                upload: newValue
-                              })
-                            )
-                          }}
-                          suffix="s"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <Button
-                        onClick={() => {
-                          applyTimeoutPreset('balanced')
-                          message.success(t('settings:tldw.resetDone'))
-                        }}
-                      >
-                        {t('settings:tldw.reset')}
-                      </Button>
-                    </div>
-                  </div>
-                )
-              }
-            ]}
+          <TldwConnectionSettings
+            t={t}
+            form={form}
+            authMode={authMode}
+            setAuthMode={setAuthMode}
+            isLoggedIn={isLoggedIn}
+            setIsLoggedIn={setIsLoggedIn}
+            loginMethod={loginMethod}
+            setLoginMethod={setLoginMethod}
+            magicEmail={magicEmail}
+            setMagicEmail={setMagicEmail}
+            magicToken={magicToken}
+            setMagicToken={setMagicToken}
+            magicSent={magicSent}
+            setMagicSent={setMagicSent}
+            magicSending={magicSending}
+            testingConnection={testingConnection}
+            connectionStatus={connectionStatus}
+            connectionDetail={connectionDetail}
+            coreStatus={coreStatus}
+            ragStatus={ragStatus}
+            onTestConnection={() => { void testConnection() }}
+            onLogin={handleLogin}
+            onSendMagicLink={handleSendMagicLink}
+            onVerifyMagicLink={handleVerifyMagicLink}
+            onLogout={handleLogout}
+            onGrantSiteAccess={grantSiteAccess}
+            onOpenHealthDiagnostics={openHealthDiagnostics}
+          />
+          <TldwTimeoutSettings
+            t={t}
+            message={message}
+            requestTimeoutSec={requestTimeoutSec}
+            setRequestTimeoutSec={setRequestTimeoutSec}
+            streamIdleTimeoutSec={streamIdleTimeoutSec}
+            setStreamIdleTimeoutSec={setStreamIdleTimeoutSec}
+            chatRequestTimeoutSec={chatRequestTimeoutSec}
+            setChatRequestTimeoutSec={setChatRequestTimeoutSec}
+            chatStartupTimeoutSec={chatStartupTimeoutSec}
+            setChatStartupTimeoutSec={setChatStartupTimeoutSec}
+            chatStreamIdleTimeoutSec={chatStreamIdleTimeoutSec}
+            setChatStreamIdleTimeoutSec={setChatStreamIdleTimeoutSec}
+            ragRequestTimeoutSec={ragRequestTimeoutSec}
+            setRagRequestTimeoutSec={setRagRequestTimeoutSec}
+            mediaRequestTimeoutSec={mediaRequestTimeoutSec}
+            setMediaRequestTimeoutSec={setMediaRequestTimeoutSec}
+            uploadRequestTimeoutSec={uploadRequestTimeoutSec}
+            setUploadRequestTimeoutSec={setUploadRequestTimeoutSec}
+            timeoutPreset={timeoutPreset}
+            setTimeoutPreset={setTimeoutPreset}
           />
         </Form>
 
         {authMode === 'multi-user' && isLoggedIn && (
-          <div className="mt-6 rounded-lg border border-border bg-surface2 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold text-text">
-                  {t('settings:tldw.billing.title', 'Billing & usage')}
-                </h3>
-                <p className="text-xs text-text-muted">
-                  {t(
-                    'settings:tldw.billing.subtitle',
-                    'Manage your plan, billing cycle, and usage limits.'
-                  )}
-                </p>
-              </div>
-              <Space>
-                <Button
-                  onClick={() => {
-                    void loadBilling()
-                    void loadInvoices()
-                  }}
-                  loading={billingLoading || billingInvoicesLoading}
-                >
-                  {t('settings:tldw.billing.refresh', 'Refresh')}
-                </Button>
-                <Button onClick={handleBillingPortal} loading={billingLoading}>
-                  {t('settings:tldw.billing.portal', 'Billing portal')}
-                </Button>
-              </Space>
-            </div>
-
-            {billingError && (
-              <Alert
-                type="error"
-                showIcon
-                className="mt-4"
-                title={t('settings:tldw.billing.errorTitle', 'Billing unavailable')}
-                description={billingError}
-              />
-            )}
-
-            <div className="mt-4 space-y-4">
-              {billingStatusError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  title={t('settings:tldw.billing.subscriptionError', 'Unable to load subscription')}
-                  description={billingStatusError}
-                />
-              ) : billingStatus ? (
-                <div className="rounded border border-border bg-surface p-3">
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="font-medium">
-                      {t('settings:tldw.billing.currentPlan', 'Current plan')}
-                    </span>
-                    <Tag color={billingStatusColor(billingStatus.status)}>
-                      {billingStatusLabel(billingStatus.status)}
-                    </Tag>
-                    <span className="text-text">
-                      {billingStatus.plan_display_name || billingStatus.plan_name}
-                    </span>
-                    {billingStatus.billing_cycle && (
-                      <Tag>
-                        {billingStatus.billing_cycle === 'yearly'
-                          ? t('settings:tldw.billing.cycle.yearly', 'Yearly')
-                          : t('settings:tldw.billing.cycle.monthly', 'Monthly')}
-                      </Tag>
-                    )}
-                  </div>
-                  <div className="mt-2 text-xs text-text-muted flex flex-wrap gap-4">
-                    <span>
-                      {t('settings:tldw.billing.renewal', 'Renews')}:{" "}
-                      {formatDate(billingStatus.current_period_end)}
-                    </span>
-                    {billingStatus.trial_end && (
-                      <span>
-                        {t('settings:tldw.billing.trialEnds', 'Trial ends')}:{" "}
-                        {formatDate(billingStatus.trial_end)}
-                      </span>
-                    )}
-                  </div>
-                  {billingStatus.cancel_at_period_end && (
-                    <Alert
-                      type="warning"
-                      showIcon
-                      className="mt-3"
-                      title={t(
-                        'settings:tldw.billing.cancelAtPeriodEnd',
-                        'Subscription will cancel at period end.'
-                      )}
-                    />
-                  )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {!billingStatus.cancel_at_period_end &&
-                      billingStatus.status !== 'canceled' && (
-                        <Button
-                          danger
-                          onClick={confirmCancelSubscription}
-                          loading={billingActionLoading}
-                        >
-                          {t(
-                            'settings:tldw.billing.cancelAction',
-                            'Cancel at period end'
-                          )}
-                        </Button>
-                      )}
-                    {billingStatus.cancel_at_period_end &&
-                      billingStatus.status !== 'canceled' && (
-                        <Button
-                          onClick={confirmResumeSubscription}
-                          loading={billingActionLoading}
-                        >
-                          {t(
-                            'settings:tldw.billing.resumeAction',
-                            'Resume subscription'
-                          )}
-                        </Button>
-                      )}
-                  </div>
-                </div>
-              ) : !billingLoading ? (
-                <div className="rounded border border-border bg-surface p-3">
-                  <div className="text-sm font-medium mb-1">
-                    {t('settings:tldw.billing.currentPlan', 'Current plan')}
-                  </div>
-                  <div className="text-xs text-text-muted">
-                    {t(
-                      'settings:tldw.billing.subscriptionEmpty',
-                      'No active subscription yet. Choose a plan to get started.'
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {billingUsage?.has_exceeded && (
-                <Alert
-                  type="error"
-                  showIcon
-                  title={t(
-                    'settings:tldw.billing.limitExceeded',
-                    'Usage has exceeded one or more plan limits.'
-                  )}
-                />
-              )}
-              {!billingUsage?.has_exceeded && billingUsage?.has_warnings && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  title={t(
-                    'settings:tldw.billing.limitWarning',
-                    'Approaching plan limits for some resources.'
-                  )}
-                />
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded border border-border bg-surface p-3">
-                  <div className="text-sm font-medium mb-2">
-                    {t('settings:tldw.billing.selectPlan', 'Select a plan')}
-                  </div>
-                  {billingPlansError && (
-                    <Alert
-                      type="error"
-                      showIcon
-                      title={t('settings:tldw.billing.plansError', 'Unable to load plans')}
-                      description={billingPlansError}
-                    />
-                  )}
-                  {!billingPlansError && (
-                    <>
-                      <Select
-                        className="w-full"
-                        placeholder={t('settings:tldw.billing.choosePlan', 'Choose a plan')}
-                        options={planOptions}
-                        value={selectedPlan || undefined}
-                        onChange={(value) => setSelectedPlan(value)}
-                        disabled={billingPlans.length === 0}
-                      />
-                      <div className="mt-3">
-                        <span className="text-xs text-text-muted">
-                          {t('settings:tldw.billing.billingCycle', 'Billing cycle')}
-                        </span>
-                        <div className="mt-2">
-                          <Segmented
-                            options={[
-                              { label: t('settings:tldw.billing.cycle.monthly', 'Monthly'), value: 'monthly' },
-                              { label: t('settings:tldw.billing.cycle.yearly', 'Yearly'), value: 'yearly' }
-                            ]}
-                            value={billingCycle}
-                            onChange={(value) => {
-                              if (value === 'monthly' || value === 'yearly') {
-                                setBillingCycle(value)
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
-                      {selectedPlanDetails && (
-                        <div className="mt-3 text-xs text-text-muted space-y-1">
-                          <div className="font-medium text-text">
-                            {selectedPlanDetails.display_name}
-                          </div>
-                          {selectedPlanDetails.description && (
-                            <div>{selectedPlanDetails.description}</div>
-                          )}
-                          <div>
-                            {t('settings:tldw.billing.price', 'Price')}:{" "}
-                            {formatPlanPrice(selectedPlanDetails, billingCycle)}
-                          </div>
-                        </div>
-                      )}
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <Button
-                          type="primary"
-                          onClick={handleCheckout}
-                          loading={billingLoading}
-                          disabled={!selectedPlan || (isSamePlan && isSameCycle)}
-                        >
-                          {isSamePlan && isSameCycle
-                            ? t('settings:tldw.billing.currentPlanCta', 'Current plan')
-                            : t('settings:tldw.billing.checkout', 'Continue to checkout')}
-                        </Button>
-                        {billingPlans.length === 0 && !billingLoading && (
-                          <span className="text-xs text-text-subtle">
-                            {t('settings:tldw.billing.noPlans', 'No plans available yet.')}
-                          </span>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                <div className="rounded border border-border bg-surface p-3">
-                  <div className="text-sm font-medium mb-2">
-                    {t('settings:tldw.billing.usageTitle', 'Usage')}
-                  </div>
-                  {billingUsageError && (
-                    <Alert
-                      type="error"
-                      showIcon
-                      title={t('settings:tldw.billing.usageError', 'Unable to load usage data')}
-                      description={billingUsageError}
-                    />
-                  )}
-                  {!billingUsageError && !billingLoading && sortedUsageEntries.length === 0 && (
-                    <span className="text-xs text-text-muted">
-                      {t('settings:tldw.billing.usageEmpty', 'Usage data will appear after activity.')}
-                    </span>
-                  )}
-                  {!billingUsageError && sortedUsageEntries.length > 0 && (
-                    <div className="space-y-2">
-                      {sortedUsageEntries.map(([key, value]) => {
-                        const check = usageChecks[key] || {}
-                        const limit = typeof check.limit !== 'undefined'
-                          ? check.limit
-                          : billingUsage?.limits?.[key]
-                        const statusColor = check.exceeded
-                          ? 'red'
-                          : check.warning
-                            ? 'orange'
-                            : 'green'
-                        return (
-                          <div key={key} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                            <span className="text-text">{formatUsageLabel(key)}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-text-muted">
-                                {formatNumber(value)} / {formatLimitValue(limit, check.unlimited)}
-                              </span>
-                              {typeof check.percent_used === 'number' && !check.unlimited && (
-                                <Tag color={statusColor}>
-                                  {Math.round(check.percent_used)}%
-                                </Tag>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded border border-border bg-surface p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-medium">
-                    {t('settings:tldw.billing.invoices.title', 'Invoice history')}
-                  </div>
-                  {billingInvoicesTotal > 0 && (
-                    <span className="text-xs text-text-muted">
-                      {t(
-                        'settings:tldw.billing.invoices.total',
-                        'Total: {{count}}',
-                        { count: billingInvoicesTotal }
-                      )}
-                    </span>
-                  )}
-                </div>
-                {billingInvoicesLoading && (
-                  <div className="mt-2 text-xs text-text-muted">
-                    {t('settings:tldw.billing.invoices.loading', 'Loading invoices…')}
-                  </div>
-                )}
-                {billingInvoicesError && (
-                  <Alert
-                    type="error"
-                    showIcon
-                    className="mt-3"
-                    title={t('settings:tldw.billing.invoices.error', 'Unable to load invoices')}
-                    description={billingInvoicesError}
-                  />
-                )}
-                {!billingInvoicesLoading && !billingInvoicesError && billingInvoices.length === 0 && (
-                  <div className="mt-2 text-xs text-text-muted">
-                    {t('settings:tldw.billing.invoices.empty', 'No invoices yet.')}
-                  </div>
-                )}
-                {!billingInvoicesError && billingInvoices.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {billingInvoices.map((invoice) => (
-                      <div
-                        key={invoice.id}
-                        className="flex flex-wrap items-center justify-between gap-2 border-b border-border/50 pb-2 text-xs"
-                      >
-                        <div className="space-y-1">
-                          <div className="font-medium text-text">
-                            {formatInvoiceAmount(invoice)}
-                          </div>
-                          <div className="text-text-muted">
-                            {formatDate(invoice.created_at)}{" "}
-                            {invoice.description ? `· ${invoice.description}` : `· #${invoice.id}`}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Tag color={invoiceStatusColor(invoice.status)}>
-                            {invoiceStatusLabel(invoice.status)}
-                          </Tag>
-                          {invoice.invoice_pdf_url && (
-                            <a
-                              href={invoice.invoice_pdf_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-primary hover:text-primaryStrong underline"
-                            >
-                              {t('settings:tldw.billing.invoices.pdf', 'PDF')}
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    {billingInvoicesTotal > billingInvoices.length && (
-                      <div className="text-xs text-text-muted">
-                        {t(
-                          'settings:tldw.billing.invoices.showing',
-                          'Showing {{count}} of {{total}}',
-                          { count: billingInvoices.length, total: billingInvoicesTotal }
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <TldwBillingSettings
+            t={t}
+            billingLoading={billingLoading}
+            billingError={billingError}
+            billingPlansError={billingPlansError}
+            billingStatusError={billingStatusError}
+            billingUsageError={billingUsageError}
+            billingPlans={billingPlans}
+            billingStatus={billingStatus}
+            billingUsage={billingUsage}
+            billingInvoices={billingInvoices}
+            billingInvoicesTotal={billingInvoicesTotal}
+            billingInvoicesLoading={billingInvoicesLoading}
+            billingInvoicesError={billingInvoicesError}
+            billingActionLoading={billingActionLoading}
+            selectedPlan={selectedPlan}
+            setSelectedPlan={setSelectedPlan}
+            billingCycle={billingCycle}
+            setBillingCycle={setBillingCycle}
+            onLoadBilling={() => { void loadBilling() }}
+            onLoadInvoices={() => { void loadInvoices() }}
+            onCheckout={handleCheckout}
+            onBillingPortal={handleBillingPortal}
+            onCancelSubscription={confirmCancelSubscription}
+            onResumeSubscription={confirmResumeSubscription}
+          />
         )}
       </div>
     </Spin>

@@ -8,9 +8,15 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     ActivitySummaryResponse,
     AuditLogResponse,
+    ErrorBreakdownItem,
+    ErrorBreakdownResponse,
+    RateLimitPolicyHeadroom,
+    RateLimitSummaryResponse,
+    RateLimitThrottledEntity,
     SecurityAlertSinkStatus,
     SecurityAlertStatusResponse,
     SystemLogEntry,
@@ -508,7 +514,13 @@ async def get_audit_log(
         if org_id is not None:
             org_ids = [org_id] if org_ids is None else [org_id] if org_id in org_ids else []
         if org_ids is not None and len(org_ids) == 0:
-            return AuditLogResponse(entries=[], total=0, limit=limit, offset=offset)
+            return AuditLogResponse(
+                entries=[],
+                total=0,
+                limit=limit,
+                offset=offset,
+                pagination=build_offset_pagination_meta(total=0, limit=limit, offset=offset, count=0),
+            )
 
         if user_id:
             await admin_scope_service.enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
@@ -517,9 +529,19 @@ async def get_audit_log(
             params.append(user_id)
 
         if action:
-            param_count += 1
-            conditions.append(f"a.action = ${param_count}" if is_pg else "a.action = ?")
-            params.append(action)
+            if action.endswith("*"):
+                # Prefix match: e.g. "admin*" matches "admin.update", "admin.delete", etc.
+                prefix = action[:-1]
+                param_count += 1
+                if is_pg:
+                    conditions.append(f"a.action LIKE ${param_count}")
+                else:
+                    conditions.append("a.action LIKE ?")
+                params.append(f"{prefix}%")
+            else:
+                param_count += 1
+                conditions.append(f"a.action = ${param_count}" if is_pg else "a.action = ?")
+                params.append(action)
 
         if resource:
             resource_filter = resource.strip()
@@ -660,7 +682,19 @@ async def get_audit_log(
                 }
                 entries.append(entry)
 
-        return AuditLogResponse(entries=entries, total=int(total or 0), limit=limit, offset=offset)
+        total_count = int(total or 0)
+        return AuditLogResponse(
+            entries=entries,
+            total=total_count,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(entries),
+            ),
+        )
 
     except HTTPException:
         raise
@@ -729,7 +763,13 @@ async def list_system_logs(
     if org_id is not None:
         org_ids = [org_id] if org_ids is None else [org_id] if org_id in org_ids else []
     if org_ids is not None and len(org_ids) == 0:
-        return SystemLogsResponse(items=[], total=0, limit=limit, offset=offset)
+        return SystemLogsResponse(
+            items=[],
+            total=0,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(total=0, limit=limit, offset=offset, count=0),
+        )
 
     items, total = query_system_logs(
         start=start_dt,
@@ -748,8 +788,268 @@ async def list_system_logs(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
+
+# ── Error breakdown aggregation (10.4) ──────────────────────────────────────
+
+async def get_error_breakdown(
+    *,
+    principal: AuthPrincipal,
+    db,
+    hours: int = 24,
+) -> ErrorBreakdownResponse:
+    """Aggregate recent audit-log entries that look like errors (failed/denied/error actions).
+
+    Groups by action (used as endpoint proxy) and a synthetic status_code derived
+    from the action name. This is lightweight in-memory processing over the
+    existing audit_log table.
+    """
+    try:
+        is_pg = _is_postgres_connection(db)
+        org_ids = await admin_scope_service.get_admin_org_ids(principal)
+
+        # Build time constraint
+        if is_pg:
+            time_clause = f"a.created_at > CURRENT_TIMESTAMP - INTERVAL '{hours} hours'"
+            time_params: list[Any] = []
+        else:
+            time_clause = "datetime(a.created_at) > datetime('now', ? || ' hours')"
+            time_params = [f"-{hours}"]
+
+        # Filter actions that indicate errors
+        error_actions_clause = (
+            "(LOWER(a.action) LIKE '%error%'"
+            " OR LOWER(a.action) LIKE '%fail%'"
+            " OR LOWER(a.action) LIKE '%denied%'"
+            " OR LOWER(a.action) LIKE '%reject%'"
+            " OR LOWER(a.action) LIKE '%unauthorized%')"
+        )
+
+        # Org scoping join
+        join_clause = ""
+        org_params: list[Any] = []
+        org_condition = ""
+        if org_ids is not None:
+            if len(org_ids) == 0:
+                return ErrorBreakdownResponse(items=[], total_errors=0, period=f"{hours}h")
+            join_clause = " LEFT JOIN org_members om ON om.user_id = a.user_id"
+            if is_pg:
+                org_condition = f" AND om.org_id = ANY(${len(time_params) + 1})"
+                org_params = [org_ids]
+            else:
+                placeholders = ",".join("?" for _ in org_ids)
+                org_condition = f" AND om.org_id IN ({placeholders})"
+                org_params = list(org_ids)
+
+        # Clauses are server-defined fragments; org values remain bound parameters.
+        query = (
+            f"SELECT a.action, COUNT(*) as cnt, MAX(a.created_at) as last_at"  # nosec B608
+            f" FROM audit_log a{join_clause}"  # nosec B608
+            f" WHERE {time_clause} AND {error_actions_clause}{org_condition}"  # nosec B608
+            f" GROUP BY a.action ORDER BY cnt DESC LIMIT 50"  # nosec B608
+        )
+        params = time_params + org_params
+
+        if is_pg:
+            rows = await db.fetch(query, *params)
+        else:
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+
+        items: list[ErrorBreakdownItem] = []
+        total_errors = 0
+        for row in rows:
+            if isinstance(row, dict):
+                action = row.get("action", "unknown")
+                count = int(row.get("cnt", 0))
+                last_at = row.get("last_at")
+            else:
+                action = row[0] if len(row) > 0 else "unknown"
+                count = int(row[1]) if len(row) > 1 else 0
+                last_at = row[2] if len(row) > 2 else None
+
+            # Derive a synthetic status code from the action name
+            action_lower = str(action).lower()
+            if "unauthorized" in action_lower or "denied" in action_lower:
+                status_code = 403
+            elif "not_found" in action_lower:
+                status_code = 404
+            elif "rate_limit" in action_lower or "throttl" in action_lower:
+                status_code = 429
+            elif "timeout" in action_lower:
+                status_code = 504
+            else:
+                status_code = 500
+
+            # Parse last_at
+            last_occurred = None
+            if last_at:
+                try:
+                    if isinstance(last_at, datetime):
+                        last_occurred = last_at
+                    else:
+                        last_occurred = datetime.fromisoformat(str(last_at).replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    pass
+
+            total_errors += count
+            items.append(ErrorBreakdownItem(
+                endpoint=str(action),
+                status_code=status_code,
+                count=count,
+                last_occurred=last_occurred,
+            ))
+
+        return ErrorBreakdownResponse(
+            items=items,
+            total_errors=total_errors,
+            period=f"{hours}h",
+        )
+    except Exception as exc:
+        logger.warning("Error breakdown aggregation failed: {}", exc)
+        return ErrorBreakdownResponse(items=[], total_errors=0, period=f"{hours}h")
+
+
+# ── Rate limit summary aggregation (10.5) ───────────────────────────────────
+
+async def get_rate_limit_summary(
+    *,
+    hours: int = 24,
+) -> RateLimitSummaryResponse:
+    """Aggregate rate-limit denial metrics from the metrics registry.
+
+    Uses the in-memory Prometheus-style counters (rg_denials_total,
+    rg_denials_by_entity_total) already maintained by the Resource Governor.
+    """
+    total_throttle_events = 0
+    entity_rejections: dict[str, dict[str, Any]] = {}
+    policy_stats: dict[str, dict[str, Any]] = {}
+
+    try:
+        reg = get_metrics_registry()
+        # Try to get denial metrics from the registry
+        for metric_name in ("rg_denials_total", "rg_denials_by_entity_total", "mcp_rate_limit_hits_total"):
+            try:
+                samples = reg.get_samples(metric_name)
+            except (AttributeError, KeyError, TypeError):
+                samples = []
+
+            if not samples:
+                continue
+
+            for sample in samples:
+                labels = {}
+                value = 0
+                if isinstance(sample, dict):
+                    labels = sample.get("labels", {})
+                    value = int(sample.get("value", 0))
+                elif hasattr(sample, "labels"):
+                    labels = getattr(sample, "labels", {})
+                    value = int(getattr(sample, "value", 0))
+                elif isinstance(sample, (list, tuple)) and len(sample) >= 2:
+                    labels = sample[0] if isinstance(sample[0], dict) else {}
+                    value = int(sample[1]) if len(sample) > 1 else 0
+
+                if value <= 0:
+                    continue
+
+                total_throttle_events += value
+
+                # Track by entity
+                entity = (
+                    labels.get("entity")
+                    or labels.get("scope", "unknown")
+                )
+                if entity not in entity_rejections:
+                    entity_rejections[entity] = {"rejections": 0, "last_rejected_at": None}
+                entity_rejections[entity]["rejections"] += value
+
+                # Track by policy
+                policy_id = labels.get("policy_id", "unknown")
+                if policy_id not in policy_stats:
+                    policy_stats[policy_id] = {
+                        "resource_type": labels.get("category"),
+                        "scope": labels.get("scope"),
+                        "total_denials": 0,
+                        "total_decisions": 0,
+                    }
+                policy_stats[policy_id]["total_denials"] += value
+
+        # Also try to get total decisions for utilization calculation
+        for metric_name in ("rg_decisions_total",):
+            try:
+                samples = reg.get_samples(metric_name)
+            except (AttributeError, KeyError, TypeError):
+                samples = []
+
+            if not samples:
+                continue
+
+            for sample in samples:
+                labels = {}
+                value = 0
+                if isinstance(sample, dict):
+                    labels = sample.get("labels", {})
+                    value = int(sample.get("value", 0))
+                elif hasattr(sample, "labels"):
+                    labels = getattr(sample, "labels", {})
+                    value = int(getattr(sample, "value", 0))
+                elif isinstance(sample, (list, tuple)) and len(sample) >= 2:
+                    labels = sample[0] if isinstance(sample[0], dict) else {}
+                    value = int(sample[1]) if len(sample) > 1 else 0
+
+                if value <= 0:
+                    continue
+
+                policy_id = labels.get("policy_id", "unknown")
+                if policy_id in policy_stats:
+                    policy_stats[policy_id]["total_decisions"] += value
+
+    except Exception as exc:
+        logger.warning("Rate limit summary metrics collection failed: {}", exc)
+
+    # Build top throttled entities
+    sorted_entities = sorted(entity_rejections.items(), key=lambda x: x[1]["rejections"], reverse=True)
+    top_throttled = [
+        RateLimitThrottledEntity(
+            entity=entity,
+            rejections=data["rejections"],
+            last_rejected_at=data.get("last_rejected_at"),
+        )
+        for entity, data in sorted_entities[:20]
+    ]
+
+    # Build policy headroom
+    headroom = []
+    for pid, stats in sorted(policy_stats.items(), key=lambda x: x[1]["total_denials"], reverse=True):
+        total_decisions = stats["total_decisions"]
+        total_denials = stats["total_denials"]
+        utilization = (total_denials / total_decisions * 100.0) if total_decisions > 0 else 0.0
+        headroom.append(RateLimitPolicyHeadroom(
+            policy_id=pid,
+            resource_type=stats.get("resource_type"),
+            scope=stats.get("scope"),
+            total_decisions=total_decisions,
+            total_denials=total_denials,
+            utilization_pct=round(utilization, 2),
+        ))
+
+    return RateLimitSummaryResponse(
+        total_throttle_events=total_throttle_events,
+        period=f"{hours}h",
+        top_throttled_entities=top_throttled,
+        policy_headroom=headroom[:20],
+    )
+
+
+# ── Key age stats (dev) ────────────────────────────────────────────────────
 
 async def get_key_age_stats(db) -> dict:
     """Get API key age distribution without per-user fan-out.
@@ -845,8 +1145,13 @@ async def debug_resolve_permissions(user_id: int, db) -> dict:
             "permission_count": len(normalized_permissions),
         }
     except Exception as exc:
-        logger.warning(f"Failed to resolve permissions for user {user_id}: {exc}")
-        return {"user_id": user_id, "roles": [], "effective_permissions": [], "error": str(exc)[:200]}
+        logger.warning(f"Failed to resolve permissions for user {user_id}")
+        return {
+            "user_id": user_id,
+            "roles": [],
+            "effective_permissions": [],
+            "error": "Failed to resolve permissions.",
+        }
 
 
 async def debug_decode_token(token: str) -> dict:
@@ -887,7 +1192,7 @@ async def debug_decode_token(token: str) -> dict:
             "subject": payload.get("sub"),
         }
     except Exception as exc:
-        return {"decoded": False, "signature_verified": False, "error": str(exc)[:200]}
+        return {"decoded": False, "signature_verified": False, "error": "Failed to decode token."}
 
 
 async def debug_validate_token(token: str) -> dict:

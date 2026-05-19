@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
@@ -13,6 +14,10 @@ import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { listQuestions } from "@/services/quizzes"
 import { TAKE_QUIZ_LIST_PREFS_KEY } from "../../stateKeys"
 import { drawDeterministicQuestionPool } from "../../utils/optionShuffle"
+
+vi.mock("react-router-dom", () => ({
+  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+}))
 
 const interpolate = (template: string, values: Record<string, unknown> | undefined) => {
   return template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_, key: string) => {
@@ -180,7 +185,7 @@ describe("TakeQuizTab study modes", () => {
       isPending: false
     } as any)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
 
@@ -221,7 +226,7 @@ describe("TakeQuizTab study modes", () => {
       count: 1
     } as any)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
 
@@ -261,7 +266,7 @@ describe("TakeQuizTab study modes", () => {
       isPending: false
     } as any)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole("button", { name: /Open Review/i }))
 
@@ -273,7 +278,7 @@ describe("TakeQuizTab study modes", () => {
   }, 15000)
 
   it("persists mode preference updates to session storage", async () => {
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     expect(screen.getByRole("button", { name: /Start Quiz/i })).toBeInTheDocument()
 
@@ -338,7 +343,7 @@ describe("TakeQuizTab study modes", () => {
 
     const expectedPool = drawDeterministicQuestionPool(questionBank, 2, 777)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
     await waitFor(() => {
@@ -389,7 +394,7 @@ describe("TakeQuizTab study modes", () => {
       count: 2
     } as any)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
 
@@ -423,7 +428,7 @@ describe("TakeQuizTab study modes", () => {
       count: 1
     } as any)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
     const input = await screen.findByRole("textbox", { name: /Answer for question/i })

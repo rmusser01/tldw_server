@@ -5,7 +5,9 @@ import difflib
 import json
 import os
 import socket
-import subprocess
+
+# The wizard starts fixed Python module commands with shell=False.
+import subprocess  # nosec B404
 import sys
 import time
 from datetime import datetime, timezone
@@ -15,12 +17,14 @@ from urllib.parse import urlsplit
 
 import typer
 from loguru import logger
+
 from tldw_Server_API.app.core.testing import is_truthy
 
+from . import profile_verify
+from . import profiles as profile_utils
 from .utils import detect as detect_utils
 from .utils import env as env_utils
 from .utils import files as files_utils
-from .utils import format as format_utils
 from .utils import git as git_utils
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="tldw_server setup wizard CLI")
@@ -35,6 +39,7 @@ _WIZARD_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     subprocess.SubprocessError,
 )
+_ENV_GITIGNORE_ENTRIES = [".env", ".env.*.bak", ".env.local", "wizard.log"]
 
 
 def _emit(result: dict[str, Any], use_json: bool) -> None:
@@ -49,8 +54,12 @@ def _emit(result: dict[str, Any], use_json: bool) -> None:
                 typer.echo(f"{k.capitalize()}: {result[k]}")
 
 
-def _resolve_database_url(env_path: Path) -> str | None:
-    value = os.getenv("DATABASE_URL") or env_utils.load_env(env_path).get("DATABASE_URL")
+def _resolve_database_url(env_path: Path, *, prefer_env_file: bool = False) -> str | None:
+    env_values = env_utils.load_env(env_path)
+    if prefer_env_file:
+        value = env_values.get("DATABASE_URL") or os.getenv("DATABASE_URL")
+    else:
+        value = os.getenv("DATABASE_URL") or env_values.get("DATABASE_URL")
     if value is None:
         return None
     trimmed = value.strip()
@@ -212,15 +221,40 @@ _PROVIDER_SOURCES = [
     {"name": "anthropic", "label": "Anthropic", "env_keys": ["ANTHROPIC_API_KEY"], "config_key": "anthropic_api_key"},
     {"name": "cohere", "label": "Cohere", "env_keys": ["COHERE_API_KEY"], "config_key": "cohere_api_key"},
     {"name": "groq", "label": "Groq", "env_keys": ["GROQ_API_KEY"], "config_key": "groq_api_key"},
-    {"name": "huggingface", "label": "HuggingFace", "env_keys": ["HUGGINGFACE_API_KEY"], "config_key": "huggingface_api_key"},
-    {"name": "openrouter", "label": "OpenRouter", "env_keys": ["OPENROUTER_API_KEY"], "config_key": "openrouter_api_key"},
+    {
+        "name": "huggingface",
+        "label": "HuggingFace",
+        "env_keys": ["HUGGINGFACE_API_KEY"],
+        "config_key": "huggingface_api_key",
+    },
+    {
+        "name": "openrouter",
+        "label": "OpenRouter",
+        "env_keys": ["OPENROUTER_API_KEY"],
+        "config_key": "openrouter_api_key",
+    },
     {"name": "deepseek", "label": "DeepSeek", "env_keys": ["DEEPSEEK_API_KEY"], "config_key": "deepseek_api_key"},
     {"name": "qwen", "label": "Qwen", "env_keys": ["QWEN_API_KEY"], "config_key": "qwen_api_key"},
     {"name": "mistral", "label": "Mistral", "env_keys": ["MISTRAL_API_KEY"], "config_key": "mistral_api_key"},
     {"name": "google", "label": "Google", "env_keys": ["GOOGLE_API_KEY"], "config_key": "google_api_key"},
-    {"name": "elevenlabs", "label": "ElevenLabs", "env_keys": ["ELEVENLABS_API_KEY"], "config_key": "elevenlabs_api_key"},
-    {"name": "bedrock", "label": "Bedrock", "env_keys": ["BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"], "config_key": "bedrock_api_key"},
-    {"name": "custom_openai", "label": "Custom OpenAI", "env_keys": ["CUSTOM_OPENAI_API_KEY"], "config_key": "custom_openai_api_key"},
+    {
+        "name": "elevenlabs",
+        "label": "ElevenLabs",
+        "env_keys": ["ELEVENLABS_API_KEY"],
+        "config_key": "elevenlabs_api_key",
+    },
+    {
+        "name": "bedrock",
+        "label": "Bedrock",
+        "env_keys": ["BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"],
+        "config_key": "bedrock_api_key",
+    },
+    {
+        "name": "custom_openai",
+        "label": "Custom OpenAI",
+        "env_keys": ["CUSTOM_OPENAI_API_KEY"],
+        "config_key": "custom_openai_api_key",
+    },
 ]
 
 _MCP_CLIENTS = {
@@ -353,7 +387,7 @@ def _start_ephemeral_server(port: int, env: dict[str, str]) -> subprocess.Popen:
         "--log-level",
         "warning",
     ]
-    return subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603
 
 
 def _stop_process(proc: subprocess.Popen, timeout: float = 5.0) -> None:
@@ -364,10 +398,22 @@ def _stop_process(proc: subprocess.Popen, timeout: float = 5.0) -> None:
         proc.kill()
 
 
+def _build_initializer_env(env_path: Path, updates: dict[str, str | None]) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(env_utils.load_env(env_path))
+    env.update({key: str(value) for key, value in updates.items() if value is not None})
+    return env
+
+
 @app.command()
 def init(
     default: bool = typer.Option(False, "--default", help="Apply safe defaults without prompting"),
     install_dir: Path = typer.Option(Path.cwd(), "--install-dir", help="Installation directory (default: CWD)"),
+    profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
+    admin_username: str | None = typer.Option(None, "--admin-username", help="Initial multi-user admin username"),
+    admin_password: str | None = typer.Option(None, "--admin-password", help="Initial multi-user admin password"),
+    admin_email: str | None = typer.Option(None, "--admin-email", help="Initial multi-user admin email"),
     non_interactive: bool = typer.Option(False, "--non-interactive", help="Run without prompts using env vars"),
     debug: bool = typer.Option(False, "--debug", help="Verbose logging"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
@@ -392,30 +438,98 @@ def init(
     }
 
     # Plan actions (skeleton)
-    env_path = base / ".env"
+    try:
+        setup_profile = profile_utils.normalize_profile(profile) if profile else None
+    except ValueError as exc:
+        result = {
+            "command": "init",
+            "status": "error",
+            "facts": facts,
+            "actions": [{"profile": {"valid": False, "reason": str(exc)}}],
+            "notes": [str(exc)],
+        }
+        _emit(result, json_out)
+        raise typer.Exit(2) from exc
+
+    env_path = (
+        profile_utils.resolve_env_path(
+            profile=setup_profile,
+            start_dir=base,
+            explicit_env_file=env_file,
+        )
+        if setup_profile
+        else (env_file.expanduser().resolve() if env_file is not None else base / ".env")
+    )
     actions = []
     if not env_path.exists():
         actions.append({"create": str(env_path)})
-    actions.append({"ensure_gitignore": [".env", ".env.local", "wizard.log"]})
+    actions.append({"ensure_gitignore": _ENV_GITIGNORE_ENTRIES})
 
-    existing_env = env_utils.load_env(env_path)
-    auth_mode = os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
+    uses_structured_postgres = bool(setup_profile and profile_utils.profile_uses_structured_postgres(setup_profile))
+    existing_env = env_utils.load_env(env_path, raw_values=uses_structured_postgres)
     updates: dict[str, str | None] = {}
+    if setup_profile:
+        requested_admin_username = admin_username or os.getenv("ADMIN_USERNAME")
+        try:
+            updates.update(
+                profile_utils.build_profile_env(
+                    profile=setup_profile,
+                    existing_env=existing_env,
+                    admin_username=requested_admin_username,
+                    admin_password=admin_password or os.getenv("ADMIN_PASSWORD"),
+                    admin_email=admin_email or os.getenv("ADMIN_EMAIL"),
+                )
+            )
+        except ValueError as exc:
+            result = {
+                "command": "init",
+                "status": "error",
+                "facts": facts,
+                "actions": [{"admin_username": {"valid": False, "reason": str(exc)}}],
+                "notes": [str(exc)],
+            }
+            _emit(result, json_out)
+            raise typer.Exit(2) from exc
+        auth_mode = updates["AUTH_MODE"]
+    else:
+        if env_file is not None:
+            auth_mode = (
+                existing_env.get("AUTH_MODE") or os.getenv("AUTH_MODE") or ("single_user" if default or yes else "")
+            )
+        else:
+            auth_mode = (
+                os.getenv("AUTH_MODE") or existing_env.get("AUTH_MODE") or ("single_user" if default or yes else "")
+            )
     initializer_action: dict[str, Any] | None = None
     validation_action: dict[str, Any] | None = None
     if auth_mode:
         updates["AUTH_MODE"] = auth_mode
     if auth_mode == "single_user":
-        existing_key = (
-            os.getenv("SINGLE_USER_API_KEY")
-            or os.getenv("API_KEY")
-            or existing_env.get("SINGLE_USER_API_KEY")
-        )
+        if setup_profile and updates.get("SINGLE_USER_API_KEY"):
+            existing_key = updates["SINGLE_USER_API_KEY"]
+        elif env_file is not None:
+            existing_key = (
+                existing_env.get("SINGLE_USER_API_KEY") or os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
+            )
+        else:
+            existing_key = (
+                os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY") or existing_env.get("SINGLE_USER_API_KEY")
+            )
         if not existing_key:
             existing_key = env_utils.generate_single_user_api_key()
         updates["SINGLE_USER_API_KEY"] = existing_key
     if auth_mode == "multi_user":
-        db_url = _resolve_database_url(env_path)
+        if uses_structured_postgres:
+            db_url = profile_utils.build_postgres_database_url(
+                user=updates.get("POSTGRES_USER") or "tldw_user",
+                password=updates.get("POSTGRES_PASSWORD") or "",
+                db=updates.get("POSTGRES_DB") or "tldw_users",
+            )
+        else:
+            db_url = updates.get("DATABASE_URL") or _resolve_database_url(
+                env_path,
+                prefer_env_file=env_file is not None,
+            )
         if not db_url:
             result = {
                 "command": "init",
@@ -438,9 +552,16 @@ def init(
             _emit(result, json_out)
             raise typer.Exit(2)
         validation_action = {"validate_database_url": {"present": True, "valid": True, "reason": None}}
-        updates["DATABASE_URL"] = db_url
+        if not uses_structured_postgres:
+            updates["DATABASE_URL"] = db_url
         cmd = [sys.executable, "-m", "tldw_Server_API.app.core.AuthNZ.initialize"]
-        if dry_run:
+        if setup_profile and setup_profile.docker:
+            initializer_action = {
+                "command": "AuthNZ initializer",
+                "status": "deferred_to_docker",
+                "reason": "Docker profiles initialize AuthNZ inside the container.",
+            }
+        elif dry_run:
             if yes:
                 initializer_action = {"command": " ".join(cmd), "status": "would_run"}
             elif non_interactive or not sys.stdin.isatty():
@@ -449,13 +570,13 @@ def init(
                 initializer_action = {"command": " ".join(cmd), "status": "would_prompt"}
         else:
             if yes:
-                proc = subprocess.run(cmd, check=False)
+                proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))  # nosec
                 initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
             elif non_interactive or not sys.stdin.isatty():
                 initializer_action = {"command": " ".join(cmd), "status": "skipped_non_interactive"}
             else:
                 if typer.confirm("Run AuthNZ initializer now?", default=False):
-                    proc = subprocess.run(cmd, check=False)
+                    proc = subprocess.run(cmd, check=False, env=_build_initializer_env(env_path, updates))  # nosec
                     initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                 else:
                     initializer_action = {"command": "AuthNZ initializer", "status": "skipped"}
@@ -472,17 +593,22 @@ def init(
             "status": "ok",
             "facts": facts,
             "actions": actions,
+            "paths": {"env": str(env_path)},
             "notes": [
                 "dry-run only; no changes made",
-                "this is a scaffold; future steps will initialize DBs and verify endpoints",
             ],
         }
         _emit(result, json_out)
         raise typer.Exit(0)
-    env_utils.ensure_env(env_path, updates=updates)
+    env_utils.ensure_env(
+        env_path,
+        updates=updates,
+        remove_keys={"DATABASE_URL", "JOBS_DB_URL"} if uses_structured_postgres else None,
+        raw_values=uses_structured_postgres,
+    )
 
     # Ensure .gitignore entries
-    files_utils.ensure_gitignore(base / ".gitignore", entries=[".env", ".env.local", "wizard.log"])
+    files_utils.ensure_gitignore(base / ".gitignore", entries=_ENV_GITIGNORE_ENTRIES)
 
     if updates:
         actions.append({"set_env": env_utils.mask_env_values({k: v for k, v in updates.items() if v is not None})})
@@ -490,15 +616,6 @@ def init(
         actions.append(validation_action)
     if initializer_action:
         actions.append({"authnz_initializer": initializer_action})
-
-    # Optional formatting (scaffold: only runs if tools present and in git repo)
-    if not no_format and facts["git"]:
-        try:
-            changed = git_utils.changed_or_untracked_files(base)
-            if changed:
-                format_utils.maybe_format(changed)
-        except _WIZARD_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"format step skipped: {e}")
 
     result = {
         "command": "init",
@@ -536,9 +653,7 @@ def auth(
     initializer_action: dict[str, Any] | None = None
     if mode == "single_user":
         existing_key = (
-            os.getenv("SINGLE_USER_API_KEY")
-            or os.getenv("API_KEY")
-            or existing_env.get("SINGLE_USER_API_KEY")
+            os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY") or existing_env.get("SINGLE_USER_API_KEY")
         )
         if not existing_key:
             if dry_run:
@@ -589,13 +704,13 @@ def auth(
                 notes.append("Non-interactive session; skipping AuthNZ initializer prompt.")
         else:
             if yes:
-                proc = subprocess.run(cmd, check=False)
+                proc = subprocess.run(cmd, check=False)  # nosec B603
                 initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                 if proc.returncode != 0:
                     notes.append("AuthNZ initializer failed; see output for details.")
             elif sys.stdin.isatty():
                 if typer.confirm("Run AuthNZ initializer now?", default=False):
-                    proc = subprocess.run(cmd, check=False)
+                    proc = subprocess.run(cmd, check=False)  # nosec B603
                     initializer_action = {"command": " ".join(cmd), "returncode": proc.returncode}
                     if proc.returncode != 0:
                         notes.append("AuthNZ initializer failed; see output for details.")
@@ -628,8 +743,15 @@ def auth(
 @app.command()
 def verify(
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
-    check_provider: bool = typer.Option(False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"),
+    check_provider: bool = typer.Option(
+        False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
+    profile: str | None = typer.Option(None, "--profile", help="Public setup profile"),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Explicit env file path"),
+    base_url: str | None = typer.Option(None, "--base-url", help="API base URL for --profile verification"),
+    webui_url: str | None = typer.Option(None, "--webui-url", help="WebUI base URL for --profile verification"),
+    first_value: bool = typer.Option(False, "--first-value", help="Run first ingest/search checks"),
 ):
     """Run verification checks (Stage 4)."""
     facts: dict[str, Any] = {
@@ -638,6 +760,74 @@ def verify(
     }
     notes: list[str] = []
     actions: list[dict[str, Any]] = []
+
+    if profile:
+        try:
+            setup_profile = profile_utils.normalize_profile(profile)
+        except ValueError as exc:
+            result = {
+                "command": "verify",
+                "status": "error",
+                "facts": facts,
+                "actions": [{"profile": {"valid": False, "reason": str(exc)}}],
+                "notes": [str(exc)],
+                "check_provider": bool(check_provider),
+                "dry_run": dry_run,
+            }
+            _emit(result, json_out)
+            raise typer.Exit(2) from exc
+
+        env_path = profile_utils.resolve_env_path(
+            profile=setup_profile,
+            start_dir=Path.cwd(),
+            explicit_env_file=env_file,
+        )
+        resolved_base_url = base_url or setup_profile.default_base_url
+        resolved_webui_url = webui_url if webui_url is not None else setup_profile.default_webui_url
+        facts.update(
+            {
+                "profile": setup_profile.name,
+                "base_url": profile_verify._sanitize_url_userinfo(resolved_base_url),
+                "webui_url": profile_verify._sanitize_url_userinfo(resolved_webui_url),
+            }
+        )
+        if dry_run:
+            result = {
+                "command": "verify",
+                "status": "ok",
+                "facts": facts,
+                "actions": [{"server": {"mode": "dry_run", "profile": setup_profile.name}}],
+                "notes": ["dry-run only; skipping profile probes."],
+                "check_provider": bool(check_provider),
+                "dry_run": True,
+                "paths": {"env": str(env_path)},
+            }
+            _emit(result, json_out)
+            raise typer.Exit(0)
+
+        check_result = profile_verify.run_profile_checks(
+            profile=setup_profile,
+            base_url=resolved_base_url,
+            webui_url=resolved_webui_url,
+            env_path=env_path,
+            first_value=first_value,
+            check_provider=bool(check_provider),
+            timeout=5.0,
+        )
+        result = {
+            "command": "verify",
+            "status": check_result.get("status", "error"),
+            "facts": facts,
+            "actions": check_result.get("actions", []),
+            "notes": check_result.get("notes", []),
+            "check_provider": bool(check_provider),
+            "dry_run": False,
+            "paths": {"env": str(env_path)},
+        }
+        _emit(result, json_out)
+        if result["status"] != "ok":
+            raise typer.Exit(2)
+        raise typer.Exit(0)
 
     env_port = os.getenv("TLDW_SERVER_PORT")
     preferred_port = int(env_port) if env_port and env_port.isdigit() else 8000
@@ -752,7 +942,9 @@ def verify(
 def providers(
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
-    check_provider: bool = typer.Option(False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"),
+    check_provider: bool = typer.Option(
+        False, "--check-provider", help="Attempt provider checks (offline/mock in scaffold)"
+    ),
     write_config: bool = typer.Option(False, "--write-config", help="Write provider keys to config.txt when set"),
 ):
     """Collect/store provider keys."""
@@ -800,7 +992,12 @@ def providers(
                 config_updates[provider["config_key"]] = value
         else:
             provider_status.append(
-                {"provider": provider["name"], "label": provider["label"], "env_key": provider["env_keys"][0], "status": "missing"}
+                {
+                    "provider": provider["name"],
+                    "label": provider["label"],
+                    "env_key": provider["env_keys"][0],
+                    "status": "missing",
+                }
             )
 
     actions.append({"providers": provider_status})
@@ -918,7 +1115,9 @@ def db(
         result = {
             "command": "db",
             "status": "error",
-            "actions": [{"validate_database_url": {"present": True, "valid": False, "reason": f"unsupported scheme '{scheme}'"}}],
+            "actions": [
+                {"validate_database_url": {"present": True, "valid": False, "reason": f"unsupported scheme '{scheme}'"}}
+            ],
             "notes": [f"Unsupported DATABASE_URL scheme: {scheme}"],
             "dry_run": dry_run,
         }
@@ -1225,6 +1424,8 @@ def format(
                 if dry_run:
                     actions["would_format"] = changed
                 else:
+                    from .utils import format as format_utils
+
                     format_utils.maybe_format(changed)
                     actions["formatted"] = changed
             except _WIZARD_NONCRITICAL_EXCEPTIONS as e:
@@ -1293,9 +1494,7 @@ def doctor(
             actions.append({"validate_database_url": {"present": False, "valid": False, "reason": "missing"}})
         else:
             valid, reason = _validate_database_url(db_url)
-            actions.append(
-                {"validate_database_url": {"present": True, "valid": valid, "reason": reason or None}}
-            )
+            actions.append({"validate_database_url": {"present": True, "valid": valid, "reason": reason or None}})
             if valid and "DATABASE_URL" not in existing_env and os.getenv("DATABASE_URL"):
                 updates["DATABASE_URL"] = db_url
 
@@ -1332,7 +1531,7 @@ def doctor(
         actions.append({"env": env_action})
 
     gitignore_path = Path.cwd() / ".gitignore"
-    desired_entries = [".env", ".env.local", "wizard.log"]
+    desired_entries = _ENV_GITIGNORE_ENTRIES
     existing_lines = gitignore_path.read_text(encoding="utf-8").splitlines() if gitignore_path.exists() else []
     existing_set = {line.strip() for line in existing_lines if line.strip()}
     missing_entries = [entry for entry in desired_entries if entry not in existing_set]

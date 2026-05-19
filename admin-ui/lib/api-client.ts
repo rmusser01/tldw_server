@@ -5,16 +5,24 @@ import { normalizeListResponse, normalizePagedResponse } from './normalize';
 import type {
   ApiKey,
   ApiKeyMutationResponse,
+  ApiKeyUsageSummary,
+  ApiKeyUsageTopResponse,
   AuditLog,
   BackupScheduleListResponse,
   BackupScheduleMutationResponse,
   BackupsResponse,
+  BillingAnalytics,
   ByokValidationRunCreateRequest,
   ByokValidationRunItem,
   ByokValidationRunListResponse,
+  CompliancePosture,
+  ComplianceReportSchedule,
+  DigestPreference,
   EffectivePermissionsResponse,
+  EmailDeliveryListResponse,
   FeatureRegistryEntry,
   IncidentItem,
+  IncidentNotifyResponse,
   IncidentsResponse,
   Invoice,
   MaintenanceRotationRunCreateRequest,
@@ -33,6 +41,8 @@ import type {
   SecurityAlertStatus,
   SecurityHealthData,
   Subscription,
+  DependencyUptimeStats,
+  SystemDependenciesResponse,
   Team,
   TeamMembership,
   User,
@@ -41,9 +51,15 @@ import type {
   VoiceCommand,
   VoiceCommandListResponse,
   VoiceCommandUsage,
+  VoiceCommandValidationResponse,
   VoiceSession,
   VoiceSessionListResponse,
   WatchlistSettings,
+  WebhookCreateResponse,
+  WebhookDeliveryItem,
+  WebhookDeliveryListResponse,
+  WebhookItem,
+  WebhookListResponse,
   AdminWebhook,
   AdminWebhooksResponse,
   AdminWebhookDeliveryLogResponse,
@@ -147,6 +163,11 @@ export const api = {
   // Dashboard & Stats
   // ============================================
   getDashboardStats: () => requestJson('/admin/stats'),
+  getRealtimeStats: () =>
+    requestJson<{
+      active_sessions: number;
+      tokens_today: { prompt: number; completion: number; total: number };
+    }>('/admin/stats/realtime'),
   getDashboardActivity: (days = 7, params?: { granularity?: 'hour' | 'day' }) => {
     const query = new URLSearchParams({ days: String(days) });
     if (params?.granularity) {
@@ -229,6 +250,20 @@ export const api = {
     method: 'DELETE',
     body: JSON.stringify(data),
   }),
+  inviteUser: (data: { email: string; role: string; expiry_days?: number }) => requestJson('/admin/users/invite', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  getInvitations: (params?: Record<string, string>) => {
+    const queryParams = params ? new URLSearchParams(params).toString() : '';
+    return requestJson(`/admin/users/invitations${queryParams ? `?${queryParams}` : ''}`);
+  },
+  revokeInvitation: (invitationId: string) => requestJson(`/admin/users/invitations/${encodeURIComponent(invitationId)}`, {
+    method: 'DELETE',
+  }),
+  resendInvitation: (invitationId: string) => requestJson(`/admin/users/invitations/${encodeURIComponent(invitationId)}/resend`, {
+    method: 'POST',
+  }),
   getCurrentUser: () => requestJson<User>('/users/me'),
 
   // ============================================
@@ -278,6 +313,8 @@ export const api = {
     method: 'DELETE',
   }),
   getApiKeyAuditLog: (keyId: string) => requestJson(`/admin/api-keys/${keyId}/audit-log`),
+  getApiKeyUsage: (keyId: string) => requestJson<ApiKeyUsageSummary>(`/admin/api-keys/${keyId}/usage`),
+  getTopApiKeyUsage: (limit: number = 10) => requestJson<ApiKeyUsageTopResponse>(`/admin/api-keys/usage/top?limit=${limit}`),
 
   // ============================================
   // Organizations
@@ -586,11 +623,34 @@ export const api = {
     requestJson(`/admin/incidents/${encodeURIComponent(incidentId)}`, {
       method: 'DELETE',
     }),
+  notifyIncidentStakeholders: (incidentId: string, data: { recipients: string[]; message?: string }) =>
+    requestJson<IncidentNotifyResponse>(`/admin/incidents/${encodeURIComponent(incidentId)}/notify`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   notifyIncident: (incidentId: string) =>
     requestJson<{ notified: boolean; incident_id: string; webhooks_delivered: number }>(
       `/admin/incidents/${encodeURIComponent(incidentId)}/notify`,
       { method: 'POST' },
     ),
+  getIncidentSlaMetrics: () =>
+    requestJson<{
+      total_incidents: number;
+      resolved_count: number;
+      acknowledged_count: number;
+      avg_mtta_minutes: number | null;
+      avg_mttr_minutes: number | null;
+      p95_mtta_minutes: number | null;
+      p95_mttr_minutes: number | null;
+    }>('/admin/incidents/metrics/sla'),
+
+  // ============================================
+  // Email Delivery Log
+  // ============================================
+  getEmailDeliveries: (params?: { limit?: number; offset?: number; status?: string }) => {
+    const qs = buildQueryString(params);
+    return requestJson<EmailDeliveryListResponse>(`/admin/email/deliveries${qs ? `?${qs}` : ''}`);
+  },
 
   // ============================================
   // Audit Logs
@@ -627,10 +687,29 @@ export const api = {
         details,
         ip_address: record.ip_address ? String(record.ip_address) : undefined,
         username: record.username ? String(record.username) : undefined,
+        request_id: record.request_id ? String(record.request_id)
+          : record.context_request_id ? String(record.context_request_id)
+          : undefined,
         raw: record,
       };
     });
     return { entries: mapped, total, limit, offset };
+  },
+
+  // ============================================
+  // Error Breakdown (10.4)
+  // ============================================
+  getErrorBreakdown: (params?: Record<string, string>) => {
+    const queryParams = params ? new URLSearchParams(params).toString() : '';
+    return requestJson(`/admin/errors/breakdown${queryParams ? `?${queryParams}` : ''}`);
+  },
+
+  // ============================================
+  // Rate Limit Summary (10.5)
+  // ============================================
+  getRateLimitSummary: (params?: Record<string, string>) => {
+    const queryParams = params ? new URLSearchParams(params).toString() : '';
+    return requestJson(`/admin/rate-limits/summary${queryParams ? `?${queryParams}` : ''}`);
   },
 
   // ============================================
@@ -962,14 +1041,6 @@ export const api = {
     buckets: Array<{ label: string; count: number; color: string }>;
     total: number;
   }>('/admin/security/key-age-stats'),
-  debugResolvePermissions: (userId: number) =>
-    requestJson<{ user_id: number; roles: string[]; effective_permissions: string[]; error?: string }>(
-      `/admin/debug/resolve-permissions?user_id=${userId}`, { method: 'POST' }
-    ),
-  debugValidateToken: (token: string) =>
-    requestJson<{ valid: boolean; header?: Record<string, unknown>; payload?: Record<string, unknown>; expired?: boolean; error?: string }>(
-      `/admin/debug/validate-token?token=${encodeURIComponent(token)}`, { method: 'POST' }
-    ),
   debugSimulateRateLimit: (data: { user_id: number; endpoint: string }) =>
     requestJson<{
       user_id: number;
@@ -987,15 +1058,6 @@ export const api = {
       range_days: number;
       items: Array<{ entity_id: number; request_count: number; total_tokens: number; estimated_cost_usd: number }>;
     }>(`/admin/usage/cost-attribution?group_by=${groupBy}&range_days=${rangeDays}`),
-  getBillingAnalytics: () => requestJson<{
-    analytics_available: boolean;
-    total_subscriptions?: number;
-    active_subscriptions?: number;
-    trialing?: number;
-    past_due?: number;
-    canceled?: number;
-    churn_rate_pct?: number;
-  }>('/admin/billing/analytics'),
   getRiskWeights: () => requestJson<{
     weights: Record<string, { weight: number; cap: number }>;
   }>('/admin/security/risk-weights'),
@@ -1023,6 +1085,53 @@ export const api = {
     projected_monthly_usd?: number;
     days_until_exhaustion?: number | null;
   }>(`/admin/budgets/forecast?org_id=${orgId}`),
+
+  // ============================================
+  // Compliance Posture
+  // ============================================
+  getCompliancePosture: () => requestJson<CompliancePosture>('/admin/compliance/posture'),
+
+  // ============================================
+  // Compliance Report Schedules
+  // ============================================
+  getReportSchedules: () =>
+    requestJson<{ items: ComplianceReportSchedule[]; total: number }>('/admin/compliance/report-schedules'),
+  createReportSchedule: (data: { frequency: string; recipients: string[]; format: string; enabled: boolean }) =>
+    requestJson<ComplianceReportSchedule>('/admin/compliance/report-schedules', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateReportSchedule: (scheduleId: string, data: Record<string, unknown>) =>
+    requestJson<ComplianceReportSchedule>(`/admin/compliance/report-schedules/${encodeURIComponent(scheduleId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteReportSchedule: (scheduleId: string) =>
+    requestJson(`/admin/compliance/report-schedules/${encodeURIComponent(scheduleId)}`, {
+      method: 'DELETE',
+    }),
+  sendReportNow: (scheduleId: string) =>
+    requestJson<{ sent_count: number; total_recipients: number; errors: string[] }>(
+      `/admin/compliance/report-schedules/${encodeURIComponent(scheduleId)}/send-now`,
+      { method: 'POST' },
+    ),
+
+  // ============================================
+  // Email Digest Preferences
+  // ============================================
+  getDigestPreference: () => requestJson<DigestPreference>('/admin/digest/preference'),
+  setDigestPreference: (data: { email: string; frequency: string }) =>
+    requestJson<DigestPreference>('/admin/digest/preference', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  // ============================================
+  // System Dependencies Health
+  // ============================================
+  getSystemDependencies: () => requestJson<SystemDependenciesResponse>('/admin/dependencies'),
+  getDependencyUptime: (name: string, days: number = 7) =>
+    requestJson<DependencyUptimeStats>(`/admin/dependencies/${encodeURIComponent(name)}/uptime?days=${days}`),
 
   // ============================================
   // Virtual API Keys
@@ -1102,6 +1211,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  deleteJobSlaPolicy: (data: { domain: string; queue: string; job_type: string }) =>
+    requestJson('/admin/jobs/sla/policy', {
+      method: 'DELETE',
+      body: JSON.stringify(data),
+    }),
+  getJobSlaBreaches: (params?: Record<string, string>) => {
+    const queryParams = params ? new URLSearchParams(params).toString() : '';
+    return requestJson(`/admin/jobs/sla/breaches${queryParams ? `?${queryParams}` : ''}`);
+  },
   getJobAttachments: (jobId: string | number, params?: Record<string, string>) => {
     const queryParams = params ? new URLSearchParams(params).toString() : '';
     return requestJson(`/admin/jobs/${encodeURIComponent(String(jobId))}/attachments${queryParams ? `?${queryParams}` : ''}`);
@@ -1146,13 +1264,29 @@ export const api = {
   // ============================================
   // Debug Tools
   // ============================================
-  debugResolveApiKey: (apiKey: string) =>
-    requestJson('/authnz/debug/api-key-id', {
-      headers: { 'X-API-KEY': apiKey },
-    }),
+  debugResolveApiKey: (value: string, options?: { mode?: 'raw_key' | 'key_id' | 'user_id' }) => {
+    const mode = options?.mode ?? 'raw_key';
+    if (mode === 'key_id') {
+      return requestJson(`/authnz/debug/api-key-id?key_id=${encodeURIComponent(value)}`);
+    }
+    if (mode === 'user_id') {
+      return requestJson(`/authnz/debug/api-key-id?user_id=${encodeURIComponent(value)}`);
+    }
+    return requestJson('/authnz/debug/api-key-id', {
+      headers: { 'X-API-KEY': value },
+    });
+  },
   debugGetBudgetSummary: (apiKey: string) =>
     requestJson('/authnz/debug/budget-summary', {
       headers: { 'X-API-KEY': apiKey },
+    }),
+  debugResolvePermissions: (userId: string) =>
+    requestJson(`/authnz/debug/permissions?user_id=${encodeURIComponent(userId)}`),
+  debugValidateToken: (token: string) =>
+    requestJson('/authnz/debug/validate-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
     }),
 
   // ============================================
@@ -1167,6 +1301,11 @@ export const api = {
   closeACPSession: (sessionId: string) =>
     requestJson(`/admin/acp/sessions/${encodeURIComponent(sessionId)}/close`, {
       method: 'POST',
+    }),
+  setSessionBudget: (sessionId: string, data: { token_budget: number; auto_terminate_at_budget?: boolean }) =>
+    requestJson(`/admin/acp/sessions/${encodeURIComponent(sessionId)}/budget`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
     }),
 
   // ============================================
@@ -1192,6 +1331,18 @@ export const api = {
     requestJson(`/admin/acp/agents/${configId}`, {
       method: 'DELETE',
     }),
+  getACPAgentMetrics: () =>
+    requestJson<{ items: Array<{
+      agent_type: string;
+      session_count: number;
+      active_sessions: number;
+      total_prompt_tokens: number;
+      total_completion_tokens: number;
+      total_tokens: number;
+      total_messages: number;
+      last_used_at: string | null;
+      total_estimated_cost_usd: number | null;
+    }> }>('/admin/acp/agents/metrics'),
   getACPAgentUsage: (rangeDays = 7) =>
     requestJson<{
       agents: Array<{
@@ -1275,6 +1426,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
+  validateVoiceCommand: (commandId: string) =>
+    requestJson<VoiceCommandValidationResponse>(`/voice/commands/${encodeURIComponent(commandId)}/validate`, {
+      method: 'POST',
+    }),
 
   // Voice Sessions
   getVoiceSessions: (params?: Record<string, string>) => {
@@ -1328,6 +1483,9 @@ export const api = {
   // ============================================
   // Plans & Billing
   // ============================================
+  getBillingAnalytics: () =>
+    requestJson<BillingAnalytics>('/admin/billing/analytics'),
+
   getPlans: (params?: Record<string, QueryParamValue>) => {
     const qs = buildQueryString(params);
     return requestJson<Plan[]>(`/billing/plans${qs ? `?${qs}` : ''}`);

@@ -1,10 +1,11 @@
 import React from "react"
 import { KeyRound, Settings } from "lucide-react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { PageShell } from "@/components/Common/PageShell"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
+import { buildFirstRunOnboardingRoute } from "@/utils/onboarding-route-intent"
 
 type WorkspaceConnectionGateProps = {
   featureName: string
@@ -47,11 +48,12 @@ export const WorkspaceConnectionGate: React.FC<
   renderTesting
 }) => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { uxState, hasCompletedFirstRun } = useConnectionUxState()
 
   const openSettings = () => navigate("/settings/tldw")
   const openDiagnostics = () => navigate("/settings/health")
-  const finishSetup = () => navigate("/")
+  const finishSetup = () => navigate(buildFirstRunOnboardingRoute(location))
 
   if (uxState === "demo_mode") {
     return renderDemo ? <>{renderDemo()}</> : <>{children}</>

@@ -25,12 +25,17 @@ from urllib.parse import urlsplit
 from loguru import logger
 
 from ....DB_Management.db_path_utils import DatabasePaths
+from ....DB_Management.media_db.errors import DatabaseError
 from ....DB_Management.media_db.api import (
     create_media_database,
     get_document_version,
     get_latest_transcription,
     get_media_by_id,
     get_media_transcripts,
+    get_unvectorized_anchor_index_for_offset,
+    get_unvectorized_chunk_index_by_uuid,
+    get_unvectorized_chunks_in_range,
+    has_unvectorized_chunks,
     permanently_delete_item,
     search_media,
 )
@@ -60,6 +65,10 @@ _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     json.JSONDecodeError,
 )
+
+
+class UnsupportedMediaQueueBackendError(RuntimeError):
+    """Raised when a configured media queue backend is recognized but not implemented."""
 
 
 class MediaModule(BaseModule):
@@ -769,10 +778,17 @@ class MediaModule(BaseModule):
             try:
                 if approx_offset is not None and isinstance(mid, (int, str)):
                     mid_int = int(mid)
-                    if dbi.has_unvectorized_chunks(mid_int):
-                        cidx = dbi.get_unvectorized_anchor_index_for_offset(mid_int, int(approx_offset))
+                    if has_unvectorized_chunks(dbi, mid_int):
+                        cidx = get_unvectorized_anchor_index_for_offset(
+                            dbi,
+                            mid_int,
+                            int(approx_offset),
+                        )
                         if cidx is not None:
                             loc_hint = {"chunk_index": cidx}
+            except DatabaseError as exc:
+                logger.debug("Chunk anchor lookup failed for media {}: {}", mid, exc)
+                loc_hint = None
             except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS:
                 loc_hint = None
             out.append({
@@ -900,82 +916,104 @@ class MediaModule(BaseModule):
             if isinstance(loc, dict) and isinstance(loc.get("chunk_uuid"), str):
                 anchor_uuid = str(loc.get("chunk_uuid"))
 
-            if prefer_prechunked and dbi.has_unvectorized_chunks(media_id):
-                # Resolve anchor by uuid or offset
-                if anchor_index is None and anchor_uuid:
-                    anchor_index = dbi.get_unvectorized_chunk_index_by_uuid(media_id, anchor_uuid)
-                if anchor_index is None and isinstance(approx_offset, int):
-                    anchor_index = dbi.get_unvectorized_anchor_index_for_offset(media_id, approx_offset)
-                if anchor_index is None:
-                    anchor_index = 0
+            if prefer_prechunked:
+                try:
+                    if has_unvectorized_chunks(dbi, media_id):
+                        # Resolve anchor by uuid or offset
+                        if anchor_index is None and anchor_uuid:
+                            anchor_index = get_unvectorized_chunk_index_by_uuid(dbi, media_id, anchor_uuid)
+                        if anchor_index is None and isinstance(approx_offset, int):
+                            anchor_index = get_unvectorized_anchor_index_for_offset(
+                                dbi,
+                                media_id,
+                                approx_offset,
+                            )
+                        if anchor_index is None:
+                            anchor_index = 0
 
-                anchor_list = dbi.get_unvectorized_chunks_in_range(media_id, anchor_index, anchor_index)
-                if anchor_list:
-                    anchor_chunk = anchor_list[0]
-                    anchor_uuid = anchor_chunk.get("uuid") or anchor_uuid
+                        anchor_list = get_unvectorized_chunks_in_range(
+                            dbi,
+                            media_id,
+                            anchor_index,
+                            anchor_index,
+                        )
+                        if anchor_list:
+                            anchor_chunk = anchor_list[0]
+                            anchor_uuid = anchor_chunk.get("uuid") or anchor_uuid
 
-                    if mode == "chunk":
-                        body = anchor_chunk.get("chunk_text") or ""
-                        item["loc"] = {"chunk_index": anchor_index, "chunk_uuid": anchor_uuid}
-                        return {"meta": item, "content": body, "attachments": None}
+                            if mode == "chunk":
+                                body = anchor_chunk.get("chunk_text") or ""
+                                item["loc"] = {"chunk_index": anchor_index, "chunk_uuid": anchor_uuid}
+                                return {"meta": item, "content": body, "attachments": None}
 
-                    # chunk_with_siblings budgeted expansion
-                    budget_tokens = int(max_tokens) if max_tokens else None
-                    selected_indexes: list[int] = [anchor_index]
-                    selected_texts: dict[int, str] = {anchor_index: anchor_chunk.get("chunk_text") or ""}
-                    if budget_tokens is None:
-                        for d in range(1, max(1, sibling_window) + 1):
-                            li = anchor_index - d
-                            ri = anchor_index + d
-                            if li >= 0:
-                                left_chunks = dbi.get_unvectorized_chunks_in_range(media_id, li, li)
-                                if left_chunks:
-                                    selected_indexes.insert(0, li)
-                                    selected_texts[li] = left_chunks[0].get("chunk_text") or ""
-                            right_chunks = dbi.get_unvectorized_chunks_in_range(media_id, ri, ri)
-                            if right_chunks:
-                                selected_indexes.append(ri)
-                                selected_texts[ri] = right_chunks[0].get("chunk_text") or ""
-                    else:
-                        current_tokens = _estimate_tokens(len(selected_texts[anchor_index]))
-                        left = anchor_index - 1
-                        right = anchor_index + 1
-                        while True:
-                            progressed = False
-                            if left >= 0:
-                                lc = dbi.get_unvectorized_chunks_in_range(media_id, left, left)
-                                if lc:
-                                    t_add = _estimate_tokens(len(lc[0].get("chunk_text") or ""))
-                                    if current_tokens + t_add <= budget_tokens:
-                                        selected_indexes.insert(0, left)
-                                        selected_texts[left] = lc[0].get("chunk_text") or ""
-                                        current_tokens += t_add
-                                        left -= 1
-                                        progressed = True
-                            rc = dbi.get_unvectorized_chunks_in_range(media_id, right, right)
-                            if rc:
-                                t_add = _estimate_tokens(len(rc[0].get("chunk_text") or ""))
-                                if current_tokens + t_add <= budget_tokens:
-                                    selected_indexes.append(right)
-                                    selected_texts[right] = rc[0].get("chunk_text") or ""
-                                    current_tokens += t_add
-                                    right += 1
-                                    progressed = True
-                            if not progressed:
-                                break
+                            # chunk_with_siblings budgeted expansion
+                            budget_tokens = int(max_tokens) if max_tokens else None
+                            selected_indexes: list[int] = [anchor_index]
+                            selected_texts: dict[int, str] = {anchor_index: anchor_chunk.get("chunk_text") or ""}
+                            if budget_tokens is None:
+                                for d in range(1, max(1, sibling_window) + 1):
+                                    li = anchor_index - d
+                                    ri = anchor_index + d
+                                    if li >= 0:
+                                        left_chunks = get_unvectorized_chunks_in_range(dbi, media_id, li, li)
+                                        if left_chunks:
+                                            selected_indexes.insert(0, li)
+                                            selected_texts[li] = left_chunks[0].get("chunk_text") or ""
+                                    right_chunks = get_unvectorized_chunks_in_range(dbi, media_id, ri, ri)
+                                    if right_chunks:
+                                        selected_indexes.append(ri)
+                                        selected_texts[ri] = right_chunks[0].get("chunk_text") or ""
+                            else:
+                                current_tokens = _estimate_tokens(len(selected_texts[anchor_index]))
+                                left = anchor_index - 1
+                                right = anchor_index + 1
+                                while True:
+                                    progressed = False
+                                    if left >= 0:
+                                        lc = get_unvectorized_chunks_in_range(dbi, media_id, left, left)
+                                        if lc:
+                                            t_add = _estimate_tokens(len(lc[0].get("chunk_text") or ""))
+                                            if current_tokens + t_add <= budget_tokens:
+                                                selected_indexes.insert(0, left)
+                                                selected_texts[left] = lc[0].get("chunk_text") or ""
+                                                current_tokens += t_add
+                                                left -= 1
+                                                progressed = True
+                                    rc = get_unvectorized_chunks_in_range(dbi, media_id, right, right)
+                                    if rc:
+                                        t_add = _estimate_tokens(len(rc[0].get("chunk_text") or ""))
+                                        if current_tokens + t_add <= budget_tokens:
+                                            selected_indexes.append(right)
+                                            selected_texts[right] = rc[0].get("chunk_text") or ""
+                                            current_tokens += t_add
+                                            right += 1
+                                            progressed = True
+                                    if not progressed:
+                                        break
 
-                    body = "\n\n".join([selected_texts[i] for i in selected_indexes])
-                    item["loc"] = {"chunk_index": anchor_index, "chunk_uuid": anchor_uuid}
-                    return {"meta": item, "content": body, "attachments": None}
+                            body = "\n\n".join([selected_texts[i] for i in selected_indexes])
+                            item["loc"] = {"chunk_index": anchor_index, "chunk_uuid": anchor_uuid}
+                            return {"meta": item, "content": body, "attachments": None}
+                except DatabaseError as exc:
+                    logger.debug("Prechunked retrieval failed for media {}: {}", media_id, exc)
 
-            # Fallback: on-the-fly chunking from full content
+            # Fallback: on-the-fly chunking from full content.
+            # Preserve anchor_index if it was already resolved (e.g. from
+            # chunk_index loc hint or uuid/offset lookup) before the DB call
+            # that raised DatabaseError.
             size_chars = max(1, chunk_size_tokens * cpt)
             chunks = _chunkify(content, size_chars)
             if not chunks:
                 body = self._make_snippet(content, None, snippet_length)
                 return {"meta": item, "content": body, "attachments": None}
 
-            anchor_index = 0 if approx_offset is None else max(0, min(len(chunks) - 1, approx_offset // size_chars))
+            if anchor_index is not None:
+                # Clamp the previously-resolved index to the on-the-fly chunk list bounds.
+                anchor_index = max(0, min(len(chunks) - 1, anchor_index))
+            elif approx_offset is not None:
+                anchor_index = max(0, min(len(chunks) - 1, approx_offset // size_chars))
+            else:
+                anchor_index = 0
 
             if mode == "chunk":
                 body = chunks[anchor_index]
@@ -1632,8 +1670,12 @@ class MediaModule(BaseModule):
                     or self.config.settings.get("queue_provider")
                 )
                 if queue_backend:
-                    await self._queue_media_job(job_id)
-                    queued = True
+                    try:
+                        await self._queue_media_job(job_id)
+                        queued = True
+                    except UnsupportedMediaQueueBackendError as exc:
+                        logger.warning("Falling back to inline ingestion for {}: {}", queue_backend, exc)
+                        await self._process_media_job(job_id)
                 else:
                     await self._process_media_job(job_id)
 
@@ -2212,7 +2254,7 @@ class MediaModule(BaseModule):
         )
         if not queue_backend:
             raise RuntimeError("Ingestion queue not configured; set ingestion_queue to enable background jobs")
-        raise RuntimeError(f"Ingestion queue backend '{queue_backend}' not implemented")
+        raise UnsupportedMediaQueueBackendError(f"Ingestion queue backend '{queue_backend}' not implemented")
 
     async def _get_media_stats(self, media_id: int) -> dict[str, Any]:
         """Get media statistics"""

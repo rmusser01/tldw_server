@@ -16,9 +16,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
+import { RefreshCw, Briefcase, Filter, AlertTriangle, Eye, RotateCcw, XCircle, Repeat, Clock, Plus, X, Paperclip, Trash2 } from 'lucide-react';
 import { ExportMenu } from '@/components/ui/export-menu';
-import { exportData, type ExportFormat } from '@/lib/export';
-import { RefreshCw, Briefcase, Filter, AlertTriangle, Eye, RotateCcw, XCircle, Repeat, Clock, Plus, X, Paperclip } from 'lucide-react';
+import { exportJobs, ExportFormat } from '@/lib/export';
 import { AccessibleIconButton } from '@/components/ui/accessible-icon-button';
 import { api, ApiError } from '@/lib/api-client';
 import { formatBytes, formatDateTime, formatDuration } from '@/lib/format';
@@ -30,10 +30,27 @@ interface SlaPolicy {
   id: string;
   name: string;
   job_type?: string;
+  domain?: string;
+  queue?: string;
   max_processing_time_seconds: number;
   max_wait_time_seconds: number;
+  max_queue_latency_seconds?: number;
+  max_duration_seconds?: number;
   priority_boost?: number;
   enabled: boolean;
+}
+
+interface SlaBreach {
+  job_id: number;
+  domain: string;
+  queue: string;
+  job_type: string;
+  status: string;
+  breach_kinds: string[];
+  wait_seconds?: number;
+  max_wait_seconds?: number;
+  processing_seconds?: number;
+  max_processing_seconds?: number;
 }
 
 interface JobAttachment {
@@ -275,6 +292,11 @@ export default function JobsPage() {
   const [slaFormMaxProcessing, setSlaFormMaxProcessing] = useState('3600');
   const [slaFormMaxWait, setSlaFormMaxWait] = useState('300');
   const [slaFormEnabled, setSlaFormEnabled] = useState(true);
+  const [slaFormDomain, setSlaFormDomain] = useState('');
+  const [slaFormQueue, setSlaFormQueue] = useState('');
+
+  // SLA Breaches
+  const [slaBreaches, setSlaBreaches] = useState<SlaBreach[]>([]);
 
   // Job Attachments
   const [jobAttachments, setJobAttachments] = useState<JobAttachment[]>([]);
@@ -344,12 +366,13 @@ export default function JobsPage() {
       granularity: '1h',
     };
 
-    const [statsResult, jobsResult, staleResult, slaResult, queueHistoryResult] = await Promise.allSettled([
+    const [statsResult, jobsResult, staleResult, slaResult, queueHistoryResult, breachesResult] = await Promise.allSettled([
       api.getJobsStats(statsParams),
       api.getJobs(listParams),
       api.getJobsStale(statsParams),
       api.getJobSlaPolicies(),
       api.getMonitoringMetrics(queueHistoryParams),
+      api.getJobSlaBreaches(statsParams),
     ]);
 
     const sawNotFound = [statsResult, jobsResult, staleResult].some(
@@ -391,6 +414,12 @@ export default function JobsPage() {
       );
     }
 
+    if (breachesResult.status === 'fulfilled') {
+      setSlaBreaches(Array.isArray(breachesResult.value) ? breachesResult.value as SlaBreach[] : []);
+    } else {
+      setSlaBreaches([]);
+    }
+
     let nextQueueHistory: QueueDepthPoint[] = [];
     if (queueHistoryResult.status === 'fulfilled') {
       nextQueueHistory = normalizeMonitoringMetricsPayload(
@@ -412,6 +441,18 @@ export default function JobsPage() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const breachedJobIds = useMemo(() => {
+    const ids = new Set<number>();
+    slaBreaches.forEach((b) => ids.add(b.job_id));
+    return ids;
+  }, [slaBreaches]);
+
+  const breachByJobId = useMemo(() => {
+    const map = new Map<number, SlaBreach>();
+    slaBreaches.forEach((b) => map.set(b.job_id, b));
+    return map;
+  }, [slaBreaches]);
 
   const jobLookupByRef = useMemo(() => {
     const lookup = new Map<string, JobItem>();
@@ -562,6 +603,10 @@ export default function JobsPage() {
       showError('Name required', 'Please enter a policy name');
       return;
     }
+    if (!slaFormJobType.trim()) {
+      showError('Job type required', 'Please enter a backend job type');
+      return;
+    }
     const maxProcessing = parseInt(slaFormMaxProcessing, 10);
     const maxWait = parseInt(slaFormMaxWait, 10);
     if (Number.isNaN(maxProcessing) || maxProcessing < 1) {
@@ -577,15 +622,19 @@ export default function JobsPage() {
       setSlaFormSaving(true);
       await api.createJobSlaPolicy({
         name: slaFormName.trim(),
-        job_type: slaFormJobType.trim() || undefined,
-        max_processing_time_seconds: maxProcessing,
-        max_wait_time_seconds: maxWait,
+        domain: slaFormDomain.trim() || 'default',
+        queue: slaFormQueue.trim() || 'default',
+        job_type: slaFormJobType.trim(),
+        max_queue_latency_seconds: maxWait,
+        max_duration_seconds: maxProcessing,
         enabled: slaFormEnabled,
       });
       success('SLA policy created', `Policy "${slaFormName}" has been created`);
       setShowSlaForm(false);
       setSlaFormName('');
       setSlaFormJobType('');
+      setSlaFormDomain('');
+      setSlaFormQueue('');
       setSlaFormMaxProcessing('3600');
       setSlaFormMaxWait('300');
       setSlaFormEnabled(true);
@@ -595,6 +644,33 @@ export default function JobsPage() {
       showError('Create failed', message);
     } finally {
       setSlaFormSaving(false);
+    }
+  };
+
+  const handleDeleteSlaPolicy = async (policy: SlaPolicy) => {
+    const policyDomain = policy.domain || 'default';
+    const policyQueue = policy.queue || 'default';
+    const policyJobType = policy.job_type || policy.name || '';
+    const confirmed = await confirm({
+      title: 'Delete SLA policy',
+      message: `Delete SLA policy for ${policyJobType} (${policyDomain}/${policyQueue})?`,
+      confirmText: 'Delete',
+      variant: 'danger',
+      icon: 'warning',
+    });
+    if (!confirmed) return;
+
+    try {
+      await api.deleteJobSlaPolicy({
+        domain: policyDomain,
+        queue: policyQueue,
+        job_type: policyJobType,
+      });
+      success('Policy deleted', `SLA policy for "${policyJobType}" has been deleted`);
+      void loadData();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to delete SLA policy';
+      showError('Delete failed', message);
     }
   };
 
@@ -734,15 +810,9 @@ export default function JobsPage() {
               <h1 className="text-3xl font-bold">Jobs</h1>
               <p className="text-muted-foreground">Inspect queues, job health, and recent activity</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap gap-2">
               <ExportMenu
-                onExport={(format: ExportFormat) => {
-                  exportData({
-                    data: jobs as unknown as Record<string, unknown>[],
-                    filename: 'jobs',
-                    format,
-                  });
-                }}
+                onExport={(format: ExportFormat) => exportJobs(jobs, format)}
                 disabled={jobs.length === 0}
               />
               <Button variant="outline" onClick={loadData} disabled={loading}>
@@ -1032,6 +1102,11 @@ export default function JobsPage() {
                   <CardTitle className="flex items-center gap-2">
                     <Clock className="h-5 w-5" />
                     SLA Policies
+                    {slaBreaches.length > 0 && (
+                      <Badge variant="destructive" data-testid="sla-breach-count">
+                        {slaBreaches.length} breach{slaBreaches.length !== 1 ? 'es' : ''}
+                      </Badge>
+                    )}
                   </CardTitle>
                   <CardDescription>Service level agreements for job processing times</CardDescription>
                 </div>
@@ -1067,7 +1142,7 @@ export default function JobsPage() {
                       onClick={() => setShowSlaForm(false)}
                     />
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <div className="space-y-1">
                       <Label htmlFor="sla-name">Policy Name</Label>
                       <Input
@@ -1078,7 +1153,25 @@ export default function JobsPage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor="sla-job-type">Job Type (optional)</Label>
+                      <Label htmlFor="sla-domain">Domain</Label>
+                      <Input
+                        id="sla-domain"
+                        placeholder="default"
+                        value={slaFormDomain}
+                        onChange={(e) => setSlaFormDomain(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="sla-queue">Queue</Label>
+                      <Input
+                        id="sla-queue"
+                        placeholder="default"
+                        value={slaFormQueue}
+                        onChange={(e) => setSlaFormQueue(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="sla-job-type">Job Type</Label>
                       <Input
                         id="sla-job-type"
                         placeholder="e.g., export"
@@ -1138,28 +1231,39 @@ export default function JobsPage() {
                 <Table caption={`SLA policies table with ${slaPolicies.length} rows.`}>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Name</TableHead>
+                      <TableHead>Domain</TableHead>
+                      <TableHead>Queue</TableHead>
                       <TableHead>Job Type</TableHead>
                       <TableHead className="text-right">Max Processing</TableHead>
                       <TableHead className="text-right">Max Wait</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {slaPolicies.map((policy) => (
-                      <TableRow key={policy.id}>
-                        <TableCell className="font-medium">{policy.name}</TableCell>
-                        <TableCell>{policy.job_type || 'All'}</TableCell>
+                    {slaPolicies.map((policy, idx) => (
+                      <TableRow key={policy.id || `sla-${idx}`}>
+                        <TableCell>{policy.domain || '—'}</TableCell>
+                        <TableCell>{policy.queue || '—'}</TableCell>
+                        <TableCell className="font-medium">{policy.job_type || policy.name || 'All'}</TableCell>
                         <TableCell className="text-right">
-                          {formatDurationDisplay(policy.max_processing_time_seconds)}
+                          {formatDurationDisplay(policy.max_duration_seconds ?? policy.max_processing_time_seconds)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {formatDurationDisplay(policy.max_wait_time_seconds)}
+                          {formatDurationDisplay(policy.max_queue_latency_seconds ?? policy.max_wait_time_seconds)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={policy.enabled ? 'default' : 'secondary'}>
                             {policy.enabled ? 'Enabled' : 'Disabled'}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <AccessibleIconButton
+                            icon={Trash2}
+                            label="Delete policy"
+                            variant="outline"
+                            onClick={() => handleDeleteSlaPolicy(policy)}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1267,6 +1371,8 @@ export default function JobsPage() {
                         const canCancel = normalizedStatus === 'queued' || normalizedStatus === 'processing';
                         const canRetry = normalizedStatus === 'failed';
                         const canRequeue = normalizedStatus === 'quarantined';
+                        const isBreaching = breachedJobIds.has(job.id);
+                        const breach = breachByJobId.get(job.id);
 
                         // SLA breach detection
                         const matchingSla =
@@ -1296,10 +1402,19 @@ export default function JobsPage() {
                         );
 
                         return (
-                          <TableRow key={job.id} className={isSlaBreach ? 'bg-red-50 dark:bg-red-950/20' : ''}>
+                          <TableRow key={job.id} className={isBreaching ? 'bg-red-50 dark:bg-red-950/30' : ''}>
                             <TableCell className="font-medium">
                               {job.id}
-                              {isSlaBreach && <Badge variant="destructive" className="ml-1 text-[10px] px-1">SLA</Badge>}
+                              {isBreaching && (
+                                <Badge
+                                  variant="destructive"
+                                  className="ml-2"
+                                  title={breach ? breach.breach_kinds.join(', ') : 'SLA breach'}
+                                  data-testid={`sla-breach-badge-${job.id}`}
+                                >
+                                  SLA
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell>{job.domain}</TableCell>
                             <TableCell>{job.queue}</TableCell>

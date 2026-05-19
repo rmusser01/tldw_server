@@ -3,6 +3,7 @@
  */
 
 import React, { useCallback, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import {
   FileText,
   Globe,
@@ -121,7 +122,8 @@ export function SourceCard({
   density = "default",
   className,
 }: SourceCardProps) {
-  const [copiedState, setCopiedState] = React.useState<"text" | "citation" | null>(null)
+  const { t } = useTranslation("knowledge")
+  const [copiedState, setCopiedState] = React.useState<"excerpt" | "citation" | null>(null)
   const [isExpanded, setIsExpanded] = React.useState(false)
   const [overflowOpen, setOverflowOpen] = React.useState(false)
   const overflowRef = React.useRef<HTMLDivElement>(null)
@@ -154,6 +156,33 @@ export function SourceCard({
         (value): value is string => Boolean(value)
       )
     : []
+
+  // Determine whether this source is a document that can be opened in the
+  // Document Workspace (PDF, EPUB, or generic "document"/"ebook" media types).
+  const contentFacet = detectSourceContentFacet(result)
+  const rawMediaType = String(
+    (result.metadata as Record<string, unknown> | undefined)?.media_type ?? ""
+  ).toLowerCase()
+  const isDocumentType =
+    contentFacet === "pdf" ||
+    rawMediaType.includes("pdf") ||
+    rawMediaType.includes("ebook") ||
+    rawMediaType === "document"
+
+  // Resolve the numeric media_id from metadata for workspace navigation.
+  const resolvedMediaId = (() => {
+    const raw =
+      (result.metadata as Record<string, unknown> | undefined)?.media_id ??
+      result.metadata?.id ??
+      result.id
+    if (typeof raw === "number" && Number.isFinite(raw)) return Math.round(raw)
+    if (typeof raw === "string" && /^\d+$/.test(raw.trim())) {
+      return Number.parseInt(raw.trim(), 10)
+    }
+    return null
+  })()
+
+  const canOpenInWorkspace = isDocumentType && resolvedMediaId != null
 
   const Icon = getSourceIcon(sourceType)
 
@@ -197,20 +226,20 @@ export function SourceCard({
     }, 2000)
   }, [])
 
-  const handleCopyText = useCallback(async () => {
+  const handleCopyExcerpt = useCallback(async () => {
     const requestId = latestCopyRequestIdRef.current + 1
     latestCopyRequestIdRef.current = requestId
     try {
-      await navigator.clipboard.writeText(content)
+      await navigator.clipboard.writeText(excerpt)
       if (!isMountedRef.current || latestCopyRequestIdRef.current !== requestId) {
         return
       }
-      setCopiedState("text")
+      setCopiedState("excerpt")
       scheduleCopiedStateReset(requestId)
     } catch (error) {
-      console.error("Failed to copy source text:", error)
+      console.error("Failed to copy source excerpt:", error)
     }
-  }, [content, scheduleCopiedStateReset])
+  }, [excerpt, scheduleCopiedStateReset])
 
   const handleCopyCitation = useCallback(async () => {
     const requestId = latestCopyRequestIdRef.current + 1
@@ -519,8 +548,9 @@ export function SourceCard({
             onClick={handleCopyCitation}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
             title="Copy citation"
+            aria-label={`Copy citation for source ${index}`}
           >
-            {copiedState === "citation" ? "Copied!" : "Cite"}
+            {copiedState === "citation" ? "Copied!" : "Copy citation"}
           </button>
 
           <div ref={overflowRef} className="relative">
@@ -592,18 +622,23 @@ export function SourceCard({
                 <button
                   type="button"
                   role="menuitem"
+                  aria-label={
+                    copiedState === "excerpt"
+                      ? `Copied excerpt from source ${index}`
+                      : `Copy excerpt from source ${index}`
+                  }
                   onClick={() => {
-                    handleCopyText()
+                    handleCopyExcerpt()
                     setOverflowOpen(false)
                   }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
                 >
-                  {copiedState === "text" ? (
+                  {copiedState === "excerpt" ? (
                     <Check className="w-3.5 h-3.5" />
                   ) : (
                     <Copy className="w-3.5 h-3.5" />
                   )}
-                  {copiedState === "text" ? "Copied text" : "Copy text"}
+                  {copiedState === "excerpt" ? "Copied excerpt" : "Copy excerpt"}
                 </button>
                 {url && (
                   <button
@@ -618,6 +653,28 @@ export function SourceCard({
                     <ExternalLink className="w-3.5 h-3.5" />
                     Open original
                   </button>
+                )}
+                {canOpenInWorkspace && (
+                  <>
+                    <div className="my-1 border-t border-border/50" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-label={t("sourceCard.openInWorkspace", "Open in Document Workspace")}
+                      onClick={() => {
+                        window.open(
+                          `/document-workspace?open=${resolvedMediaId}`,
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                        setOverflowOpen(false)
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      {t("sourceCard.openInWorkspace", "Open in Document Workspace")}
+                    </button>
+                  </>
                 )}
               </div>
             )}

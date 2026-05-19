@@ -96,14 +96,14 @@ export abstract class BasePage {
           }
 
           case "state_change": {
-            const before = await el.expectation.stateCheck(this.page)
+            const stateCheck = el.expectation.stateCheck
+            const before = await stateCheck(this.page)
             await el.locator.click()
             const beforeSerialized = JSON.stringify(before)
             try {
               await expect
                 .poll(
-                  async () =>
-                    JSON.stringify(await el.expectation.stateCheck(this.page)),
+                  async () => JSON.stringify(await stateCheck(this.page)),
                   { timeout: 5_000 }
                 )
                 .not.toBe(beforeSerialized)

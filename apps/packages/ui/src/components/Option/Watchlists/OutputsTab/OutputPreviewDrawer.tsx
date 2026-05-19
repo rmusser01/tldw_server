@@ -23,15 +23,18 @@ import {
   restoreFocusToElement
 } from "../shared/focus-management"
 import {
+  type AudioArtifactSummary,
   getDeliveryStatusColor,
   getOutputArtifactLabel,
   getOutputFileExtension,
+  getOutputAudioStatusSummary,
   getOutputDeliveryStatuses,
   getOutputMimeType,
   getOutputTemplateName,
   getOutputTemplateVersion,
   isAudioOutput
 } from "./outputMetadata"
+import { ReportEvidencePanel } from "./ReportEvidencePanel"
 
 interface OutputPreviewDrawerProps {
   output: WatchlistOutput | null | undefined
@@ -199,6 +202,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     return getOutputDeliveryStatuses(output?.metadata)
   }, [output?.metadata])
 
+  const audioSummary = useMemo(() => {
+    return getOutputAudioStatusSummary(output?.metadata)
+  }, [output?.metadata])
+
   const templateName = useMemo(() => {
     return getOutputTemplateName(output?.metadata)
   }, [output?.metadata])
@@ -209,6 +216,17 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const artifactLabel = useMemo(() => {
     return getOutputArtifactLabel(output)
   }, [output])
+  const hasReportEvidenceMetadata = useMemo(() => {
+    const metadata = output?.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return false
+    }
+    return (
+      "report_snapshot_path" in metadata ||
+      "report_readiness" in metadata ||
+      "report_schema_version" in metadata
+    )
+  }, [output?.metadata])
 
   // Open in new tab (for HTML)
   const handleOpenInNewTab = () => {
@@ -219,6 +237,59 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     window.open(url, "_blank")
     // Clean up after a delay
     setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const renderAudioArtifactGraph = () => {
+    if (!audioSummary.requested) return null
+
+    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+      <div key={key}>
+        <div className="font-medium text-text">{artifact.label}</div>
+        {artifact.displayName ? <div>{artifact.displayName}</div> : null}
+        {artifact.downloadUrl ? (
+          <a
+            href={artifact.downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+            aria-label={t("watchlists:outputs.openAudioArtifactAria", "Open {{label}}", {
+              label: artifact.label
+            })}
+          >
+            {t("watchlists:outputs.openAudioArtifact", "Open")}
+          </a>
+        ) : null}
+      </div>
+    )
+
+    return (
+      <div className="space-y-2" data-testid="output-preview-audio-artifacts">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-medium text-text">
+            {t("watchlists:outputs.audioArtifactsLabel", "Audio artifacts")}
+          </div>
+          <Tag color={audioSummary.statusColor}>{audioSummary.statusLabel}</Tag>
+        </div>
+        {audioSummary.fallbackReason && (
+          <div className="text-xs text-warning">
+            {t("watchlists:outputs.audioFallback", "Fallback: {{reason}}", {
+              reason: audioSummary.fallbackReason
+            })}
+          </div>
+        )}
+        <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+          {audioSummary.scriptArtifact && (
+            renderArtifact(audioSummary.scriptArtifact, "script")
+          )}
+          {audioSummary.speakerArtifacts.map((artifact, index) => (
+            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
+          ))}
+          {audioSummary.finalArtifact && (
+            renderArtifact(audioSummary.finalArtifact, "final")
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -315,6 +386,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}
@@ -325,6 +397,14 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   {t("watchlists:outputs.storagePath", "Stored file")}: {output.storage_path}
                 </div>
               )}
+            </div>
+          )}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
             </div>
           )}
 
@@ -404,6 +484,14 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
               )}
             </div>
           )}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
+            </div>
+          )}
 
           {/* View mode toggle for HTML */}
           {output?.format === "html" && (
@@ -438,10 +526,20 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           )}
         </div>
       ) : (
-        <Empty
-          description={t("watchlists:outputs.noContent", "No content available")}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
+        <div className="space-y-4">
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
+            </div>
+          )}
+          <Empty
+            description={t("watchlists:outputs.noContent", "No content available")}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </div>
       )}
     </Drawer>
   )

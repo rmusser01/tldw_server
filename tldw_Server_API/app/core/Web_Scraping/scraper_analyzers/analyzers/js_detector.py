@@ -103,4 +103,4 @@ def analyze_js_rendering(url: str) -> dict[str, Any]:
     except PlaywrightTimeoutError:
         return {"status": "error", "message": "Page load timed out.", "error_code": "timeout"}
     except Exception as exc:  # pragma: no cover - defensive catch
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": "JavaScript rendering analysis failed."}

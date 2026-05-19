@@ -88,6 +88,35 @@ async def test_authenticate_api_key_user_allows_allowed_single_user_ip(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_authenticate_api_key_user_rejects_nonmatching_single_user_key_without_db_fallback(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "99")
+    reset_settings()
+
+    class _StubAPIKeyManager:
+        async def validate_api_key(self, **_kwargs):
+            raise AssertionError("single-user mismatch must not fall back to DB-backed API keys")
+
+    async def _fake_get_api_key_manager():
+        return _StubAPIKeyManager()
+
+    monkeypatch.setattr(user_handling, "get_api_key_manager", _fake_get_api_key_manager)
+
+    request = _build_request(client_ip="127.0.0.1")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await user_handling.authenticate_api_key_user(request, "db-key-0987654321")
+
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+    assert exc_info.value.detail == "Invalid or missing API Key"
+
+    for env_key in ("AUTH_MODE", "SINGLE_USER_API_KEY", "SINGLE_USER_FIXED_ID"):
+        monkeypatch.delenv(env_key, raising=False)
+    reset_settings()
+
+
+@pytest.mark.asyncio
 async def test_get_request_user_rejects_inactive_api_key_user(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")

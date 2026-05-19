@@ -84,9 +84,10 @@ class FakeDB:
 
 
 @pytest.fixture()
-def client_override(tmp_path):
+def client_override(tmp_path, monkeypatch):
     # Ensure test mode to avoid global rate limiter
-    os.environ["TEST_MODE"] = "true"
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
 
     async def override_user():
         return User(id=1, username="tester", email="t@e.com", is_active=True)
@@ -134,6 +135,7 @@ def test_chatbooks_export_sync_persists_job_and_downloads(client_override: TestC
     data = r.json()
     assert data["success"] is True
     assert isinstance(data.get("job_id"), str) and len(data["job_id"]) > 0
+    assert "file_path" not in data
     assert data.get("download_url", "").endswith(data["job_id"])  # URL is job-based
 
     job_id = data["job_id"]
@@ -186,3 +188,105 @@ def test_chatbooks_export_sync_rejects_result_outside_exports_dir(
     resp = client.post("/api/v1/chatbooks/export", json=_make_export_payload(async_mode=False))
     assert resp.status_code == 500, resp.text
     assert resp.json().get("detail") == "Export path validation failed"
+
+
+@pytest.mark.unit
+def test_chatbooks_export_sync_rejects_missing_result_file(
+    client_override: TestClient,
+    monkeypatch,
+):
+    client = client_override
+    export_dir = DatabasePaths.get_user_chatbooks_exports_dir(1).resolve()
+    missing_path = export_dir / "missing.chatbook"
+
+    async def _fake_create_chatbook(*_args, **_kwargs):
+        return True, "ok", str(missing_path)
+
+    monkeypatch.setattr(chatbooks_mod.ChatbookService, "create_chatbook", _fake_create_chatbook)
+    resp = client.post("/api/v1/chatbooks/export", json=_make_export_payload(async_mode=False))
+    assert resp.status_code == 500, resp.text
+    assert resp.json().get("detail") == "Export archive was not created"
+
+    db = getattr(client, "_chatbooks_db", None)
+    assert db is not None
+    assert db._export_jobs == {}
+
+
+@pytest.mark.unit
+def test_chatbooks_continue_export_sync_persists_job_and_downloads(
+    client_override: TestClient,
+    monkeypatch,
+):
+    client = client_override
+    export_dir = DatabasePaths.get_user_chatbooks_exports_dir(1).resolve()
+    continuation_path = export_dir / "continuation.chatbook"
+    continuation_path.write_bytes(b"continuation-bytes")
+
+    async def _fake_continue_export(*_args, **_kwargs):
+        return True, "Continuation created", str(continuation_path)
+
+    monkeypatch.setattr(chatbooks_mod.ChatbookService, "continue_chatbook_export", _fake_continue_export)
+    opaque_cursor = "-".join(("cursor", "1"))
+
+    response = client.post(
+        "/api/v1/chatbooks/export/continue",
+        json={
+            "export_id": "export-123",
+            "continuations": [{"evaluation_id": "eval-1", "continuation_token": opaque_cursor}],
+            "async_mode": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data == {
+        "success": True,
+        "message": "Continuation created",
+        "job_id": data["job_id"],
+        "download_url": data["download_url"],
+    }
+    assert isinstance(data["job_id"], str) and data["job_id"]
+    assert data["download_url"].endswith(data["job_id"])
+    assert "file_path" not in data
+
+    job_response = client.get(f"/api/v1/chatbooks/export/jobs/{data['job_id']}")
+    assert job_response.status_code == 200, job_response.text
+    job = job_response.json()
+    assert job["status"] == "completed"
+    assert job["download_url"].endswith(data["job_id"])
+
+    download_response = client.get(f"/api/v1/chatbooks/download/{data['job_id']}")
+    assert download_response.status_code == 200, download_response.text
+    assert download_response.headers.get("content-type") == "application/zip"
+
+
+@pytest.mark.unit
+def test_chatbooks_continue_export_sync_rejects_missing_result_file(
+    client_override: TestClient,
+    monkeypatch,
+):
+    client = client_override
+    export_dir = DatabasePaths.get_user_chatbooks_exports_dir(1).resolve()
+    missing_path = export_dir / "missing-continuation.chatbook"
+
+    async def _fake_continue_export(*_args, **_kwargs):
+        return True, "Continuation created", str(missing_path)
+
+    monkeypatch.setattr(chatbooks_mod.ChatbookService, "continue_chatbook_export", _fake_continue_export)
+    opaque_cursor = "-".join(("cursor", "1"))
+
+    response = client.post(
+        "/api/v1/chatbooks/export/continue",
+        json={
+            "export_id": "export-123",
+            "continuations": [{"evaluation_id": "eval-1", "continuation_token": opaque_cursor}],
+            "async_mode": False,
+        },
+    )
+
+    assert response.status_code == 500, response.text
+    assert response.json().get("detail") == "Export archive was not created"
+
+    db = getattr(client, "_chatbooks_db", None)
+    assert db is not None
+    assert db._export_jobs == {}

@@ -72,7 +72,10 @@ def _resolve_config_path(path_hint: str | None) -> Path | None:
             if p.exists() and p.is_file():
                 return p
         except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Skipping invalid config path candidate '{cand}': {exc}")
+            logger.debug(
+                "Skipping invalid config path candidate "
+                f"(error_type={exc.__class__.__name__})"
+            )
             continue
     return None
 
@@ -98,7 +101,10 @@ def _coerce_entry(raw: Any, provider_hint: str | None) -> PhonemeOverrideEntry |
             term, phonemes = raw[0], raw[1]
             return PhonemeOverrideEntry(term=str(term), phonemes=str(phonemes), provider=provider_hint)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug(f"Failed to parse phoneme override entry: {exc}")
+        logger.debug(
+            "Failed to parse phoneme override entry "
+            f"(error_type={exc.__class__.__name__})"
+        )
     return None
 
 
@@ -212,7 +218,10 @@ def _load_override_entries_cached(path_str: str) -> list[PhonemeOverrideEntry]:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
     except Exception as exc:
-        logger.warning(f"Failed to load phoneme overrides from {path}: {exc}")
+        logger.warning(
+            "Failed to load phoneme overrides "
+            f"(error_type={exc.__class__.__name__})"
+        )
         return []
 
     entries = parse_override_entries(data)

@@ -284,6 +284,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_search_ops i
     search_claims,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
+    count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
@@ -412,6 +413,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.pos
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_email_schema import (
     run_postgres_migrate_to_v22,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_transcript_run_history import (
+    run_postgres_migrate_to_v23,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies.postgres_tts_history import (
     run_postgres_migrate_to_v20,
 )
@@ -480,7 +484,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.unvectorized_chunk_
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
 
-    _CURRENT_SCHEMA_VERSION = 22  # Email-native schema bootstrap + lookup indexes
+    _CURRENT_SCHEMA_VERSION = 23  # Transcript run-history schema/bootstrap scaffolding
 
     # <<< Schema Definition (Version 1) >>>
 
@@ -518,6 +522,8 @@ class MediaDatabase:
         team_id INTEGER,
         visibility TEXT DEFAULT 'personal' CHECK (visibility IN ('personal', 'team', 'org')),
         owner_user_id INTEGER,
+        latest_transcription_run_id INTEGER,
+        next_transcription_run_id INTEGER NOT NULL DEFAULT 1,
         client_id TEXT NOT NULL,
         deleted BOOLEAN NOT NULL DEFAULT 0,
         prev_version INTEGER,
@@ -554,6 +560,9 @@ class MediaDatabase:
         whisper_model TEXT,
         transcription TEXT,
         created_at DATETIME,
+        transcription_run_id INTEGER,
+        supersedes_run_id INTEGER,
+        idempotency_key TEXT,
         uuid TEXT UNIQUE NOT NULL,
         last_modified DATETIME NOT NULL,
         version INTEGER NOT NULL DEFAULT 1,
@@ -561,7 +570,6 @@ class MediaDatabase:
         deleted BOOLEAN NOT NULL DEFAULT 0,
         prev_version INTEGER,
         merge_parent_uuid TEXT,
-        UNIQUE (media_id, whisper_model),
         FOREIGN KEY (media_id) REFERENCES Media(id) ON DELETE CASCADE
     );
 
@@ -743,6 +751,8 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_media_team_id ON Media(team_id);
     CREATE INDEX IF NOT EXISTS idx_media_visibility ON Media(visibility);
     CREATE INDEX IF NOT EXISTS idx_media_owner_user_id ON Media(owner_user_id);
+    CREATE INDEX IF NOT EXISTS idx_media_latest_transcription_run_id ON Media(latest_transcription_run_id);
+    CREATE INDEX IF NOT EXISTS idx_media_next_transcription_run_id ON Media(next_transcription_run_id);
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_uuid ON Keywords(uuid);
     CREATE INDEX IF NOT EXISTS idx_keywords_last_modified ON Keywords(last_modified);
@@ -759,6 +769,13 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_transcripts_deleted ON Transcripts(deleted);
     CREATE INDEX IF NOT EXISTS idx_transcripts_prev_version ON Transcripts(prev_version);
     CREATE INDEX IF NOT EXISTS idx_transcripts_merge_parent_uuid ON Transcripts(merge_parent_uuid);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_media_run_id
+        ON Transcripts(media_id, transcription_run_id DESC)
+        WHERE transcription_run_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_transcripts_supersedes_run_id ON Transcripts(supersedes_run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_transcripts_media_idempotency_key
+        ON Transcripts(media_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
 
     CREATE INDEX IF NOT EXISTS idx_mediachunks_media_id ON MediaChunks(media_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_mediachunks_uuid ON MediaChunks(uuid);
@@ -1748,6 +1765,7 @@ MediaDatabase._postgres_migrate_to_v19 = run_postgres_migrate_to_v19
 MediaDatabase._postgres_migrate_to_v20 = run_postgres_migrate_to_v20
 MediaDatabase._postgres_migrate_to_v21 = run_postgres_migrate_to_v21
 MediaDatabase._postgres_migrate_to_v22 = run_postgres_migrate_to_v22
+MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
 MediaDatabase._get_db_version = get_db_version
 MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
 MediaDatabase._sync_postgres_sequences = sync_postgres_sequences
@@ -1877,6 +1895,9 @@ MediaDatabase.upsert_claims_review_extractor_metrics_daily = (
 )
 MediaDatabase.list_claims_review_extractor_metrics_daily = (
     list_claims_review_extractor_metrics_daily
+)
+MediaDatabase.count_claims_review_extractor_metrics_daily = (
+    count_claims_review_extractor_metrics_daily
 )
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids

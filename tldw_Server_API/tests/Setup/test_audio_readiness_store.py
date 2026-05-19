@@ -1,8 +1,30 @@
 import pytest
+import sys
 
 from tldw_Server_API.app.core.Setup import install_manager
 from tldw_Server_API.app.core.Setup import audio_readiness_store
 from tldw_Server_API.app.core.Setup.audio_readiness_store import AudioReadinessStore
+
+
+class _CapturingLogger:
+    def __init__(self):
+        self.records = []
+
+    def debug(self, message, *args, **kwargs):
+        self._capture("debug", message, args, kwargs)
+
+    def warning(self, message, *args, **kwargs):
+        self._capture("warning", message, args, kwargs)
+
+    def _capture(self, level, message, args, kwargs):
+        captured_kwargs = dict(kwargs)
+        if captured_kwargs.get("exc_info"):
+            captured_kwargs["exc_info_repr"] = repr(sys.exc_info()[1])
+        self.records.append((level, message, args, captured_kwargs))
+
+
+def _joined_logs(logger):
+    return "\n".join(f"{level} {message} {args!r} {kwargs!r}" for level, message, args, kwargs in logger.records)
 
 
 def test_audio_readiness_defaults_to_not_started(tmp_path):
@@ -137,10 +159,49 @@ def test_audio_readiness_save_keeps_existing_file_when_atomic_replace_fails(tmp_
     def _raise_replace(_src, _dst):
         raise OSError("replace failed")
 
-    monkeypatch.setattr(readiness_store_module.os, "replace", _raise_replace)
+    monkeypatch.setattr(audio_readiness_store.os, "replace", _raise_replace)
 
     with pytest.raises(OSError, match="replace failed"):
         store.update(status="failed")
 
     assert readiness_path.read_text(encoding="utf-8") == initial_contents
     assert list(tmp_path.glob("audio_readiness.json.*.tmp")) == []
+
+
+def test_resolve_readiness_file_candidate_failure_log_is_sanitized(tmp_path, monkeypatch):
+    readiness_path = tmp_path / "private" / "setup_audio_readiness.json"
+    logger = _CapturingLogger()
+
+    def _raise_write_text(self, *_args, **_kwargs):
+        raise OSError(f"write denied at {readiness_path}")
+
+    monkeypatch.setattr(audio_readiness_store, "logger", logger)
+    monkeypatch.setattr(audio_readiness_store, "_candidate_readiness_files", lambda: [readiness_path])
+    monkeypatch.setattr(audio_readiness_store.Path, "write_text", _raise_write_text)
+
+    assert audio_readiness_store._resolve_readiness_file() is None
+
+    logs = _joined_logs(logger)
+    assert "Audio readiness path" not in logs
+    assert "Audio readiness candidate path not writable" in logs
+    assert str(readiness_path) not in logs
+    assert "write denied" not in logs
+    assert "exc_info" not in logs
+
+
+def test_audio_readiness_load_failure_log_is_sanitized(tmp_path, monkeypatch):
+    readiness_path = tmp_path / "private" / "setup_audio_readiness.json"
+    readiness_path.parent.mkdir()
+    readiness_path.write_text("{invalid-json", encoding="utf-8")
+    logger = _CapturingLogger()
+
+    monkeypatch.setattr(audio_readiness_store, "logger", logger)
+
+    readiness = AudioReadinessStore(readiness_path).load()
+
+    assert readiness["status"] == "not_started"
+    logs = _joined_logs(logger)
+    assert "Failed to read audio readiness" in logs
+    assert str(readiness_path) not in logs
+    assert "Expecting property name" not in logs
+    assert "exc_info" not in logs

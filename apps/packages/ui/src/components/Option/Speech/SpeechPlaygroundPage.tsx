@@ -77,6 +77,10 @@ import { VoicePickerModal, type VoiceSelection } from "@/components/Option/Speec
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
 import { useMultiRenderState } from "@/hooks/useMultiRenderState"
+import {
+  getModels as getElevenLabsModels,
+  getVoices as getElevenLabsVoices
+} from "@/services/elevenlabs"
 
 const { Text, Title, Paragraph } = Typography
 
@@ -111,6 +115,7 @@ const STREAMING_FORMATS = new Set(["mp3", "opus", "aac", "flac", "wav", "pcm"])
 const TTS_CHAR_WARNING = 2000
 const TTS_CHAR_LIMIT = 8000
 const TTS_ESTIMATE_CHARS_PER_SEC = 15
+const ELEVENLABS_INLINE_TEST_TIMEOUT_MS = 10_000
 const TTS_JOB_STEPS = [
   { key: "tts_started", label: "Queued" },
   { key: "tts_synthesizing", label: "Synthesizing" },
@@ -845,6 +850,13 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const [responseSplitting, setResponseSplitting] = React.useState("punctuation")
   const [openAiModel, setOpenAiModel] = React.useState<string | undefined>(undefined)
   const [openAiVoice, setOpenAiVoice] = React.useState<string | undefined>(undefined)
+  const [inlineElevenLabsApiKey, setInlineElevenLabsApiKey] = React.useState("")
+  const [inlineElevenLabsSaving, setInlineElevenLabsSaving] = React.useState(false)
+  const [inlineElevenLabsResult, setInlineElevenLabsResult] = React.useState<{
+    ok: boolean
+    message: string
+  } | null>(null)
+  const [inlineElevenLabsDetailsOpen, setInlineElevenLabsDetailsOpen] = React.useState(true)
   const provider = ttsSettings?.ttsProvider || DEFAULT_TTS_PROVIDER
   const isTldw = provider === "tldw"
   const inferredProviderKey = React.useMemo(() => {
@@ -871,6 +883,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     queryFn: listCustomVoices,
     enabled: isTldw && hasAudio
   })
+
+  React.useEffect(() => {
+    if (provider !== "elevenlabs" || ttsSettings?.elevenLabsApiKey) {
+      setInlineElevenLabsApiKey("")
+      setInlineElevenLabsResult(null)
+      setInlineElevenLabsDetailsOpen(true)
+    }
+  }, [provider, ttsSettings?.elevenLabsApiKey])
 
   const handleAddRenderStrip = React.useCallback(() => {
     // Try to use last-used voice config from localStorage
@@ -1822,7 +1842,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       )
     : t(
         "playground:tts.elevenLabsMissingBody",
-        "Add your ElevenLabs API key in Settings to load voices and models."
+        "Enter your ElevenLabs API key below to load voices and models. You can also manage it in Settings."
       )
   const elevenLabsTimeoutBody = t(
     "playground:tts.elevenLabsTimeoutBody",
@@ -1902,14 +1922,94 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     setInspectorOpen
   ])
 
-  const handleElevenLabsApiKeyFocus = React.useCallback(() => {
-    const el = document.getElementById("elevenlabs-api-key")
-    if (!el) return
+  const handleInlineElevenLabsSave = React.useCallback(async () => {
+    const trimmedKey = inlineElevenLabsApiKey.trim()
+    if (!trimmedKey) {
+      setInlineElevenLabsResult({
+        ok: false,
+        message: t(
+          "playground:tts.elevenLabsInlineKeyRequired",
+          "Enter an ElevenLabs API key first."
+        ) as string
+      })
+      return
+    }
+
+    setInlineElevenLabsSaving(true)
+    setInlineElevenLabsResult(null)
     try {
-      el.scrollIntoView({ block: "center" })
-    } catch {}
-    ;(el as HTMLElement).focus()
-  }, [])
+      const [voices, models] = await Promise.all([
+        getElevenLabsVoices(trimmedKey, {
+          timeoutMs: ELEVENLABS_INLINE_TEST_TIMEOUT_MS
+        }),
+        getElevenLabsModels(trimmedKey, {
+          timeoutMs: ELEVENLABS_INLINE_TEST_TIMEOUT_MS
+        })
+      ])
+      if (
+        !Array.isArray(voices) ||
+        voices.length === 0 ||
+        !Array.isArray(models) ||
+        models.length === 0
+      ) {
+        setInlineElevenLabsResult({
+          ok: false,
+          message: t(
+            "playground:tts.elevenLabsInlineKeyNoResources",
+            "API key accepted, but no voices or models were returned."
+          ) as string
+        })
+        return
+      }
+
+      const currentSettings = await getTTSSettings()
+      await setTTSSettings({
+        ...currentSettings,
+        elevenLabsApiKey: trimmedKey
+      })
+      await queryClient.invalidateQueries({ queryKey: ["fetchTTSSettings"] })
+      const savedMessage = t(
+        "playground:tts.elevenLabsInlineKeySaved",
+        "API key saved. ElevenLabs voices can now load."
+      ) as string
+      notification.success({ message: savedMessage })
+      setInlineElevenLabsResult(null)
+    } catch (error: unknown) {
+      const status =
+        typeof error === "object" && error !== null
+          ? Number((error as { response?: { status?: unknown } }).response?.status)
+          : NaN
+      const code =
+        typeof error === "object" && error !== null
+          ? String((error as { code?: unknown }).code ?? "")
+          : ""
+      const message = isTimeoutLikeError(error)
+        ? t(
+            "playground:tts.elevenLabsInlineKeyTimeout",
+            "Request timed out while validating the API key."
+          )
+        : status === 401 || status === 403
+          ? t(
+              "playground:tts.elevenLabsInlineKeyInvalid",
+              "Invalid ElevenLabs API key. Check the key and try again."
+            )
+          : code === "ERR_NETWORK" || code === "ENOTFOUND" || code === "ECONNREFUSED"
+            ? t(
+                "playground:tts.elevenLabsInlineKeyNetworkError",
+                "Network error while validating the API key. Check your connection and try again."
+              )
+            : t(
+                "playground:tts.elevenLabsInlineKeyFailed",
+                "Unable to validate the ElevenLabs API key."
+              )
+      setInlineElevenLabsResult({
+        ok: false,
+        message: message as string
+      })
+    } finally {
+      setInlineElevenLabsSaving(false)
+    }
+  }, [inlineElevenLabsApiKey, queryClient, t])
 
   const handleAddVoiceCard = () => {
     if (voiceCards.length >= 4) return
@@ -2137,7 +2237,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   }
 
   const pageTitle = isLockedTtsRoute
-    ? t("playground:speech.ttsRouteTitle", "TTS Playground")
+    ? t("playground:speech.textToSpeechRouteTitle", "Text to Speech")
     : t("playground:speech.title", "Speech Playground")
   const pageSubtitle = isLockedTtsRoute
     ? t(
@@ -2160,7 +2260,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   return (
     <PageShell maxWidthClassName="max-w-5xl" className="py-6">
-      <Title level={3} className="!mb-1">{pageTitle}</Title>
+      <Title level={1} className="!mb-1 !text-2xl">{pageTitle}</Title>
       <Text type="secondary">{pageSubtitle}</Text>
 
       <div className="mt-4 space-y-4">
@@ -2492,33 +2592,80 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                         showIcon
                         title={elevenLabsHintTitle}
                         description={
-                          <div className="flex flex-wrap items-center gap-2">
+                          <div className="space-y-3">
                             <span>
                               {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
                                 ? elevenLabsTimeoutBody
                                 : elevenLabsHintBody}
                             </span>
-                            {hasElevenLabsKey && (
-                              <Button
-                                size="small"
-                                type="link"
-                                onClick={() => {
-                                  void refetchElevenLabs()
+                            {hasElevenLabsKey ? (
+                              <div>
+                                <Button
+                                  size="small"
+                                  type="link"
+                                  onClick={() => {
+                                    void refetchElevenLabs()
+                                  }}
+                                >
+                                  {t("common:retry", "Retry")}
+                                </Button>
+                              </div>
+                            ) : (
+                              <details
+                                open={inlineElevenLabsDetailsOpen}
+                                onToggle={(event) => {
+                                  setInlineElevenLabsDetailsOpen(event.currentTarget.open)
                                 }}
+                                className="rounded-md border border-border bg-background/60 px-3 py-2"
                               >
-                                {t("common:retry", "Retry")}
-                              </Button>
+                                <summary className="cursor-pointer text-sm font-medium text-text">
+                                  {t(
+                                    "playground:tts.elevenLabsInlineKeySummary",
+                                    "Enter API key"
+                                  )}
+                                </summary>
+                                <div className="mt-3 space-y-2">
+                                  <Space.Compact className="w-full max-w-xl">
+                                    <Input.Password
+                                      id="elevenlabs-api-key"
+                                      aria-label={t(
+                                        "playground:tts.elevenLabsInlineKeyLabel",
+                                        "ElevenLabs API key"
+                                      ) as string}
+                                      placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                      value={inlineElevenLabsApiKey}
+                                      onChange={(event) => {
+                                        setInlineElevenLabsApiKey(event.target.value)
+                                        setInlineElevenLabsResult(null)
+                                      }}
+                                      onPressEnter={() => {
+                                        void handleInlineElevenLabsSave()
+                                      }}
+                                    />
+                                    <Button
+                                      type="primary"
+                                      loading={inlineElevenLabsSaving}
+                                      disabled={!inlineElevenLabsApiKey.trim()}
+                                      onClick={() => {
+                                        void handleInlineElevenLabsSave()
+                                      }}
+                                    >
+                                      {t(
+                                        "playground:tts.elevenLabsInlineKeySave",
+                                        "Test & Save"
+                                      )}
+                                    </Button>
+                                  </Space.Compact>
+                                  {inlineElevenLabsResult && (
+                                    <Alert
+                                      type={inlineElevenLabsResult.ok ? "success" : "error"}
+                                      showIcon
+                                      title={inlineElevenLabsResult.message}
+                                    />
+                                  )}
+                                </div>
+                              </details>
                             )}
-                            <Button
-                              size="small"
-                              type="link"
-                              onClick={handleElevenLabsApiKeyFocus}
-                            >
-                              {t(
-                                "playground:tts.elevenLabsMissingCta",
-                                "Set API key in Settings"
-                              )}
-                            </Button>
                           </div>
                         }
                       />

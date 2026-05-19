@@ -106,6 +106,7 @@ vi.mock('@/lib/api-client', () => ({
     getEmbeddingsHealth: vi.fn(),
     getSecurityHealth: vi.fn(),
     getIncidents: vi.fn(),
+    getRealtimeStats: vi.fn(),
     createRegistrationCode: vi.fn(),
     deleteRegistrationCode: vi.fn(),
     updateRegistrationSettings: vi.fn(),
@@ -136,6 +137,7 @@ type ApiMock = {
   getEmbeddingsHealth: ReturnType<typeof vi.fn>;
   getSecurityHealth: ReturnType<typeof vi.fn>;
   getIncidents: ReturnType<typeof vi.fn>;
+  getRealtimeStats: ReturnType<typeof vi.fn>;
   createRegistrationCode: ReturnType<typeof vi.fn>;
   deleteRegistrationCode: ReturnType<typeof vi.fn>;
   updateRegistrationSettings: ReturnType<typeof vi.fn>;
@@ -171,6 +173,10 @@ beforeEach(() => {
   apiMock.getEmbeddingsHealth.mockResolvedValue({ status: 'ok' });
   apiMock.getSecurityHealth.mockResolvedValue({});
   apiMock.getIncidents.mockResolvedValue([]);
+  apiMock.getRealtimeStats.mockResolvedValue({
+    active_sessions: 0,
+    tokens_today: { prompt: 0, completion: 0, total: 0 },
+  });
   apiMock.createRegistrationCode.mockResolvedValue({});
   apiMock.deleteRegistrationCode.mockResolvedValue({});
   apiMock.updateRegistrationSettings.mockResolvedValue({});

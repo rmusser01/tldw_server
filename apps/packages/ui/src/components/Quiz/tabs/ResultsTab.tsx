@@ -38,12 +38,19 @@ import { useDecksQuery } from "@/components/Flashcards/hooks/useFlashcardQueries
 import { NewDeckConfigurationFields } from "@/components/Flashcards/components/NewDeckConfigurationFields"
 import { useDeckSchedulerDraft } from "@/components/Flashcards/hooks/useDeckSchedulerDraft"
 import { formatSchedulerSummary } from "@/components/Flashcards/utils/scheduler-settings"
+import type { DeckReviewPromptSide } from "@/services/flashcards"
+import { StudySuggestionsPanel } from "@/components/StudySuggestions/StudySuggestionsPanel"
 import type {
   AnswerValue,
   QuestionPublic,
   QuizAnswer,
   QuizRemediationConversionSummary
 } from "@/services/quizzes"
+import {
+  parseStudySuggestionTargetId,
+  type StudySuggestionActionRequest,
+  type StudySuggestionActionResponse
+} from "@/services/studySuggestions"
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff"
 import type { TakeTabNavigationIntent } from "../navigation"
 import { RESULTS_FILTER_PREFS_KEY } from "../stateKeys"
@@ -161,6 +168,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   const [selectedMissedQuestions, setSelectedMissedQuestions] = React.useState<Record<number, boolean>>({})
   const [deckTarget, setDeckTarget] = React.useState<DeckTargetValue>(null)
   const [newDeckName, setNewDeckName] = React.useState("")
+  const [reviewPromptSide, setReviewPromptSide] = React.useState<DeckReviewPromptSide>("front")
   const [replaceExistingQuestionIds, setReplaceExistingQuestionIds] = React.useState<number[]>([])
   const newDeckSchedulerDraft = useDeckSchedulerDraft()
 
@@ -272,11 +280,11 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   }, [decks, remediationConversions])
 
   const handleNavigateToFlashcardsStudy = React.useCallback(
-    (params: { quizId: number; attemptId: number }) => {
+    (params: { quizId: number; attemptId: number; deckId?: number }) => {
       const route = buildFlashcardsStudyRouteFromQuiz({
         quizId: params.quizId,
         attemptId: params.attemptId,
-        deckId: linkedStudyDeckId
+        deckId: params.deckId ?? linkedStudyDeckId
       })
       navigate(route)
     },
@@ -284,6 +292,62 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   )
 
   const attempts = attemptsData?.items ?? []
+  const selectedAttemptSummary = React.useMemo(() => {
+    if (selectedAttemptId == null) {
+      return null
+    }
+
+    const listAttempt = attempts.find((attempt) => attempt.id === selectedAttemptId)
+    if (listAttempt) {
+      return {
+        id: listAttempt.id,
+        quizId: listAttempt.quiz_id
+      }
+    }
+
+    if (selectedAttemptDetails) {
+      return {
+        id: selectedAttemptDetails.id,
+        quizId: selectedAttemptDetails.quiz_id
+      }
+    }
+
+    return null
+  }, [attempts, selectedAttemptDetails, selectedAttemptId])
+
+  const handleStudySuggestionActionResult = React.useCallback(
+    async (response: StudySuggestionActionResponse, request: StudySuggestionActionRequest) => {
+      if (!selectedAttemptSummary) return
+
+      const targetId = parseStudySuggestionTargetId(response.target_id)
+
+      if (response.target_service === "flashcards" && targetId) {
+        handleNavigateToFlashcardsStudy({
+          quizId: selectedAttemptSummary.quizId,
+          attemptId: selectedAttemptSummary.id,
+          deckId: targetId
+        })
+        return
+      }
+
+      if (response.target_service === "quiz" && request.actionKind === "follow_up_quiz" && targetId) {
+        if (onRetakeQuiz) {
+          onRetakeQuiz({
+            startQuizId: targetId,
+            highlightQuizId: targetId
+          })
+        } else {
+          const params = new URLSearchParams()
+          params.set("tab", "take")
+          params.set("start_quiz_id", String(targetId))
+          params.set("highlight_quiz_id", String(targetId))
+          navigate(`/quiz?${params.toString()}`)
+        }
+      }
+    },
+    [handleNavigateToFlashcardsStudy, navigate, onRetakeQuiz, selectedAttemptSummary]
+  )
+
   const quizzes = quizzesData?.items ?? []
 
   const quizMap = React.useMemo(() => {
@@ -825,6 +889,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
             return {
               question_ids: questionIds,
               create_deck_name: trimmedDeckName,
+              create_deck_review_prompt_side: reviewPromptSide,
               create_deck_scheduler_type: schedulerSettings.scheduler_type,
               create_deck_scheduler_settings: schedulerSettings.scheduler_settings,
               replace_active: replaceActive
@@ -911,6 +976,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
     missedQuestionEntries,
     newDeckSchedulerDraft,
     newDeckName,
+    reviewPromptSide,
     replaceExistingQuestionIds,
     selectedAttemptDetails,
     selectedMissedQuestions,
@@ -980,6 +1046,8 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
               <NewDeckConfigurationFields
                 deckName={newDeckName}
                 onDeckNameChange={setNewDeckName}
+                reviewPromptSide={reviewPromptSide}
+                onReviewPromptSideChange={setReviewPromptSide}
                 schedulerDraft={newDeckSchedulerDraft}
                 nameTestId="quiz-remediation-new-deck-name"
                 hint={t("option:quiz.newDeckSchedulerHint", {
@@ -1136,154 +1204,164 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
       width={920}
       destroyOnHidden
     >
-      {selectedAttemptLoading || selectedAttemptFetching ? (
-        <div className="py-4" data-testid="results-detail-loading-skeleton">
-          <Skeleton active paragraph={{ rows: 8 }} />
-        </div>
-      ) : !selectedAttemptDetails ? (
-        <Empty
-          description={t("option:quiz.attemptDetailsUnavailable", {
-            defaultValue: "Attempt details are unavailable."
-          })}
-        />
-      ) : (
+      {selectedAttemptId == null ? null : (
         <div className="space-y-4">
-          <Descriptions size="small" bordered column={1}>
-            <Descriptions.Item label={t("option:quiz.quiz", { defaultValue: "Quiz" })}>
-              {quizMap.get(selectedAttemptDetails.quiz_id)?.name ?? `Quiz #${selectedAttemptDetails.quiz_id}`}
-            </Descriptions.Item>
-            <Descriptions.Item label={t("option:quiz.started", { defaultValue: "Started" })}>
-              {formatDate(selectedAttemptDetails.started_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label={t("option:quiz.completed", { defaultValue: "Completed" })}>
-              {selectedAttemptDetails.completed_at
-                ? formatDate(selectedAttemptDetails.completed_at)
-                : t("option:quiz.inProgress", { defaultValue: "In progress" })}
-            </Descriptions.Item>
-            <Descriptions.Item label={t("option:quiz.timeSpent", { defaultValue: "Time Spent" })}>
-              {selectedAttemptDetails.time_spent_seconds != null
-                ? formatTime(selectedAttemptDetails.time_spent_seconds)
-                : t("option:quiz.notAvailable", { defaultValue: "Not available" })}
-            </Descriptions.Item>
-          </Descriptions>
+          <StudySuggestionsPanel
+            anchorType="quiz_attempt"
+            anchorId={selectedAttemptId}
+            onActionResult={handleStudySuggestionActionResult}
+          />
 
-          {hasMissedQuestions && (selectedAttemptDetails.questions?.length ?? 0) > 0 ? (
-            <QuizRemediationPanel
-              attemptId={selectedAttemptDetails.id}
-              quizId={selectedAttemptDetails.quiz_id}
-              missedQuestionEntries={missedQuestionEntries}
-              selectedMissedQuestions={selectedMissedQuestions}
-              onSelectedMissedQuestionsChange={updateSelectedMissedQuestions}
-              onCreateRemediationQuiz={handleCreateRemediationQuiz}
-              onCreateRemediationFlashcards={openFlashcardModal}
-              onStudyLinkedCards={() => {
-                handleNavigateToFlashcardsStudy({
-                  quizId: selectedAttemptDetails.quiz_id,
-                  attemptId: selectedAttemptDetails.id
-                })
-              }}
-              remediationQuizPending={generateRemediationQuizMutation.isPending}
+          {selectedAttemptLoading || selectedAttemptFetching ? (
+            <div className="py-4" data-testid="results-detail-loading-skeleton">
+              <Skeleton active paragraph={{ rows: 8 }} />
+            </div>
+          ) : !selectedAttemptDetails ? (
+            <Empty
+              description={t("option:quiz.attemptDetailsUnavailable", {
+                defaultValue: "Attempt details are unavailable."
+              })}
             />
-          ) : null}
+          ) : (
+            <>
+              <Descriptions size="small" bordered column={1}>
+                <Descriptions.Item label={t("option:quiz.quiz", { defaultValue: "Quiz" })}>
+                  {quizMap.get(selectedAttemptDetails.quiz_id)?.name ?? `Quiz #${selectedAttemptDetails.quiz_id}`}
+                </Descriptions.Item>
+                <Descriptions.Item label={t("option:quiz.started", { defaultValue: "Started" })}>
+                  {formatDate(selectedAttemptDetails.started_at)}
+                </Descriptions.Item>
+                <Descriptions.Item label={t("option:quiz.completed", { defaultValue: "Completed" })}>
+                  {selectedAttemptDetails.completed_at
+                    ? formatDate(selectedAttemptDetails.completed_at)
+                    : t("option:quiz.inProgress", { defaultValue: "In progress" })}
+                </Descriptions.Item>
+                <Descriptions.Item label={t("option:quiz.timeSpent", { defaultValue: "Time Spent" })}>
+                  {selectedAttemptDetails.time_spent_seconds != null
+                    ? formatTime(selectedAttemptDetails.time_spent_seconds)
+                    : t("option:quiz.notAvailable", { defaultValue: "Not available" })}
+                </Descriptions.Item>
+              </Descriptions>
 
-          <List
-            dataSource={detailRows}
-            locale={{
-              emptyText: t("option:quiz.noAnswersSubmitted", {
-                defaultValue: "No answer breakdown available."
-              })
-            }}
-            renderItem={(entry) => {
-              const wasAnswered = entry.answer != null
-              const isCorrect = Boolean(entry.answer?.is_correct)
-              const citations = Array.isArray(entry.answer?.source_citations)
-                ? entry.answer?.source_citations
-                : Array.isArray(entry.question?.source_citations)
-                  ? entry.question?.source_citations
-                  : null
+              {hasMissedQuestions && (selectedAttemptDetails.questions?.length ?? 0) > 0 ? (
+                <QuizRemediationPanel
+                  attemptId={selectedAttemptDetails.id}
+                  quizId={selectedAttemptDetails.quiz_id}
+                  missedQuestionEntries={missedQuestionEntries}
+                  selectedMissedQuestions={selectedMissedQuestions}
+                  onSelectedMissedQuestionsChange={updateSelectedMissedQuestions}
+                  onCreateRemediationQuiz={handleCreateRemediationQuiz}
+                  onCreateRemediationFlashcards={openFlashcardModal}
+                  onStudyLinkedCards={() => {
+                    handleNavigateToFlashcardsStudy({
+                      quizId: selectedAttemptDetails.quiz_id,
+                      attemptId: selectedAttemptDetails.id
+                    })
+                  }}
+                  remediationQuizPending={generateRemediationQuizMutation.isPending}
+                />
+              ) : null}
 
-              return (
-                <List.Item>
-                  <div className="w-full space-y-2">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="font-medium">
-                        <span className="block text-xs text-text-muted">
-                          {t("option:quiz.questionNumberLabel", {
-                            defaultValue: "Question {{number}}",
-                            number: entry.order
-                          })}
-                        </span>
-                        <QuizMarkdown
-                          content={entry.questionText}
-                          className="[&>p]:my-1"
+              <List
+                dataSource={detailRows}
+                locale={{
+                  emptyText: t("option:quiz.noAnswersSubmitted", {
+                    defaultValue: "No answer breakdown available."
+                  })
+                }}
+                renderItem={(entry) => {
+                  const wasAnswered = entry.answer != null
+                  const isCorrect = Boolean(entry.answer?.is_correct)
+                  const citations = Array.isArray(entry.answer?.source_citations)
+                    ? entry.answer?.source_citations
+                    : Array.isArray(entry.question?.source_citations)
+                      ? entry.question?.source_citations
+                      : null
+
+                  return (
+                    <List.Item>
+                      <div className="w-full space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="font-medium">
+                            <span className="block text-xs text-text-muted">
+                              {t("option:quiz.questionNumberLabel", {
+                                defaultValue: "Question {{number}}",
+                                number: entry.order
+                              })}
+                            </span>
+                            <QuizMarkdown
+                              content={entry.questionText}
+                              className="[&>p]:my-1"
+                            />
+                          </div>
+                          {!wasAnswered ? (
+                            <Tag>{t("option:quiz.unanswered", { defaultValue: "Unanswered" })}</Tag>
+                          ) : (
+                            <Tag
+                              color={isCorrect ? "success" : "error"}
+                              icon={isCorrect ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                            >
+                              {isCorrect
+                                ? t("option:quiz.correct", { defaultValue: "Correct" })
+                                : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
+                            </Tag>
+                          )}
+                        </div>
+
+                        <div className="text-sm text-text-muted">
+                          {t("option:quiz.yourAnswer", { defaultValue: "Your answer" })}:{" "}
+                          <span className="font-medium">
+                            {formatAnswerValue(entry.answer?.user_answer, entry.question)}
+                          </span>
+                        </div>
+
+                        <div className="text-sm text-text-muted">
+                          {t("option:quiz.correctAnswerLabel", { defaultValue: "Correct answer" })}:{" "}
+                          <span className="font-medium">
+                            {formatAnswerValue(entry.answer?.correct_answer, entry.question)}
+                          </span>
+                        </div>
+
+                        {entry.answer && (
+                          <div className="text-sm text-text-muted">
+                            {t("option:quiz.points", { defaultValue: "Points" })}:{" "}
+                            <span className="font-medium">
+                              {Number(entry.answer.points_awarded ?? 0)}
+                              {entry.question ? ` / ${entry.question.points}` : ""}
+                            </span>
+                          </div>
+                        )}
+
+                        {entry.answer?.hint_used && (
+                          <Typography.Text className="block text-xs text-text-muted">
+                            {Number(entry.answer.hint_penalty_points ?? 0) > 0
+                              ? t("option:quiz.hintPenaltyResult", {
+                                defaultValue: "Hint used (-{{points}} point(s)).",
+                                points: Number(entry.answer.hint_penalty_points ?? 0)
+                              })
+                              : t("option:quiz.hintUsedNoPenalty", {
+                                defaultValue: "Hint used."
+                              })}
+                          </Typography.Text>
+                        )}
+
+                        {entry.answer?.explanation && (
+                          <QuizMarkdown
+                            content={entry.answer.explanation}
+                            className="text-sm text-text-subtle"
+                          />
+                        )}
+                        <SourceCitations
+                          citations={citations}
+                          fallbackMediaId={selectedAttemptMediaId}
                         />
                       </div>
-                      {!wasAnswered ? (
-                        <Tag>{t("option:quiz.unanswered", { defaultValue: "Unanswered" })}</Tag>
-                      ) : (
-                        <Tag
-                          color={isCorrect ? "success" : "error"}
-                          icon={isCorrect ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-                        >
-                          {isCorrect
-                            ? t("option:quiz.correct", { defaultValue: "Correct" })
-                            : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
-                        </Tag>
-                      )}
-                    </div>
-
-                    <div className="text-sm text-text-muted">
-                      {t("option:quiz.yourAnswer", { defaultValue: "Your answer" })}:{" "}
-                      <span className="font-medium">
-                        {formatAnswerValue(entry.answer?.user_answer, entry.question)}
-                      </span>
-                    </div>
-
-                    <div className="text-sm text-text-muted">
-                      {t("option:quiz.correctAnswerLabel", { defaultValue: "Correct answer" })}:{" "}
-                      <span className="font-medium">
-                        {formatAnswerValue(entry.answer?.correct_answer, entry.question)}
-                      </span>
-                    </div>
-
-                    {entry.answer && (
-                      <div className="text-sm text-text-muted">
-                        {t("option:quiz.points", { defaultValue: "Points" })}:{" "}
-                        <span className="font-medium">
-                          {Number(entry.answer.points_awarded ?? 0)}
-                          {entry.question ? ` / ${entry.question.points}` : ""}
-                        </span>
-                      </div>
-                    )}
-
-                    {entry.answer?.hint_used && (
-                      <Typography.Text className="block text-xs text-text-muted">
-                        {Number(entry.answer.hint_penalty_points ?? 0) > 0
-                          ? t("option:quiz.hintPenaltyResult", {
-                            defaultValue: "Hint used (-{{points}} point(s)).",
-                            points: Number(entry.answer.hint_penalty_points ?? 0)
-                          })
-                          : t("option:quiz.hintUsedNoPenalty", {
-                            defaultValue: "Hint used."
-                          })}
-                      </Typography.Text>
-                    )}
-
-                    {entry.answer?.explanation && (
-                      <QuizMarkdown
-                        content={entry.answer.explanation}
-                        className="text-sm text-text-subtle"
-                      />
-                    )}
-                    <SourceCitations
-                      citations={citations}
-                      fallbackMediaId={selectedAttemptMediaId}
-                    />
-                  </div>
-                </List.Item>
-              )
-            }}
-          />
+                    </List.Item>
+                  )
+                }}
+              />
+            </>
+          )}
         </div>
       )}
     </Modal>
@@ -1325,7 +1403,26 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
               </p>
             </div>
           }
-        />
+        >
+          {onRetakeQuiz && (
+            <Button
+              type="primary"
+              onClick={() => onRetakeQuiz({
+                startQuizId: null,
+                highlightQuizId: null,
+                forceShowWorkspaceItems: false,
+                sourceTab: "results",
+                attemptId: null,
+                assignmentMode: null,
+                assignmentDueAt: null,
+                assignmentNote: null,
+                assignedByRole: null
+              })}
+            >
+              {t("option:quiz.takeAQuiz", { defaultValue: "Take a Quiz" })}
+            </Button>
+          )}
+        </Empty>
       </>
     )
   }

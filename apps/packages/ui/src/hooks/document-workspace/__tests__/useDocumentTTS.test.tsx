@@ -60,12 +60,8 @@ describe("useDocumentTTS", () => {
   })
 
   it("uses configured tldw model and voice when speaking", async () => {
-    const createObjectURL = vi
-      .spyOn(URL, "createObjectURL")
-      .mockReturnValue("blob:tts-audio")
-    const revokeObjectURL = vi
-      .spyOn(URL, "revokeObjectURL")
-      .mockImplementation(() => {})
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:tts-audio")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       blob: vi.fn().mockResolvedValue(new Blob(["audio"]))
@@ -126,7 +122,102 @@ describe("useDocumentTTS", () => {
       })
     )
 
-    createObjectURL.mockRestore()
-    revokeObjectURL.mockRestore()
+    expect(result.current.voice).toBe("Bella")
+  })
+
+  it("falls back to the configured tldw voice when local storage has no voice", async () => {
+    mocks.getTldwTTSVoice.mockResolvedValue("Jasper")
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:tts-audio")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: vi.fn().mockResolvedValue(new Blob(["audio"]))
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    class MockAudio {
+      paused = true
+      ended = false
+      duration = 0
+      currentTime = 0
+      volume = 1
+      onended: (() => void) | null = null
+      onerror: (() => void) | null = null
+      onplay: (() => void) | null = null
+      onpause: (() => void) | null = null
+      ontimeupdate: (() => void) | null = null
+
+      constructor(public src: string) {}
+
+      pause() {
+        this.paused = true
+        this.onpause?.()
+      }
+
+      play() {
+        this.paused = false
+        this.onplay?.()
+        return Promise.resolve()
+      }
+    }
+
+    vi.stubGlobal("Audio", MockAudio)
+
+    const { result } = renderHook(() => useDocumentTTS(), {
+      wrapper: buildWrapper()
+    })
+
+    await waitFor(() => {
+      expect(result.current.voicesLoading).toBe(false)
+    })
+
+    await act(async () => {
+      await result.current.speak("Configured voice text")
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/audio/speech",
+      expect.objectContaining({
+        body: JSON.stringify({
+          input: "Configured voice text",
+          voice: "Jasper",
+          model: "KittenML/kitten-tts-nano-0.8",
+          speed: 1,
+          response_format: "mp3"
+        })
+      })
+    )
+    expect(result.current.voice).toBe("Jasper")
+  })
+
+  it("does not overwrite a user-selected voice when configured voice resolves later", async () => {
+    let resolveVoice: ((value: string) => void) | undefined
+    const pendingVoice = new Promise<string>((resolve) => {
+      resolveVoice = resolve
+    })
+    mocks.getTldwTTSVoice.mockReturnValue(pendingVoice)
+
+    const { result } = renderHook(() => useDocumentTTS(), {
+      wrapper: buildWrapper()
+    })
+
+    await waitFor(() => {
+      expect(result.current.voicesLoading).toBe(false)
+    })
+
+    act(() => {
+      result.current.setVoice("Luna")
+    })
+
+    expect(result.current.voice).toBe("Luna")
+
+    await act(async () => {
+      resolveVoice?.("Bella")
+      await pendingVoice
+    })
+
+    await waitFor(() => {
+      expect(result.current.voice).toBe("Luna")
+    })
   })
 })

@@ -3,14 +3,17 @@ import { useTranslation } from "react-i18next"
 import { Drawer, Tabs, Modal, Input, Empty, Skeleton, Button, message } from "antd"
 import type { InputRef } from "antd"
 import {
+  AlertTriangle,
   FileText,
   MessageSquare,
   Sparkles,
   Search,
   Command,
-  Loader2
+  Loader2,
+  PanelLeftOpen,
+  PanelRightOpen
 } from "lucide-react"
-import { useWorkspaceStore } from "@/store/workspace"
+import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
 import { useTutorialStore } from "@/store/tutorials"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
@@ -38,6 +41,7 @@ import { SharedWorkspaceBanner } from "./SharedWorkspaceBanner"
 import { SharedWorkspaceProvider } from "./SharedWorkspaceContext"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ChatPane } from "./ChatPane"
+import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import {
   TransferSourcesModal,
   type TransferSourcesModalLaunchRequest
@@ -63,6 +67,20 @@ import {
   type WorkspaceGlobalSearchNoteDocument,
   type WorkspaceGlobalSearchResult
 } from "./workspace-global-search"
+import {
+  getResearchStudioTabFromSearch,
+  parseResearchStudioTab,
+  RESEARCH_STUDIO_DEFAULT_TAB,
+  readResearchStudioLastMobileTab,
+  writeResearchStudioLastMobileTab,
+  type ResearchStudioTab
+} from "./research-studio-route-state"
+import {
+  buildUnknownResearchStudioCapabilities,
+  isResearchStudioCapabilitiesStale,
+  normalizeResearchStudioCapabilities,
+  type ResearchStudioCapabilitiesResponse
+} from "./research-studio-capabilities"
 import {
   collectDescendantSourceIds,
   createWorkspaceOrganizationIndex
@@ -141,7 +159,7 @@ const normalizeVectorProcessingStatus = (
   return null
 }
 
-type WorkspaceTabKey = "sources" | "chat" | "studio"
+type WorkspaceTabKey = ResearchStudioTab
 
 type WorkspaceNoteKeywordLike =
   | string
@@ -178,6 +196,42 @@ type WorkspaceStorageUsageState = {
   originQuotaBytes: number | null
   accountUsedBytes: number | null
   accountQuotaBytes: number | null
+}
+
+type WorkspaceRestoreRailButtonProps = {
+  side: "left" | "right"
+  label: string
+  panelId: string
+  testId: string
+  onClick: () => void
+}
+
+const WorkspaceRestoreRailButton: React.FC<WorkspaceRestoreRailButtonProps> = ({
+  side,
+  label,
+  panelId,
+  testId,
+  onClick
+}) => {
+  const Icon = side === "left" ? PanelLeftOpen : PanelRightOpen
+
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-label={label}
+      aria-controls={panelId}
+      aria-expanded={false}
+      title={label}
+      onClick={onClick}
+      className="sticky top-2 z-20 hidden min-h-[14rem] w-11 shrink-0 self-stretch flex-col items-center justify-center gap-3 rounded-xl border border-border/80 bg-surface/95 px-0 py-3 text-sm font-medium text-text shadow-card transition hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg lg:flex"
+    >
+      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+      <span className="hidden text-xs font-medium text-muted xl:block xl:rotate-180 xl:[writing-mode:vertical-rl]">
+        {label}
+      </span>
+    </button>
+  )
 }
 
 const parseNoteKeyword = (
@@ -795,13 +849,43 @@ const WorkspacePlaygroundBody: React.FC = () => {
   )
   const provenanceEnabled = provenanceFlagEnabled !== false
   const statusGuardrailsEnabled = statusGuardrailsFlagEnabled !== false
+  const [researchStudioCapabilities, setResearchStudioCapabilities] =
+    React.useState<ResearchStudioCapabilitiesResponse>(() =>
+      buildUnknownResearchStudioCapabilities("capabilities_not_loaded")
+    )
+  const [
+    researchStudioCapabilitiesFetchedAt,
+    setResearchStudioCapabilitiesFetchedAt
+  ] = React.useState<number | null>(null)
 
   // Mobile drawer state
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
 
+  const initialRouteTabRef = React.useRef<WorkspaceTabKey | null>(
+    getResearchStudioTabFromSearch(
+      typeof window === "undefined" ? "" : window.location.search
+    )
+  )
+  const initialStoredMobileTabRef = React.useRef<WorkspaceTabKey | null>(
+    initialRouteTabRef.current ? null : readResearchStudioLastMobileTab()
+  )
+  const initialRouteTabAppliedRef = React.useRef(false)
+
   // Mobile tab state
-  const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>("chat")
+  const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>(
+    () =>
+      initialRouteTabRef.current ??
+      initialStoredMobileTabRef.current ??
+      RESEARCH_STUDIO_DEFAULT_TAB
+  )
+  const setActiveMobileTab = React.useCallback(
+    (tab: WorkspaceTabKey) => {
+      setActiveTab(tab)
+      writeResearchStudioLastMobileTab(tab)
+    },
+    []
+  )
 
   // Global search state
   const [globalSearchOpen, setGlobalSearchOpen] = React.useState(false)
@@ -821,6 +905,8 @@ const WorkspacePlaygroundBody: React.FC = () => {
   const workspaceTransitionTimerRef = React.useRef<number | null>(null)
   const [showStorageQuotaWarning, setShowStorageQuotaWarning] =
     React.useState(false)
+  const [storageHighUsageDismissed, setStorageHighUsageDismissed] =
+    React.useState(false)
   const [showCrossTabSyncWarning, setShowCrossTabSyncWarning] =
     React.useState(false)
   const [crossTabChangedFields, setCrossTabChangedFields] = React.useState<
@@ -835,8 +921,29 @@ const WorkspacePlaygroundBody: React.FC = () => {
     accountUsedBytes: null,
     accountQuotaBytes: null
   })
+  const storageUsagePercent = React.useMemo(() => {
+    if (
+      workspaceStorageUsage.quotaBytes <= 0 ||
+      !Number.isFinite(workspaceStorageUsage.usedBytes) ||
+      !Number.isFinite(workspaceStorageUsage.quotaBytes)
+    ) {
+      return 0
+    }
+    return Math.round(
+      (workspaceStorageUsage.usedBytes / workspaceStorageUsage.quotaBytes) * 100
+    )
+  }, [workspaceStorageUsage.usedBytes, workspaceStorageUsage.quotaBytes])
+
+  const showStorageHighUsageWarning =
+    statusGuardrailsEnabled &&
+    !storageHighUsageDismissed &&
+    !showStorageQuotaWarning &&
+    storageUsagePercent >= 80
+
   const lastCrossTabSyncWarningRef = React.useRef(0)
   const onboardingInitializedRef = React.useRef(false)
+  const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
+  const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
 
   // Shared workspace state (from ?shared= query param)
@@ -1187,6 +1294,39 @@ const WorkspacePlaygroundBody: React.FC = () => {
     }
   }, [])
 
+  const refreshResearchStudioCapabilities = React.useCallback(async () => {
+    try {
+      const raw = await tldwClient.getResearchStudioCapabilities()
+      const normalized = normalizeResearchStudioCapabilities(raw)
+      setResearchStudioCapabilities(normalized)
+      setResearchStudioCapabilitiesFetchedAt(Date.now())
+      return normalized
+    } catch {
+      const fallback = buildUnknownResearchStudioCapabilities(
+        "capability_fetch_failed"
+      )
+      setResearchStudioCapabilities(fallback)
+      setResearchStudioCapabilitiesFetchedAt(Date.now())
+      return fallback
+    }
+  }, [])
+
+  const refreshResearchStudioCapabilitiesIfStale = React.useCallback(async () => {
+    if (
+      !isResearchStudioCapabilitiesStale(
+        researchStudioCapabilities,
+        researchStudioCapabilitiesFetchedAt
+      )
+    ) {
+      return researchStudioCapabilities
+    }
+    return refreshResearchStudioCapabilities()
+  }, [
+    refreshResearchStudioCapabilities,
+    researchStudioCapabilities,
+    researchStudioCapabilitiesFetchedAt
+  ])
+
   const closeGlobalSearch = React.useCallback(() => {
     setGlobalSearchOpen(false)
     setGlobalSearchQuery("")
@@ -1207,14 +1347,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
   const dismissOnboardingOverlay = React.useCallback(() => {
     if (typeof window === "undefined") return
 
-    try {
-      window.localStorage.setItem(
+    void Promise.resolve(
+      createWorkspaceStorage().setItem(
         WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY,
         "1"
       )
-    } catch {
+    ).catch(() => {
       // Ignore storage errors.
-    }
+    })
   }, [])
 
   useEffect(() => {
@@ -1301,7 +1441,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
     (pane: WorkspaceTabKey) => {
       if (pane === "sources") {
         if (isMobile) {
-          setActiveTab("sources")
+          setActiveMobileTab("sources")
         } else if (isDesktopLayout()) {
           setLeftPaneCollapsed(false)
         } else {
@@ -1320,7 +1460,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (pane === "studio") {
         if (isMobile) {
-          setActiveTab("studio")
+          setActiveMobileTab("studio")
         } else if (isDesktopLayout()) {
           setRightPaneCollapsed(false)
         } else {
@@ -1338,7 +1478,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
       }
 
       if (isMobile) {
-        setActiveTab("chat")
+        setActiveMobileTab("chat")
       }
       window.setTimeout(() => {
         const chatInput = document.querySelector<HTMLElement>(
@@ -1355,8 +1495,18 @@ const WorkspacePlaygroundBody: React.FC = () => {
         firstFocusable?.focus()
       }, 0)
     },
-    [isMobile, setLeftPaneCollapsed, setRightPaneCollapsed]
+    [isMobile, setActiveMobileTab, setLeftPaneCollapsed, setRightPaneCollapsed]
   )
+
+  React.useEffect(() => {
+    if (initialRouteTabAppliedRef.current) return
+    initialRouteTabAppliedRef.current = true
+
+    const initialRouteTab = initialRouteTabRef.current
+    if (!initialRouteTab || initialRouteTab === "chat") return
+
+    focusWorkspacePane(initialRouteTab)
+  }, [focusWorkspacePane])
 
   const handleOpenSplitWorkspace = React.useCallback(() => {
     if (readyEffectiveSelectedSourceEntries.length === 0) {
@@ -1457,7 +1607,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (result.domain === "source" && result.sourceId) {
         if (isMobile) {
-          setActiveTab("sources")
+          setActiveMobileTab("sources")
         } else if (isDesktopLayout()) {
           setLeftPaneCollapsed(false)
         } else {
@@ -1472,7 +1622,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (result.domain === "chat" && result.chatMessageId) {
         if (isMobile) {
-          setActiveTab("chat")
+          setActiveMobileTab("chat")
         }
         window.setTimeout(() => {
           focusChatMessageById(result.chatMessageId!)
@@ -1482,7 +1632,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
       if (result.domain === "note") {
         if (isMobile) {
-          setActiveTab("studio")
+          setActiveMobileTab("studio")
         } else if (isDesktopLayout()) {
           setRightPaneCollapsed(false)
         } else {
@@ -1500,6 +1650,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
       focusSourceById,
       hydrateAndFocusNote,
       isMobile,
+      setActiveMobileTab,
       setLeftPaneCollapsed,
       setRightPaneCollapsed
     ]
@@ -1572,6 +1723,11 @@ const WorkspacePlaygroundBody: React.FC = () => {
   useEffect(() => {
     void refreshAccountStorageUsage()
   }, [refreshAccountStorageUsage])
+
+  useEffect(() => {
+    if (!isStoreHydrated) return
+    void refreshResearchStudioCapabilities()
+  }, [isStoreHydrated, refreshResearchStudioCapabilities])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -1671,65 +1827,71 @@ const WorkspacePlaygroundBody: React.FC = () => {
     onboardingInitializedRef.current = true
 
     if (typeof window === "undefined") return
-    try {
-      const dismissed = window.localStorage.getItem(
+    let isActive = true
+
+    void Promise.resolve(
+      createWorkspaceStorage().getItem(
         WORKSPACE_ONBOARDING_DISMISSED_STORAGE_KEY
       )
-      if (dismissed !== "1") {
-        // Auto-start the guided Joyride tour for first-time users
-        startTutorial("workspace-playground-basics")
-        dismissOnboardingOverlay()
-      }
-    } catch {
-      // On storage error, start the tour anyway for this session
-      startTutorial("workspace-playground-basics")
+    )
+      .then((dismissed) => {
+        if (isActive && dismissed !== "1") {
+          setShowTutorialPrompt(true)
+        }
+      })
+      .catch(() => {
+        // Ignore storage errors.
+      })
+
+    return () => {
+      isActive = false
     }
-  }, [isStoreHydrated, workspaceId, startTutorial, dismissOnboardingOverlay])
+  }, [isStoreHydrated, workspaceId])
 
   useEffect(() => {
     if (typeof window === "undefined") return
 
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
-      const hasModifier = event.metaKey || event.ctrlKey
+      const hasPrimaryModifier = event.metaKey || event.ctrlKey
 
-      if (hasModifier && key === "k") {
+      if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "k") {
         event.preventDefault()
         setGlobalSearchOpen(true)
         return
       }
 
-      if (hasModifier && key === "z" && !event.shiftKey) {
+      if (hasPrimaryModifier && key === "z" && !event.shiftKey) {
         event.preventDefault()
         undoLatestWorkspaceAction()
         return
       }
 
-      if (hasModifier && !event.shiftKey && key === "1") {
+      if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "1") {
         event.preventDefault()
         focusWorkspacePane("sources")
         return
       }
 
-      if (hasModifier && !event.shiftKey && key === "2") {
+      if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "2") {
         event.preventDefault()
         focusWorkspacePane("chat")
         return
       }
 
-      if (hasModifier && !event.shiftKey && key === "3") {
+      if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "3") {
         event.preventDefault()
         focusWorkspacePane("studio")
         return
       }
 
-      if (hasModifier && event.shiftKey && key === "n") {
+      if (event.altKey && !hasPrimaryModifier && event.shiftKey && key === "n") {
         event.preventDefault()
         createNewWorkspace()
         return
       }
 
-      if (hasModifier && !event.shiftKey && key === "n") {
+      if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "n") {
         event.preventDefault()
         const hasNoteContent =
           currentNote.title.trim().length > 0 ||
@@ -1766,6 +1928,26 @@ const WorkspacePlaygroundBody: React.FC = () => {
       if (event.key === "Escape") {
         event.preventDefault()
         closeGlobalSearch()
+        return
+      }
+
+      if (
+        event.key === "?" &&
+        !hasPrimaryModifier &&
+        !event.altKey
+      ) {
+        const target = event.target as HTMLElement | null
+        const tag = target?.tagName?.toLowerCase()
+        if (
+          tag === "input" ||
+          tag === "textarea" ||
+          tag === "select" ||
+          target?.isContentEditable
+        ) {
+          return
+        }
+        event.preventDefault()
+        setShowShortcutsModal(true)
       }
     }
 
@@ -2004,6 +2186,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
     }
   }
 
+  const handleRestoreLeftPane = () => {
+    setLeftPaneCollapsed(false)
+  }
+
+  const handleRestoreRightPane = () => {
+    setRightPaneCollapsed(false)
+  }
+
   const handleReloadWorkspaceFromSyncWarning = () => {
     if (statusGuardrailsEnabled) {
       const refreshAttempt = recordWorkspaceRefreshLoopAttempt()
@@ -2083,6 +2273,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
           provenanceEnabled={provenanceEnabled}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           contentWidthMode="full"
+          researchStudioCapabilities={researchStudioCapabilities}
+          researchStudioCapabilitiesStale={isResearchStudioCapabilitiesStale(
+            researchStudioCapabilities,
+            researchStudioCapabilitiesFetchedAt
+          )}
+          onRefreshResearchStudioCapabilities={
+            refreshResearchStudioCapabilitiesIfStale
+          }
         />
       )
     },
@@ -2125,7 +2323,14 @@ const WorkspacePlaygroundBody: React.FC = () => {
       <Suspense
         fallback={<WorkspacePaneFallback testId="workspace-studio-pane" />}
       >
-        <StudioPane onHide={options?.onHide} />
+        <StudioPane
+          onHide={options?.onHide}
+          onRequestSources={() => focusWorkspacePane("sources")}
+          researchStudioCapabilities={researchStudioCapabilities}
+          onRefreshResearchStudioCapabilities={
+            refreshResearchStudioCapabilitiesIfStale
+          }
+        />
       </Suspense>
     )
   }
@@ -2146,6 +2351,35 @@ const WorkspacePlaygroundBody: React.FC = () => {
   if (!isStoreHydrated) {
     return <WorkspacePlaygroundSkeleton isMobile={isMobile} />
   }
+
+  const tutorialPromptBanner = showTutorialPrompt ? (
+    <div className="mx-4 mt-2 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+      <span><strong>New here?</strong> Take a quick tour of the workspace.</span>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            startTutorial("workspace-playground-basics")
+            dismissOnboardingOverlay()
+            setShowTutorialPrompt(false)
+          }}
+          className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-primaryStrong transition-colors"
+        >
+          Start tour
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            dismissOnboardingOverlay()
+            setShowTutorialPrompt(false)
+          }}
+          className="rounded-md border border-border px-3 py-1 text-xs text-text-muted hover:bg-surface2 transition-colors"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  ) : null
 
   return (
     <SharedWorkspaceProvider
@@ -2176,7 +2410,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
       </a>
 
       {statusGuardrailsEnabled &&
-        (showStorageQuotaWarning || showCrossTabSyncWarning) && (
+        (showStorageQuotaWarning || showStorageHighUsageWarning || showCrossTabSyncWarning) && (
         <div className="space-y-2 border-b border-border bg-surface px-3 py-2">
           {showStorageQuotaWarning && (
             <div
@@ -2195,6 +2429,33 @@ const WorkspacePlaygroundBody: React.FC = () => {
                 type="button"
                 className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2"
                 onClick={() => setShowStorageQuotaWarning(false)}
+              >
+                {t("common:dismiss", "Dismiss")}
+              </button>
+            </div>
+          )}
+
+          {showStorageHighUsageWarning && (
+            <div
+              data-testid="workspace-storage-high-usage-banner"
+              className="flex flex-wrap items-center justify-between gap-2 rounded border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-text"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
+                <span>
+                  {t(
+                    "playground:workspace.storageHighUsage",
+                    "Storage is {{percent}}% full. Consider archiving unused workspaces to free space.",
+                    { percent: storageUsagePercent }
+                  )}
+                </span>
+              </span>
+              <button
+                type="button"
+                className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2"
+                onClick={() => setStorageHighUsageDismissed(true)}
               >
                 {t("common:dismiss", "Dismiss")}
               </button>
@@ -2226,10 +2487,16 @@ const WorkspacePlaygroundBody: React.FC = () => {
                     )}
                   </p>
                 )}
+                <p className="text-xs font-medium text-primary">
+                  {t(
+                    "playground:workspace.externalUpdateRecommendation",
+                    "Recommended: Reload to get the latest version."
+                  )}
+                </p>
                 <p className="text-xs text-text-muted">
                   {t(
                     "playground:workspace.externalUpdateActionHint",
-                    "Reload from other tab refreshes this tab. Keep this version ignores the update. Save as new workspace copies your current state."
+                    "Keep this version ignores the update. Save as new workspace copies your current state."
                   )}
                 </p>
               </div>
@@ -2265,6 +2532,7 @@ const WorkspacePlaygroundBody: React.FC = () => {
       )}
 
 
+      {/* Mobile vs desktop layout */}
       {isMobile ? (
         <>
           <WorkspaceHeader
@@ -2291,6 +2559,8 @@ const WorkspacePlaygroundBody: React.FC = () => {
           />
           <SharedWorkspaceBanner />
 
+          {tutorialPromptBanner}
+
           <WorkspaceStatusBar
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
@@ -2300,7 +2570,12 @@ const WorkspacePlaygroundBody: React.FC = () => {
 
           <Tabs
             activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as WorkspaceTabKey)}
+            onChange={(key) => {
+              const nextTab = parseResearchStudioTab(key)
+              if (nextTab) {
+                setActiveMobileTab(nextTab)
+              }
+            }}
             items={mobileTabItems}
             centered
             destroyOnHidden
@@ -2333,7 +2608,19 @@ const WorkspacePlaygroundBody: React.FC = () => {
           />
           <SharedWorkspaceBanner />
 
+          {tutorialPromptBanner}
+
           <div className="flex min-h-0 flex-1 gap-2 px-2 py-2">
+            {!leftPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="left"
+                label={t("playground:workspace.showSources", "Show sources")}
+                panelId="workspace-sources-panel"
+                testId="workspace-restore-sources"
+                onClick={handleRestoreLeftPane}
+              />
+            )}
+
             {leftPaneOpen && (
               <>
                 <aside
@@ -2381,8 +2668,26 @@ const WorkspacePlaygroundBody: React.FC = () => {
                 provenanceEnabled={provenanceEnabled}
                 statusGuardrailsEnabled={statusGuardrailsEnabled}
                 contentWidthMode={desktopChatContentWidthMode}
+                researchStudioCapabilities={researchStudioCapabilities}
+                researchStudioCapabilitiesStale={isResearchStudioCapabilitiesStale(
+                  researchStudioCapabilities,
+                  researchStudioCapabilitiesFetchedAt
+                )}
+                onRefreshResearchStudioCapabilities={
+                  refreshResearchStudioCapabilitiesIfStale
+                }
               />
             </main>
+
+            {!rightPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="right"
+                label={t("playground:workspace.showStudio", "Show studio")}
+                panelId="workspace-studio-panel"
+                testId="workspace-restore-studio"
+                onClick={handleRestoreRightPane}
+              />
+            )}
 
             {rightPaneOpen && (
               <>
@@ -2469,6 +2774,12 @@ const WorkspacePlaygroundBody: React.FC = () => {
               </span>
             }
           />
+          <p className="text-xs text-text-muted mt-0.5">
+            {t(
+              "playground:search.prefixHint",
+              "Tip: Type source: chat: or note: to filter by category"
+            )}
+          </p>
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-text-subtle">
               {t("playground:search.filterBy", "Filter:")}
@@ -2584,6 +2895,12 @@ const WorkspacePlaygroundBody: React.FC = () => {
         open={transferSourcesRequest !== null}
         request={transferSourcesRequest}
         onCancel={closeTransferSourcesModal}
+      />
+
+      <WorkspaceShortcutsModal
+        open={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
+        includeShowShortcutsShortcut
       />
 
       {showWorkspaceTransitionCue && (

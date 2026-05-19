@@ -1,4 +1,15 @@
 groups:
+  - name: tldw_server_health
+    rules:
+      - alert: TLDWServiceDown
+        expr: up{job="tldw_server"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: tldw_server
+        annotations:
+          summary: "tldw_server is unreachable"
+          description: "Prometheus cannot scrape tldw_server for 2+ minutes."
   - name: tldw_server_http
     rules:
       - alert: TLDW5xxSpike

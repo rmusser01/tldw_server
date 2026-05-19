@@ -11,4 +11,5 @@ pytestmark = pytest.mark.integration
 def test_apply_rls_policies_smoke(pg_database_config: DatabaseConfig):
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     applied = ensure_prompt_studio_rls(backend)
-    assert applied in (True, False)
+    if applied is not True:
+        pytest.fail("expected PostgreSQL RLS installation to succeed in the integration fixture")

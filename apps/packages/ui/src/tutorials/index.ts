@@ -4,7 +4,11 @@
  */
 
 // Types
-export type { TutorialStep, TutorialDefinition } from "./registry"
+export type {
+  TutorialStep,
+  TutorialDefinition,
+  TutorialSequence
+} from "./registry"
 
 // Registry and helpers
 export {
@@ -12,6 +16,8 @@ export {
   getTutorialsForRoute,
   getTutorialById,
   getPrimaryTutorialForRoute,
+  getNextTutorialInSequence,
+  areTutorialPrerequisitesMet,
   hasTutorialsForRoute,
   getTutorialCountForRoute,
   normalizeTutorialRoute
@@ -28,4 +34,9 @@ export { evaluationsTutorials } from "./definitions/evaluations"
 export { notesTutorials } from "./definitions/notes"
 export { flashcardsTutorials } from "./definitions/flashcards"
 export { worldBooksTutorials } from "./definitions/world-books"
+export { documentWorkspaceTutorials } from "./definitions/document-workspace"
 export { gettingStartedTutorials } from "./definitions/getting-started"
+export { ttsTutorials } from "./definitions/tts"
+export { sttTutorials } from "./definitions/stt"
+export { watchlistsTutorials } from "./definitions/watchlists"
+export { monitoringTutorials } from "./definitions/monitoring"

@@ -561,7 +561,7 @@ export const AnnotationsPanel: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-secondary">
-              {filteredAnnotations.length} {t("option:documentWorkspace.annotationsCount", "annotations")}
+              {filteredAnnotations.length} {t("option:documentWorkspace.annotationsCount", "items")}
             </span>
             <Tooltip title={t("option:documentWorkspace.exportAnnotations", "Export")}>
               <Button
@@ -590,8 +590,8 @@ export const AnnotationsPanel: React.FC = () => {
             <div>
               <p className="text-sm font-medium">
                 {searchQuery || colorFilter !== "all" || typeFilter !== "all"
-                  ? t("option:documentWorkspace.noMatchingAnnotations", "No matching annotations")
-                  : t("option:documentWorkspace.noAnnotations", "No annotations yet")}
+                  ? t("option:documentWorkspace.noMatchingAnnotations", "No matching highlights or notes")
+                  : t("option:documentWorkspace.noAnnotations", "No highlights or notes yet")}
               </p>
               <p className="mt-1 text-xs text-text-secondary">
                 {searchQuery || colorFilter !== "all" || typeFilter !== "all"

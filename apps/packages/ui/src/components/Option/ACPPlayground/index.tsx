@@ -1,5 +1,6 @@
 import React, { Suspense, useEffect } from "react"
 import { useTranslation } from "react-i18next"
+import { useQuery } from "@tanstack/react-query"
 import { useStorage } from "@plasmohq/storage/hook"
 import { Drawer, Tabs } from "antd"
 import { Bot, MessageSquare, Wrench, Terminal } from "lucide-react"
@@ -7,7 +8,7 @@ import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConf
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useACPSession } from "@/hooks/useACPSession"
 import { ACPRestClient } from "@/services/acp/client"
-import { buildACPClientConfig } from "@/services/acp/connection"
+import { buildACPClientConfig, buildACPAuthHeaders } from "@/services/acp/connection"
 import { useACPSessionsStore } from "@/store/acp-sessions"
 import type { ACPPermissionTier } from "@/services/acp/types"
 import { ACPPlaygroundHeader } from "./ACPPlaygroundHeader"
@@ -28,6 +29,27 @@ const ACPPermissionModal = React.lazy(() =>
 
 const ACP_LEFT_PANE_KEY = "acp-playground-left-pane"
 const ACP_RIGHT_PANE_KEY = "acp-playground-right-pane"
+const ACP_SESSION_DETAIL_VIEWS = new Set([
+  "session",
+  "diagnostics",
+  "artifacts",
+  "audit",
+  "events"
+])
+
+const readACPPlaygroundSearch = (): string => {
+  if (typeof window === "undefined") return ""
+  if (window.location.search) return window.location.search
+
+  const hash = window.location.hash || ""
+  const queryIndex = hash.indexOf("?")
+  return queryIndex >= 0 ? hash.slice(queryIndex) : ""
+}
+
+const normalizeQueryValue = (value: string | null): string | null => {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
 
 /**
  * ACPPlayground - Agent Client Protocol interface
@@ -79,6 +101,7 @@ export const ACPPlayground: React.FC = () => {
   const upsertSessionsFromServerList = useACPSessionsStore((s) => s.upsertSessionsFromServerList)
   const applySessionDetail = useACPSessionsStore((s) => s.applySessionDetail)
   const applySessionUsage = useACPSessionsStore((s) => s.applySessionUsage)
+  const setActiveSession = useACPSessionsStore((s) => s.setActiveSession)
   const globalError = useACPSessionsStore((s) => s.globalError)
   const setGlobalError = useACPSessionsStore((s) => s.setGlobalError)
   const cleanupExpiredSessions = useACPSessionsStore((s) => s.cleanupExpiredSessions)
@@ -90,6 +113,35 @@ export const ACPPlayground: React.FC = () => {
       connectionConfig ? new ACPRestClient(buildACPClientConfig(connectionConfig)) : null,
     [connectionConfig]
   )
+
+  // Health check query to determine ACP backend availability.
+  // Include the server URL in the query key so changing the ACP server
+  // configuration invalidates the cached health status.
+  const acpServerUrl = connectionConfig?.serverUrl ?? ""
+  const { data: healthData, isLoading: isHealthLoading } = useQuery({
+    queryKey: ["acp", "health", acpServerUrl],
+    queryFn: async () => {
+      try {
+        const resp = await fetch(
+          `${connectionConfig!.serverUrl}/api/v1/acp/health`,
+          {
+            headers: buildACPAuthHeaders(connectionConfig),
+          }
+        )
+        return resp.ok ? await resp.json() : { overall: "unavailable" }
+      } catch {
+        return { overall: "unavailable" }
+      }
+    },
+    enabled: !!connectionConfig,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+  // Return undefined while the initial health check is in flight so
+  // downstream components can distinguish "loading" from "unhealthy".
+  const acpHealthy: boolean | undefined = isHealthLoading
+    ? undefined
+    : healthData?.overall === "healthy" || healthData?.overall === "degraded"
 
   const refreshSessionsFromServer = React.useCallback(async () => {
     if (!restClient) {
@@ -111,6 +163,7 @@ export const ACPPlayground: React.FC = () => {
     state,
     isConnected,
     error: websocketError,
+    reconnectInfo,
     connect,
     sendPrompt,
     cancel,
@@ -164,6 +217,45 @@ export const ACPPlayground: React.FC = () => {
   useEffect(() => {
     cleanupExpiredSessions()
   }, [cleanupExpiredSessions])
+
+  // Honor deep links from Agent Tasks and workspace run history.
+  useEffect(() => {
+    const params = new URLSearchParams(readACPPlaygroundSearch())
+    const requestedSessionId = normalizeQueryValue(params.get("session"))
+    const requestedView = normalizeQueryValue(params.get("view"))?.toLowerCase()
+
+    if (requestedSessionId) {
+      setActiveSession(requestedSessionId)
+    }
+
+    if (!requestedView) {
+      return
+    }
+
+    if (requestedView === "workspace") {
+      setActiveTab("workspace")
+      setRightTab("workspace")
+      setRightPaneOpen(true)
+      return
+    }
+
+    if (requestedView === "tools") {
+      setActiveTab("tools")
+      setRightTab("tools")
+      setRightPaneOpen(true)
+      return
+    }
+
+    if (requestedView === "chat") {
+      setActiveTab("chat")
+      return
+    }
+
+    if (requestedView === "sessions" || ACP_SESSION_DETAIL_VIEWS.has(requestedView)) {
+      setActiveTab("sessions")
+      setLeftPaneOpen(true)
+    }
+  }, [setActiveSession, setLeftPaneOpen, setRightPaneOpen])
 
   // Hydrate persisted ACP sessions from backend when the page loads.
   useEffect(() => {
@@ -330,6 +422,7 @@ export const ACPPlayground: React.FC = () => {
       children: renderAcpSessionPanel({
         onRefreshSessions: refreshSessionsFromServer,
         isRefreshing: isHydratingSessions,
+        acpHealthy,
       }),
     },
     {
@@ -349,6 +442,7 @@ export const ACPPlayground: React.FC = () => {
           error={globalError ?? websocketError}
           sendPrompt={sendPrompt}
           cancel={cancel}
+          reconnectInfo={reconnectInfo}
         />
       ),
     },
@@ -377,13 +471,15 @@ export const ACPPlayground: React.FC = () => {
   // Mobile layout
   if (isMobile) {
     return (
-      <div className="flex h-full flex-col bg-bg text-text">
+      <div className="relative flex h-full flex-col bg-bg text-text">
         <ACPPlaygroundHeader
           leftPaneOpen={false}
           rightPaneOpen={false}
           onToggleLeftPane={handleToggleLeftPane}
           onToggleRightPane={handleToggleRightPane}
           hideToggles
+          acpHealthy={acpHealthy}
+          isHealthLoading={isHealthLoading}
         />
 
         <Tabs
@@ -403,12 +499,14 @@ export const ACPPlayground: React.FC = () => {
 
   // Desktop layout
   return (
-    <div className="flex h-full flex-col bg-bg text-text">
+    <div className="relative flex h-full flex-col bg-bg text-text">
       <ACPPlaygroundHeader
         leftPaneOpen={!!leftPaneOpen}
         rightPaneOpen={!!rightPaneOpen}
         onToggleLeftPane={handleToggleLeftPane}
         onToggleRightPane={handleToggleRightPane}
+        acpHealthy={acpHealthy}
+        isHealthLoading={isHealthLoading}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -419,6 +517,7 @@ export const ACPPlayground: React.FC = () => {
               onHide: () => setLeftPaneOpen(false),
               onRefreshSessions: refreshSessionsFromServer,
               isRefreshing: isHydratingSessions,
+              acpHealthy,
             })}
           </aside>
         )}
@@ -441,6 +540,7 @@ export const ACPPlayground: React.FC = () => {
           {renderAcpSessionPanel({
             onRefreshSessions: refreshSessionsFromServer,
             isRefreshing: isHydratingSessions,
+            acpHealthy,
           })}
         </Drawer>
 
@@ -454,6 +554,7 @@ export const ACPPlayground: React.FC = () => {
             error={globalError ?? websocketError}
             sendPrompt={sendPrompt}
             cancel={cancel}
+            reconnectInfo={reconnectInfo}
           />
         </main>
 

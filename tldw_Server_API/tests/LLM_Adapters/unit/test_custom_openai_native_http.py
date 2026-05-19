@@ -95,3 +95,52 @@ def test_custom_openai_adapter_native_http_streaming(monkeypatch):
     chunks = list(a.stream(request))
     assert any(c.startswith("data: ") for c in chunks)
     assert sum(1 for c in chunks if "[DONE]" in c) == 1
+
+
+def test_custom_openai_adapter_fallback_accepts_canonical_env(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter
+
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP", "http://127.0.0.1:8000/v1")
+    adapter = CustomOpenAIAdapter()
+
+    assert adapter._resolve_base({"app_config": {}}) == "http://127.0.0.1:8000/v1"
+
+
+def test_custom_openai_adapter_fallback_preserves_numbered_env_compatibility(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter2
+
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP_2", "http://127.0.0.1:8002/v1")
+    adapter = CustomOpenAIAdapter2()
+
+    assert adapter._resolve_base({"app_config": {}}) == "http://127.0.0.1:8002/v1"
+
+
+def test_custom_openai_adapter_factory_supports_numbered_endpoint_env(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP_37", "http://127.0.0.1:8037/v1")
+
+    registry = ChatProviderRegistry()
+    adapter = registry.get_adapter("custom-openai-api-37")
+
+    assert adapter is not None
+    assert adapter.name == "custom-openai-api-37"
+    assert adapter.config_section == "custom_openai_api_37"
+    assert adapter._resolve_base({"app_config": {}}) == "http://127.0.0.1:8037/v1"
+
+
+def test_numbered_custom_openai_adapters_require_explicit_base_url(monkeypatch):
+    from tldw_Server_API.app.core.custom_openai_providers import custom_openai_endpoint_env_keys
+    from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import (
+        CustomOpenAIAdapter2,
+        make_custom_openai_adapter_class,
+    )
+
+    for env_key in (*custom_openai_endpoint_env_keys(2), *custom_openai_endpoint_env_keys(37)):
+        monkeypatch.delenv(env_key, raising=False)
+
+    with pytest.raises(RuntimeError, match="requires an explicit base URL"):
+        CustomOpenAIAdapter2()._resolve_base({"app_config": {}})
+
+    with pytest.raises(RuntimeError, match="requires an explicit base URL"):
+        make_custom_openai_adapter_class(37)()._resolve_base({"app_config": {}})

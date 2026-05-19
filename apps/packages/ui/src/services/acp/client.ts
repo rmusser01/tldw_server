@@ -75,8 +75,33 @@ export class ACPRestClient {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: response.statusText }))
-      throw new Error(error.detail || `HTTP ${response.status}`)
+      const errorBody = await response.json().catch(() => ({ detail: response.statusText }))
+      const detail =
+        errorBody && typeof errorBody === "object" && "detail" in errorBody
+          ? errorBody.detail
+          : response.statusText
+      const requestError = new Error(
+        typeof detail === "string" && detail.trim().length > 0
+          ? detail
+          : `HTTP ${response.status}`
+      ) as Error & {
+        status?: number
+        code?: string
+        detail?: unknown
+        details?: unknown
+      }
+      requestError.status = response.status
+      requestError.code =
+        errorBody && typeof errorBody === "object"
+          ? typeof (errorBody as Record<string, unknown>).error_code === "string"
+            ? (errorBody as Record<string, unknown>).error_code as string
+            : typeof (errorBody as Record<string, unknown>).code === "string"
+              ? (errorBody as Record<string, unknown>).code as string
+              : undefined
+          : undefined
+      requestError.detail = detail
+      requestError.details = errorBody
+      throw requestError
     }
 
     return response.json()

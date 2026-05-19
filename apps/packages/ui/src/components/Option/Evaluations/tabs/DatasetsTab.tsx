@@ -35,6 +35,8 @@ const { Text } = Typography
 export const DatasetsTab: React.FC = () => {
   const { t } = useTranslation(["evaluations", "common"])
   const [form] = Form.useForm()
+  const [loadingDatasetId, setLoadingDatasetId] = React.useState<string | null>(null)
+  const [deletingDatasetId, setDeletingDatasetId] = React.useState<string | null>(null)
 
   // Store state
   const {
@@ -134,8 +136,30 @@ export const DatasetsTab: React.FC = () => {
           "This will permanently remove the dataset. Evaluations using it will need a new dataset."
       }),
       okButtonProps: { danger: true },
-      onOk: () => deleteDatasetMutation.mutateAsync(datasetId)
+      onOk: async () => {
+        setDeletingDatasetId(datasetId)
+        try {
+          await deleteDatasetMutation.mutateAsync(datasetId)
+        } finally {
+          setDeletingDatasetId((current) =>
+            current === datasetId ? null : current
+          )
+        }
+      }
     })
+  }
+
+  const handleViewDataset = async (datasetId: string) => {
+    setLoadingDatasetId(datasetId)
+    try {
+      await loadDatasetMutation.mutateAsync({
+        datasetId,
+        page: 1,
+        pageSize: datasetSamplesPageSize
+      })
+    } finally {
+      setLoadingDatasetId((current) => (current === datasetId ? null : current))
+    }
   }
 
   return (
@@ -205,21 +229,15 @@ export const DatasetsTab: React.FC = () => {
                   <Space>
                     <Button
                       size="small"
-                      loading={loadDatasetMutation.isPending}
-                      onClick={() =>
-                        loadDatasetMutation.mutate({
-                          datasetId: ds.id,
-                          page: 1,
-                          pageSize: datasetSamplesPageSize
-                        })
-                      }
+                      loading={loadingDatasetId === ds.id}
+                      onClick={() => void handleViewDataset(ds.id)}
                     >
                       {t("common:view", { defaultValue: "View" })}
                     </Button>
                     <Button
                       size="small"
                       danger
-                      loading={deleteDatasetMutation.isPending}
+                      loading={deletingDatasetId === ds.id}
                       onClick={() => handleDeleteDataset(ds.id)}
                     >
                       {t("common:delete", { defaultValue: "Delete" })}

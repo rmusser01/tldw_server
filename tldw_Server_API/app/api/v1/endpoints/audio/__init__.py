@@ -136,8 +136,8 @@ def _get_failopen_cap_minutes() -> float:
             f = float(v)
             if f > 0:
                 return f
-        except (ValueError, TypeError) as exc:
-            logger.debug(f"AUDIO_FAILOPEN_CAP_MINUTES parse failed: {exc}")
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
     try:
         cfg = load_comprehensive_config()
         if cfg is not None:
@@ -146,17 +146,17 @@ def _get_failopen_cap_minutes() -> float:
                     f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio-Quota].failopen_cap_minutes parse failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
             if cfg.has_section("Audio"):
                 try:
                     f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio].failopen_cap_minutes parse failed: {exc}")
-    except Exception as exc:
-        logger.debug(f"Config read for failopen cap failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio].failopen_cap_minutes parse failed")
+    except Exception:
+        logger.debug("Config read for failopen cap failed")
     return 5.0
 
 

@@ -235,7 +235,9 @@ describe("WorldBooksManager import/export stage-4 export actions and upload cont
       } = setupDownloadSpies()
 
       render(<WorldBooksManager />)
-      await user.click(screen.getAllByRole("button", { name: "Export world book" })[0])
+      // Open overflow menu for first row, then click Export JSON
+      await user.click(screen.getAllByRole("button", { name: /More actions for/ })[0])
+      await user.click(await screen.findByText("Export JSON"))
 
       await waitFor(() => {
         expect(tldwClientMock.exportWorldBook).toHaveBeenCalledWith(1)
@@ -261,7 +263,9 @@ describe("WorldBooksManager import/export stage-4 export actions and upload cont
     const { capturedBlobPayloads, createElementSpy, restoreBlob } = setupDownloadSpies()
 
     render(<WorldBooksManager />)
-    await user.click(screen.getByRole("button", { name: "Export all world books" }))
+    // Open Tools dropdown then click Export All
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Export All"))
 
     await waitFor(() => {
       expect(tldwClientMock.exportWorldBook).toHaveBeenCalledTimes(2)
@@ -318,7 +322,9 @@ describe("WorldBooksManager import/export stage-4 export actions and upload cont
       const user = userEvent.setup({ applyAccept: false })
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open world book import modal" }))
+      // Open Tools dropdown then click Import JSON
+      await user.click(screen.getByRole("button", { name: "Tools" }))
+      await user.click(await screen.findByText("Import JSON"))
       expect(screen.getByRole("button", { name: "Import world book JSON file" })).toBeInTheDocument()
 
       const modalTitles = await screen.findAllByText("Import World Book (JSON)")

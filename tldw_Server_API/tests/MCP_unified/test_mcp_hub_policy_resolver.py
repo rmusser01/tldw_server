@@ -181,7 +181,9 @@ async def test_policy_resolver_merges_default_group_and_persona_targets() -> Non
     assert policy["denied_tools"] == ["external.tools.refresh"]
     assert policy["capabilities"] == ["filesystem.read", "network.external"]
     assert policy["approval_mode"] == "ask_every_time"
-    assert policy["authored_policy_document"] == policy["policy_document"]
+    # resolved_policy_document gains setdefault keys (tool_tier_overrides, conditions)
+    for key in policy["authored_policy_document"]:
+        assert policy["authored_policy_document"][key] == policy["policy_document"][key]
     assert policy["resolved_policy_document"] == policy["policy_document"]
     assert policy["policy_document"]["path_scope_mode"] == "cwd_descendants"
     assert policy["policy_document"]["path_scope_enforcement"] == "approval_required_when_unenforceable"
@@ -330,6 +332,28 @@ async def test_policy_resolver_allows_assignment_override_to_replace_path_scope_
         and entry["effect"] == "replaced"
         for entry in policy["provenance"]
     )
+
+
+@pytest.mark.asyncio
+async def test_policy_resolver_allows_null_override_to_clear_inherited_field() -> None:
+    from tldw_Server_API.app.services.mcp_hub_policy_resolver import McpHubPolicyResolver
+
+    repo = _FakeRepo()
+    repo.overrides[10] = {
+        "id": 501,
+        "assignment_id": 10,
+        "override_policy_document": {"path_scope_mode": None},
+        "is_active": True,
+    }
+    resolver = McpHubPolicyResolver(repo=repo)
+
+    policy = await resolver.resolve_for_context(
+        user_id=7,
+        metadata={"mcp_policy_context_enabled": True},
+    )
+
+    assert "path_scope_mode" in policy["policy_document"]
+    assert policy["policy_document"]["path_scope_mode"] is None
 
 
 @pytest.mark.asyncio
@@ -501,7 +525,11 @@ async def test_policy_resolver_keeps_unresolved_capabilities_visible_without_gra
 
     assert policy["allowed_tools"] == []
     assert policy["authored_policy_document"] == {"capabilities": ["tool.invoke.unmapped"]}
-    assert policy["resolved_policy_document"] == {"capabilities": ["tool.invoke.unmapped"]}
+    assert policy["resolved_policy_document"] == {
+        "capabilities": ["tool.invoke.unmapped"],
+        "tool_tier_overrides": {},
+        "conditions": {},
+    }
     assert policy["resolved_capabilities"] == []
     assert policy["unresolved_capabilities"] == ["tool.invoke.unmapped"]
     assert policy["capability_warnings"] == [

@@ -116,31 +116,31 @@ async def test_notes_crud_and_tags_flow():
         context=ctx,
     )
     note_id = created["note_id"]
-    assert created["success"] is True
-    assert created["meta"]["title"] == "Hello"
+    assert created["success"] is True  # nosec B101
+    assert created["meta"]["title"] == "Hello"  # nosec B101
 
     tags_list = await mod.execute_tool("notes.tags.list", {"note_id": note_id}, context=ctx)
-    assert tags_list["tags"] == ["bar", "foo"]
+    assert tags_list["tags"] == ["bar", "foo"]  # nosec B101
 
     added = await mod.execute_tool("notes.tags.add", {"note_id": note_id, "tags": ["Baz"]}, context=ctx)
-    assert "baz" in added["tags"]
+    assert "baz" in added["tags"]  # nosec B101
 
     removed = await mod.execute_tool("notes.tags.remove", {"note_id": note_id, "tags": ["foo"]}, context=ctx)
-    assert "foo" not in removed["tags"]
+    assert "foo" not in removed["tags"]  # nosec B101
 
     cleared = await mod.execute_tool("notes.tags.set", {"note_id": note_id, "tags": []}, context=ctx)
-    assert cleared["tags"] == []
+    assert cleared["tags"] == []  # nosec B101
 
     updated = await mod.execute_tool(
         "notes.update",
         {"note_id": note_id, "updates": {"title": "Updated"}},
         context=ctx,
     )
-    assert "title" in updated["updated_fields"]
+    assert "title" in updated["updated_fields"]  # nosec B101
 
     # List all tags (should be empty after clear)
     tags_all = await mod.execute_tool("notes.tags.list", {"limit": 10, "offset": 0}, context=ctx)
-    assert tags_all["tags"] == ["bar", "baz", "foo"]
+    assert tags_all["tags"] == ["bar", "baz", "foo"]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -171,4 +171,50 @@ async def test_notes_delete_permanent_requires_admin():
         {"note_id": note_id, "permanent": True},
         context=admin_ctx,
     )
-    assert deleted["action"] == "permanently_deleted"
+    assert deleted["action"] == "permanently_deleted"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notes_mutations_reject_out_of_scope_note_ids():
+    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+
+    mod = NotesModule(ModuleConfig(name="notes"))
+    fake_db = FakeNotesDB()
+    fake_db.add_note(title="In scope", content="Body", note_id="note-2")
+    fake_db.add_note(title="Out of scope", content="Body", note_id="note-1")
+    mod._open_db = lambda _ctx: fake_db  # type: ignore[attr-defined]
+
+    ctx = RequestContext(
+        request_id="notes-scope-write",
+        user_id="1",
+        metadata={
+            "persona_scope": {
+                "scope_snapshot_id": "snap-1",
+                "materialized_scope": {"explicit_ids": {"note_id": ["note-2"]}},
+            }
+        },
+    )
+
+    with pytest.raises(PermissionError, match="Cannot create a note outside explicit persona scope"):
+        await mod.execute_tool("notes.create", {"title": "A", "content": "B"}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Cannot list all tags outside explicit persona scope"):
+        await mod.execute_tool("notes.tags.list", {"limit": 10, "offset": 0}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Note access denied by persona scope"):
+        await mod.execute_tool("notes.tags.list", {"note_id": "note-1"}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Note access denied by persona scope"):
+        await mod.execute_tool("notes.update", {"note_id": "note-1", "updates": {"title": "X"}}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Note access denied by persona scope"):
+        await mod.execute_tool("notes.delete", {"note_id": "note-1"}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Note access denied by persona scope"):
+        await mod.execute_tool("notes.tags.add", {"note_id": "note-1", "tags": ["x"]}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Note access denied by persona scope"):
+        await mod.execute_tool("notes.tags.remove", {"note_id": "note-1", "tags": ["x"]}, context=ctx)
+
+    with pytest.raises(PermissionError, match="Note access denied by persona scope"):
+        await mod.execute_tool("notes.tags.set", {"note_id": "note-1", "tags": ["x"]}, context=ctx)

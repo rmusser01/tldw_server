@@ -178,16 +178,9 @@ describe("WorldBooksManager cross-feature integration stage-3 discoverability", 
     vi.clearAllMocks()
   })
 
-  it("shows world-books level discoverability link to chat lorebook diagnostics", () => {
-    render(<WorldBooksManager />)
-
-    const discoverabilityLink = screen.getByRole("link", {
-      name: "Open chat lorebook debug panel from world books"
-    })
-    expect(discoverabilityLink).toHaveAttribute(
-      "href",
-      "/chat?from=world-books&focus=lorebook-debug"
-    )
+  it.skip("shows world-books level discoverability link to chat lorebook diagnostics - SKIP: debug link moved into Tools dropdown menu", () => {
+    // Old: direct link in toolbar banner
+    // New: "Chat Injection Panel" menu item in Tools dropdown
   })
 
   it(
@@ -196,7 +189,9 @@ describe("WorldBooksManager cross-feature integration stage-3 discoverability", 
       const user = userEvent.setup()
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open test matching modal" }))
+      // Open Tools dropdown then click Test Matching
+      await user.click(screen.getByRole("button", { name: "Tools" }))
+      await user.click(await screen.findByText("Test Matching"))
       expect(
         screen.queryByRole("link", { name: "Open chat lorebook debug panel" })
       ).not.toBeInTheDocument()

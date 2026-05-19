@@ -9,15 +9,17 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.Evaluations.identity import EvaluationIdentity
 
 from .evaluations_auth import (
     check_evaluation_rate_limit,
+    get_evaluation_identity,
     get_eval_request_user,
     require_eval_permissions,
     sanitize_error_message,
@@ -27,12 +29,8 @@ from .evaluations_auth import (
 benchmarks_router = APIRouter()
 
 
-def _get_evaluation_manager_for_user(current_user: User) -> EvaluationManager:
-    user_id = getattr(current_user, "id", None)
-    try:
-        return EvaluationManager(user_id=int(user_id)) if user_id is not None else EvaluationManager()
-    except (TypeError, ValueError):
-        return EvaluationManager()
+def _get_evaluation_manager_for_user(identity: EvaluationIdentity) -> EvaluationManager:
+    return EvaluationManager(user_id=identity.user_scope)
 
 
 class BenchmarkRunRequest(BaseModel):
@@ -106,7 +104,9 @@ async def run_benchmark(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        evaluation_manager = _get_evaluation_manager_for_user(current_user)
+        identity = get_evaluation_identity(current_user)
+        evaluation_manager = _get_evaluation_manager_for_user(identity)
+        stable_user_id = identity.created_by
         registry = get_registry()
         config = registry.get(benchmark_name)
         if not config:
@@ -164,7 +164,7 @@ async def run_benchmark(
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
             for item, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
-                    logger.error("Benchmark evaluation failed for item_id={}: {}", item.get("id"), result)
+                    logger.error("Benchmark evaluation failed")
                     results.append({"item": item, "score": 0.0, "error": str(result)})
                 else:
                     results.append(
@@ -206,8 +206,8 @@ async def run_benchmark(
                 results={"summary": summary, "scores": scores},
                 metadata={
                     "api_name": request.api_name,
-                    "user_id": user_id,
-                    "current_user_id": str(getattr(current_user, "id", "")),
+                    "user_id": stable_user_id,
+                    "current_user_id": identity.user_scope,
                     "total_samples": len(dataset),
                 },
             )
@@ -221,7 +221,7 @@ async def run_benchmark(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run benchmark: {e}")
+        logger.error("Failed to run benchmark")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to run benchmark: {sanitize_error_message(e, 'benchmark run')}",

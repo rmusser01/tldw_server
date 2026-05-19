@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
+
 #######################################################################################################################
 #
 # Constants:
@@ -480,10 +482,9 @@ ALLOWED_PROVIDERS: frozenset = frozenset([
     "vllm",
     "local-llm",
     "aphrodite",
-    "custom-openai-api",
-    "custom-openai-api-2",
     "moonshot",
     "zai",
+    *iter_custom_openai_provider_names(),
 ])
 
 

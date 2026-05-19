@@ -8,14 +8,12 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    rbac_rate_limit,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     check_evaluation_rate_limit,
     create_error_response,
+    get_evaluation_identity,
     get_eval_request_user,
     require_eval_permissions,
     sanitize_error_message,
@@ -30,12 +28,12 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     RunResponse,
     UpdateEvaluationRequest,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Evaluations.audit_adapter import MandatoryAuditWriteError
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
-from tldw_Server_API.app.core.Evaluations.webhook_identity import webhook_user_id_from_user
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 _EVALS_CRUD_NONCRITICAL_EXCEPTIONS = (
@@ -67,6 +65,11 @@ crud_router = APIRouter()
 RBAC_EVALS_CREATE = rbac_rate_limit("evals.create")
 
 
+def _get_crud_identity_and_service(current_user: User):
+    identity = get_evaluation_identity(current_user)
+    return identity, get_unified_evaluation_service_for_user(identity.user_scope)
+
+
 @crud_router.post(
     "/",
     response_model=EvaluationResponse,
@@ -84,23 +87,22 @@ async def create_evaluation(
     response: Response = None,
 ):
     try:
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        identity, svc = _get_crud_identity_and_service(current_user)
         if idempotency_key:
             try:
-                existing_id = svc.db.lookup_idempotency("evaluation", idempotency_key, stable_user_id)
+                existing_id = svc.db.lookup_idempotency("evaluation", idempotency_key, identity.created_by)
                 if existing_id:
-                    existing = await svc.get_evaluation(existing_id, created_by=stable_user_id)
+                    existing = await svc.get_evaluation(existing_id, created_by=identity.created_by)
                     if existing:
                         try:
                             if response is not None:
                                 response.headers["X-Idempotent-Replay"] = "true"
                                 response.headers["Idempotency-Key"] = idempotency_key
-                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"evaluations_crud: failed to set idempotency headers for {existing_id}: {e}")
+                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                            logger.debug("evaluations_crud: failed to set evaluation idempotency replay headers")
                         return EvaluationResponse(**existing)
-            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"evaluations_crud: idempotency lookup failed for key {idempotency_key}: {e}")
+            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                logger.debug("evaluations_crud: evaluation idempotency lookup failed")
         evaluation = await svc.create_evaluation(
             name=eval_request.name,
             description=eval_request.description,
@@ -109,18 +111,16 @@ async def create_evaluation(
             dataset_id=eval_request.dataset_id,
             dataset=[model_dump_compat(s) for s in eval_request.dataset] if eval_request.dataset else None,
             metadata=model_dump_compat(eval_request.metadata) if eval_request.metadata else None,
-            created_by=stable_user_id,
+            created_by=identity.created_by,
         )
         try:
             if idempotency_key and evaluation.get("id"):
-                svc.db.record_idempotency("evaluation", idempotency_key, evaluation["id"], stable_user_id)
-        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(
-                f"evaluations_crud: failed to record idempotency for evaluation {evaluation.get('id')}: {e}"
-            )
+                svc.db.record_idempotency("evaluation", idempotency_key, evaluation["id"], identity.created_by)
+        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+            logger.debug("evaluations_crud: failed to record evaluation idempotency")
         return EvaluationResponse(**evaluation)
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create evaluation: {e}")
+        logger.error("Failed to create evaluation")
         raise create_error_response(
             message=f"Failed to create evaluation: {sanitize_error_message(e, 'evaluation creation')}",
             error_type="server_error",
@@ -142,25 +142,34 @@ async def list_evaluations(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        identity, svc = _get_crud_identity_and_service(current_user)
         evaluations, has_more = await svc.list_evaluations(
             limit=limit,
             after=after,
             eval_type=eval_type,
-            created_by=stable_user_id,
+            created_by=identity.created_by,
         )
         first_id = evaluations[0]["id"] if evaluations else None
         last_id = evaluations[-1]["id"] if evaluations else None
+        next_cursor = last_id if has_more else None
         return EvaluationListResponse(
             object="list",
             data=[EvaluationResponse(**eval) for eval in evaluations],
+            limit=limit,
+            cursor=after,
+            next_cursor=next_cursor,
             has_more=has_more,
             first_id=first_id,
             last_id=last_id,
+            pagination=build_cursor_pagination_meta(
+                limit=limit,
+                cursor=after,
+                next_cursor=next_cursor,
+                has_more=has_more,
+            ),
         )
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list evaluations: {e}")
+        logger.error("Failed to list evaluations")
         raise create_error_response(
             message=f"Failed to list evaluations: {sanitize_error_message(e, 'listing evaluations')}",
             error_type="server_error",
@@ -178,9 +187,8 @@ async def get_evaluation(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        evaluation = await svc.get_evaluation(eval_id, created_by=stable_user_id)
+        identity, svc = _get_crud_identity_and_service(current_user)
+        evaluation = await svc.get_evaluation(eval_id, created_by=identity.created_by)
         if not evaluation:
             raise create_error_response(
                 message="Evaluation not found",
@@ -191,7 +199,7 @@ async def get_evaluation(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get evaluation: {e}")
+        logger.error("Failed to get evaluation")
         raise create_error_response(
             message=f"Failed to get evaluation: {sanitize_error_message(e, 'retrieving evaluation')}",
             error_type="server_error",
@@ -210,11 +218,15 @@ async def update_evaluation(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
+        identity, svc = _get_crud_identity_and_service(current_user)
         # Only include explicitly provided fields; avoid overwriting with None
         updates = model_dump_compat(update_request, exclude_none=True, exclude_unset=True)
-        evaluation = await svc.update_evaluation(eval_id, updates, updated_by=stable_user_id, created_by=stable_user_id)
+        evaluation = await svc.update_evaluation(
+            eval_id,
+            updates,
+            updated_by=identity.created_by,
+            created_by=identity.created_by,
+        )
         if not evaluation:
             raise create_error_response(
                 message="Evaluation not found",
@@ -225,7 +237,7 @@ async def update_evaluation(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to update evaluation: {e}")
+        logger.error("Failed to update evaluation")
         raise create_error_response(
             message=f"Failed to update evaluation: {sanitize_error_message(e, 'updating evaluation')}",
             error_type="server_error",
@@ -244,9 +256,12 @@ async def delete_evaluation(
     current_user: User = Depends(get_eval_request_user),
 ) -> Response:
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        success = await svc.delete_evaluation(eval_id, deleted_by=stable_user_id, created_by=stable_user_id)
+        identity, svc = _get_crud_identity_and_service(current_user)
+        success = await svc.delete_evaluation(
+            eval_id,
+            deleted_by=identity.created_by,
+            created_by=identity.created_by,
+        )
         if not success:
             raise create_error_response(
                 message="Evaluation not found",
@@ -257,7 +272,7 @@ async def delete_evaluation(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to delete evaluation: {e}")
+        logger.error("Failed to delete evaluation")
         raise create_error_response(
             message=f"Failed to delete evaluation: {sanitize_error_message(e, 'deleting evaluation')}",
             error_type="server_error",
@@ -272,7 +287,7 @@ async def delete_evaluation(
     dependencies=[
         Depends(require_eval_permissions(EVALS_MANAGE)),
         Depends(check_evaluation_rate_limit),
-        Depends(require_token_scope(
+        Depends(TokenScopeGuard(
             "workflows",
             require_if_present=True,
             require_schedule_match=False,
@@ -291,25 +306,22 @@ async def create_run(
     response: Response = None,
 ):
     try:
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        svc = get_unified_evaluation_service_for_user(current_user.id)
+        identity, svc = _get_crud_identity_and_service(current_user)
         if idempotency_key:
             try:
-                existing_id = svc.db.lookup_idempotency("run", idempotency_key, stable_user_id)
+                existing_id = svc.db.lookup_idempotency("run", idempotency_key, identity.created_by)
                 if existing_id:
-                    existing = await svc.get_run(existing_id, created_by=stable_user_id)
+                    existing = await svc.get_run(existing_id, created_by=identity.created_by)
                     if existing:
                         try:
                             if response is not None:
                                 response.headers["X-Idempotent-Replay"] = "true"
                                 response.headers["Idempotency-Key"] = idempotency_key
-                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(
-                                f"evaluations_crud: failed to set idempotency headers for {existing_id}: {e}"
-                            )
+                        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                            logger.debug("evaluations_crud: failed to set run idempotency replay headers")
                         return RunResponse(**existing)
-            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"evaluations_crud: idempotency lookup failed for key {idempotency_key}: {e}")
+            except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+                logger.debug("evaluations_crud: run idempotency lookup failed")
         target_model = request.target_model
         # Allow free-form config; convert Pydantic models if provided in future
         config = model_dump_compat(request.config) if hasattr(request.config, 'model_dump') else (request.config or {})
@@ -321,19 +333,26 @@ async def create_run(
             config=config,
             dataset_override=dataset_override,
             webhook_url=webhook_url,
-            created_by=stable_user_id,
-            webhook_user_id=webhook_user_id_from_user(current_user),
+            created_by=identity.created_by,
+            webhook_user_id=identity.webhook_user_id,
         )
         try:
             if idempotency_key and run.get("id"):
-                svc.db.record_idempotency("run", idempotency_key, run["id"], stable_user_id)
-        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"evaluations_crud: failed to record idempotency for run {run.get('id')}: {e}")
+                svc.db.record_idempotency("run", idempotency_key, run["id"], identity.created_by)
+        except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
+            logger.debug("evaluations_crud: failed to record run idempotency")
         return RunResponse(**run)
     except HTTPException:
         raise
+    except MandatoryAuditWriteError as e:
+        raise create_error_response(
+            message="Mandatory audit persistence unavailable",
+            error_type="service_unavailable",
+            code="audit_persistence_failure",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        ) from e
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to create run: {e}")
+        logger.error("Failed to create run")
         raise create_error_response(
             message=f"Failed to create run: {sanitize_error_message(e, 'creating run')}",
             error_type="server_error",
@@ -350,18 +369,39 @@ async def list_runs(
     eval_id: str,
     limit: int = Query(20, ge=1, le=100),
     after: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    run_status: Optional[str] = Query(None, alias="status"),
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        runs, has_more = await svc.list_runs(eval_id=eval_id, status=status, limit=limit, after=after, created_by=stable_user_id)
+        identity, svc = _get_crud_identity_and_service(current_user)
+        runs, has_more = await svc.list_runs(
+            eval_id=eval_id,
+            status=run_status,
+            limit=limit,
+            after=after,
+            created_by=identity.created_by,
+        )
         first_id = runs[0]["id"] if runs else None
         last_id = runs[-1]["id"] if runs else None
-        return RunListResponse(object="list", data=[RunResponse(**run) for run in runs], has_more=has_more, first_id=first_id, last_id=last_id)
+        next_cursor = last_id if has_more else None
+        return RunListResponse(
+            object="list",
+            data=[RunResponse(**run) for run in runs],
+            limit=limit,
+            cursor=after,
+            next_cursor=next_cursor,
+            has_more=has_more,
+            first_id=first_id,
+            last_id=last_id,
+            pagination=build_cursor_pagination_meta(
+                limit=limit,
+                cursor=after,
+                next_cursor=next_cursor,
+                has_more=has_more,
+            ),
+        )
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to list runs: {e}")
+        logger.error("Failed to list runs")
         raise create_error_response(
             message=f"Failed to list runs: {sanitize_error_message(e, 'listing runs')}",
             error_type="server_error",
@@ -379,9 +419,8 @@ async def get_run(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        run = await svc.get_run(run_id, created_by=stable_user_id)
+        identity, svc = _get_crud_identity_and_service(current_user)
+        run = await svc.get_run(run_id, created_by=identity.created_by)
         if not run:
             raise create_error_response(
                 message="Run not found",
@@ -392,7 +431,7 @@ async def get_run(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to get run: {e}")
+        logger.error("Failed to get run")
         raise create_error_response(
             message=f"Failed to get run: {sanitize_error_message(e, 'retrieving run')}",
             error_type="server_error",
@@ -409,9 +448,12 @@ async def cancel_run(
     current_user: User = Depends(get_eval_request_user),
 ):
     try:
-        svc = get_unified_evaluation_service_for_user(current_user.id)
-        stable_user_id = getattr(current_user, "id_str", None) or str(current_user.id)
-        ok = await svc.cancel_run(run_id, cancelled_by=stable_user_id, created_by=stable_user_id)
+        identity, svc = _get_crud_identity_and_service(current_user)
+        ok = await svc.cancel_run(
+            run_id,
+            cancelled_by=identity.created_by,
+            created_by=identity.created_by,
+        )
         if not ok:
             raise create_error_response(
                 message="Run not found",
@@ -422,7 +464,7 @@ async def cancel_run(
     except HTTPException:
         raise
     except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to cancel run: {e}")
+        logger.error("Failed to cancel run")
         raise create_error_response(
             message=f"Failed to cancel run: {sanitize_error_message(e, 'cancelling run')}",
             error_type="server_error",

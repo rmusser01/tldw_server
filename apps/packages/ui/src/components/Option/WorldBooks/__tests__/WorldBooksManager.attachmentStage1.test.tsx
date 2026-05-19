@@ -194,7 +194,9 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
 
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+    // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
 
     expect(await screen.findByText("List view active (11 characters).")).toBeInTheDocument()
     expect(
@@ -214,7 +216,9 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
 
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+    // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
     expect(await screen.findByText("Matrix view active (2 characters).")).toBeInTheDocument()
 
     await user.click(screen.getByLabelText("Toggle attachment Arcana / Bob"))
@@ -243,7 +247,9 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
 
       render(<WorldBooksManager />)
 
-      await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+      // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
       expect(await screen.findByText("List view active (2 characters).")).toBeInTheDocument()
 
       await user.click(screen.getByLabelText("Attachment selector for Arcana"))
@@ -304,7 +310,9 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
 
     expect(attachmentQueryCalls.at(-1)?.[0]?.enabled).toBe(false)
 
-    await user.click(screen.getByRole("button", { name: "Open relationship matrix" }))
+    // Open Tools dropdown then click Relationship Matrix
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    await user.click(await screen.findByText("Relationship Matrix"))
 
     const updatedAttachmentQueryCalls = useQueryMock.mock.calls.filter((call) => {
       const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []

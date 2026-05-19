@@ -881,7 +881,10 @@ describe("extension entry shell performance contracts", () => {
     )
     expect(documentWorkspacePageSource).toContain('import("./DocumentViewer")')
     expect(documentWorkspacePageSource).toContain(
-      'import("./LeftSidebar/FiguresTab")',
+      'import("./LeftSidebar/PagesTab")',
+    )
+    expect(documentWorkspacePageSource).toContain(
+      'import("./LeftSidebar/ReferencesTab")',
     )
     expect(documentWorkspacePageSource).toContain(
       'import("./RightPanel/DocumentChat")',

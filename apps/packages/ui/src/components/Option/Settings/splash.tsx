@@ -154,7 +154,7 @@ export const SplashSettings = () => {
         <div className="border-b border-border mt-3" />
       </div>
 
-      <div className="rounded-xl border border-border bg-surface p-4">
+      <div className="panel-card p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <div className="text-sm font-medium text-text">
@@ -224,7 +224,7 @@ export const SplashSettings = () => {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-surface p-4 space-y-4">
+      <div className="panel-card p-4 space-y-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <Space wrap>
             <Button onClick={() => void setEnabledCardNames(DEFAULT_SPLASH_CARD_NAMES)}>

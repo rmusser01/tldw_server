@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
@@ -63,6 +63,11 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
+  createWorkspaceStorage: () => ({
+    getItem: vi.fn().mockResolvedValue("1"),
+    setItem: vi.fn().mockResolvedValue(undefined),
+    removeItem: vi.fn().mockResolvedValue(undefined)
+  }),
   useWorkspaceStore: (
     selector: (state: {
       storeHydrated?: boolean
@@ -300,5 +305,44 @@ describe("WorkspacePlayground desktop layout guardrails", () => {
       "data-content-width-mode",
       "full"
     )
+  })
+
+  it("keeps collapsed sidebar restore rails persistent and associated with their panels", () => {
+    testState.leftPaneCollapsed = true
+    testState.rightPaneCollapsed = true
+
+    render(<WorkspacePlayground />)
+
+    const restoreSourcesButton = screen.getByTestId("workspace-restore-sources")
+    const restoreStudioButton = screen.getByTestId("workspace-restore-studio")
+
+    expect(restoreSourcesButton).toHaveAttribute("aria-controls", "workspace-sources-panel")
+    expect(restoreSourcesButton).toHaveAttribute("aria-expanded", "false")
+    expect(restoreSourcesButton).toHaveClass("sticky")
+    expect(restoreSourcesButton).toHaveClass("top-2")
+    expect(restoreSourcesButton).toHaveClass("self-stretch")
+    expect(restoreSourcesButton).toHaveClass("min-h-[14rem]")
+    expect(restoreSourcesButton).toHaveClass("w-11")
+
+    expect(restoreStudioButton).toHaveAttribute("aria-controls", "workspace-studio-panel")
+    expect(restoreStudioButton).toHaveAttribute("aria-expanded", "false")
+    expect(restoreStudioButton).toHaveClass("sticky")
+    expect(restoreStudioButton).toHaveClass("top-2")
+    expect(restoreStudioButton).toHaveClass("self-stretch")
+    expect(restoreStudioButton).toHaveClass("min-h-[14rem]")
+    expect(restoreStudioButton).toHaveClass("w-11")
+  })
+
+  it("restores collapsed sidebars from desktop rail buttons", () => {
+    testState.leftPaneCollapsed = true
+    testState.rightPaneCollapsed = true
+
+    render(<WorkspacePlayground />)
+
+    fireEvent.click(screen.getByTestId("workspace-restore-sources"))
+    fireEvent.click(screen.getByTestId("workspace-restore-studio"))
+
+    expect(testState.setLeftPaneCollapsed).toHaveBeenCalledWith(false)
+    expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)
   })
 })

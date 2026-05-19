@@ -9,8 +9,12 @@ import type {
   WizardResultItem,
   WizardStep,
   DetectedMediaType,
+  ConferenceBatchMetadata,
+  ConferenceItemMetadataOverride,
+  PlaylistQueueMetadata,
 } from "@/components/Common/QuickIngest/types"
 import { DEFAULT_PRESET, DEFAULT_PRESETS } from "@/components/Common/QuickIngest/presets"
+import type { QuickIngestOpenDetail } from "@/utils/quick-ingest-open"
 
 const STORAGE_KEY = "tldw-quick-ingest-session"
 
@@ -27,11 +31,15 @@ export type PersistedQuickIngestTracking = {
   sessionId?: string
   batchId?: string
   batchIds?: string[]
+  collectionId?: string
+  plannedItemIds?: string[]
   jobIds?: number[]
   submittedItemIds?: string[]
   /** @deprecated use submittedItemIds */
   itemIds?: string[]
   jobIdToItemId?: Record<string, string>
+  jobIdToCollectionItemId?: Record<string, string>
+  durableMode?: "durable_collection" | "degraded" | "unknown"
   startedAt?: number
 }
 
@@ -50,6 +58,8 @@ export type PersistedWizardQueueItem = {
   fileSize: number
   mimeType?: string
   validation: QueueItemValidation
+  playlist?: PlaylistQueueMetadata
+  conferenceOverride?: ConferenceItemMetadataOverride
   fileStub?: {
     key?: string
     instanceId?: string
@@ -93,6 +103,8 @@ export type QuickIngestSessionRecord = {
   customOptions: Partial<PresetConfig>
   processingState: WizardProcessingState
   results: WizardResultItem[]
+  openDetail?: QuickIngestOpenDetail | null
+  conferenceBatchMetadata?: ConferenceBatchMetadata | null
   badge: QuickIngestSessionBadge
   resultSummary: QuickIngestSessionResultSummary
   tracking?: PersistedQuickIngestTracking
@@ -105,6 +117,11 @@ export type QuickIngestSessionRecord = {
 type QuickIngestSessionPersistedState = {
   session: QuickIngestSessionRecord | null
 }
+
+const isCustomBasePreset = (
+  value: unknown
+): value is Exclude<IngestPreset, "custom"> =>
+  typeof value === "string" && value in DEFAULT_PRESETS
 
 type QuickIngestSessionState = QuickIngestSessionPersistedState & {
   triggerSummary: QuickIngestTriggerSummary
@@ -152,7 +169,6 @@ const createSessionStorage = (): StateStorage => {
   if (typeof window === "undefined") {
     return createMemoryStorage()
   }
-
   return {
     getItem: (name: string): string | null => {
       try {
@@ -223,7 +239,15 @@ const sanitizeTracking = (
       : []),
     ...(Array.isArray(tracking.itemIds) ? tracking.itemIds : []),
   ])
+  const plannedItemIds = normalizeStringIds(
+    Array.isArray(tracking.plannedItemIds) ? tracking.plannedItemIds : []
+  )
   const jobIdToItemIdEntries = Object.entries(tracking.jobIdToItemId || {})
+    .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
+    .filter(([jobId, itemId]) => jobId && itemId)
+  const jobIdToCollectionItemIdEntries = Object.entries(
+    tracking.jobIdToCollectionItemId || {}
+  )
     .map(([jobId, itemId]) => [String(jobId || "").trim(), String(itemId || "").trim()] as const)
     .filter(([jobId, itemId]) => jobId && itemId)
   const normalizedMode =
@@ -240,6 +264,8 @@ const sanitizeTracking = (
       tracking.batchId?.trim() ||
       (batchIds.length > 0 ? batchIds[batchIds.length - 1] : undefined),
     batchIds: batchIds.length > 0 ? batchIds : undefined,
+    collectionId: tracking.collectionId?.trim() || undefined,
+    plannedItemIds: plannedItemIds.length > 0 ? plannedItemIds : undefined,
     jobIds: jobIds && jobIds.length > 0 ? Array.from(new Set(jobIds)) : undefined,
     submittedItemIds:
       submittedItemIds.length > 0 ? submittedItemIds : undefined,
@@ -247,6 +273,16 @@ const sanitizeTracking = (
     jobIdToItemId:
       jobIdToItemIdEntries.length > 0
         ? Object.fromEntries(jobIdToItemIdEntries)
+        : undefined,
+    jobIdToCollectionItemId:
+      jobIdToCollectionItemIdEntries.length > 0
+        ? Object.fromEntries(jobIdToCollectionItemIdEntries)
+        : undefined,
+    durableMode:
+      tracking.durableMode === "durable_collection" ||
+      tracking.durableMode === "degraded" ||
+      tracking.durableMode === "unknown"
+        ? tracking.durableMode
         : undefined,
     startedAt:
       typeof tracking.startedAt === "number" && Number.isFinite(tracking.startedAt)
@@ -274,6 +310,11 @@ const mergeTracking = (
     sessionId: next.sessionId || base.sessionId,
     batchId: next.batchId || base.batchId,
     batchIds: [...(base.batchIds || []), ...(next.batchIds || [])],
+    collectionId: next.collectionId || base.collectionId,
+    plannedItemIds: [
+      ...(base.plannedItemIds || []),
+      ...(next.plannedItemIds || []),
+    ],
     jobIds: [...(base.jobIds || []), ...(next.jobIds || [])],
     submittedItemIds: [
       ...(base.submittedItemIds || base.itemIds || []),
@@ -283,6 +324,11 @@ const mergeTracking = (
       ...(base.jobIdToItemId || {}),
       ...(next.jobIdToItemId || {}),
     },
+    jobIdToCollectionItemId: {
+      ...(base.jobIdToCollectionItemId || {}),
+      ...(next.jobIdToCollectionItemId || {}),
+    },
+    durableMode: next.durableMode || base.durableMode,
     startedAt: base.startedAt || next.startedAt,
   })
 }
@@ -326,6 +372,8 @@ const sanitizeQueueItems = (
             ? item.type
             : undefined,
       validation: item?.validation || { valid: true },
+      playlist: item?.playlist,
+      conferenceOverride: item?.conferenceOverride,
     }
 
     if (item?.fileStub) {
@@ -434,6 +482,10 @@ const sanitizeSession = (
       ? session.updatedAt
       : createdAt
 
+  const customBasePreset = isCustomBasePreset(session.customBasePreset)
+    ? session.customBasePreset
+    : DEFAULT_PRESET
+
   return {
     id: session.id || generateSessionId(),
     visibility: session.visibility === "hidden" ? "hidden" : "visible",
@@ -441,14 +493,16 @@ const sanitizeSession = (
     currentStep: session.currentStep || 1,
     queueItems: sanitizeQueueItems(session.queueItems),
     selectedPreset: session.selectedPreset || DEFAULT_PRESET,
-    customBasePreset:
-      session.customBasePreset && session.customBasePreset !== "custom"
-        ? session.customBasePreset
-        : DEFAULT_PRESET,
+    customBasePreset,
     presetConfig: session.presetConfig || DEFAULT_PRESETS[DEFAULT_PRESET],
     customOptions: session.customOptions || {},
     processingState: session.processingState || { ...INITIAL_PROCESSING_STATE },
     results: Array.isArray(session.results) ? session.results : [],
+    openDetail:
+      session.openDetail && typeof session.openDetail === "object"
+        ? session.openDetail
+        : null,
+    conferenceBatchMetadata: session.conferenceBatchMetadata ?? null,
     badge: {
       queueCount: Math.max(
         0,
@@ -498,6 +552,8 @@ export const createEmptyQuickIngestSession = (): QuickIngestSessionRecord => {
     customOptions: {},
     processingState: { ...INITIAL_PROCESSING_STATE },
     results: [],
+    openDetail: null,
+    conferenceBatchMetadata: null,
     badge: {
       queueCount: 0,
       hasRecentFailure: false,

@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminWebhookCreateRequest,
     AdminWebhookDeleteResponse,
@@ -67,6 +68,14 @@ async def list_webhooks(
             for r in items
         ],
         total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 
@@ -173,4 +182,12 @@ async def list_webhook_deliveries(
             for e in items
         ],
         total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )

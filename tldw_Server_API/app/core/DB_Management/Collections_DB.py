@@ -14,10 +14,12 @@ Notes:
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import re
-from collections.abc import Iterable
+import threading
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -35,6 +37,7 @@ from tldw_Server_API.app.core.Collections.utils import (
 from tldw_Server_API.app.core.config import load_comprehensive_config, settings
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.DB_Management.content_backend import (
+    backend_target_key,
     get_content_backend,
     load_content_db_settings,
 )
@@ -44,7 +47,11 @@ from tldw_Server_API.app.core.exceptions import (
 )
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError
-from .backends.factory import DatabaseBackendFactory
+from .backends.factory import (
+    DatabaseBackendFactory,
+    is_factory_managed_backend,
+    release_managed_backend,
+)
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths, normalize_output_storage_filename
 
@@ -62,6 +69,19 @@ _COLLECTIONS_NONCRITICAL_EXCEPTIONS = (
     StorageUnavailableError,
     InvalidStorageUserIdError,
 )
+
+
+def _count_row_total(row: Any) -> int:
+    if not row:
+        return 0
+    if isinstance(row, dict):
+        value = row.get("total")
+    else:
+        try:
+            value = row["total"]
+        except (IndexError, KeyError, TypeError):
+            value = row[0]
+    return int(value if value is not None else 0)
 
 
 def _utcnow_iso() -> str:
@@ -117,6 +137,9 @@ _SQLITE_PRAGMA_TABLES = {
     "content_item_tags",
     "content_items",
     "file_artifacts",
+    "media_collection_items",
+    "media_collection_runs",
+    "media_collections",
     "notification_preferences",
     "notification_bridge_state",
     "output_templates",
@@ -127,6 +150,17 @@ _SQLITE_PRAGMA_TABLES = {
     "reading_digest_schedules",
     "reading_highlights",
     "user_notifications",
+}
+
+
+CONFERENCE_ITEM_STATUSES = {
+    "planned",
+    "processing",
+    "completed",
+    "skipped_existing",
+    "submit_failed",
+    "failed",
+    "cancelled",
 }
 
 
@@ -204,6 +238,51 @@ class ContentItemRow:
     tags: list[str]
     is_new: bool = False
     content_changed: bool = False
+
+
+@dataclass
+class MediaCollectionItemRow:
+    id: int
+    user_id: str
+    collection_id: int
+    ordinal: int
+    source_url: str
+    normalized_source_id: str | None
+    source_kind: str | None
+    title: str | None
+    speaker: str | None
+    published_at: str | None
+    track: str | None
+    duplicate_status: str
+    status: str
+    media_id: int | None
+    content_item_id: int | None
+    latest_job_id: str | None
+    latest_run_id: int | None
+    idempotency_key: str | None
+    retry_count: int
+    error_summary: str | None
+    warnings: list[str]
+    metadata: dict[str, Any]
+    tags: list[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class MediaCollectionRow:
+    id: int
+    user_id: str
+    name: str
+    kind: str
+    description: str | None
+    source_url: str | None
+    metadata: dict[str, Any]
+    default_tags: list[str]
+    deleted: bool
+    created_at: str
+    updated_at: str
+    items: list[MediaCollectionItemRow]
 
 
 @dataclass
@@ -308,6 +387,7 @@ class UserNotificationRow:
     created_at: str
     read_at: str | None
     dismissed_at: str | None
+    snooze_task_id: str | None = None
     delivery_status: str = "pending"
     delivered_at: str | None = None
 
@@ -378,21 +458,52 @@ class AudiobookArtifactRow:
     metadata_json: str | None
 
 
+def _pin_collections_public_operation(method):
+    @functools.wraps(method)
+    def wrapper(self: "CollectionsDatabase", *args: Any, **kwargs: Any):
+        with self._operation_backend_pin():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) -> type["CollectionsDatabase"]:
+    for name, attribute in list(vars(cls).items()):
+        if name.startswith("_") or name in {"ensure_schema", "transaction"}:
+            continue
+        if isinstance(attribute, (classmethod, staticmethod, property, type)):
+            continue
+        if not callable(attribute):
+            continue
+        setattr(cls, name, _pin_collections_public_operation(attribute))
+    return cls
+
+
+@_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
+
+    _bootstrapped_backend_targets: set[str] = set()
 
     def __init__(self, user_id: int | str, backend: DatabaseBackend | None = None):
         self.user_id = str(user_id)
         self._owns_backend = False
+        self._local = threading.local()
+        self._backend: DatabaseBackend
+        self._uses_shared_content_backend = False
+        self._backend_refresh_suspended = False
         if backend is None:
-            backend = self._resolve_backend()
+            backend, uses_shared_backend = self._resolve_backend()
+            self._uses_shared_content_backend = uses_shared_backend
         else:
             self._owns_backend = False
-        self.backend = backend
+        self._backend = backend
         self._fts_available = True
         self._fts_supports_direct_delete = True
-        self.ensure_schema()
-        self._seed_watchlists_output_templates()
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self._ensure_bootstrap_for_backend(self._backend)
+        else:
+            self._run_backend_bootstrap()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> CollectionsDatabase:
@@ -403,7 +514,84 @@ class CollectionsDatabase:
         """Construct using an existing backend (avoids path resolution and int casting)."""
         return cls(user_id=user_id, backend=backend)
 
-    def _resolve_backend(self) -> DatabaseBackend:
+    @property
+    def backend(self) -> DatabaseBackend:
+        pinned_backend = self._get_pinned_backend()
+        if pinned_backend is not None:
+            return pinned_backend
+        return self._refresh_backend_if_needed()
+
+    @property
+    def backend_type(self) -> BackendType:
+        return self.backend.backend_type
+
+    def _refresh_backend_if_needed(self) -> DatabaseBackend:
+        if not self._uses_shared_content_backend:
+            return self._backend
+        if self._backend_refresh_suspended:
+            return self._backend
+
+        previous_owns_backend = self._owns_backend
+        current_key = self._backend_target_key(self._backend)
+        refreshed_backend, uses_shared_backend = self._resolve_backend()
+        refreshed_key = self._backend_target_key(refreshed_backend)
+
+        # A transient refresh failure must not demote an active shared backend
+        # to a new SQLite backend mid-operation.
+        if not uses_shared_backend or refreshed_backend.backend_type != BackendType.POSTGRESQL:
+            self._owns_backend = previous_owns_backend
+            if refreshed_backend is not self._backend:
+                with contextlib.suppress(_COLLECTIONS_NONCRITICAL_EXCEPTIONS):
+                    refreshed_backend.get_pool().close_all()
+            logger.warning(
+                "CollectionsDatabase refresh fell back to a non-shared backend while {} remained active; keeping the current backend",
+                current_key or "<unknown>",
+            )
+            return self._backend
+
+        if (
+            uses_shared_backend
+            and refreshed_backend.backend_type == BackendType.POSTGRESQL
+            and refreshed_key != current_key
+        ):
+            self._ensure_bootstrap_for_backend(refreshed_backend)
+
+        self._uses_shared_content_backend = uses_shared_backend
+        self._backend = refreshed_backend
+        return self._backend
+
+    def _backend_target_key(self, backend: DatabaseBackend | None) -> str | None:
+        return backend_target_key(backend)
+
+    def _get_pinned_backend(self) -> DatabaseBackend | None:
+        return getattr(self._local, "backend_pin", None)
+
+    def _run_backend_bootstrap(self) -> None:
+        self.ensure_schema()
+        self._seed_watchlists_output_templates()
+
+    def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
+        key = self._backend_target_key(backend)
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
+
+    def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
+        if backend.backend_type != BackendType.POSTGRESQL:
+            return
+        key = self._backend_target_key(backend)
+        if key in type(self)._bootstrapped_backend_targets:
+            return
+        previous_suspend = self._backend_refresh_suspended
+        self._backend_refresh_suspended = True
+        try:
+            self._backend = backend
+            self._run_backend_bootstrap()
+        finally:
+            self._backend_refresh_suspended = previous_suspend
+        if key:
+            type(self)._bootstrapped_backend_targets.add(key)
+
+    def _resolve_backend(self) -> tuple[DatabaseBackend, bool]:
         backend_mode_env = (os.getenv("TLDW_CONTENT_DB_BACKEND") or "").strip().lower()
         if backend_mode_env in {"postgres", "postgresql"}:
             parser = load_comprehensive_config()
@@ -411,7 +599,7 @@ class CollectionsDatabase:
             if resolved is None:
                 raise DatabaseError("PostgreSQL content backend requested but not initialized")
             self._owns_backend = False
-            return resolved
+            return resolved, True
 
         try:
             parser = load_comprehensive_config()
@@ -426,21 +614,28 @@ class CollectionsDatabase:
                     if resolved is None:
                         raise DatabaseError("PostgreSQL content backend requested but not initialized")
                     self._owns_backend = False
-                    return resolved
+                    return resolved, True
             except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
                 pass
 
         db_path = str(DatabasePaths.get_media_db_path(int(self.user_id)))
         cfg = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
         self._owns_backend = True
-        return DatabaseBackendFactory.create_backend(cfg)
+        return DatabaseBackendFactory.create_backend(cfg), False
 
     def close(self) -> None:
         """Release backend connections if this instance owns the backend."""
         if not self._owns_backend:
             return
+        self._owns_backend = False
+        if (
+            getattr(self._backend, "backend_type", None) == BackendType.SQLITE
+            and is_factory_managed_backend(self._backend)
+        ):
+            release_managed_backend(self._backend)
+            return
         try:
-            self.backend.get_pool().close_all()
+            self._backend.get_pool().close_all()
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("collections_db: failed to close backend for user {}: {}", self.user_id, exc)
 
@@ -449,6 +644,36 @@ class CollectionsDatabase:
 
     def __exit__(self, exc_type, exc, traceback) -> None:
         self.close()
+
+    @contextlib.contextmanager
+    def _operation_backend_pin(self) -> Generator[DatabaseBackend, None, None]:
+        previous_backend = self._get_pinned_backend()
+        if previous_backend is None:
+            self._local.backend_pin = self._refresh_backend_if_needed()
+        try:
+            yield self._local.backend_pin
+        finally:
+            if previous_backend is None:
+                with contextlib.suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
+
+    @contextlib.contextmanager
+    def transaction(self) -> Generator[Any, None, None]:
+        """Pin the active backend for the duration of a transactional operation."""
+        backend = self.backend
+        previous_backend = self._get_pinned_backend()
+        self._local.backend_pin = backend
+        try:
+            with backend.transaction() as conn:
+                yield conn
+        finally:
+            if previous_backend is None:
+                with contextlib.suppress(AttributeError):
+                    del self._local.backend_pin
+            else:
+                self._local.backend_pin = previous_backend
 
     def _execute_insert(self, query: str, params: tuple[Any, ...]) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
@@ -716,6 +941,7 @@ class CollectionsDatabase:
                 created_at TEXT NOT NULL,
                 read_at TEXT,
                 dismissed_at TEXT,
+                snooze_task_id TEXT,
                 delivery_status TEXT NOT NULL DEFAULT 'pending',
                 delivered_at TEXT
             );
@@ -967,6 +1193,7 @@ class CollectionsDatabase:
                 created_at TEXT NOT NULL,
                 read_at TEXT,
                 dismissed_at TEXT,
+                snooze_task_id TEXT,
                 delivery_status TEXT NOT NULL DEFAULT 'pending',
                 delivered_at TEXT
             );
@@ -1427,6 +1654,87 @@ class CollectionsDatabase:
             CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
             CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
 
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT,
+                source_url TEXT,
+                metadata_json TEXT,
+                default_tags_json TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
+                ON media_collections(user_id, deleted, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
+                ON media_collections(user_id, kind, deleted, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id BIGINT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                source_url TEXT NOT NULL,
+                normalized_source_id TEXT,
+                source_kind TEXT,
+                title TEXT,
+                speaker TEXT,
+                published_at TEXT,
+                track TEXT,
+                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'planned',
+                media_id BIGINT,
+                content_item_id BIGINT,
+                latest_job_id TEXT,
+                latest_run_id BIGINT,
+                idempotency_key TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT,
+                tags_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
+                ON media_collection_items(user_id, normalized_source_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
+                ON media_collection_items(user_id, media_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
+                ON media_collection_items(user_id, latest_job_id);
+
+            CREATE TABLE IF NOT EXISTS media_collection_runs (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id BIGINT NOT NULL,
+                batch_id TEXT,
+                status TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                processing_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                cancelled_count INTEGER NOT NULL DEFAULT 0,
+                options_json TEXT,
+                summary_json TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
+                ON media_collection_runs(user_id, collection_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
+                ON media_collection_runs(user_id, batch_id);
+
             CREATE TABLE IF NOT EXISTS content_item_tags (
                 item_id BIGINT NOT NULL,
                 tag_id BIGINT NOT NULL,
@@ -1497,6 +1805,87 @@ class CollectionsDatabase:
             CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
             CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
             CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
+
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT,
+                source_url TEXT,
+                metadata_json TEXT,
+                default_tags_json TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
+                ON media_collections(user_id, deleted, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
+                ON media_collections(user_id, kind, deleted, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id INTEGER NOT NULL,
+                ordinal INTEGER NOT NULL,
+                source_url TEXT NOT NULL,
+                normalized_source_id TEXT,
+                source_kind TEXT,
+                title TEXT,
+                speaker TEXT,
+                published_at TEXT,
+                track TEXT,
+                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'planned',
+                media_id INTEGER,
+                content_item_id INTEGER,
+                latest_job_id TEXT,
+                latest_run_id INTEGER,
+                idempotency_key TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT,
+                tags_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
+                ON media_collection_items(user_id, normalized_source_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
+                ON media_collection_items(user_id, media_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
+                ON media_collection_items(user_id, latest_job_id);
+
+            CREATE TABLE IF NOT EXISTS media_collection_runs (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id INTEGER NOT NULL,
+                batch_id TEXT,
+                status TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                processing_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                cancelled_count INTEGER NOT NULL DEFAULT 0,
+                options_json TEXT,
+                summary_json TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
+                ON media_collection_runs(user_id, collection_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
+                ON media_collection_runs(user_id, batch_id);
 
             CREATE TABLE IF NOT EXISTS content_item_tags (
                 item_id INTEGER NOT NULL,
@@ -1591,6 +1980,17 @@ class CollectionsDatabase:
             except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
                 if _is_backfill_noop_error(exc):
                     logger.debug("collections backfill: user_notifications.delivered_at already exists or skipped")
+                else:
+                    raise
+        if notif_columns and "snooze_task_id" not in notif_columns:
+            try:
+                self.backend.execute(
+                    "ALTER TABLE user_notifications ADD COLUMN snooze_task_id TEXT",
+                    (),
+                )
+            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+                if _is_backfill_noop_error(exc):
+                    logger.debug("collections backfill: user_notifications.snooze_task_id already exists or skipped")
                 else:
                     raise
 
@@ -2106,6 +2506,583 @@ class CollectionsDatabase:
             return None
         tags_map = self._fetch_tags_for_item_ids([int(row.get("id"))])
         return self._row_to_content_item(row, tags_map.get(int(row.get("id")), []))
+
+    @staticmethod
+    def _json_dumps_or_none(value: Any) -> str | None:
+        if value is None:
+            return None
+        return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _json_loads_dict(raw: str | None) -> dict[str, Any]:
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _json_loads_string_list(raw: str | None) -> list[str]:
+        if not raw:
+            return []
+        try:
+            payload = json.loads(raw)
+        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS:
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [
+            item.strip()
+            for item in payload
+            if isinstance(item, str) and item.strip()
+        ]
+
+    @staticmethod
+    def _normalize_string_list(values: Iterable[str] | None) -> list[str]:
+        if values is None:
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            item = str(value).strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            normalized.append(item)
+        return normalized
+
+    @staticmethod
+    def _normalize_collection_status(status: str) -> str:
+        normalized = str(status or "").strip()
+        if normalized not in CONFERENCE_ITEM_STATUSES:
+            raise ValueError("invalid_media_collection_item_status")
+        return normalized
+
+    def _row_to_media_collection_item(self, row: dict[str, Any]) -> MediaCollectionItemRow:
+        return MediaCollectionItemRow(
+            id=int(row.get("id")),
+            user_id=str(row.get("user_id")),
+            collection_id=int(row.get("collection_id")),
+            ordinal=int(row.get("ordinal") or 0),
+            source_url=str(row.get("source_url") or ""),
+            normalized_source_id=row.get("normalized_source_id"),
+            source_kind=row.get("source_kind"),
+            title=row.get("title"),
+            speaker=row.get("speaker"),
+            published_at=row.get("published_at"),
+            track=row.get("track"),
+            duplicate_status=str(row.get("duplicate_status") or "unknown"),
+            status=str(row.get("status") or "planned"),
+            media_id=(int(row.get("media_id")) if row.get("media_id") is not None else None),
+            content_item_id=(
+                int(row.get("content_item_id"))
+                if row.get("content_item_id") is not None
+                else None
+            ),
+            latest_job_id=row.get("latest_job_id"),
+            latest_run_id=(
+                int(row.get("latest_run_id"))
+                if row.get("latest_run_id") is not None
+                else None
+            ),
+            idempotency_key=row.get("idempotency_key"),
+            retry_count=int(row.get("retry_count") or 0),
+            error_summary=row.get("error_summary"),
+            warnings=self._json_loads_string_list(row.get("warnings_json")),
+            metadata=self._json_loads_dict(row.get("metadata_json")),
+            tags=self._json_loads_string_list(row.get("tags_json")),
+            created_at=str(row.get("created_at")),
+            updated_at=str(row.get("updated_at")),
+        )
+
+    def _fetch_media_collection_items(self, collection_id: int) -> list[MediaCollectionItemRow]:
+        rows = self.backend.execute(
+            """
+            SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                   source_kind, title, speaker, published_at, track, duplicate_status,
+                   status, media_id, content_item_id, latest_job_id, latest_run_id,
+                   idempotency_key, retry_count, error_summary, warnings_json,
+                   metadata_json, tags_json, created_at, updated_at
+            FROM media_collection_items
+            WHERE collection_id = ? AND user_id = ?
+            ORDER BY ordinal ASC, id ASC
+            """,
+            (collection_id, self.user_id),
+        ).rows
+        return [self._row_to_media_collection_item(row) for row in rows]
+
+    def _row_to_media_collection(
+        self,
+        row: dict[str, Any],
+        *,
+        include_items: bool = True,
+    ) -> MediaCollectionRow:
+        collection_id = int(row.get("id"))
+        return MediaCollectionRow(
+            id=collection_id,
+            user_id=str(row.get("user_id")),
+            name=str(row.get("name")),
+            kind=str(row.get("kind")),
+            description=row.get("description"),
+            source_url=row.get("source_url"),
+            metadata=self._json_loads_dict(row.get("metadata_json")),
+            default_tags=self._json_loads_string_list(row.get("default_tags_json")),
+            deleted=bool(row.get("deleted", 0)),
+            created_at=str(row.get("created_at")),
+            updated_at=str(row.get("updated_at")),
+            items=self._fetch_media_collection_items(collection_id) if include_items else [],
+        )
+
+    def create_media_collection(
+        self,
+        *,
+        name: str,
+        kind: str,
+        description: str | None = None,
+        source_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        default_tags: Iterable[str] | None = None,
+    ) -> MediaCollectionRow:
+        """Create a stable, user-owned media collection."""
+        name_value = str(name or "").strip()
+        kind_value = str(kind or "").strip()
+        if not name_value:
+            raise ValueError("media_collection_name_required")
+        if not kind_value:
+            raise ValueError("media_collection_kind_required")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("media_collection_metadata_must_be_object")
+
+        now = _utcnow_iso()
+        result = self._execute_insert(
+            """
+            INSERT INTO media_collections (
+                user_id, name, kind, description, source_url, metadata_json,
+                default_tags_json, deleted, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                name_value,
+                kind_value,
+                description.strip() if isinstance(description, str) and description.strip() else None,
+                source_url.strip() if isinstance(source_url, str) and source_url.strip() else None,
+                self._json_dumps_or_none(metadata or {}),
+                self._json_dumps_or_none(self._normalize_string_list(default_tags)),
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+                now,
+                now,
+            ),
+        )
+        collection_id = self._extract_lastrowid(result)
+        if not collection_id:
+            raise DatabaseError("Failed to insert media collection")
+        return self.get_media_collection(collection_id)
+
+    def get_media_collection(self, collection_id: int) -> MediaCollectionRow:
+        """Return collection metadata plus ordered membership."""
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, name, kind, description, source_url, metadata_json,
+                   default_tags_json, deleted, created_at, updated_at
+            FROM media_collections
+            WHERE id = ? AND user_id = ? AND deleted = ?
+            """,
+            (
+                int(collection_id),
+                self.user_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            ),
+        ).first
+        if not row:
+            raise KeyError("media_collection_not_found")
+        return self._row_to_media_collection(row)
+
+    def list_media_collections(
+        self,
+        *,
+        kind: str | None = None,
+        page: int = 1,
+        size: int = 20,
+    ) -> tuple[list[MediaCollectionRow], int]:
+        """List durable media collections for the current user."""
+        page_value = max(1, int(page or 1))
+        size_value = min(100, max(1, int(size or 20)))
+        offset = (page_value - 1) * size_value
+        where = ["user_id = ?", "deleted = ?"]
+        params: list[Any] = [
+            self.user_id,
+            self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+        ]
+        if kind is not None and str(kind).strip():
+            where.append("kind = ?")
+            params.append(str(kind).strip())
+        where_sql = " AND ".join(where)
+        total = _count_row_total(
+            self.backend.execute(
+                f"SELECT COUNT(*) AS total FROM media_collections WHERE {where_sql}",  # nosec B608
+                tuple(params),
+            ).first
+        )
+        rows = self.backend.execute(
+            f"""
+            SELECT id, user_id, name, kind, description, source_url, metadata_json,
+                   default_tags_json, deleted, created_at, updated_at
+            FROM media_collections
+            WHERE {where_sql}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple([*params, size_value, offset]),
+        ).rows
+        return [self._row_to_media_collection(row) for row in rows], total
+
+    def update_media_collection(
+        self,
+        collection_id: int,
+        *,
+        name: str | None = None,
+        kind: str | None = None,
+        description: str | None = None,
+        source_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        default_tags: Iterable[str] | None = None,
+    ) -> MediaCollectionRow:
+        """Update collection-level metadata without changing membership."""
+        self.get_media_collection(collection_id)
+        fields: list[str] = []
+        params: list[Any] = []
+
+        def add_field(field: str, value: Any) -> None:
+            fields.append(f"{field} = ?")
+            params.append(value)
+
+        if name is not None:
+            name_value = str(name).strip()
+            if not name_value:
+                raise ValueError("media_collection_name_required")
+            add_field("name", name_value)
+        if kind is not None:
+            kind_value = str(kind).strip()
+            if not kind_value:
+                raise ValueError("media_collection_kind_required")
+            add_field("kind", kind_value)
+        if description is not None:
+            add_field("description", description.strip() if description.strip() else None)
+        if source_url is not None:
+            add_field("source_url", source_url.strip() if source_url.strip() else None)
+        if metadata is not None:
+            if not isinstance(metadata, dict):
+                raise ValueError("media_collection_metadata_must_be_object")
+            add_field("metadata_json", self._json_dumps_or_none(metadata))
+        if default_tags is not None:
+            add_field(
+                "default_tags_json",
+                self._json_dumps_or_none(self._normalize_string_list(default_tags)),
+            )
+        if not fields:
+            return self.get_media_collection(collection_id)
+        add_field("updated_at", _utcnow_iso())
+        self.backend.execute(
+            f"UPDATE media_collections SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
+            tuple([*params, int(collection_id), self.user_id]),
+        )
+        return self.get_media_collection(collection_id)
+
+    def delete_media_collection(self, collection_id: int) -> bool:
+        """Soft-delete a media collection and hide it from collection lists."""
+        self.get_media_collection(collection_id)
+        self.backend.execute(
+            "UPDATE media_collections SET deleted = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (
+                self._coerce_bool_flag(True, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+                _utcnow_iso(),
+                int(collection_id),
+                self.user_id,
+            ),
+        )
+        return True
+
+    def _next_media_collection_ordinal(self, collection_id: int) -> int:
+        row = self.backend.execute(
+            """
+            SELECT COALESCE(MAX(ordinal), 0) + 1 AS next_ordinal
+            FROM media_collection_items
+            WHERE collection_id = ? AND user_id = ?
+            """,
+            (int(collection_id), self.user_id),
+        ).first
+        if not row:
+            return 1
+        return int(row.get("next_ordinal") or 1)
+
+    def _ensure_media_collection_ordinal_available(
+        self,
+        *,
+        collection_id: int,
+        ordinal: int,
+        exclude_item_id: int | None = None,
+    ) -> None:
+        if exclude_item_id is None:
+            row = self.backend.execute(
+                """
+                SELECT id
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ? AND ordinal = ?
+                LIMIT 1
+                """,
+                (int(collection_id), self.user_id, int(ordinal)),
+            ).first
+        else:
+            row = self.backend.execute(
+                """
+                SELECT id
+                FROM media_collection_items
+                WHERE collection_id = ? AND user_id = ? AND ordinal = ? AND id != ?
+                LIMIT 1
+                """,
+                (int(collection_id), self.user_id, int(ordinal), int(exclude_item_id)),
+            ).first
+        if row:
+            raise ValueError("media_collection_item_ordinal_duplicate")
+
+    def add_media_collection_item(
+        self,
+        *,
+        collection_id: int,
+        source_url: str,
+        normalized_source_id: str | None = None,
+        source_kind: str | None = None,
+        status: str = "planned",
+        ordinal: int | None = None,
+        title: str | None = None,
+        speaker: str | None = None,
+        published_at: str | None = None,
+        track: str | None = None,
+        duplicate_status: str = "unknown",
+        media_id: int | None = None,
+        content_item_id: int | None = None,
+        latest_job_id: str | None = None,
+        latest_run_id: int | None = None,
+        idempotency_key: str | None = None,
+        retry_count: int = 0,
+        error_summary: str | None = None,
+        warnings: Iterable[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        tags: Iterable[str] | None = None,
+    ) -> MediaCollectionItemRow:
+        """Add an unresolved planned/source item to a media collection."""
+        self.get_media_collection(collection_id)
+        source_url_value = str(source_url or "").strip()
+        if not source_url_value:
+            raise ValueError("media_collection_item_source_url_required")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("media_collection_item_metadata_must_be_object")
+        status_value = self._normalize_collection_status(status)
+        ordinal_value = int(ordinal) if ordinal is not None else self._next_media_collection_ordinal(collection_id)
+        if ordinal_value < 1:
+            raise ValueError("media_collection_item_ordinal_invalid")
+        self._ensure_media_collection_ordinal_available(
+            collection_id=collection_id,
+            ordinal=ordinal_value,
+        )
+
+        now = _utcnow_iso()
+        result = self._execute_insert(
+            """
+            INSERT INTO media_collection_items (
+                user_id, collection_id, ordinal, source_url, normalized_source_id,
+                source_kind, title, speaker, published_at, track, duplicate_status,
+                status, media_id, content_item_id, latest_job_id, latest_run_id,
+                idempotency_key, retry_count, error_summary, warnings_json,
+                metadata_json, tags_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                self.user_id,
+                int(collection_id),
+                ordinal_value,
+                source_url_value,
+                normalized_source_id.strip() if isinstance(normalized_source_id, str) and normalized_source_id.strip() else None,
+                source_kind.strip() if isinstance(source_kind, str) and source_kind.strip() else None,
+                title.strip() if isinstance(title, str) and title.strip() else None,
+                speaker.strip() if isinstance(speaker, str) and speaker.strip() else None,
+                published_at.strip() if isinstance(published_at, str) and published_at.strip() else None,
+                track.strip() if isinstance(track, str) and track.strip() else None,
+                str(duplicate_status or "unknown").strip() or "unknown",
+                status_value,
+                int(media_id) if media_id is not None else None,
+                int(content_item_id) if content_item_id is not None else None,
+                latest_job_id.strip() if isinstance(latest_job_id, str) and latest_job_id.strip() else None,
+                int(latest_run_id) if latest_run_id is not None else None,
+                idempotency_key.strip() if isinstance(idempotency_key, str) and idempotency_key.strip() else None,
+                max(0, int(retry_count or 0)),
+                error_summary.strip() if isinstance(error_summary, str) and error_summary.strip() else None,
+                self._json_dumps_or_none(self._normalize_string_list(warnings)),
+                self._json_dumps_or_none(metadata or {}),
+                self._json_dumps_or_none(self._normalize_string_list(tags)),
+                now,
+                now,
+            ),
+        )
+        item_id = self._extract_lastrowid(result)
+        if not item_id:
+            raise DatabaseError("Failed to insert media collection item")
+        self.backend.execute(
+            "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
+            (now, int(collection_id), self.user_id),
+        )
+        return self.get_media_collection_item(item_id)
+
+    def get_media_collection_item(self, item_id: int) -> MediaCollectionItemRow:
+        row = self.backend.execute(
+            """
+            SELECT id, user_id, collection_id, ordinal, source_url, normalized_source_id,
+                   source_kind, title, speaker, published_at, track, duplicate_status,
+                   status, media_id, content_item_id, latest_job_id, latest_run_id,
+                   idempotency_key, retry_count, error_summary, warnings_json,
+                   metadata_json, tags_json, created_at, updated_at
+            FROM media_collection_items
+            WHERE id = ? AND user_id = ?
+            """,
+            (int(item_id), self.user_id),
+        ).first
+        if not row:
+            raise KeyError("media_collection_item_not_found")
+        return self._row_to_media_collection_item(row)
+
+    def update_media_collection_item(
+        self,
+        item_id: int,
+        *,
+        ordinal: int | None = None,
+        title: str | None = None,
+        speaker: str | None = None,
+        published_at: str | None = None,
+        track: str | None = None,
+        duplicate_status: str | None = None,
+        status: str | None = None,
+        media_id: int | None = None,
+        content_item_id: int | None = None,
+        latest_job_id: str | None = None,
+        latest_run_id: int | None = None,
+        idempotency_key: str | None = None,
+        retry_count: int | None = None,
+        error_summary: str | None = None,
+        warnings: Iterable[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        tags: Iterable[str] | None = None,
+    ) -> MediaCollectionItemRow:
+        """Update a planned/resolved collection item without touching content_items."""
+        existing = self.get_media_collection_item(item_id)
+        fields: list[str] = []
+        params: list[Any] = []
+
+        def add_field(field: str, value: Any) -> None:
+            fields.append(f"{field} = ?")
+            params.append(value)
+
+        if ordinal is not None:
+            ordinal_value = int(ordinal)
+            if ordinal_value < 1:
+                raise ValueError("media_collection_item_ordinal_invalid")
+            self._ensure_media_collection_ordinal_available(
+                collection_id=existing.collection_id,
+                ordinal=ordinal_value,
+                exclude_item_id=existing.id,
+            )
+            add_field("ordinal", ordinal_value)
+        if title is not None:
+            add_field("title", title.strip() if title.strip() else None)
+        if speaker is not None:
+            add_field("speaker", speaker.strip() if speaker.strip() else None)
+        if published_at is not None:
+            add_field("published_at", published_at.strip() if published_at.strip() else None)
+        if track is not None:
+            add_field("track", track.strip() if track.strip() else None)
+        if duplicate_status is not None:
+            add_field("duplicate_status", str(duplicate_status or "unknown").strip() or "unknown")
+        if status is not None:
+            add_field("status", self._normalize_collection_status(status))
+        if media_id is not None:
+            add_field("media_id", int(media_id))
+        if content_item_id is not None:
+            add_field("content_item_id", int(content_item_id))
+        if latest_job_id is not None:
+            add_field("latest_job_id", latest_job_id.strip() if latest_job_id.strip() else None)
+        if latest_run_id is not None:
+            add_field("latest_run_id", int(latest_run_id))
+        if idempotency_key is not None:
+            add_field("idempotency_key", idempotency_key.strip() if idempotency_key.strip() else None)
+        if retry_count is not None:
+            add_field("retry_count", max(0, int(retry_count)))
+        if error_summary is not None:
+            add_field("error_summary", error_summary.strip() if error_summary.strip() else None)
+        if warnings is not None:
+            add_field("warnings_json", self._json_dumps_or_none(self._normalize_string_list(warnings)))
+        if metadata is not None:
+            if not isinstance(metadata, dict):
+                raise ValueError("media_collection_item_metadata_must_be_object")
+            add_field("metadata_json", self._json_dumps_or_none(metadata))
+        if tags is not None:
+            add_field("tags_json", self._json_dumps_or_none(self._normalize_string_list(tags)))
+        if not fields:
+            return existing
+        now = _utcnow_iso()
+        add_field("updated_at", now)
+        self.backend.execute(
+            f"UPDATE media_collection_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
+            tuple([*params, int(item_id), self.user_id]),
+        )
+        self.backend.execute(
+            "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
+            (now, existing.collection_id, self.user_id),
+        )
+        return self.get_media_collection_item(item_id)
+
+    def update_media_collection_item_status(
+        self,
+        item_id: int,
+        *,
+        status: str,
+        error_summary: str | None = None,
+        warnings: Iterable[str] | None = None,
+        latest_job_id: str | None = None,
+        latest_run_id: int | None = None,
+    ) -> MediaCollectionItemRow:
+        """Update processing status without losing source metadata."""
+        return self.update_media_collection_item(
+            item_id,
+            status=status,
+            error_summary=error_summary,
+            warnings=warnings,
+            latest_job_id=latest_job_id,
+            latest_run_id=latest_run_id,
+        )
+
+    def resolve_media_collection_item(
+        self,
+        item_id: int,
+        *,
+        media_id: int,
+        content_item_id: int | None = None,
+        status: str = "completed",
+        latest_job_id: str | None = None,
+        latest_run_id: int | None = None,
+    ) -> MediaCollectionItemRow:
+        """Resolve a planned item to an existing or newly created media row."""
+        return self.update_media_collection_item(
+            item_id,
+            status=status,
+            media_id=media_id,
+            content_item_id=content_item_id,
+            latest_job_id=latest_job_id,
+            latest_run_id=latest_run_id,
+            error_summary="",
+            warnings=[],
+        )
 
     def upsert_content_item(
         self,
@@ -3369,6 +4346,7 @@ class CollectionsDatabase:
         limit: int = 50,
         offset: int = 0,
         job_id: int | None = None,
+        job_ids: list[int] | None = None,
         run_id: int | None = None,
         type_: str | None = None,
         workspace_tag: str | None = None,
@@ -3383,9 +4361,20 @@ class CollectionsDatabase:
             where.append("deleted = 1")
         elif not include_deleted:
             where.append("deleted = 0")
+        normalized_job_ids: list[int] | None = None
+        if job_ids is not None:
+            normalized_job_ids = sorted({int(value) for value in job_ids})
+            if not normalized_job_ids:
+                return [], 0
+            if job_id is not None and int(job_id) not in normalized_job_ids:
+                return [], 0
         if job_id is not None:
             where.append("job_id = ?")
             params.append(job_id)
+        elif normalized_job_ids is not None:
+            placeholders = ", ".join(["?"] * len(normalized_job_ids))
+            where.append(f"job_id IN ({placeholders})")
+            params.extend(normalized_job_ids)
         if run_id is not None:
             where.append("run_id = ?")
             params.append(run_id)
@@ -3638,6 +4627,13 @@ class CollectionsDatabase:
         rows = self.backend.execute(q, (self.user_id, limit, offset)).rows
         return [AudiobookProjectRow(**row) for row in rows]
 
+    def count_audiobook_projects(self) -> int:
+        row = self.backend.execute(
+            "SELECT COUNT(*) AS total FROM audiobook_projects WHERE user_id = ?",
+            (self.user_id,),
+        ).first
+        return _count_row_total(row)
+
     def update_audiobook_project_status(
         self,
         project_id: int,
@@ -3808,6 +4804,13 @@ class CollectionsDatabase:
         )
         rows = self.backend.execute(q, (self.user_id, limit, offset)).rows
         return [VoiceProfileRow(**row) for row in rows]
+
+    def count_voice_profiles(self) -> int:
+        row = self.backend.execute(
+            "SELECT COUNT(*) AS total FROM audiobook_voice_profiles WHERE user_id = ?",
+            (self.user_id,),
+        ).first
+        return _count_row_total(row)
 
     def delete_voice_profile(self, profile_id: str) -> None:
         q = "DELETE FROM audiobook_voice_profiles WHERE profile_id = ? AND user_id = ?"
@@ -4408,6 +5411,7 @@ class CollectionsDatabase:
             created_at=str(row.get("created_at") or ""),
             read_at=row.get("read_at"),
             dismissed_at=row.get("dismissed_at"),
+            snooze_task_id=row.get("snooze_task_id"),
             delivery_status=str(row.get("delivery_status") or "pending"),
             delivered_at=row.get("delivered_at"),
         )
@@ -4461,9 +5465,24 @@ class CollectionsDatabase:
             "pending",
             None,
         )
-        res = self._execute_insert(q, params)
-        new_id = self._extract_lastrowid(res)
-        if not new_id and dedupe_key:
+        duplicate_dedupe_error = False
+        try:
+            res = self._execute_insert(q, params)
+        except DatabaseError as exc:
+            duplicate_dedupe_error = bool(
+                dedupe_key
+                and (
+                    "unique constraint failed: user_notifications.user_id, user_notifications.dedupe_key"
+                    in str(exc).lower()
+                    or "duplicate key value violates unique constraint" in str(exc).lower()
+                    or "ux_user_notifications_user_dedupe" in str(exc).lower()
+                )
+            )
+            if not duplicate_dedupe_error:
+                raise
+            res = None
+        new_id = self._extract_lastrowid(res) if res is not None else None
+        if (duplicate_dedupe_error or not new_id) and dedupe_key:
             existing = self.backend.execute(
                 "SELECT * FROM user_notifications WHERE user_id = ? AND dedupe_key = ? ORDER BY id DESC LIMIT 1",
                 (self.user_id, dedupe_key),
@@ -4513,6 +5532,35 @@ class CollectionsDatabase:
         q = f"SELECT * FROM user_notifications WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?"  # nosec B608
         params.extend([limit, offset])
         rows = self.backend.execute(q, tuple(params)).rows
+        return [self._notification_row_from_db(row) for row in rows]
+
+    def count_user_notifications(self, *, include_archived: bool = False) -> int:
+        params: list[Any] = [self.user_id]
+        where = "user_id = ?"
+        if not include_archived:
+            where += " AND archived_at IS NULL AND dismissed_at IS NULL"
+        row = self.backend.execute(
+            f"SELECT COUNT(*) AS total FROM user_notifications WHERE {where}",  # nosec B608
+            tuple(params),
+        ).first
+        if row is None:
+            return 0
+        return _count_row_total(row)
+
+    def list_user_dismissed_notifications(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[UserNotificationRow]:
+        rows = self.backend.execute(
+            (
+                "SELECT * FROM user_notifications "
+                "WHERE user_id = ? AND dismissed_at IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            ),
+            (self.user_id, limit, offset),
+        ).rows
         return [self._notification_row_from_db(row) for row in rows]
 
     def list_user_notifications_after_id(
@@ -4611,6 +5659,13 @@ class CollectionsDatabase:
             "WHERE id = ? AND user_id = ? AND dismissed_at IS NULL"
         )
         res = self.backend.execute(q, (_utcnow_iso(), notification_id, self.user_id))
+        return bool(res.rowcount and res.rowcount > 0)
+
+    def set_user_notification_snooze_task(self, notification_id: int, task_id: str | None) -> bool:
+        res = self.backend.execute(
+            "UPDATE user_notifications SET snooze_task_id = ? WHERE id = ? AND user_id = ?",
+            (task_id, notification_id, self.user_id),
+        )
         return bool(res.rowcount and res.rowcount > 0)
 
     def delete_user_notifications_by_link(

@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardCreateDrawer } from "../FlashcardCreateDrawer"
-import { useCreateFlashcardMutation, useCreateDeckMutation, useDecksQuery } from "../../hooks"
+import {
+  useCreateDeckMutation,
+  useCreateFlashcardMutation,
+  useCreateFlashcardTemplateMutation,
+  useDecksQuery
+} from "../../hooks"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../../constants"
 
 vi.mock("react-i18next", () => ({
@@ -43,11 +48,32 @@ vi.mock("../../hooks", () => ({
   useDecksQuery: vi.fn(),
   useCreateFlashcardMutation: vi.fn(),
   useCreateDeckMutation: vi.fn(),
-  useDebouncedFormField: vi.fn(() => undefined)
+  useCreateFlashcardTemplateMutation: vi.fn(),
+  useDebouncedFormField: vi.fn(() => undefined),
+  useFlashcardDeckRecentCardsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
+  useFlashcardDeckSearchQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  }))
 }))
 
 vi.mock("../MarkdownWithBoundary", () => ({
   MarkdownWithBoundary: ({ content }: { content: string }) => <div>{content}</div>
+}))
+
+vi.mock("../FlashcardTagPicker", () => ({
+  FlashcardTagPicker: ({ dataTestId }: { dataTestId?: string }) => (
+    <div data-testid={dataTestId ?? "flashcard-tag-picker"} />
+  )
 }))
 
 if (!(globalThis as any).ResizeObserver) {
@@ -76,9 +102,11 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 
 describe("FlashcardCreateDrawer cloze helper and validation", () => {
   const mutateAsync = vi.fn()
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.clearAllMocks()
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
         {
@@ -100,6 +128,15 @@ describe("FlashcardCreateDrawer cloze helper and validation", () => {
       mutateAsync: vi.fn(),
       isPending: false
     } as any)
+    vi.mocked(useCreateFlashcardTemplateMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
+  })
+
+  afterEach(() => {
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
   })
 
   it("shows template guidance and blocks invalid cloze front syntax", async () => {
@@ -120,7 +157,7 @@ describe("FlashcardCreateDrawer cloze helper and validation", () => {
       )
     ).toBeInTheDocument()
 
-    fireEvent.mouseDown(screen.getByLabelText("Card template"))
+    fireEvent.mouseDown(screen.getByLabelText("Card model"))
     fireEvent.click(screen.getByText("Cloze (Fill in the blank)"))
 
     await waitFor(() => {

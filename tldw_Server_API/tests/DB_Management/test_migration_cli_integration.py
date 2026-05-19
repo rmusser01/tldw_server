@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import socket
 import uuid
 from pathlib import Path
-import uuid
+from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management import migrate_db as migrate_db_cli
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.DB_Management import migration_tools
@@ -34,7 +36,81 @@ _required_env = [
     "POSTGRES_TEST_PASSWORD",
 ]
 
-pytestmark = pytest.mark.skipif(_PG_DRIVER is None, reason="Postgres driver not installed")
+requires_postgres_driver = pytest.mark.skipif(
+    _PG_DRIVER is None,
+    reason="Postgres driver not installed",
+)
+
+
+def _require_postgres_driver() -> str:
+    if _PG_DRIVER is None:
+        pytest.skip("Postgres driver not installed")
+    return _PG_DRIVER
+
+
+def _postgres_server_reachable() -> bool:
+    from tldw_Server_API.tests.helpers.pg_env import get_pg_env
+
+    env = get_pg_env()
+    try:
+        with socket.create_connection((env.host, int(env.port)), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def test_migrate_threads_create_backup_flag(monkeypatch):
+    calls = {}
+    placeholder_db_path = "task2_cli_placeholder.db"
+
+    class _FakeMigrator:
+        def __init__(self, db_path: str):
+            calls["db_path"] = db_path
+
+        def get_current_version(self):
+            return 0
+
+        def load_migrations(self):
+            return [SimpleNamespace(version=5)]
+
+        def migrate_to_version(self, target_version, create_backup=True):
+            calls["target_version"] = target_version
+            calls["create_backup"] = create_backup
+            return {
+                "status": "success",
+                "previous_version": 0,
+                "current_version": target_version,
+                "target_version": target_version,
+                "migrations_applied": [],
+                "total_execution_time": 0.0,
+                "backup_path": None,
+            }
+
+    monkeypatch.setattr(migrate_db_cli, "DatabaseMigrator", _FakeMigrator)
+    monkeypatch.setattr(migrate_db_cli, "get_default_db_path", lambda: placeholder_db_path)
+    monkeypatch.setattr(
+        migrate_db_cli.sys,
+        "argv",
+        [
+            "migrate_db.py",
+            "--db-path",
+            placeholder_db_path,
+            "migrate",
+            "--version",
+            "5",
+            "--no-backup",
+        ],
+    )
+
+    migrate_db_cli.main()
+
+    expected = {
+        "db_path": placeholder_db_path,
+        "target_version": 5,
+        "create_backup": False,
+    }
+    if calls != expected:
+        pytest.fail(f"Expected migrate() to thread create_backup; got {calls!r}")
 
 
 def _base_postgres_config() -> DatabaseConfig:
@@ -53,9 +129,9 @@ def _base_postgres_config() -> DatabaseConfig:
 
 
 def _create_temp_postgres_database(config: DatabaseConfig) -> DatabaseConfig:
-    assert _PG_DRIVER is not None
+    driver = _require_postgres_driver()
     db_name = f"tldw_test_{uuid.uuid4().hex[:8]}"
-    if _PG_DRIVER == "psycopg":
+    if driver == "psycopg":
         admin = _psycopg_v3.connect(
             host=config.pg_host,
             port=config.pg_port,
@@ -89,8 +165,8 @@ def _create_temp_postgres_database(config: DatabaseConfig) -> DatabaseConfig:
 
 
 def _drop_postgres_database(config: DatabaseConfig) -> None:
-    assert _PG_DRIVER is not None
-    if _PG_DRIVER == "psycopg":
+    driver = _require_postgres_driver()
+    if driver == "psycopg":
         admin = _psycopg_v3.connect(
             host=config.pg_host,
             port=config.pg_port,
@@ -120,6 +196,9 @@ def _drop_postgres_database(config: DatabaseConfig) -> None:
 
 @pytest.fixture()
 def temp_postgres_config() -> DatabaseConfig:
+    if not _postgres_server_reachable():
+        pytest.skip("Postgres not reachable; skipping Postgres-backed tests")
+
     base = _base_postgres_config()
     cfg = _create_temp_postgres_database(base)
     try:
@@ -259,8 +338,8 @@ def _reset_postgres_database(config: DatabaseConfig) -> None:
 
 
 def _postgres_counts(config: DatabaseConfig) -> tuple[int, int]:
-    assert _PG_DRIVER is not None
-    if _PG_DRIVER == "psycopg":
+    driver = _require_postgres_driver()
+    if driver == "psycopg":
         conn = _psycopg_v3.connect(
             host=config.pg_host,
             port=config.pg_port,
@@ -287,6 +366,7 @@ def _postgres_counts(config: DatabaseConfig) -> tuple[int, int]:
     return media_count, claims_count
 
 
+@requires_postgres_driver
 @pytest.mark.integration
 def test_migration_cli_transfers_content_rows(sqlite_media_db: Path, temp_postgres_config: DatabaseConfig) -> None:
     backend = DatabaseBackendFactory.create_backend(temp_postgres_config)
@@ -301,11 +381,15 @@ def test_migration_cli_transfers_content_rows(sqlite_media_db: Path, temp_postgr
 
     pg_media, pg_claims = _postgres_counts(temp_postgres_config)
 
-    assert pg_media == sqlite_media
-    assert pg_claims == sqlite_claims
+    if pg_media != sqlite_media:
+        pytest.fail(f"Expected migrated media count {sqlite_media}, got {pg_media}")
+    if pg_claims != sqlite_claims:
+        pytest.fail(f"Expected migrated claim count {sqlite_claims}, got {pg_claims}")
 
-    assert pg_media > 0
-    assert pg_claims > 0
+    if pg_media <= 0:
+        pytest.fail(f"Expected migrated media rows to be > 0, got {pg_media}")
+    if pg_claims <= 0:
+        pytest.fail(f"Expected migrated claim rows to be > 0, got {pg_claims}")
 
     if _PG_DRIVER == "psycopg":
         conn = _psycopg_v3.connect(
@@ -330,14 +414,17 @@ def test_migration_cli_transfers_content_rows(sqlite_media_db: Path, temp_postgr
     finally:
         conn.close()
 
-    assert migrated_claim == "Claim copied via migration"
+    if migrated_claim != "Claim copied via migration":
+        pytest.fail(
+            f"Expected migrated claim text to round-trip, got {migrated_claim!r}"
+        )
     # Cleanup temporary DB
     _drop_postgres_database(temp_postgres_config)
 
 
 def _postgres_workflow_counts(config: DatabaseConfig) -> tuple[int, int, int, int]:
-    assert _PG_DRIVER is not None
-    if _PG_DRIVER == "psycopg":
+    driver = _require_postgres_driver()
+    if driver == "psycopg":
         conn = _psycopg_v3.connect(
             host=config.pg_host,
             port=config.pg_port,
@@ -381,6 +468,7 @@ def _sqlite_workflow_counts(path: Path) -> tuple[int, int, int, int]:
     return defs, runs, events, artifacts
 
 
+@requires_postgres_driver
 @pytest.mark.integration
 def test_migration_cli_transfers_workflow_rows(sqlite_workflows_db: Path, temp_postgres_config: DatabaseConfig) -> None:
     backend = DatabaseBackendFactory.create_backend(temp_postgres_config)
@@ -396,9 +484,16 @@ def test_migration_cli_transfers_workflow_rows(sqlite_workflows_db: Path, temp_p
     sqlite_counts = _sqlite_workflow_counts(sqlite_workflows_db)
     pg_counts = _postgres_workflow_counts(temp_postgres_config)
 
-    assert sqlite_counts == pg_counts
+    if sqlite_counts != pg_counts:
+        pytest.fail(
+            f"Expected workflow row counts to match after migration: "
+            f"sqlite={sqlite_counts!r}, postgres={pg_counts!r}"
+        )
 
     defs, runs, _, _ = pg_counts
-    assert defs > 0 and runs > 0
+    if defs <= 0 or runs <= 0:
+        pytest.fail(
+            f"Expected migrated workflow definitions and runs to be > 0, got {(defs, runs)!r}"
+        )
     # Cleanup temporary DB
     _drop_postgres_database(temp_postgres_config)

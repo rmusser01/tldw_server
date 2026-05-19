@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
+    FILE_CATEGORY_STT_AUDIO,
     FILE_CATEGORY_TTS_AUDIO,
+    SOURCE_FEATURE_STT,
     SOURCE_FEATURE_TTS,
+    VALID_FILE_CATEGORIES,
+    VALID_SOURCE_FEATURES,
     AuthnzGeneratedFilesRepo,
 )
 
@@ -150,3 +155,10 @@ async def test_create_file_postgres_backend_selection_uses_fetchrow():
     assert "returning *" in query.lower()
     assert "$1" in query
     assert len(params) >= 18
+
+
+def test_generated_files_repo_exposes_stt_audio_constants() -> None:
+    assert FILE_CATEGORY_STT_AUDIO == "stt_audio"
+    assert SOURCE_FEATURE_STT == "stt"
+    assert FILE_CATEGORY_STT_AUDIO in VALID_FILE_CATEGORIES
+    assert SOURCE_FEATURE_STT in VALID_SOURCE_FEATURES

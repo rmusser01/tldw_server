@@ -88,6 +88,8 @@ async def test_vad_auto_commit_triggers_full_transcript(monkeypatch):
     full_transcripts = [m for m in ws.sent if m.get("type") == "full_transcript"]
     assert full_transcripts, f"Expected a full_transcript frame, saw {ws.sent}"
     assert full_transcripts[0].get("auto_commit") is True
+    assert full_transcripts[0].get("vad_status") == "enabled"
+    assert full_transcripts[0].get("diarization_status") == "disabled"
     assert full_transcripts[0].get("text") == "hello world"
     assert full_transcripts[0].get("voice_to_voice_start") == pytest.approx(1234.5)
 
@@ -103,10 +105,10 @@ async def test_vad_fail_open_disables_auto_commit(monkeypatch):
             return None
 
         async def process_audio_chunk(self, _audio_bytes: bytes):
-            return None
+            return {"type": "partial", "text": "hi", "timestamp": time.time(), "is_final": False}
 
         def get_full_transcript(self):
-            return "should_not_emit"
+            return "manual_after_fail_open"
 
         def reset(self):
             return None
@@ -129,12 +131,59 @@ async def test_vad_fail_open_disables_auto_commit(monkeypatch):
 
     cfg = json.dumps({"type": "config", "model": "parakeet", "sample_rate": 16000, "enable_vad": True})
     audio_frame = json.dumps({"type": "audio", "data": base64.b64encode(b'1234').decode("ascii")})
+    commit = json.dumps({"type": "commit"})
     stop = json.dumps({"type": "stop"})
-    ws = _DummyWebSocket([cfg, audio_frame, stop])
+    ws = _DummyWebSocket([cfg, audio_frame, commit, stop])
 
     await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
 
-    assert not [m for m in ws.sent if m.get("type") == "full_transcript"]
+    full_transcripts = [m for m in ws.sent if m.get("type") == "full_transcript"]
+    assert full_transcripts, f"Expected a full_transcript frame, saw {ws.sent}"
+    assert full_transcripts[0].get("auto_commit") is False
+    assert full_transcripts[0].get("vad_status") == "fail_open"
+    assert full_transcripts[0].get("diarization_status") == "disabled"
+    assert full_transcripts[0].get("text") == "manual_after_fail_open"
+
+
+@pytest.mark.asyncio
+async def test_manual_commit_with_vad_disabled_sets_deterministic_diagnostics(monkeypatch):
+    class _StubTranscriber:
+        def __init__(self, config):
+            self.config = config
+
+        def initialize(self):
+            return None
+
+        async def process_audio_chunk(self, _audio_bytes: bytes):
+            return {"type": "partial", "text": "hi", "timestamp": time.time(), "is_final": False}
+
+        def get_full_transcript(self):
+            return "manual_vad_disabled"
+
+        def reset(self):
+            return None
+
+        def cleanup(self):
+            return None
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _StubTranscriber)
+
+    cfg = json.dumps({"type": "config", "model": "parakeet", "sample_rate": 16000, "enable_vad": False})
+    audio_frame = json.dumps({"type": "audio", "data": base64.b64encode(b'1234').decode("ascii")})
+    commit = json.dumps({"type": "commit"})
+    stop = json.dumps({"type": "stop"})
+    ws = _DummyWebSocket([cfg, audio_frame, commit, stop])
+
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+
+    full_transcripts = [m for m in ws.sent if m.get("type") == "full_transcript"]
+    assert full_transcripts, f"Expected a full_transcript frame, saw {ws.sent}"
+    assert full_transcripts[0].get("auto_commit") is False
+    assert full_transcripts[0].get("vad_status") == "disabled"
+    assert full_transcripts[0].get("diarization_status") == "disabled"
+    assert full_transcripts[0].get("text") == "manual_vad_disabled"
 
 
 @pytest.mark.asyncio

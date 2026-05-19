@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 import uuid
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache, partial
@@ -51,11 +51,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, resolve_user_id_for_request, TokenScopeGuard, User
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -100,9 +96,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     API_KEYS as SCHEMAS_API_KEYS,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
+    ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
+    DEFAULT_LLM_PROVIDER,
     RagContext,
     get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
@@ -117,6 +114,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_validators import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditContext,
     AuditEventType,
+    MandatoryAuditWriteError,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
@@ -157,9 +155,16 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     prepare_structured_response_request,
     queue_is_active,
+    resolve_input_moderation_chat_type,
+    resolve_moderation_chat_type,
     resolve_provider_and_model,
     resolve_provider_api_key,
     is_model_known_for_provider,
+    write_mandatory_moderation_audit,
+)
+from tldw_Server_API.app.core.Moderation.review_service import (
+    capture_moderation_review_item,
+    is_moderation_review_capture_enabled,
 )
 
 # Backward-compatible re-exports for legacy tests patching these symbols on the endpoint module.
@@ -194,6 +199,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
+from tldw_Server_API.app.core.Moderation.supervised_policy import (
+    bootstrap_guardian_moderation_runtime,
+)
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list,
     build_system_message_with_skills,
@@ -204,12 +212,6 @@ _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, ValidationError
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
@@ -223,11 +225,18 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryResponse,
     ValidationIssue,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ResolvedByokCredentials,
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
+    LimitEnforcer,
+    get_billing_org_id,
+    require_within_limit,
+)
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
 from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
@@ -246,6 +255,7 @@ from tldw_Server_API.app.core.Persona.exemplar_runtime import (
     append_persona_exemplar_sections,
 )
 from tldw_Server_API.app.core.Persona.memory_integration import persist_persona_turn
+from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.testing import (
@@ -338,6 +348,14 @@ delete_chat_grammar = chat_grammars.delete_chat_grammar
 def _chat_connectors_enabled() -> bool:
     """Feature flag for chat connectors v2 (email/issue/wiki exports)."""
     return _shared_env_flag_enabled("CHAT_CONNECTORS_V2_ENABLED")
+
+
+def _mandatory_audit_unavailable_detail() -> dict[str, str]:
+    """Return the standardized chat-module payload for mandatory audit failures."""
+    return {
+        "error_code": "mandatory_audit_unavailable",
+        "message": "Mandatory audit persistence is currently unavailable",
+    }
 
 # Load configuration values from config
 import contextlib
@@ -531,15 +549,16 @@ _PERSONA_IOR_LOW_ALERT_THRESHOLD = 0.10
 _PERSONA_IOR_HIGH_ALERT_THRESHOLD = 0.60
 _PERSONA_IOO_SUSTAIN_WINDOW = 8
 _PERSONA_IOO_SUSTAIN_MIN_HITS = 3
+_PERSONA_IOO_WINDOW_MAX_KEYS = 10000
+_PERSONA_TELEMETRY_ASSISTANT_ID_MAX_LEN = 128
+_PERSONA_TELEMETRY_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _PERSONA_IOO_BUDGET_AUTO_ADJUST_ENABLED = _resolve_persona_ioo_budget_auto_adjust_enabled(_chat_config)
 _PERSONA_IOO_BUDGET_AUTO_REDUCTION_FACTOR = _resolve_persona_ioo_budget_auto_reduction_factor(_chat_config)
 _PERSONA_IOO_BUDGET_AUTO_MIN_TOKENS = _resolve_persona_ioo_budget_auto_min_tokens(_chat_config)
 _PERSONA_ID_ALIAS_DEPRECATION_START_DATE = date(2026, 2, 9)
 _PERSONA_ID_ALIAS_SUNSET_DATE = date(2026, 6, 30)
 _PERSONA_ID_ALIAS_REMOVAL_DATE = date(2026, 7, 1)
-_persona_ioo_windows: dict[str, deque[int]] = defaultdict(
-    lambda: deque(maxlen=_PERSONA_IOO_SUSTAIN_WINDOW)
-)
+_persona_ioo_windows: OrderedDict[str, deque[int]] = OrderedDict()
 _persona_alert_guard = threading.Lock()
 
 
@@ -630,6 +649,21 @@ def _schedule_audit_background_task(awaitable: Any, *, task_name: str) -> asynci
 
     task.add_done_callback(_consume)
     return task
+
+
+def _build_chat_error_audit_metadata(
+    e_chat: BaseException,
+    *,
+    provider: Any,
+    model: Any,
+) -> dict[str, Any]:
+    """Build chat error audit metadata without persisting raw exception text."""
+    return {
+        "error_type": type(e_chat).__name__,
+        "error_message": "Chat completion failed",
+        "provider": provider,
+        "model": model,
+    }
 
 
 def _extract_text_from_message_content(content: Any) -> str:
@@ -1141,15 +1175,59 @@ def _resolve_character_id_from_persona_alias(request_data: ChatCompletionRequest
     return True
 
 
+def _normalize_persona_telemetry_assistant_id(value: Any, *, default: str = "none") -> str:
+    """Return a bounded, redaction-safe assistant id for telemetry labels."""
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return default
+    if (
+        len(raw_value) <= _PERSONA_TELEMETRY_ASSISTANT_ID_MAX_LEN
+        and _PERSONA_TELEMETRY_SAFE_ID_RE.fullmatch(raw_value)
+    ):
+        return raw_value
+    digest = hashlib.sha256(raw_value.encode("utf-8")).hexdigest()[:16]
+    return f"hash:{digest}"
+
+
+def _persona_ioo_window_key(
+    *,
+    user_id: str | None,
+    character_id: int | None,
+    assistant_kind: str | None = None,
+    assistant_id: str | None = None,
+) -> str:
+    """Return the IOO alert-window key while preserving legacy character keying."""
+    normalized_user_id = str(user_id or "unknown")
+    normalized_assistant_kind = str(assistant_kind or "").strip().lower()
+    if normalized_assistant_kind == "persona":
+        safe_assistant_id = _normalize_persona_telemetry_assistant_id(assistant_id)
+        return f"{normalized_user_id}:persona:{safe_assistant_id}:{str(character_id or 'none')}"
+    return f"{normalized_user_id}:{character_id}"
+
+
+def _get_persona_ioo_window_locked(window_key: str) -> deque[int]:
+    """Return a bounded LRU alert window for ``window_key``."""
+    window = _persona_ioo_windows.get(window_key)
+    if window is None:
+        while len(_persona_ioo_windows) >= max(1, _PERSONA_IOO_WINDOW_MAX_KEYS):
+            _persona_ioo_windows.popitem(last=False)
+        window = deque(maxlen=_PERSONA_IOO_SUSTAIN_WINDOW)
+        _persona_ioo_windows[window_key] = window
+    else:
+        _persona_ioo_windows.move_to_end(window_key)
+    return window
+
+
 def _has_sustained_persona_ioo_alerts(user_id: str | None, character_id: int | None) -> bool:
     """Return True when the per-user/character IOO window indicates sustained over-copying risk."""
     if not user_id or character_id is None:
         return False
-    window_key = f"{str(user_id)}:{character_id}"
+    window_key = _persona_ioo_window_key(user_id=user_id, character_id=character_id)
     with _persona_alert_guard:
         window = _persona_ioo_windows.get(window_key)
         if not window:
             return False
+        _persona_ioo_windows.move_to_end(window_key)
         if len(window) < _PERSONA_IOO_SUSTAIN_WINDOW:
             return False
         return sum(window) >= _PERSONA_IOO_SUSTAIN_MIN_HITS
@@ -1261,15 +1339,23 @@ def _record_persona_telemetry_hooks(
     model: str,
     user_id: str | None,
     character_id: int | None,
+    assistant_kind: str | None,
+    assistant_id: str | None,
     debug_id: str | None,
 ) -> None:
     """Emit metric/log hooks for persona telemetry diagnostics."""
+    normalized_assistant_kind = str(
+        assistant_kind or ""
+    ).strip().lower() or "unknown"
     labels = {
         "provider": str(provider or "unknown"),
         "model": str(model or "unknown"),
         "user_id": str(user_id or "unknown"),
         "character_id": str(character_id or "none"),
     }
+    if normalized_assistant_kind == "persona":
+        labels["assistant_kind"] = "persona"
+        labels["assistant_id"] = _normalize_persona_telemetry_assistant_id(assistant_id)
 
     try:
         ioo = float(telemetry.get("ioo", 0.0))
@@ -1298,22 +1384,38 @@ def _record_persona_telemetry_hooks(
 
     if ioo >= _PERSONA_IOO_ALERT_THRESHOLD:
         log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
-        logger.warning(
-            "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={}",
-            debug_id or "n/a",
-            ioo,
-            labels["user_id"],
-            labels["character_id"],
-        )
+        if normalized_assistant_kind == "persona":
+            logger.warning(
+                "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={} assistant_kind={} assistant_id={}",
+                debug_id or "n/a",
+                ioo,
+                labels["user_id"],
+                labels["character_id"],
+                labels["assistant_kind"],
+                labels["assistant_id"],
+            )
+        else:
+            logger.warning(
+                "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={}",
+                debug_id or "n/a",
+                ioo,
+                labels["user_id"],
+                labels["character_id"],
+            )
 
     if ior < _PERSONA_IOR_LOW_ALERT_THRESHOLD:
         log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "low"})
     elif ior > _PERSONA_IOR_HIGH_ALERT_THRESHOLD:
         log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
 
-    window_key = f"{labels['user_id']}:{labels['character_id']}"
+    window_key = _persona_ioo_window_key(
+        user_id=user_id,
+        character_id=character_id,
+        assistant_kind=normalized_assistant_kind,
+        assistant_id=assistant_id,
+    )
     with _persona_alert_guard:
-        window = _persona_ioo_windows[window_key]
+        window = _get_persona_ioo_window_locked(window_key)
         window.append(1 if ioo >= _PERSONA_IOO_ALERT_THRESHOLD else 0)
         if (
             len(window) == window.maxlen
@@ -1488,7 +1590,7 @@ async def _maybe_rg_shadow_chat_decision(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.commands.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.commands.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.commands.list")),
     ],
 )
 async def list_chat_commands(
@@ -1592,7 +1694,7 @@ async def list_chat_commands(
     },
     dependencies=[
         Depends(rbac_rate_limit("chat.dictionaries.validate")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.dictionaries.validate")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.dictionaries.validate")),
         Depends(get_request_user),
     ],
 )
@@ -1632,6 +1734,32 @@ def _config_default_llm_provider() -> str | None:
         return None
 
     return _extract("llm_api_settings") or _extract("API")
+
+
+def _any_cloud_provider_has_key() -> bool:
+    """Return True if at least one cloud LLM provider has an API key configured.
+
+    This is used to distinguish "no providers configured at all" (new install)
+    from "this specific provider's key is missing."
+    """
+    try:
+        from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_REQUIRES_KEY
+    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        # If we can't import the metadata, assume providers might be configured
+        return True
+
+    try:
+        all_keys = get_api_keys() or {}
+    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        return True  # If key loading fails, don't block with a misleading error
+
+    for provider_name, requires_key in PROVIDER_REQUIRES_KEY.items():
+        if not requires_key:
+            continue
+        key_val = all_keys.get(provider_name)
+        if key_val and str(key_val).strip():
+            return True
+    return False
 
 
 def _get_default_provider() -> str:
@@ -2171,6 +2299,7 @@ async def _persist_system_message_if_needed(
 
 @router.post(
     "/completions",
+    response_model=ChatCompletionResponse,
     summary="Create chat completion (OpenAI-compatible)",
     description=(
         "Generates an assistant response using the configured LLM provider. "
@@ -2182,11 +2311,19 @@ async def _persist_system_message_if_needed(
     ),
     tags=["chat"],
     responses={
+        status.HTTP_200_OK: {
+            "description": "OpenAI-compatible chat completion JSON response or SSE stream.",
+            "content": {
+                "application/json": {},
+                "text/event-stream": {},
+            },
+        },
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid request (e.g., empty messages, text too long, bad parameters)."},
         status.HTTP_401_UNAUTHORIZED: {"description": "Invalid authentication token."},
         status.HTTP_404_NOT_FOUND: {"description": "Resource not found (e.g., character)."},
         status.HTTP_409_CONFLICT: {"description": "Data conflict (e.g., version mismatch during DB operation)."},
         status.HTTP_413_CONTENT_TOO_LARGE: {"description": "Request payload too large (e.g., too many messages, too many images)."},
+        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
         status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Rate limit exceeded."},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error."},
         status.HTTP_502_BAD_GATEWAY: {"description": "Error received from an upstream LLM provider."},
@@ -2195,9 +2332,10 @@ async def _persist_system_message_if_needed(
     },
     dependencies=[
         Depends(rbac_rate_limit("chat.create")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.completions", count_as="call")),
         Depends(get_auth_principal),  # Establish AuthPrincipal/AuthContext early for guardrails
         Depends(enforce_llm_budget),  # Hard budget stop before handler runs
+        Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),  # Billing: daily API call limit
     ]
 )
 async def create_chat_completion(
@@ -2211,6 +2349,7 @@ async def create_chat_completion(
     X_API_KEY: str = Header(None, alias="X-API-KEY", description="Direct API key header for single-user mode."),
     audit_service=Depends(get_audit_service_for_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
+    billing_org_id: int | None = Depends(get_billing_org_id),
     # background_tasks: BackgroundTasks = Depends(), # Replaced by starlette.background.BackgroundTask for StreamingResponse
 ):
     """
@@ -2240,8 +2379,10 @@ async def create_chat_completion(
     enforce_image_size = _resolve_base64_image_limit_enforcement()
     max_image_bytes = get_max_base64_bytes() if enforce_image_size else None
 
-    # Capture raw model input before any normalization for later decisions
+    # Capture raw model/provider input before any normalization for later decisions
     raw_model_input = request_data.model
+    raw_api_provider_input = getattr(request_data, "api_provider", None)
+    explicit_provider_requested = bool(str(raw_api_provider_input or "").strip())
     auto_model_requested = str(raw_model_input or "").strip().lower() == "auto"
     explicit_model_requested = bool(str(raw_model_input or "").strip()) and not auto_model_requested
     strict_model_selection = _should_enforce_strict_model_selection()
@@ -2343,6 +2484,8 @@ async def create_chat_completion(
         if str((routing_debug or {}).get("policy", {}).get("boundary_mode") or "").strip().lower() == "pinned_provider":
             allow_provider_fallback_for_request = False
 
+    request_model_was_explicit = bool(str(getattr(request_data, "model", None) or "").strip())
+
     (
         metrics_provider,
         metrics_model,
@@ -2403,6 +2546,10 @@ async def create_chat_completion(
     _rg_handle_id = None
     _rg_policy_id = None
     rg_finalized = False
+
+    # Billing: initialized after request_json is available (see below)
+    _billing_enforcer: LimitEnforcer | None = None
+    _billing_enforcer_entered = False
 
     _track_request_cm = metrics.track_request(
         provider=provider,
@@ -2503,20 +2650,42 @@ async def create_chat_completion(
                             with contextlib.suppress(_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS):
                                 metrics.track_moderation_input(str(req_user_id or client_id), inj_mod['action'], category=(inj_mod.get('category') or "default"))
                             # Audit moderation decision
-                            try:
-                                if audit_service and context:
-                                    _schedule_audit_background_task(
-                                        audit_service.log_event(
-                                            event_type=AuditEventType.SECURITY_VIOLATION,
-                                            context=context,
-                                            action="moderation.input",
-                                            result=("failure" if inj_mod['blocked'] else "success"),
-                                            metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
-                                        ),
-                                        task_name="chat.command.moderation.input.audit",
-                                    )
-                            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                                pass
+                                await write_mandatory_moderation_audit(
+                                    audit_service=audit_service,
+                                    audit_context=context,
+                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                    action="moderation.input",
+                                    result=("failure" if inj_mod['blocked'] else "success"),
+                                    metadata={"phase": "input", "action": inj_mod['action'], "pattern": inj_mod.get('pattern'), "category": inj_mod.get('category')},
+                                )
+                                if inj_mod["action"] != "pass" and is_moderation_review_capture_enabled():
+                                    try:
+                                        await asyncio.to_thread(
+                                            partial(
+                                                capture_moderation_review_item,
+                                                phase="input",
+                                                action=str(inj_mod["action"]),
+                                                excerpt="[matched content redacted]",
+                                                category=inj_mod.get("category"),
+                                                matched_pattern=inj_mod.get("pattern"),
+                                                effective_policy=policy.to_dict() if hasattr(policy, "to_dict") else {},
+                                                source_type="chat",
+                                                source_id=str(request_data.conversation_id) if request_data.conversation_id else None,
+                                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                                                session_id=None,
+                                            )
+                                        )
+                                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                                        logger.warning(
+                                            "Moderation review capture failed in chat endpoint: {}: {}",
+                                            type(exc).__name__,
+                                            str(exc),
+                                        )
+                        except MandatoryAuditWriteError as exc:
+                            raise HTTPException(
+                                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail=_mandatory_audit_unavailable_detail(),
+                            ) from exc
                         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _mod_err:
                             logger.debug(f"Slash command moderation step skipped due to error: {_mod_err}")
 
@@ -2590,6 +2759,15 @@ async def create_chat_completion(
                                     request_data.messages.append(sys_msg)
                                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as inj_err:
                                     logger.debug(f"Failed to append system injection message: {inj_err}")
+        except HTTPException as _cmd_err:
+            detail = getattr(_cmd_err, "detail", None)
+            if (
+                _cmd_err.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+                and isinstance(detail, dict)
+                and detail.get("error_code") == "mandatory_audit_unavailable"
+            ):
+                raise
+            logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _cmd_err:
             logger.debug(f"Slash command handling skipped due to error: {_cmd_err}")
 
@@ -2916,6 +3094,34 @@ async def create_chat_completion(
             finally:
                 await _decrement_active_request(user_id)
 
+        # Billing: LLM token enforcement via context manager (tracks actual usage)
+        if enforcement_enabled() and billing_org_id is not None and not _billing_enforcer_entered:
+            try:
+                _est = estimate_tokens_from_json(
+                    _sanitize_json_for_rate_limit(request_json)
+                ) if request_json else 1000
+                _billing_enforcer = LimitEnforcer(
+                    billing_org_id,
+                    LimitCategory.LLM_TOKENS_MONTH,
+                    estimated_units=max(1, _est),
+                )
+                await _billing_enforcer.__aenter__()
+                _billing_enforcer_entered = True
+            except HTTPException:
+                raise
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
+                logger.debug(f"Billing token pre-check failed (fail-open): {_billing_err}")
+                _billing_enforcer = None
+        try:
+            input_moderation_chat_type = await resolve_input_moderation_chat_type(
+                chat_db=chat_db,
+                request_data=request_data,
+                loop=current_loop,
+            )
+        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("resolve_input_moderation_chat_type failed; defaulting to None: {}", exc)
+            input_moderation_chat_type = None
+
         # Guardian & self-monitoring integration
         _supervised_engine = None
         _self_mon_service = None
@@ -2923,38 +3129,28 @@ async def create_chat_completion(
         try:
             from tldw_Server_API.app.core.feature_flags import is_guardian_enabled, is_self_monitoring_enabled
 
-            if current_user and getattr(current_user, "id", None) is not None:
-                try:
-                    _uid_int = int(current_user.id)
-                except Exception:
-                    import hashlib as _hashlib
-                    # Deterministic non-crypto ID derivation for non-integer test/single-user IDs.
-                    # `usedforsecurity=False` keeps behavior while making intent explicit.
-                    try:
-                        _digest = _hashlib.sha1(
-                            str(current_user.id).encode("utf-8"),
-                            usedforsecurity=False,
-                        ).digest()
-                    except TypeError:  # pragma: no cover - compatibility fallback
-                        _digest = _hashlib.sha1(str(current_user.id).encode("utf-8")).digest()  # nosec B324
-                    _uid_int = int.from_bytes(_digest[:4], byteorder="big", signed=False)
-                _guardian_db_path = DatabasePaths.get_guardian_db_path(_uid_int)
+            guardian_enabled = is_guardian_enabled()
+            self_monitoring_enabled = is_self_monitoring_enabled()
+            if (
+                current_user
+                and getattr(current_user, "id", None) is not None
+                and (guardian_enabled or self_monitoring_enabled)
+            ):
+                _guardian_runtime = bootstrap_guardian_moderation_runtime(
+                    user_id=current_user.id,
+                    dependent_user_id=str(current_user.id),
+                    chat_type=input_moderation_chat_type,
+                )
+                _dep_user_id = _guardian_runtime.dependent_user_id
 
-                _guardian_db = None
-                if is_guardian_enabled() or is_self_monitoring_enabled():
-                    from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB as _GuardianDB
-                    _guardian_db = _GuardianDB(str(_guardian_db_path))
+                if guardian_enabled and _guardian_runtime.supervised_engine:
+                    _supervised_engine = _guardian_runtime.supervised_engine
 
-                if is_guardian_enabled() and _guardian_db:
-                    from tldw_Server_API.app.core.Moderation.supervised_policy import get_supervised_policy_engine
-                    _supervised_engine = get_supervised_policy_engine(_guardian_db)
-                    _dep_user_id = str(current_user.id)
-
-                if is_self_monitoring_enabled() and _guardian_db:
+                if self_monitoring_enabled and _guardian_runtime.guardian_db:
                     from tldw_Server_API.app.core.Monitoring.self_monitoring_service import get_self_monitoring_service
-                    _self_mon_service = get_self_monitoring_service(_guardian_db)
-        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-            pass
+                    _self_mon_service = get_self_monitoring_service(_guardian_runtime.guardian_db)
+        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("Guardian moderation bootstrap failed; continuing with base moderation only: {}", exc)
 
         # Moderation: apply global/per-user policy to input messages (redact or block)
         try:
@@ -2976,7 +3172,13 @@ async def create_chat_completion(
                 supervised_policy_engine=_supervised_engine,
                 self_monitoring_service=_self_mon_service,
                 dependent_user_id=_dep_user_id,
+                chat_type=input_moderation_chat_type,
             )
+        except MandatoryAuditWriteError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_mandatory_audit_unavailable_detail(),
+            ) from exc
         except HTTPException:
             raise
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
@@ -2985,6 +3187,41 @@ async def create_chat_completion(
         # Normalize provider/model on the request for downstream logic (already resolved)
         provider = selected_provider
         model = selected_model or model
+
+        def _get_default_model_for_provider_name(target_provider: str) -> str | None:
+            override_default = get_override_default_model(target_provider)
+            if override_default:
+                return override_default
+            override = get_llm_provider_override(target_provider)
+            if override and override.allowed_models:
+                return override.allowed_models[0]
+            normalized = target_provider.replace(".", "_").replace("-", "_")
+            env_key = f"DEFAULT_MODEL_{normalized.upper()}"
+            env_val = os.getenv(env_key)
+            if env_val:
+                return env_val
+            config_key = f"default_model_{normalized.lower()}"
+            if _chat_config:
+                cfg_val = _chat_config.get(config_key)
+                if cfg_val:
+                    return cfg_val
+            return None
+
+        if not request_model_was_explicit:
+            default_model_for_provider = _get_default_model_for_provider_name(provider)
+            if default_model_for_provider:
+                model = default_model_for_provider
+                request_data.model = default_model_for_provider
+        if not model:
+            # Fail fast with a clear client error instead of cascading into a 500
+            # when downstream provider adapters require an explicit model.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Model is required for provider '{provider}'. Please select a model in the WebUI "
+                    f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
+                ),
+            )
 
         override_error = validate_provider_override(provider, model)
         if override_error:
@@ -3089,8 +3326,31 @@ async def create_chat_completion(
             _force_mock = _shared_is_truthy(os.getenv("CHAT_FORCE_MOCK", ""))
             _auto_mock_family = target_api_provider in {"openai", "groq", "mistral"}
             if provider_requires_api_key(target_api_provider) and not provider_api_key and not (_force_mock or (_test_mode_flag and _auto_mock_family)):
-                logger.error(f"API key for provider '{target_api_provider}' is missing or not configured.")
                 record_byok_missing_credentials(target_api_provider, operation="chat")
+
+                # Distinguish "no LLM providers configured at all" (fresh install) from
+                # "this specific provider's key is missing" (user picked a provider that
+                # lacks credentials).  The former gets a dedicated error code so the
+                # frontend can show onboarding-style guidance.
+                if not explicit_provider_requested and not _any_cloud_provider_has_key():
+                    logger.error(
+                        "No LLM provider API keys are configured on this server. "
+                        "At least one provider key (e.g. OPENAI_API_KEY) must be set."
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "error": "no_provider_configured",
+                            "message": (
+                                "No LLM provider is configured. "
+                                "Contact your administrator or check the provider configuration."
+                            ),
+                            "docs_url": "/docs#section/LLM-Providers",
+                            "admin_url": "/admin/providers",
+                        },
+                    )
+
+                logger.error(f"API key for provider '{target_api_provider}' is missing or not configured.")
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail={
@@ -3147,6 +3407,14 @@ async def create_chat_completion(
                 if isinstance(continuation_runtime.get("assistant_context"), dict)
                 else None
             )
+            try:
+                output_moderation_chat_type = resolve_moderation_chat_type(
+                    request_data=request_data,
+                    assistant_context=assistant_context,
+                )
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug("resolve_moderation_chat_type failed; defaulting to None: {}", exc)
+                output_moderation_chat_type = None
 
             # --- Prompt Templating (system + content transforms) ---
             final_system_message, templated_llm_payload = apply_prompt_templating(
@@ -3188,6 +3456,27 @@ async def create_chat_completion(
                 isinstance(assistant_context, dict)
                 and assistant_context.get("assistant_kind") == "persona"
                 and bool(persona_assistant_id)
+            )
+            telemetry_assistant_kind = (
+                str(assistant_context.get("assistant_kind") or "").strip()
+                if isinstance(assistant_context, dict)
+                else ""
+            )
+            telemetry_assistant_id_from_context = (
+                str(assistant_context.get("assistant_id") or "").strip()
+                if isinstance(assistant_context, dict)
+                else ""
+            )
+            if is_persona_backed_chat:
+                telemetry_assistant_id = persona_assistant_id
+            elif telemetry_assistant_id_from_context:
+                telemetry_assistant_id = telemetry_assistant_id_from_context
+            elif telemetry_assistant_kind != "persona" and character_db_id_for_context is not None:
+                telemetry_assistant_id = str(character_db_id_for_context)
+            else:
+                telemetry_assistant_id = ""
+            should_record_persona_telemetry = (
+                is_persona_backed_chat or character_db_id_for_context is not None
             )
 
             if persona_strategy != "off" and is_persona_backed_chat:
@@ -3384,50 +3673,10 @@ async def create_chat_completion(
                 final_system_message=llm_final_system_message,
                 app_config=app_config_override,
                 grammar_record=llamacpp_grammar_record,
+                resolved_model=model,
             )
             cleaned_args["request"] = request
-
-            def _get_default_model_for_provider_name(target_provider: str) -> str | None:
-                override_default = get_override_default_model(target_provider)
-                if override_default:
-                    return override_default
-                override = get_llm_provider_override(target_provider)
-                if override and override.allowed_models:
-                    return override.allowed_models[0]
-                normalized = target_provider.replace(".", "_").replace("-", "_")
-                env_key = f"DEFAULT_MODEL_{normalized.upper()}"
-                env_val = os.getenv(env_key)
-                if env_val:
-                    return env_val
-                config_key = f"default_model_{normalized.lower()}"
-                if _chat_config:
-                    cfg_val = _chat_config.get(config_key)
-                    if cfg_val:
-                        return cfg_val
-                return None
-
-            if not cleaned_args.get("model"):
-                default_model_for_provider = _get_default_model_for_provider_name(provider)
-                if default_model_for_provider:
-                    cleaned_args["model"] = default_model_for_provider
-                    if not request_data.model:
-                        request_data.model = default_model_for_provider
-                    model = default_model_for_provider
-                else:
-                    # Fail fast with a clear client error instead of cascading into a 500
-                    # when downstream provider adapters require an explicit model.
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            f"Model is required for provider '{provider}'. Please select a model in the WebUI "
-                            f"or configure a default via environment variable 'DEFAULT_MODEL_{provider.replace('.', '_').replace('-', '_').upper()}'"
-                        ),
-                    )
-
-            # Re-validate provider override after applying a default model.
-            override_error = validate_provider_override(provider, cleaned_args.get("model") or request_data.model)
-            if override_error:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
+            cleaned_args["model"] = cleaned_args.get("model") or model
 
             async def rebuild_call_params_for_provider(
                 target_provider: str,
@@ -3808,13 +4057,18 @@ async def create_chat_completion(
                     return base
                 try:
                     from tldw_Server_API.app.core.Moderation.supervised_policy import GuardianModerationProxy
-                    return GuardianModerationProxy(base, _supervised_engine, _dep_user_id)
+                    return GuardianModerationProxy(
+                        base,
+                        _supervised_engine,
+                        _dep_user_id,
+                        chat_type=output_moderation_chat_type,
+                    )
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     return base
 
             async def _on_stream_full_reply_for_persona_telemetry(full_reply: str) -> None:
                 assistant_text = str(full_reply or "")
-                if character_db_id_for_context is not None:
+                if should_record_persona_telemetry:
                     persona_telemetry = compute_persona_exemplar_telemetry(
                         output_text=assistant_text,
                         selected_exemplars=persona_selected_exemplars,
@@ -3837,6 +4091,8 @@ async def create_chat_completion(
                         model=model,
                         user_id=user_id,
                         character_id=character_db_id_for_context,
+                        assistant_kind=telemetry_assistant_kind,
+                        assistant_id=telemetry_assistant_id,
                         debug_id=debug_id_for_logs,
                     )
 
@@ -3875,9 +4131,8 @@ async def create_chat_completion(
                     moderation_getter=_get_moderation_with_guardian,
                     on_success=_touch_byok,
                     on_stream_full_reply=_on_stream_full_reply_for_persona_telemetry,
-                    rg_commit_cb=(
-                        (lambda total: (request.app.state.rg_governor.commit(_rg_handle_id, actuals={"tokens": int(total)}) if getattr(request.app.state, "rg_governor", None) and _rg_handle_id else None))
-                        if _rg_handle_id else None
+                    rg_commit_cb=_build_streaming_commit_cb(
+                        _rg_handle_id, request, _billing_enforcer, billing_org_id,
                     ),
                     rg_refund_cb=(
                         (lambda **_kwargs: (request.app.state.rg_governor.commit(_rg_handle_id, actuals={"tokens": 0}) if getattr(request.app.state, "rg_governor", None) and _rg_handle_id else None))
@@ -3934,7 +4189,7 @@ async def create_chat_completion(
                     if isinstance(encoded_payload, dict)
                     else ""
                 )
-                if isinstance(encoded_payload, dict) and character_db_id_for_context is not None:
+                if isinstance(encoded_payload, dict) and should_record_persona_telemetry:
                     persona_telemetry = compute_persona_exemplar_telemetry(
                         output_text=assistant_reply_text,
                         selected_exemplars=persona_selected_exemplars,
@@ -3958,6 +4213,8 @@ async def create_chat_completion(
                             model=model,
                             user_id=user_id,
                             character_id=character_db_id_for_context,
+                            assistant_kind=telemetry_assistant_kind,
+                            assistant_id=telemetry_assistant_id,
                             debug_id=debug_id_for_logs,
                         )
                     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
@@ -4014,6 +4271,15 @@ async def create_chat_completion(
                         rg_finalized = True
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _rg_commit_err:
                     logger.debug(f"RG tokens commit skipped/failed: {_rg_commit_err}")
+                # Billing: record actual token usage for non-streaming
+                if _billing_enforcer is not None:
+                    try:
+                        usage = (encoded_payload or {}).get("usage") if isinstance(encoded_payload, dict) else None
+                        total = int((usage or {}).get("total_tokens") or 0) if usage else 0
+                        if total > 0:
+                            _billing_enforcer.record_actual(total)
+                    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
+                        logger.debug(f"Billing token recording failed: {_billing_err}")
                 alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
                 return JSONResponse(content=encoded_payload, headers=alias_headers or None)
 
@@ -4121,11 +4387,24 @@ async def create_chat_completion(
                 detail=safe_detail
             ) from e_chat
 
+        except MandatoryAuditWriteError as e_chat:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_mandatory_audit_unavailable_detail(),
+            ) from e_chat
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as e_chat:
             # Do not leak raw HTTPException details from underlying call sites.
             # For unexpected HTTPException from lower layers (e.g., provider shims),
             # normalize to a generic 500 to match test expectations.
+            # However, billing (402) and rate-limit (429) responses must propagate
+            # to the client unchanged so callers can react appropriately.
             if isinstance(e_chat, HTTPException):
+                if e_chat.status_code in (
+                    status.HTTP_402_PAYMENT_REQUIRED,
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                ):
+                    raise
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="An unexpected internal server error occurred."
@@ -4164,12 +4443,11 @@ async def create_chat_completion(
                     context=context,
                     action="chat_error",
                     result="failure",
-                    metadata={
-                        "error_type": type(e_chat).__name__,
-                        "error_message": str(e_chat),
-                        "provider": provider,
-                        "model": model
-                    }
+                    metadata=_build_chat_error_audit_metadata(
+                        e_chat,
+                        provider=provider,
+                        model=model,
+                    )
                 )
             # Determine status robustly across possible module/class identity mismatches
             if is_chat_lib_error:
@@ -4270,6 +4548,15 @@ async def create_chat_completion(
                     rg_finalized = True
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _rg_refund_err:
                 logger.debug(f"RG tokens refund skipped/failed: {_rg_refund_err}")
+        # Billing: finalize the LimitEnforcer context manager.
+        # For streaming: the callback handles recording via apply_usage_delta
+        # directly, so __aexit__ only needs to run for non-streaming paths
+        # (where record_actual was called before __aexit__).
+        if _billing_enforcer is not None and _billing_enforcer_entered:
+            try:
+                await _billing_enforcer.__aexit__(exc_type, exc_value, exc_tb)
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_exit_err:
+                logger.debug(f"Billing enforcer exit failed: {_billing_exit_err}")
         await _track_request_cm.__aexit__(exc_type, exc_value, exc_tb)
 
 
@@ -4281,7 +4568,7 @@ async def create_chat_completion(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.queue.status")),
-        Depends(require_permissions(SYSTEM_LOGS)),
+        Depends(RequirePermission(SYSTEM_LOGS)),
     ],
 )
 async def get_chat_queue_status():
@@ -4306,7 +4593,7 @@ async def get_chat_queue_status():
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.queue.activity")),
-        Depends(require_permissions(SYSTEM_LOGS)),
+        Depends(RequirePermission(SYSTEM_LOGS)),
     ],
 )
 async def get_chat_queue_activity(
@@ -4343,6 +4630,83 @@ def _sanitize_json_for_rate_limit(request_json: str) -> str:
         return pattern.sub(r"\1<omitted>", request_json)
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         return request_json
+
+
+def _build_streaming_commit_cb(
+    rg_handle_id: str | None,
+    request: Request | None,
+    billing_enforcer: LimitEnforcer | None,
+    billing_org_id: int | None,
+) -> Callable[[int], Any] | None:
+    """Build the rg_commit_cb for streaming chat that handles both RG and billing.
+
+    The callback is invoked by chat_service when the stream finishes with the
+    total estimated token count.  It must:
+      - Record billing usage via apply_usage_delta (hot cache) AND schedule a
+        durable cost-units ledger write so usage survives cache expiry/restart.
+      - Return an awaitable that the caller awaits, combining the durable
+        ledger write and the RG governor commit.
+    """
+    if not rg_handle_id and not billing_enforcer:
+        return None
+
+    def _commit(total: int) -> Any:
+        tokens = int(total)
+
+        # Billing: record streaming tokens into the enforcer hot cache.
+        if billing_enforcer is not None and billing_org_id is not None:
+            try:
+                billing_enforcer.record_actual(tokens)
+                get_billing_enforcer().apply_usage_delta(
+                    billing_org_id, LimitCategory.LLM_TOKENS_MONTH, tokens,
+                )
+            except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning(
+                    "Billing streaming cache update failed (fail-open): "
+                    "org_id=%s, category=LLM_TOKENS_MONTH, tokens=%s, error=%s",
+                    billing_org_id, tokens, exc,
+                )
+
+        # Build an async wrapper that performs the durable ledger write
+        # and the RG governor commit.  The caller checks for __await__
+        # and awaits the result if present.
+        rg_coro = None
+        if rg_handle_id and request is not None:
+            gov = getattr(request.app.state, "rg_governor", None)
+            if gov is not None:
+                rg_coro = gov.commit(rg_handle_id, actuals={"tokens": tokens})
+
+        needs_durable = (
+            billing_enforcer is not None
+            and billing_org_id is not None
+            and tokens > 0
+        )
+
+        if not needs_durable and rg_coro is None:
+            return None
+
+        async def _durable_and_rg() -> None:
+            # Durable cost-units ledger write so streaming usage persists
+            # across cache expiry / server restart.
+            if needs_durable:
+                try:
+                    await cost_units.record_cost_units_for_entity(
+                        entity_scope="org",
+                        entity_value=str(billing_org_id),
+                        tokens=tokens,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Billing streaming durable ledger write failed (fail-open): "
+                        "org_id=%s, category=LLM_TOKENS_MONTH, tokens=%s, error=%s",
+                        billing_org_id, tokens, exc,
+                    )
+            if rg_coro is not None:
+                await rg_coro
+
+        return _durable_and_rg()
+
+    return _commit
 
 
 def _estimate_tokens_for_queue(request_json: str) -> int:
@@ -4768,7 +5132,7 @@ class SharedConversationResolveResponse(BaseModel):
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.knowledge.save")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.knowledge.save")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.knowledge.save")),
     ],
 )
 async def save_chat_knowledge(
@@ -4865,7 +5229,7 @@ async def save_chat_knowledge(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
 )
 @conversations_alias_router.get(
@@ -4875,7 +5239,7 @@ async def save_chat_knowledge(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
     include_in_schema=False,
 )
@@ -5023,7 +5387,7 @@ async def list_chat_conversations(
         return ConversationListResponse(items=items, pagination=pagination)
     except InputError as exc:
         _record_search_outcome("validation")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise map_db_error_to_http(exc) from exc
     except HTTPException as exc:
         if 400 <= exc.status_code < 500:
             _record_search_outcome("validation")
@@ -5062,7 +5426,7 @@ async def list_chat_conversations(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
 )
 @conversations_alias_router.get(
@@ -5072,7 +5436,7 @@ async def list_chat_conversations(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.list")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.list")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.list")),
     ],
     include_in_schema=False,
 )
@@ -5127,7 +5491,7 @@ async def get_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.update")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.update")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.update")),
     ],
 )
 @conversations_alias_router.patch(
@@ -5137,7 +5501,7 @@ async def get_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.update")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.update")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.update")),
     ],
     include_in_schema=False,
 )
@@ -5228,10 +5592,8 @@ async def update_chat_conversation(
             external_ref=updated.get("external_ref"),
             version=updated.get("version") or payload.version + 1,
         )
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (ConflictError, InputError) as exc:
+        raise map_db_error_to_http(exc) from exc
     except HTTPException:
         raise
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
@@ -5246,7 +5608,7 @@ async def update_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.tree")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
     ],
 )
 @conversations_alias_router.get(
@@ -5256,7 +5618,7 @@ async def update_chat_conversation(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.tree")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.tree")),
     ],
     include_in_schema=False,
 )
@@ -5438,7 +5800,7 @@ async def get_conversation_tree(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
 )
 @conversations_alias_router.post(
@@ -5448,7 +5810,7 @@ async def get_conversation_tree(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
     include_in_schema=False,
 )
@@ -5511,7 +5873,7 @@ async def create_conversation_share_link(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
 )
 @conversations_alias_router.get(
@@ -5521,7 +5883,7 @@ async def create_conversation_share_link(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
     include_in_schema=False,
 )
@@ -5586,7 +5948,7 @@ async def list_conversation_share_links(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
 )
 @conversations_alias_router.delete(
@@ -5596,7 +5958,7 @@ async def list_conversation_share_links(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.share_links")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.share_links")),
     ],
     include_in_schema=False,
 )
@@ -5712,7 +6074,7 @@ async def resolve_conversation_share_token(
     tags=["chat"],
     dependencies=[
         Depends(rbac_rate_limit("chat.analytics")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.analytics")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.analytics")),
     ],
 )
 async def get_chat_analytics(
@@ -5853,7 +6215,7 @@ class ConversationCitationsResponse(BaseModel):
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.messages.rag_context")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
     ],
 )
 async def persist_rag_context(
@@ -5909,7 +6271,7 @@ async def persist_rag_context(
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.messages.rag_context")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.messages.rag_context")),
     ],
 )
 async def get_rag_context(
@@ -5953,7 +6315,7 @@ async def get_rag_context(
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.messages")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.messages")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.messages")),
     ],
 )
 async def get_messages_with_rag_context(
@@ -6004,7 +6366,7 @@ async def get_messages_with_rag_context(
     tags=["chat", "rag"],
     dependencies=[
         Depends(rbac_rate_limit("chat.conversations.citations")),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="chat.conversations.citations")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="chat.conversations.citations")),
     ],
 )
 async def get_conversation_citations(

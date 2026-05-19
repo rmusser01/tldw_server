@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import type { Message as StoreMessage } from "@/store/option/types"
@@ -7,7 +8,10 @@ import { WORKSPACE_SOURCE_DRAG_TYPE } from "../drag-source"
 
 const hoistedMocks = vi.hoisted(() => ({
   setSelectedModel: vi.fn(),
-  getModels: vi.fn()
+  getModels: vi.fn(),
+  fetchChatModels: vi.fn(),
+  setFavoriteModels: vi.fn(),
+  setModelSortMode: vi.fn()
 }))
 
 const mockCheckConnectionOnce = vi.fn()
@@ -261,6 +265,30 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: hoistedMocks.fetchChatModels
+}))
+
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: (key: string, defaultValue: unknown) => {
+    const initialValue =
+      key === "favoriteChatModels"
+        ? ["openai:openai/gpt-4o"]
+        : key === "modelSelectSortMode"
+          ? "favorites"
+          : key === "modelListScope"
+            ? "configured"
+            : defaultValue
+    const setter =
+      key === "favoriteChatModels"
+        ? hoistedMocks.setFavoriteModels
+        : key === "modelSelectSortMode"
+          ? hoistedMocks.setModelSortMode
+          : vi.fn()
+    return [initialValue, setter, { isLoading: false }] as const
+  }
+}))
+
 vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
   return {
@@ -280,6 +308,18 @@ vi.mock("antd", async () => {
     }
   }
 })
+
+function renderChatPaneNode() {
+  return (
+    <MemoryRouter>
+      <ChatPane />
+    </MemoryRouter>
+  )
+}
+
+function renderChatPane() {
+  return render(renderChatPaneNode())
+}
 
 describe("ChatPane Stage 2 citation traceability and retrieval transparency", () => {
   beforeEach(() => {
@@ -305,6 +345,10 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     })
     mockGetWorkspaceChatSession.mockReturnValue(null)
     hoistedMocks.setSelectedModel.mockReset()
+    hoistedMocks.setFavoriteModels.mockReset()
+    hoistedMocks.setModelSortMode.mockReset()
+    hoistedMocks.fetchChatModels.mockReset()
+    hoistedMocks.fetchChatModels.mockResolvedValue([])
     hoistedMocks.getModels.mockResolvedValue([])
 
     messageOptionState.messages = []
@@ -332,7 +376,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
         title: `Source ${index + 1}`
       }))
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const moreButton = screen.getByRole("button", {
       name: "Show more sources"
@@ -367,7 +411,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
 
     expect(mockFocusSourceByMediaId).toHaveBeenCalledWith(42)
@@ -394,7 +438,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Open citation" }))
 
     expect(mockFocusSourceById).toHaveBeenCalledWith("source-alpha")
@@ -432,7 +476,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("Retrieval info")).toBeInTheDocument()
     expect(screen.getByText(/Chunks retrieved/i)).toBeInTheDocument()
@@ -447,29 +491,180 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     expect(screen.getByText(/Doc A, Doc B, Doc C \+1 more/)).toBeInTheDocument()
   })
 
-  it("renders model picker options and updates selected model", async () => {
+  it("renders chat model selector options and updates selected model", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels.mockResolvedValue([
+      {
+        model: "tldw:openai/gpt-4o",
+        name: "tldw:openai/gpt-4o",
+        nickname: "GPT-4o",
+        provider: "openai",
+        details: {
+          capabilities: ["vision", "tools", "streaming"],
+          price_hint: "$5/$15"
+        }
+      },
+      {
+        model: "tldw:anthropic/claude-3-5-sonnet",
+        name: "tldw:anthropic/claude-3-5-sonnet",
+        nickname: "Claude 3.5 Sonnet",
+        provider: "anthropic"
+      }
+    ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+    expect(hoistedMocks.getModels).not.toHaveBeenCalled()
+
+    const modelSelector = await screen.findByTestId("model-selector")
+    expect(modelSelector.closest("label")).toBeNull()
+    fireEvent.click(modelSelector)
+
+    expect(
+      await screen.findByPlaceholderText("Search models")
+    ).toBeInTheDocument()
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+    fireEvent.click(await screen.findByText("Claude 3.5 Sonnet"))
+
+    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
+      "anthropic:anthropic/claude-3-5-sonnet"
+    )
+  })
+
+  it("uses the chat model selector menu with favorites and search", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels.mockResolvedValue([
+      {
+        model: "tldw:openai/gpt-4o",
+        name: "tldw:openai/gpt-4o",
+        nickname: "GPT-4o",
+        provider: "openai",
+        details: {
+          capabilities: ["vision", "tools", "streaming"],
+          price_hint: "$5/$15"
+        }
+      },
+      {
+        model: "tldw:anthropic/claude-3-5-sonnet",
+        name: "tldw:anthropic/claude-3-5-sonnet",
+        nickname: "Claude 3.5 Sonnet",
+        provider: "anthropic"
+      }
+    ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    const modelSelector = await screen.findByTestId("model-selector")
+    fireEvent.click(modelSelector)
+
+    expect(
+      await screen.findByPlaceholderText("Search models")
+    ).toBeInTheDocument()
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.getAllByText("Favorites").length).toBeGreaterThan(0)
+    expect(
+      screen.getByRole("button", { name: "Remove from favorites" })
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from favorites" }))
+    expect(hoistedMocks.setFavoriteModels).toHaveBeenCalledWith(
+      expect.any(Function)
+    )
+
+    fireEvent.click(screen.getByText("Claude 3.5 Sonnet"))
+    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
+      "anthropic:anthropic/claude-3-5-sonnet"
+    )
+  })
+
+  it("keeps the model selector usable with settings fallback when no models load", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels.mockResolvedValue([])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    const modelSelector = screen.getByTestId("model-selector")
+    expect(modelSelector).not.toBeDisabled()
+    fireEvent.click(modelSelector)
+
+    expect(
+      await screen.findByText("No models available. Connect your server in Settings.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Open model settings")).toBeInTheDocument()
+  })
+
+  it("retries chat model loading after an empty startup fetch", async () => {
+    connectionStoreState.state.phase = ConnectionPhase.ERROR
+    connectionStoreState.state.lastError = "offline"
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          model: "tldw:openai/gpt-4o",
+          name: "tldw:openai/gpt-4o",
+          nickname: "GPT-4o",
+          provider: "openai"
+        }
+      ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenLastCalledWith({
+        returnEmpty: true,
+        forceRefresh: true
+      })
+    })
+    expect(mockCheckConnectionOnce).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByTestId("model-selector"))
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
+  })
+
+  it("keeps the legacy model client unused", async () => {
     hoistedMocks.getModels.mockResolvedValue([
       {
         id: "gpt-4o",
         name: "GPT-4o",
         provider: "openai"
-      },
-      {
-        id: "claude-3-5-sonnet",
-        name: "Claude 3.5 Sonnet",
-        provider: "anthropic"
       }
     ])
 
-    render(<ChatPane />)
+    renderChatPane()
 
-    const modelSelect = await screen.findByRole("combobox", {
-      name: "Select model"
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
     })
-    fireEvent.change(modelSelect, { target: { value: "gpt-4o" } })
 
-    expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith("gpt-4o")
-    expect(screen.getByRole("option", { name: /openai/i })).toBeInTheDocument()
+    expect(hoistedMocks.getModels).not.toHaveBeenCalled()
   })
 
   it("handles partial retrieval metadata by inferring diagnostics from sources", () => {
@@ -486,7 +681,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("Retrieval info")).toBeInTheDocument()
     expect(screen.getByText("0.600")).toBeInTheDocument()
@@ -510,7 +705,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("Retrieval info")).toBeInTheDocument()
     expect(screen.getByText(/30 prompt \+ 70 completion = 100 tokens/i)).toBeInTheDocument()
@@ -531,7 +726,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     expect(screen.getByText("0.350")).toBeInTheDocument()
     expect(screen.getByText("Low")).toBeInTheDocument()
@@ -547,7 +742,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const dropZone = screen.getByTestId("chat-drop-zone")
     const dataTransfer = {
@@ -601,7 +796,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const dropZone = screen.getByTestId("chat-drop-zone")
     const dataTransfer = {
@@ -678,7 +873,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
 
     const dropZone = screen.getByTestId("chat-drop-zone")
     const dataTransfer = {
@@ -749,10 +944,10 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    const { rerender } = render(<ChatPane />)
+    const { rerender } = renderChatPane()
 
     workspaceStoreState.selectedSourceIds = ["source-1"]
-    rerender(<ChatPane />)
+    rerender(renderChatPaneNode())
 
     expect(mockMessageInfo).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -772,7 +967,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
 
     expect(mockCreateChatBranch).toHaveBeenCalledWith(0)
@@ -794,7 +989,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       }
     ]
 
-    render(<ChatPane />)
+    renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Variant next" }))
 
     const updater = mockSetMessages.mock.calls.at(-1)?.[0]

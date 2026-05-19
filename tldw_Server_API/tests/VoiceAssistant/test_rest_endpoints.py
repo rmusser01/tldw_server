@@ -2,12 +2,15 @@
 # Integration tests for Voice Assistant REST endpoints
 #
 #######################################################################################################################
+import builtins
 import importlib
 import json
 import uuid
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -175,6 +178,63 @@ class MockVoiceWorkflowHandler:
                 "steps": [{"id": "step1"}],
             },
         }
+
+
+@pytest.mark.asyncio
+async def test_voice_command_dry_run_sanitizes_module_import_errors(monkeypatch, mock_user):
+    """Dry-run availability errors should not expose import/backend details."""
+    from tldw_Server_API.app.api.v1.endpoints import voice_assistant as voice_mod
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.VoiceAssistant.intent_parser":
+            raise ImportError("voice backend exploded")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await voice_mod.voice_command_dry_run(
+            payload=voice_mod.VoiceCommandDryRunRequest(phrase="hello assistant"),
+            request=object(),
+            current_user=mock_user,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 501
+    assert exc_info.value.detail == "Voice assistant module not available"
+
+
+@pytest.mark.asyncio
+async def test_voice_command_dry_run_sanitizes_unexpected_failures(monkeypatch, mock_user):
+    """Dry-run backend failures should return a stable operational detail."""
+    from tldw_Server_API.app.api.v1.endpoints import voice_assistant as voice_mod
+
+    logged_errors = []
+
+    class LoggerStub:
+        def error(self, message, *args, **kwargs):
+            logged_errors.append((message, args, kwargs))
+
+    monkeypatch.setattr(voice_mod, "logger", LoggerStub())
+    monkeypatch.setattr(
+        voice_mod,
+        "get_voice_command_registry",
+        lambda: (_ for _ in ()).throw(RuntimeError("dry-run backend exploded")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await voice_mod.voice_command_dry_run(
+            payload=voice_mod.VoiceCommandDryRunRequest(phrase="hello assistant"),
+            request=object(),
+            current_user=mock_user,
+            db=object(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Dry-run failed"
+    assert logged_errors == [("Voice command dry-run failed", (), {})]
 
 
 # Test classes
@@ -491,6 +551,54 @@ class TestVoiceSessionsEndpoint:
         data = response.json()
         assert data["total"] == 1
         assert len(data["sessions"]) == 1
+
+    def test_list_sessions_includes_canonical_pagination(self, client_with_user, mock_user) -> None:
+        """Voice session listing preserves total while exposing canonical offset pagination."""
+        client, _, _, db = client_with_user
+        now = datetime.utcnow()
+        sessions = [
+            VoiceSessionContext(
+                session_id="voice-session-newest",
+                user_id=mock_user.id,
+                state=VoiceSessionState.IDLE,
+                last_activity=now,
+            ),
+            VoiceSessionContext(
+                session_id="voice-session-middle",
+                user_id=mock_user.id,
+                state=VoiceSessionState.IDLE,
+                last_activity=now - timedelta(minutes=1),
+            ),
+            VoiceSessionContext(
+                session_id="voice-session-oldest",
+                user_id=mock_user.id,
+                state=VoiceSessionState.IDLE,
+                last_activity=now - timedelta(minutes=2),
+            ),
+        ]
+        for session in sessions:
+            save_voice_session(db, session)
+
+        response = client.get(
+            "/api/v1/voice/sessions",
+            params={"active_only": False, "limit": 1, "offset": 1},
+        )
+
+        if response.status_code == 404:
+            pytest.skip("Voice assistant routes not available")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert [session["session_id"] for session in data["sessions"]] == ["voice-session-middle"]
+        assert data["total"] == 3
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
 
 
 class TestVoiceSessionDeleteEndpoint:

@@ -1,19 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { ArrowLeft, RefreshCw, Shield, Save, Search, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw, Search, Shield, Save, X } from 'lucide-react';
 import { api } from '@/lib/api-client';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { Role, Permission } from '@/types';
 import { CardSkeleton } from '@/components/ui/skeleton';
+import { logger } from '@/lib/logger';
 
 type RolePermissionMap = Record<number, Set<number>>;
 
@@ -27,6 +29,9 @@ export default function PermissionMatrixPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [showDifferencesOnly, setShowDifferencesOnly] = useState(false);
   const [permSearch, setPermSearch] = useState('');
   const [differencesOnly, setDifferencesOnly] = useState(false);
 
@@ -57,7 +62,7 @@ export default function PermissionMatrixPage() {
               (Array.isArray(rolePerms) ? rolePerms : []).map((p: Permission) => p.id)
             );
           } catch (err: unknown) {
-            console.warn(`Failed to load permissions for role ${role.id}`, err);
+            logger.warn(`Failed to load permissions for role ${role.id}`, { component: 'PermissionMatrixPage', error: err instanceof Error ? err.message : String(err) });
             permMap[role.id] = new Set();
           }
         })
@@ -66,7 +71,7 @@ export default function PermissionMatrixPage() {
       setRolePermissions(permMap);
       setPendingChanges({});
     } catch (err: unknown) {
-      console.error('Failed to load data:', err);
+      logger.error('Failed to load data', { component: 'PermissionMatrixPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to load roles and permissions');
     } finally {
       setLoading(false);
@@ -98,6 +103,79 @@ export default function PermissionMatrixPage() {
   };
 
   const pendingChangeCount = useMemo(() => Object.keys(pendingChanges).length, [pendingChanges]);
+
+  /** Extract namespace prefix from permission name (e.g. "read:" from "read:users") */
+  const getNamespace = (permName: string): string => {
+    const colonIndex = permName.indexOf(':');
+    return colonIndex > 0 ? permName.substring(0, colonIndex + 1) : 'other';
+  };
+
+  /** Check whether all roles have the same value for a given permission (considering pending changes) */
+  const isUniformPermission = useCallback((perm: Permission): boolean => {
+    if (roles.length <= 1) return true;
+    const firstValue = hasPermission(roles[0].id, perm.id);
+    return roles.every((role) => hasPermission(role.id, perm.id) === firstValue);
+  }, [roles, rolePermissions, pendingChanges]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Filtered permissions based on search and differences toggle */
+  const filteredPermissions = useMemo(() => {
+    let filtered = permissions;
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((perm) =>
+        perm.name.toLowerCase().includes(query)
+        || (perm.description && perm.description.toLowerCase().includes(query))
+      );
+    }
+
+    // Apply differences-only filter
+    if (showDifferencesOnly) {
+      filtered = filtered.filter((perm) => !isUniformPermission(perm));
+    }
+
+    return filtered;
+  }, [permissions, searchQuery, showDifferencesOnly, isUniformPermission]);
+
+  /** Group filtered permissions by namespace */
+  const groupedPermissions = useMemo(() => {
+    const groups: { namespace: string; permissions: Permission[] }[] = [];
+    const groupMap = new Map<string, Permission[]>();
+
+    filteredPermissions.forEach((perm) => {
+      const ns = getNamespace(perm.name);
+      if (!groupMap.has(ns)) {
+        groupMap.set(ns, []);
+      }
+      groupMap.get(ns)!.push(perm);
+    });
+
+    // Sort namespaces alphabetically, but "other" goes last
+    const sortedKeys = Array.from(groupMap.keys()).sort((a, b) => {
+      if (a === 'other') return 1;
+      if (b === 'other') return -1;
+      return a.localeCompare(b);
+    });
+
+    sortedKeys.forEach((ns) => {
+      groups.push({ namespace: ns, permissions: groupMap.get(ns)! });
+    });
+
+    return groups;
+  }, [filteredPermissions]);
+
+  const toggleGroupCollapse = (namespace: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(namespace)) {
+        next.delete(namespace);
+      } else {
+        next.add(namespace);
+      }
+      return next;
+    });
+  };
 
   const isDirtyCell = (roleId: number, permissionId: number): boolean => {
     return getCellKey(roleId, permissionId) in pendingChanges;
@@ -186,7 +264,7 @@ export default function PermissionMatrixPage() {
       setPendingChanges({});
       setSuccess(`Saved ${entries.length} permission change${entries.length === 1 ? '' : 's'}.`);
     } catch (err: unknown) {
-      console.error('Failed to save matrix changes:', err);
+      logger.error('Failed to save matrix changes', { component: 'PermissionMatrixPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to save matrix changes');
     } finally {
       setSaving(false);
@@ -286,22 +364,72 @@ export default function PermissionMatrixPage() {
               </CardContent>
             </Card>
 
+            {/* Search & Filters */}
+            <Card className="mb-6">
+              <CardContent className="pt-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="relative max-w-md w-full">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                    <label htmlFor="matrix-search" className="sr-only">
+                      Search permissions by name
+                    </label>
+                    <Input
+                      id="matrix-search"
+                      placeholder="Search permissions..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Checkbox
+                        checked={showDifferencesOnly}
+                        onCheckedChange={(checked) => setShowDifferencesOnly(checked)}
+                        aria-label="Show differences only"
+                      />
+                      <span className="text-muted-foreground">Show differences only</span>
+                    </label>
+                    {(searchQuery || showDifferencesOnly) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setShowDifferencesOnly(false);
+                        }}
+                      >
+                        Clear filters
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Matrix Table */}
             <Card>
               <CardHeader>
                 <CardTitle>Role-Permission Matrix</CardTitle>
                 <CardDescription>
-                  {roles.length} roles x {permissions.length} permissions
+                  {filteredPermissions.length} of {permissions.length} permissions
+                  {' '}&times; {roles.length} roles
+                  {groupedPermissions.length > 1 && ` in ${groupedPermissions.length} groups`}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <CardSkeleton />
+                  <TableSkeleton rows={5} columns={5} />
                 ) : roles.length === 0 || permissions.length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
                     {roles.length === 0 ? 'No roles found. ' : ''}
                     {permissions.length === 0 ? 'No permissions found. ' : ''}
                     Create some first on the Roles page.
+                  </div>
+                ) : filteredPermissions.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    No permissions match your search
+                    {showDifferencesOnly ? ' and difference filter' : ''}.
                   </div>
                 ) : (
                   <>
@@ -345,44 +473,71 @@ export default function PermissionMatrixPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {permissions.filter((perm) => {
-                          if (permSearch && !perm.name.toLowerCase().includes(permSearch.toLowerCase())) return false;
-                          if (differencesOnly) {
-                            const states = roles.map(role => rolePermissions[role.id]?.has(perm.id) ?? false);
-                            const allSame = states.every(s => s === states[0]);
-                            if (allSame) return false;
-                          }
-                          return true;
-                        }).map((perm, index) => (
-                          <tr key={perm.id} className={index % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
-                            <td className="p-3 sticky left-0 bg-inherit border-b">
-                              <div>
-                                <code className="text-sm font-mono">{perm.name}</code>
-                                {perm.description && (
-                                  <p className="text-xs text-muted-foreground">{perm.description}</p>
-                                )}
-                              </div>
-                            </td>
-                            {roles.map((role) => (
-                              <td
-                                key={`${role.id}-${perm.id}`}
-                                className={`p-3 text-center border-b ${
-                                  isDirtyCell(role.id, perm.id)
-                                    ? 'bg-amber-50 dark:bg-amber-900/20'
-                                    : ''
-                                }`}
-                              >
-                                <Checkbox
-                                  checked={hasPermission(role.id, perm.id)}
-                                  onCheckedChange={() => togglePermission(role, perm.id)}
-                                  aria-label={`Toggle ${perm.name} for ${role.name}`}
-                                  disabled={role.is_system || saving}
-                                  className="mx-auto"
-                                />
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
+                        {groupedPermissions.map((group) => {
+                          const isCollapsed = collapsedGroups.has(group.namespace);
+                          return (
+                            <React.Fragment key={group.namespace}>
+                              {/* Namespace group header */}
+                              {groupedPermissions.length > 1 && (
+                                <tr className="bg-muted/50">
+                                  <td
+                                    colSpan={1 + roles.length}
+                                    className="p-2 border-b cursor-pointer select-none sticky left-0"
+                                    onClick={() => toggleGroupCollapse(group.namespace)}
+                                    role="button"
+                                    aria-expanded={!isCollapsed}
+                                    aria-label={`Toggle ${group.namespace} group`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      {isCollapsed ? (
+                                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                      ) : (
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                                      )}
+                                      <span className="text-sm font-semibold">
+                                        {group.namespace === 'other' ? 'Other' : group.namespace}
+                                      </span>
+                                      <Badge variant="secondary" className="text-xs">
+                                        {group.permissions.length}
+                                      </Badge>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              {/* Permission rows (hidden when collapsed) */}
+                              {!isCollapsed && group.permissions.map((perm, index) => (
+                                <tr key={perm.id} className={index % 2 === 0 ? 'bg-background' : 'bg-muted/30'}>
+                                  <td className="p-3 sticky left-0 bg-inherit border-b">
+                                    <div>
+                                      <code className="text-sm font-mono">{perm.name}</code>
+                                      {perm.description && (
+                                        <p className="text-xs text-muted-foreground">{perm.description}</p>
+                                      )}
+                                    </div>
+                                  </td>
+                                  {roles.map((role) => (
+                                    <td
+                                      key={`${role.id}-${perm.id}`}
+                                      className={`p-3 text-center border-b ${
+                                        isDirtyCell(role.id, perm.id)
+                                          ? 'bg-amber-50 dark:bg-amber-900/20'
+                                          : ''
+                                      }`}
+                                    >
+                                      <Checkbox
+                                        checked={hasPermission(role.id, perm.id)}
+                                        onCheckedChange={() => togglePermission(role, perm.id)}
+                                        aria-label={`Toggle ${perm.name} for ${role.name}`}
+                                        disabled={role.is_system || saving}
+                                        className="mx-auto"
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

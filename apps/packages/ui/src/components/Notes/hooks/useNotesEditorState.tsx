@@ -1,6 +1,6 @@
 import React from 'react'
 import type { InputRef } from 'antd'
-import { Button } from 'antd'
+import { Button, Modal } from 'antd'
 import type { MessageInstance } from 'antd/es/message/interface'
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
@@ -163,6 +163,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
   const graphModalReturnFocusRef = React.useRef<HTMLElement | null>(null)
+
+  // ---- AI assist undo ----
+  const contentBeforeAssistRef = React.useRef<string | null>(null)
+  const assistUndoTimerRef = React.useRef<number | null>(null)
+  const [canUndoAssist, setCanUndoAssist] = React.useState(false)
+
+  const clearAssistUndoState = React.useCallback(() => {
+    if (assistUndoTimerRef.current != null) {
+      window.clearTimeout(assistUndoTimerRef.current)
+      assistUndoTimerRef.current = null
+    }
+    contentBeforeAssistRef.current = null
+    setCanUndoAssist(false)
+  }, [])
 
   const pinnedNoteIdSet = React.useMemo(() => new Set(pinnedNoteIds), [pinnedNoteIds])
 
@@ -353,6 +367,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [])
 
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
+    clearAssistUndoState()
     setLoadingDetail(true)
     try {
       const d = await bgRequest<any>({ path: `/api/v1/notes/${id}` as any, method: 'GET' as any })
@@ -395,9 +410,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       message.error('Failed to load note')
       return false
     } finally { setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, message, rememberRecentNote, setEditorKeywords])
+  }, [applyOfflineDraftToEditor, clearAssistUndoState, message, rememberRecentNote, setEditorKeywords])
 
   const resetEditor = React.useCallback(() => {
+    clearAssistUndoState()
     setSelectedId(null)
     setTitle('')
     setContent('')
@@ -417,7 +433,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setWysiwygHtml('<p><br/></p>')
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = null
-  }, [setEditorKeywords])
+  }, [clearAssistUndoState, setEditorKeywords])
 
   const confirmDiscardIfDirty = React.useCallback(async () => {
     if (!isDirty) return true
@@ -426,15 +442,55 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         await saveNoteRef.current({ showSuccessMessage: false })
         return true
       } catch {
-        // Save failed - fall through to confirmation dialog
+        // Save failed — show 3-button dialog: retry / discard / cancel
+        const retryResult = await new Promise<'saved' | 'discard' | 'cancel'>((resolve) => {
+          const modalRef = Modal.confirm({
+            title: t('option:notesSearch.unsavedChangesTitle', { defaultValue: 'Save changes?' }),
+            content: t('option:notesSearch.unsavedChangesContent', {
+              defaultValue: 'Auto-save could not reach the server. You can try saving again or discard your changes.'
+            }),
+            okText: t('option:notesSearch.retrySave', { defaultValue: 'Try saving again' }),
+            cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
+            okButtonProps: { type: 'primary' },
+            onOk: async () => {
+              try {
+                if (saveNoteRef.current) {
+                  await saveNoteRef.current({ showSuccessMessage: true })
+                }
+                resolve('saved')
+              } catch {
+                // Save still failed — stay on current note
+                resolve('cancel')
+              }
+            },
+            onCancel: () => resolve('cancel'),
+            footer: (_, { OkBtn, CancelBtn }) => (
+              <>
+                <CancelBtn />
+                <Button
+                  danger
+                  onClick={() => {
+                    modalRef.destroy()
+                    resolve('discard')
+                  }}
+                >
+                  {t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' })}
+                </Button>
+                <OkBtn />
+              </>
+            ),
+          })
+        })
+        return retryResult === 'saved' || retryResult === 'discard'
       }
     }
+    // Fallback for edge cases (empty content or save in progress)
     const ok = await confirmDanger({
       title: t('option:notesSearch.unsavedChangesTitle', { defaultValue: 'Save changes?' }),
       content: t('option:notesSearch.unsavedChangesContent', {
         defaultValue: 'Your changes could not be saved automatically. What would you like to do?'
       }),
-      okText: t('option:notesSearch.discardChanges', { defaultValue: 'Discard' }),
+      okText: t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' }),
       cancelText: t('common:cancel', { defaultValue: 'Cancel' })
     })
     return ok
@@ -602,7 +658,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const keywordSuffix =
         warning.failedKeywords.length > 0 ? ` (${warning.failedKeywords.join(', ')})` : ''
       message.warning(
-        `Note ${action}, but ${warning.failedCount} keyword${
+        `Note ${action}, but ${warning.failedCount} tag${
           warning.failedCount === 1 ? '' : 's'
         } failed to attach${keywordSuffix}.`
       )
@@ -1072,7 +1128,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return {
           value: strategy,
           label: t('option:notesSearch.titleStrategyLlm', {
-            defaultValue: 'LLM (quality)'
+            defaultValue: 'AI-powered'
           })
         }
       }
@@ -1080,14 +1136,14 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return {
           value: strategy,
           label: t('option:notesSearch.titleStrategyLlmFallback', {
-            defaultValue: 'LLM fallback'
+            defaultValue: 'AI-powered with fallback'
           })
         }
       }
       return {
         value: strategy,
         label: t('option:notesSearch.titleStrategyHeuristic', {
-          defaultValue: 'Heuristic (fast)'
+          defaultValue: 'Quick (from content)'
         })
       }
     })
@@ -1178,7 +1234,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (suggestedKeywords.length === 0) {
             message.warning(
               t('option:notesSearch.assistKeywordsNoResult', {
-                defaultValue: 'No additional keyword suggestions were found.'
+                defaultValue: 'No additional tag suggestions were found.'
               })
             )
             return
@@ -1221,6 +1277,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           })
         })
         if (!apply) return
+        // Store content before replacement so the user can undo the AI change
+        contentBeforeAssistRef.current = sourceContent
+        setCanUndoAssist(true)
+        if (assistUndoTimerRef.current != null) window.clearTimeout(assistUndoTimerRef.current)
+        assistUndoTimerRef.current = window.setTimeout(() => {
+          contentBeforeAssistRef.current = null
+          setCanUndoAssist(false)
+          assistUndoTimerRef.current = null
+        }, 30_000)
         setContentDirty(generatedContent, { provenance: action })
         message.success(
           action === 'summarize'
@@ -1251,6 +1316,29 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       t
     ]
   )
+
+  const undoAssist = React.useCallback(() => {
+    if (contentBeforeAssistRef.current == null) return
+    setContentDirty(contentBeforeAssistRef.current, { provenance: 'manual' })
+    contentBeforeAssistRef.current = null
+    setCanUndoAssist(false)
+    if (assistUndoTimerRef.current != null) {
+      window.clearTimeout(assistUndoTimerRef.current)
+      assistUndoTimerRef.current = null
+    }
+    message.info(
+      t('option:notesSearch.undoAssistApplied', {
+        defaultValue: 'Reverted AI change.'
+      })
+    )
+  }, [setContentDirty, message, t])
+
+  // Clean up assist undo timer on unmount
+  React.useEffect(() => {
+    return () => {
+      if (assistUndoTimerRef.current != null) window.clearTimeout(assistUndoTimerRef.current)
+    }
+  }, [])
 
   // ---- pinned notes ----
   const selectedNotePinned =
@@ -1286,7 +1374,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const handler = (event: KeyboardEvent) => {
       const lowered = event.key.toLowerCase()
       const hasModifier = event.ctrlKey || event.metaKey
-      if (!hasModifier || lowered !== 's' || event.altKey) return
+      if (!hasModifier || lowered !== 's' || event.altKey || event.shiftKey) return
       if (!isEditorSaveShortcutContext(event.target)) return
       event.preventDefault()
       if (editorDisabled) return
@@ -1587,7 +1675,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     }
     if (saveIndicator === 'error') {
       return t('option:notesSearch.autosaveFailed', {
-        defaultValue: 'Autosave failed. Press Save to retry.'
+        defaultValue: 'Could not save — check your connection and try again.'
       })
     }
     if (saveIndicator === 'saved' && !isDirty) {
@@ -1634,7 +1722,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const provenanceSummaryText = React.useMemo(() => {
     if (editProvenance.mode === 'manual') {
       return t('option:notesSearch.provenanceManual', {
-        defaultValue: 'Edit source: Manual'
+        defaultValue: 'Origin: Typed manually'
       })
     }
     const actionLabel =
@@ -1642,10 +1730,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         ? t('option:notesSearch.assistSummarizeAction', { defaultValue: 'Summarize' })
         : editProvenance.action === 'expand_outline'
           ? t('option:notesSearch.assistExpandOutlineAction', { defaultValue: 'Expand outline' })
-          : t('option:notesSearch.assistSuggestKeywordsAction', { defaultValue: 'Suggest keywords' })
+          : t('option:notesSearch.assistSuggestKeywordsAction', { defaultValue: 'Suggest tags' })
     const generatedAt = new Date(editProvenance.at).toLocaleTimeString()
     const generatedPrefix = t('option:notesSearch.provenanceGeneratedPrefix', {
-      defaultValue: 'Edit source: Generated'
+      defaultValue: 'Origin: AI-generated'
     })
     return `${generatedPrefix} (${actionLabel} at ${generatedAt})`
   }, [editProvenance, t])
@@ -1684,6 +1772,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     editorCursorIndex, setEditorCursorIndex,
     titleSuggestionLoading,
     assistLoadingAction,
+    canUndoAssist,
     editProvenance,
     monitoringNotice, setMonitoringNotice,
     recentNotes,
@@ -1734,6 +1823,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     reloadNotes,
     suggestTitle,
     runAssistAction,
+    undoAssist,
     toggleNotePinned,
     isVersionConflictError,
     handleVersionConflict,

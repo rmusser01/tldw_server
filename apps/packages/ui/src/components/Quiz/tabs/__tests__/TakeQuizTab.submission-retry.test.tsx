@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
@@ -12,6 +13,10 @@ import { useQuizTimer } from "../../hooks/useQuizTimer"
 
 const connectivity = vi.hoisted(() => ({ online: true }))
 const timerControls = vi.hoisted(() => ({ onExpire: null as null | (() => void) }))
+
+vi.mock("react-router-dom", () => ({
+  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+}))
 
 const interpolate = (template: string, values: Record<string, unknown> | undefined) => {
   return template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_, key: string) => {
@@ -228,7 +233,7 @@ describe("TakeQuizTab submission retry recovery", () => {
       isPending: false
     } as any)
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
     await startAttempt()
 
     fireEvent.click(screen.getByRole("radio", { name: "True" }))
@@ -273,7 +278,7 @@ describe("TakeQuizTab submission retry recovery", () => {
       isPending: false
     } as any)
 
-    const view = render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    const view = render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
     await startAttempt()
 
     fireEvent.click(screen.getByRole("radio", { name: "True" }))
@@ -282,7 +287,7 @@ describe("TakeQuizTab submission retry recovery", () => {
     expect(screen.getByText("You're offline. We'll retry automatically when your connection returns.")).toBeInTheDocument()
 
     connectivity.online = true
-    view.rerender(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    view.rerender(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
 
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledTimes(2)
@@ -303,7 +308,7 @@ describe("TakeQuizTab submission retry recovery", () => {
       return null
     })
 
-    render(<TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} />)
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
     await startAttempt()
 
     await act(async () => {

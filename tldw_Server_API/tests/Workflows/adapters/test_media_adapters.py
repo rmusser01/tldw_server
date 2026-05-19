@@ -487,6 +487,42 @@ class TestProcessMediaAdapter:
         assert result.get("error") == "missing_or_invalid_file_uri"
 
     @pytest.mark.asyncio
+    async def test_process_media_pdf_sanitizes_file_access_errors(self, test_mode_env, tmp_path, monkeypatch):
+        """Test process_media PDF hides workflow file resolver details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_process_media_adapter
+
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_pdf = tmp_path / "private-report.pdf"
+        outside_pdf.write_bytes(b"%PDF-1.4")
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(allowed_dir))
+
+        result = await run_process_media_adapter({"kind": "pdf", "file_uri": f"file://{outside_pdf}"}, {})
+
+        assert result == {"error": "file_access_denied"}
+
+    @pytest.mark.asyncio
+    async def test_process_media_pdf_sanitizes_backend_errors(self, test_mode_env, tmp_path, monkeypatch):
+        """Test process_media PDF hides backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_process_media_adapter
+
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+        pdf_file = tmp_path / "document.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4 content")
+
+        async def raise_pdf_error(**kwargs):
+            raise RuntimeError("pdf backend exploded at /private/pdf-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.process_pdf_task",
+            raise_pdf_error,
+        )
+
+        result = await run_process_media_adapter({"kind": "pdf", "file_uri": f"file://{pdf_file}"}, {})
+
+        assert result == {"error": "pdf_process_error"}
+
+    @pytest.mark.asyncio
     async def test_process_media_ebook_not_implemented(self, test_mode_env):
         """Test process_media ebook kind returns explicit not_implemented."""
         from tldw_Server_API.app.core.Workflows.adapters import run_process_media_adapter
@@ -523,6 +559,21 @@ class TestProcessMediaAdapter:
         result = await run_process_media_adapter(config, context)
 
         assert result.get("error") == "missing_or_invalid_file_uri"
+
+    @pytest.mark.asyncio
+    async def test_process_media_mediawiki_dump_sanitizes_file_access_errors(self, test_mode_env, tmp_path, monkeypatch):
+        """Test process_media MediaWiki dump hides workflow file resolver details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_process_media_adapter
+
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        outside_dump = tmp_path / "private-dump.xml"
+        outside_dump.write_text("<mediawiki />")
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(allowed_dir))
+
+        result = await run_process_media_adapter({"kind": "mediawiki_dump", "file_uri": f"file://{outside_dump}"}, {})
+
+        assert result == {"error": "file_access_denied"}
 
     @pytest.mark.asyncio
     async def test_process_media_podcast_not_implemented(self, test_mode_env):
@@ -802,6 +853,69 @@ class TestPDFExtractAdapter:
         assert result.get("status") == "Error"
 
     @pytest.mark.asyncio
+    async def test_pdf_extract_sanitizes_path_resolution_errors(self, tmp_path, monkeypatch):
+        """Test PDF extract does not expose path resolution details."""
+        from tldw_Server_API.app.core.exceptions import AdapterError
+        from tldw_Server_API.app.core.Workflows.adapters import run_pdf_extract_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.media.documents.resolve_workflow_file_uri",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AdapterError("pdf denied at /private/pdf-input.pdf")),
+        )
+
+        result = await run_pdf_extract_adapter({"pdf_uri": "file:///private/pdf-input.pdf"}, {})
+
+        assert result == {"error": "invalid_pdf_path", "status": "Error", "content": "", "text": ""}
+
+    @pytest.mark.asyncio
+    async def test_pdf_extract_sanitizes_file_read_errors(self, tmp_path, monkeypatch):
+        """Test PDF extract does not expose file read exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_pdf_extract_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+        pdf_file = tmp_path / "private.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4 fake content")
+
+        def raise_read_error(self):
+            raise OSError(f"pdf read exploded for {self} at /private/pdf-cache.bin")
+
+        monkeypatch.setattr(type(pdf_file), "read_bytes", raise_read_error)
+
+        result = await run_pdf_extract_adapter({"pdf_uri": f"file://{pdf_file}"}, {})
+
+        assert result == {"error": "pdf_read_error", "status": "Error", "content": "", "text": ""}
+
+    @pytest.mark.asyncio
+    async def test_pdf_extract_sanitizes_processing_errors(self, tmp_path, monkeypatch):
+        """Test PDF extract does not expose processing exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_pdf_extract_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+        pdf_file = tmp_path / "private.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4 fake content")
+
+        def raise_processing_error(**kwargs):
+            raise RuntimeError("pdf processor exploded at /private/pdf-model-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.PDF_Processing_Lib.process_pdf",
+            raise_processing_error,
+        )
+
+        result = await run_pdf_extract_adapter({"pdf_uri": f"file://{pdf_file}"}, {})
+
+        assert result == {"error": "pdf_extract_error", "status": "Error", "content": "", "text": ""}
+
+    @pytest.mark.asyncio
     async def test_pdf_extract_keywords_as_list(self, test_mode_env, tmp_path, monkeypatch):
         """Test PDF extract handles keywords as list."""
         from tldw_Server_API.app.core.Workflows.adapters import run_pdf_extract_adapter
@@ -987,6 +1101,72 @@ class TestOCRAdapter:
         result = await run_ocr_adapter(config, context)
 
         assert result.get("error") == "image_not_found"
+
+    @pytest.mark.asyncio
+    async def test_ocr_sanitizes_path_resolution_errors(self, tmp_path, monkeypatch):
+        """Test OCR does not expose path resolution details."""
+        from tldw_Server_API.app.core.exceptions import AdapterError
+        from tldw_Server_API.app.core.Workflows.adapters import run_ocr_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.media.documents.resolve_workflow_file_uri",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AdapterError("image denied at /private/ocr-input.png")),
+        )
+
+        result = await run_ocr_adapter({"image_uri": "file:///private/ocr-input.png"}, {})
+
+        assert result == {"error": "invalid_image_path", "text": ""}
+
+    @pytest.mark.asyncio
+    async def test_ocr_sanitizes_image_read_errors(self, tmp_path, monkeypatch):
+        """Test OCR does not expose image read exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_ocr_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+        image_file = tmp_path / "private.png"
+        image_file.write_bytes(b"fake png content")
+
+        def raise_read_error(self):
+            raise OSError(f"image read exploded for {self} at /private/ocr-cache.bin")
+
+        monkeypatch.setattr(type(image_file), "read_bytes", raise_read_error)
+
+        result = await run_ocr_adapter({"image_uri": f"file://{image_file}"}, {})
+
+        assert result == {"error": "image_read_error", "text": ""}
+
+    @pytest.mark.asyncio
+    async def test_ocr_sanitizes_backend_errors(self, tmp_path, monkeypatch):
+        """Test OCR does not expose backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_ocr_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+        image_file = tmp_path / "private.png"
+        image_file.write_bytes(b"fake png content")
+
+        class ExplodingBackend:
+            name = "exploding"
+
+            def ocr_image(self, image_bytes, *, lang):
+                raise RuntimeError("ocr backend exploded at /private/ocr-model-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.registry.get_backend",
+            lambda backend_name: ExplodingBackend(),
+        )
+
+        result = await run_ocr_adapter({"image_uri": f"file://{image_file}"}, {})
+
+        assert result == {"error": "ocr_error", "text": ""}
 
     @pytest.mark.asyncio
     async def test_ocr_blocks_returned_test_mode(self, test_mode_env, tmp_path, monkeypatch):
@@ -1215,6 +1395,75 @@ class TestDocumentTableExtractAdapter:
 
         assert "tables" in result
         assert result.get("count") == 0  # No tables found
+
+    @pytest.mark.asyncio
+    async def test_table_extract_sanitizes_path_resolution_errors(self, tmp_path, monkeypatch):
+        """Test table extraction does not expose path resolution details."""
+        from tldw_Server_API.app.core.exceptions import AdapterError
+        from tldw_Server_API.app.core.Workflows.adapters import run_document_table_extract_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.media.documents.resolve_workflow_file_uri",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AdapterError("table denied at /private/table-input.pdf")),
+        )
+
+        result = await run_document_table_extract_adapter(
+            {"file_uri": "file:///private/table-input.pdf"},
+            {},
+        )
+
+        assert result == {"error": "invalid_file_uri", "tables": [], "count": 0}
+
+    @pytest.mark.asyncio
+    async def test_table_extract_sanitizes_file_path_resolution_errors(self, tmp_path, monkeypatch):
+        """Test table extraction does not expose file path resolution details."""
+        from tldw_Server_API.app.core.exceptions import AdapterError
+        from tldw_Server_API.app.core.Workflows.adapters import run_document_table_extract_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.media.documents.resolve_workflow_file_path",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AdapterError("table denied at /private/table-input.txt")),
+        )
+
+        result = await run_document_table_extract_adapter(
+            {"file_path": "private/table-input.txt"},
+            {},
+        )
+
+        assert result == {"error": "file_access_denied", "tables": [], "count": 0}
+
+    @pytest.mark.asyncio
+    async def test_table_extract_sanitizes_backend_errors(self, tmp_path, monkeypatch):
+        """Test table extraction does not expose backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters import run_document_table_extract_adapter
+
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+        monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+        text_file = tmp_path / "private.txt"
+        text_file.write_text("Name | Value\nAlice | 100")
+
+        async def raise_table_error(*args, **kwargs):
+            raise RuntimeError("table extraction backend exploded at /private/table-model-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            raise_table_error,
+        )
+
+        result = await run_document_table_extract_adapter(
+            {"file_path": str(text_file), "provider": "llm"},
+            {},
+        )
+
+        assert result == {"error": "table_extract_error", "tables": [], "count": 0}
 
     @pytest.mark.asyncio
     async def test_table_extract_specific_table_index(self, test_mode_env, tmp_path, monkeypatch):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
@@ -65,6 +67,14 @@ async def _latest_usage_row():
     return await pool.fetchrow(
         "SELECT user_id, key_id FROM usage_log ORDER BY id DESC LIMIT 1"
     )
+
+
+class _UsageLoggerStub:
+    def __init__(self):
+        self.records: list[dict[str, object]] = []
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        self.records.append({"message": message, "args": args, "kwargs": kwargs})
 
 
 class _PrincipalInjectorMiddleware(BaseHTTPMiddleware):
@@ -186,7 +196,7 @@ async def test_usage_logging_prefers_auth_principal_ids(
         return {"ok": True}
 
     app_local.add_middleware(UsageLoggingMiddleware)
-    principal = AuthPrincipal(
+    principal = AuthPrincipal(  # nosec B106
         kind=principal_kind,
         user_id=principal_user_id,
         api_key_id=principal_key_id,
@@ -215,3 +225,80 @@ async def test_usage_logging_prefers_auth_principal_ids(
     row = await _latest_usage_row()
     assert row["user_id"] == principal_user_id
     assert row["key_id"] == principal_key_id
+
+
+def test_usage_logging_exclude_prefix_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import usage_logging_middleware as ulm
+
+    def _fail_settings():
+        raise RuntimeError("usage config exploded at /private/usage.toml")
+
+    logger_stub = _UsageLoggerStub()
+    monkeypatch.setattr(ulm, "get_settings", _fail_settings)
+    monkeypatch.setattr(ulm, "logger", logger_stub)
+
+    middleware = ulm.UsageLoggingMiddleware(FastAPI())
+
+    assert middleware._is_excluded("/api/private") is False
+    assert logger_stub.records
+    record = logger_stub.records[-1]
+    assert record["message"] == "Usage logging exclude-prefix check failed; defaulting to include"
+    assert "exc_info" not in record["kwargs"]
+    assert "usage config exploded" not in str(record)
+    assert "/private/usage.toml" not in str(record)
+
+
+@pytest.mark.asyncio
+async def test_usage_logging_write_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ import usage_logging_middleware as ulm
+
+    class _Settings:
+        USAGE_LOG_ENABLED = True
+        USAGE_LOG_EXCLUDE_PREFIXES: list[str] = []
+        USAGE_LOG_DISABLE_META = True
+        PII_REDACT_LOGS = False
+
+    class _FailingUsageRepo:
+        def __init__(self, db_pool):
+            self.db_pool = db_pool
+
+        async def insert_usage_log(self, **_kwargs):
+            raise RuntimeError("usage DB write failed at /private/usage.db")
+
+    async def _fake_get_db_pool():
+        return object()
+
+    logger_stub = _UsageLoggerStub()
+    monkeypatch.setattr(ulm, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(ulm, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(ulm, "AuthnzUsageRepo", _FailingUsageRepo)
+    monkeypatch.setattr(ulm, "logger", logger_stub)
+
+    middleware = ulm.UsageLoggingMiddleware(FastAPI())
+    request = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "path": "/api/v1/usage-test",
+            "raw_path": b"/api/v1/usage-test",
+            "query_string": b"",
+            "headers": [(b"host", b"testserver")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+    )
+
+    async def _call_next(_request: Request) -> Response:
+        return Response(content=b"{}", media_type="application/json", status_code=200)
+
+    response = await middleware.dispatch(request, _call_next)
+
+    assert response.status_code == 200
+    assert logger_stub.records
+    message = str(logger_stub.records[-1]["message"])
+    assert message == "Usage logging skipped/failed"
+    assert "usage DB write failed" not in message
+    assert "/private/usage.db" not in message

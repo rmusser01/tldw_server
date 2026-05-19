@@ -15,7 +15,7 @@ exports[`StatsGrid > matches snapshot at viewport width 375 1`] = `
       <p
         class="sr-only"
       >
-        Dashboard metrics updated. 12 total users, 9 active users, 4 organizations, 4 enabled providers, 25 percent storage used, error rate 1.52 percent, queue depth 16.
+        Dashboard metrics updated. 12 total users, 9 active users, 4 organizations, 4 enabled providers, 25 percent storage used, error rate 1.52 percent, queue depth 16. 7 active sessions, 167.0K tokens consumed.
       </p>
       <div
         class="rounded-lg border bg-card text-card-foreground shadow-sm"
@@ -268,7 +268,12 @@ exports[`StatsGrid > matches snapshot at viewport width 375 1`] = `
             class="mt-2"
           >
             <div
+              aria-label="Storage usage"
+              aria-valuemax="100"
+              aria-valuemin="0"
+              aria-valuenow="25"
               class="h-2 w-full rounded-full bg-gray-200"
+              role="progressbar"
             >
               <div
                 class="h-2 rounded-full bg-green-500"
@@ -280,7 +285,127 @@ exports[`StatsGrid > matches snapshot at viewport width 375 1`] = `
             >
               25% used
             </p>
+            <a
+              class="mt-1 inline-block text-xs text-primary hover:underline"
+              data-testid="storage-detail-link"
+              href="/data-ops"
+            >
+              View details
+            </a>
           </div>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Active Sessions
+          </h3>
+          <svg
+            class="lucide lucide-monitor h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect
+              height="14"
+              rx="2"
+              width="20"
+              x="2"
+              y="3"
+            />
+            <line
+              x1="8"
+              x2="16"
+              y1="21"
+              y2="21"
+            />
+            <line
+              x1="12"
+              x2="12"
+              y1="17"
+              y2="21"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            7
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            ACP agent sessions
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Token Consumption
+          </h3>
+          <svg
+            class="lucide lucide-coins h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle
+              cx="8"
+              cy="8"
+              r="6"
+            />
+            <path
+              d="M18.09 10.37A6 6 0 1 1 10.34 18"
+            />
+            <path
+              d="M7 6h1v4"
+            />
+            <path
+              d="m16.71 13.88.7.71-2.82 2.82"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            167.0K
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            125.0K prompt / 42.0K completion
+          </p>
         </div>
       </div>
       <div
@@ -418,6 +543,13 @@ exports[`StatsGrid > matches snapshot at viewport width 375 1`] = `
             </svg>
             24.0% down vs previous day
           </p>
+          <a
+            class="inline-block text-xs text-primary hover:underline"
+            data-testid="error-drilldown-link"
+            href="/audit?action=error"
+          >
+            View errors
+          </a>
         </div>
       </div>
       <div
@@ -563,6 +695,111 @@ exports[`StatsGrid > matches snapshot at viewport width 375 1`] = `
               />
             </svg>
             20.0% down vs last refresh
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Cache Hit Rate
+          </h3>
+          <svg
+            class="lucide lucide-database h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <ellipse
+              cx="12"
+              cy="5"
+              rx="9"
+              ry="3"
+            />
+            <path
+              d="M3 5V19A9 3 0 0 0 21 19V5"
+            />
+            <path
+              d="M3 12A9 3 0 0 0 21 12"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0 space-y-1"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            N/A
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            RAG cache hit rate
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            MCP Tool Invocations
+          </h3>
+          <svg
+            class="lucide lucide-plug h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M12 22v-5"
+            />
+            <path
+              d="M9 8V2"
+            />
+            <path
+              d="M15 8V2"
+            />
+            <path
+              d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0 space-y-1"
+        >
+          <div
+            class="text-2xl font-bold"
+            title="Requires MCP telemetry"
+          >
+            N/A
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            Requires MCP telemetry
           </p>
         </div>
       </div>
@@ -586,7 +823,7 @@ exports[`StatsGrid > matches snapshot at viewport width 768 1`] = `
       <p
         class="sr-only"
       >
-        Dashboard metrics updated. 12 total users, 9 active users, 4 organizations, 4 enabled providers, 25 percent storage used, error rate 1.52 percent, queue depth 16.
+        Dashboard metrics updated. 12 total users, 9 active users, 4 organizations, 4 enabled providers, 25 percent storage used, error rate 1.52 percent, queue depth 16. 7 active sessions, 167.0K tokens consumed.
       </p>
       <div
         class="rounded-lg border bg-card text-card-foreground shadow-sm"
@@ -839,7 +1076,12 @@ exports[`StatsGrid > matches snapshot at viewport width 768 1`] = `
             class="mt-2"
           >
             <div
+              aria-label="Storage usage"
+              aria-valuemax="100"
+              aria-valuemin="0"
+              aria-valuenow="25"
               class="h-2 w-full rounded-full bg-gray-200"
+              role="progressbar"
             >
               <div
                 class="h-2 rounded-full bg-green-500"
@@ -851,7 +1093,127 @@ exports[`StatsGrid > matches snapshot at viewport width 768 1`] = `
             >
               25% used
             </p>
+            <a
+              class="mt-1 inline-block text-xs text-primary hover:underline"
+              data-testid="storage-detail-link"
+              href="/data-ops"
+            >
+              View details
+            </a>
           </div>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Active Sessions
+          </h3>
+          <svg
+            class="lucide lucide-monitor h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect
+              height="14"
+              rx="2"
+              width="20"
+              x="2"
+              y="3"
+            />
+            <line
+              x1="8"
+              x2="16"
+              y1="21"
+              y2="21"
+            />
+            <line
+              x1="12"
+              x2="12"
+              y1="17"
+              y2="21"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            7
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            ACP agent sessions
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Token Consumption
+          </h3>
+          <svg
+            class="lucide lucide-coins h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle
+              cx="8"
+              cy="8"
+              r="6"
+            />
+            <path
+              d="M18.09 10.37A6 6 0 1 1 10.34 18"
+            />
+            <path
+              d="M7 6h1v4"
+            />
+            <path
+              d="m16.71 13.88.7.71-2.82 2.82"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            167.0K
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            125.0K prompt / 42.0K completion
+          </p>
         </div>
       </div>
       <div
@@ -989,6 +1351,13 @@ exports[`StatsGrid > matches snapshot at viewport width 768 1`] = `
             </svg>
             24.0% down vs previous day
           </p>
+          <a
+            class="inline-block text-xs text-primary hover:underline"
+            data-testid="error-drilldown-link"
+            href="/audit?action=error"
+          >
+            View errors
+          </a>
         </div>
       </div>
       <div
@@ -1134,6 +1503,111 @@ exports[`StatsGrid > matches snapshot at viewport width 768 1`] = `
               />
             </svg>
             20.0% down vs last refresh
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Cache Hit Rate
+          </h3>
+          <svg
+            class="lucide lucide-database h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <ellipse
+              cx="12"
+              cy="5"
+              rx="9"
+              ry="3"
+            />
+            <path
+              d="M3 5V19A9 3 0 0 0 21 19V5"
+            />
+            <path
+              d="M3 12A9 3 0 0 0 21 12"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0 space-y-1"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            N/A
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            RAG cache hit rate
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            MCP Tool Invocations
+          </h3>
+          <svg
+            class="lucide lucide-plug h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M12 22v-5"
+            />
+            <path
+              d="M9 8V2"
+            />
+            <path
+              d="M15 8V2"
+            />
+            <path
+              d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0 space-y-1"
+        >
+          <div
+            class="text-2xl font-bold"
+            title="Requires MCP telemetry"
+          >
+            N/A
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            Requires MCP telemetry
           </p>
         </div>
       </div>
@@ -1157,7 +1631,7 @@ exports[`StatsGrid > matches snapshot at viewport width 1280 1`] = `
       <p
         class="sr-only"
       >
-        Dashboard metrics updated. 12 total users, 9 active users, 4 organizations, 4 enabled providers, 25 percent storage used, error rate 1.52 percent, queue depth 16.
+        Dashboard metrics updated. 12 total users, 9 active users, 4 organizations, 4 enabled providers, 25 percent storage used, error rate 1.52 percent, queue depth 16. 7 active sessions, 167.0K tokens consumed.
       </p>
       <div
         class="rounded-lg border bg-card text-card-foreground shadow-sm"
@@ -1410,7 +1884,12 @@ exports[`StatsGrid > matches snapshot at viewport width 1280 1`] = `
             class="mt-2"
           >
             <div
+              aria-label="Storage usage"
+              aria-valuemax="100"
+              aria-valuemin="0"
+              aria-valuenow="25"
               class="h-2 w-full rounded-full bg-gray-200"
+              role="progressbar"
             >
               <div
                 class="h-2 rounded-full bg-green-500"
@@ -1422,7 +1901,127 @@ exports[`StatsGrid > matches snapshot at viewport width 1280 1`] = `
             >
               25% used
             </p>
+            <a
+              class="mt-1 inline-block text-xs text-primary hover:underline"
+              data-testid="storage-detail-link"
+              href="/data-ops"
+            >
+              View details
+            </a>
           </div>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Active Sessions
+          </h3>
+          <svg
+            class="lucide lucide-monitor h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect
+              height="14"
+              rx="2"
+              width="20"
+              x="2"
+              y="3"
+            />
+            <line
+              x1="8"
+              x2="16"
+              y1="21"
+              y2="21"
+            />
+            <line
+              x1="12"
+              x2="12"
+              y1="17"
+              y2="21"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            7
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            ACP agent sessions
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Token Consumption
+          </h3>
+          <svg
+            class="lucide lucide-coins h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle
+              cx="8"
+              cy="8"
+              r="6"
+            />
+            <path
+              d="M18.09 10.37A6 6 0 1 1 10.34 18"
+            />
+            <path
+              d="M7 6h1v4"
+            />
+            <path
+              d="m16.71 13.88.7.71-2.82 2.82"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            167.0K
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            125.0K prompt / 42.0K completion
+          </p>
         </div>
       </div>
       <div
@@ -1560,6 +2159,13 @@ exports[`StatsGrid > matches snapshot at viewport width 1280 1`] = `
             </svg>
             24.0% down vs previous day
           </p>
+          <a
+            class="inline-block text-xs text-primary hover:underline"
+            data-testid="error-drilldown-link"
+            href="/audit?action=error"
+          >
+            View errors
+          </a>
         </div>
       </div>
       <div
@@ -1705,6 +2311,111 @@ exports[`StatsGrid > matches snapshot at viewport width 1280 1`] = `
               />
             </svg>
             20.0% down vs last refresh
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            Cache Hit Rate
+          </h3>
+          <svg
+            class="lucide lucide-database h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <ellipse
+              cx="12"
+              cy="5"
+              rx="9"
+              ry="3"
+            />
+            <path
+              d="M3 5V19A9 3 0 0 0 21 19V5"
+            />
+            <path
+              d="M3 12A9 3 0 0 0 21 12"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0 space-y-1"
+        >
+          <div
+            class="text-2xl font-bold"
+          >
+            N/A
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            RAG cache hit rate
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-lg border bg-card text-card-foreground shadow-sm"
+      >
+        <div
+          class="p-6 flex flex-row items-center justify-between space-y-0 pb-2"
+        >
+          <h3
+            class="tracking-tight text-sm font-medium"
+          >
+            MCP Tool Invocations
+          </h3>
+          <svg
+            class="lucide lucide-plug h-4 w-4 text-muted-foreground"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M12 22v-5"
+            />
+            <path
+              d="M9 8V2"
+            />
+            <path
+              d="M15 8V2"
+            />
+            <path
+              d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"
+            />
+          </svg>
+        </div>
+        <div
+          class="p-6 pt-0 space-y-1"
+        >
+          <div
+            class="text-2xl font-bold"
+            title="Requires MCP telemetry"
+          >
+            N/A
+          </div>
+          <p
+            class="text-xs text-muted-foreground"
+          >
+            Requires MCP telemetry
           </p>
         </div>
       </div>

@@ -29,12 +29,14 @@ from tldw_Server_API.app.core.Security.crypto import (
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
 from .audit_bridge import submit_job_audit_event
-from .fair_share import FairShareScheduler
 from .event_stream import emit_job_event
+from .fair_share import FairShareScheduler
 from .metrics import (
     ensure_jobs_metrics_registered,
     increment_cancelled,
@@ -82,6 +84,20 @@ _JOB_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 # Module-level fair-share scheduler instance (lazy singleton)
 _fair_share: FairShareScheduler | None = None
 _fair_share_limits: tuple[int, int] | None = None
+
+
+def _safe_increment_created_metric(*, domain: str, queue: str, job_type: str) -> None:
+    """Keep job creation non-fatal while surfacing metric update failures."""
+    try:
+        increment_created({"domain": domain, "queue": queue, "job_type": job_type})
+    except _JOB_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Non-critical jobs created metric update failed for {}:{}:{}: {}",
+            domain,
+            queue,
+            job_type,
+            exc,
+        )
 
 
 def _fair_share_enabled() -> bool:
@@ -238,7 +254,10 @@ class JobManager:
     # Standard queues across domains
     STANDARD_QUEUES = ("default", "high", "low")
     DOMAIN_ALLOWED_QUEUES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "llamacpp": ("acquisition",),
         "reading": ("reading-digest",),
+        "vn_assets": ("generation",),
+        "persona_visuals": ("generation",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -773,6 +792,33 @@ class JobManager:
         finally:
             conn.close()
 
+    def delete_sla_policy(
+        self,
+        *,
+        domain: str,
+        queue: str,
+        job_type: str,
+    ) -> bool:
+        """Delete an SLA policy. Returns True if a row was deleted."""
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "DELETE FROM job_sla_policies WHERE domain=%s AND queue=%s AND job_type=%s",
+                        (domain, queue, job_type),
+                    )
+                    return (cur.rowcount or 0) > 0
+            else:
+                with conn:
+                    cur = conn.execute(
+                        "DELETE FROM job_sla_policies WHERE domain=? AND queue=? AND job_type=?",
+                        (domain, queue, job_type),
+                    )
+                    return (cur.rowcount or 0) > 0
+        finally:
+            conn.close()
+
     def _get_sla_policy(self, domain: str, queue: str, job_type: str) -> dict[str, Any] | None:
         conn = self._connect()
         try:
@@ -1289,11 +1335,11 @@ class JobManager:
                                     "job_type": job_type,
                                 }
                             )
-                            try:
-                                if was_insert:
-                                    increment_created({"domain": domain, "queue": queue, "job_type": job_type})
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
+                            emitted_job = {
+                                **d,
+                                "request_id": d.get("request_id") or request_id,
+                                "trace_id": d.get("trace_id") or trace_id,
+                            }
                             # Counters bump (PG, idempotent insert occurred)
                             try:
                                 if was_insert and JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -1307,42 +1353,44 @@ class JobManager:
                                     )
                             except _JOB_NONCRITICAL_EXCEPTIONS:
                                 pass
-                            try:
-                                # Write to outbox within the same transaction (Postgres path)
-                                attrs_json = json.dumps(
-                                    {
-                                        "idempotent": (not was_insert),
-                                        "owner_user_id": d.get("owner_user_id"),
-                                        "retry_count": int(d.get("retry_count") or 0),
-                                    }
+                            # Write to outbox within the same transaction (Postgres path).
+                            attrs_json = json.dumps(
+                                {
+                                    "idempotent": (not was_insert),
+                                    "owner_user_id": d.get("owner_user_id"),
+                                    "retry_count": int(d.get("retry_count") or 0),
+                                }
+                            )
+                            cur.execute(
+                                (
+                                    "INSERT INTO job_events("
+                                    "job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at"
+                                    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())"
+                                ),
+                                (
+                                    int(d.get("id")),
+                                    d.get("domain"),
+                                    d.get("queue"),
+                                    d.get("job_type"),
+                                    "job.created",
+                                    attrs_json,
+                                    d.get("owner_user_id"),
+                                    request_id,
+                                    trace_id,
+                                ),
+                            )
+                            if was_insert:
+                                _safe_increment_created_metric(
+                                    domain=domain,
+                                    queue=queue,
+                                    job_type=job_type,
                                 )
-                                cur.execute(
-                                    (
-                                        "INSERT INTO job_events("
-                                        "job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at"
-                                        ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())"
-                                    ),
-                                    (
-                                        int(d.get("id")),
-                                        d.get("domain"),
-                                        d.get("queue"),
-                                        d.get("job_type"),
-                                        "job.created",
-                                        attrs_json,
-                                        d.get("owner_user_id"),
-                                        d.get("request_id"),
-                                        d.get("trace_id"),
-                                    ),
-                                )
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                # Best-effort; do not fail job create on outbox errors
-                                pass
                             # Emit event for in-process listeners when outbox is disabled
                             try:
                                 if not JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")):
                                     emit_job_event(
                                         "job.created",
-                                        job=d,
+                                        job=emitted_job,
                                         attrs={
                                             "idempotent": (not was_insert),
                                             "owner_user_id": d.get("owner_user_id"),
@@ -1355,7 +1403,7 @@ class JobManager:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 submit_job_audit_event(
                                     "job.created",
-                                    job=d,
+                                    job=emitted_job,
                                     attrs={
                                         "idempotent": (not was_insert),
                                         "owner_user_id": d.get("owner_user_id"),
@@ -1411,8 +1459,6 @@ class JobManager:
                             pass
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             self._assert_invariants(d)
-                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            increment_created({"domain": domain, "queue": queue, "job_type": job_type})
                         # Counters bump (PG, non-idempotent path)
                         try:
                             if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -1426,34 +1472,36 @@ class JobManager:
                                 )
                         except _JOB_NONCRITICAL_EXCEPTIONS:
                             pass
-                        try:
-                            attrs_json = json.dumps(
-                                {
-                                    "idempotent": False,
-                                    "owner_user_id": d.get("owner_user_id"),
-                                    "retry_count": int(d.get("retry_count") or 0),
-                                }
-                            )
-                            cur.execute(
-                                (
-                                    "INSERT INTO job_events("
-                                    "job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at"
-                                    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())"
-                                ),
-                                (
-                                    int(d.get("id")),
-                                    d.get("domain"),
-                                    d.get("queue"),
-                                    d.get("job_type"),
-                                    "job.created",
-                                    attrs_json,
-                                    d.get("owner_user_id"),
-                                    d.get("request_id"),
-                                    d.get("trace_id"),
-                                ),
-                            )
-                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                            pass
+                        attrs_json = json.dumps(
+                            {
+                                "idempotent": False,
+                                "owner_user_id": d.get("owner_user_id"),
+                                "retry_count": int(d.get("retry_count") or 0),
+                            }
+                        )
+                        cur.execute(
+                            (
+                                "INSERT INTO job_events("
+                                "job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at"
+                                ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())"
+                            ),
+                            (
+                                int(d.get("id")),
+                                d.get("domain"),
+                                d.get("queue"),
+                                d.get("job_type"),
+                                "job.created",
+                                attrs_json,
+                                d.get("owner_user_id"),
+                                d.get("request_id"),
+                                d.get("trace_id"),
+                            ),
+                        )
+                        _safe_increment_created_metric(
+                            domain=domain,
+                            queue=queue,
+                            job_type=job_type,
+                        )
                         # Emit event for in-process listeners when outbox is disabled
                         try:
                             if not JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")):
@@ -1511,8 +1559,8 @@ class JobManager:
                                     INSERT OR IGNORE INTO jobs (
                                       uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
                                       idempotency_key, payload, result, status, priority, max_retries,
-                                      retry_count, available_at, created_at, updated_at
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?)
+                                      retry_count, available_at, created_at, updated_at, request_id, trace_id
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
                                     """,
                                     (
                                         uuid_val,
@@ -1533,6 +1581,8 @@ class JobManager:
                                         ),
                                         now,
                                         now,
+                                        request_id,
+                                        trace_id,
                                     ),
                                 )
                                 inserted = bool(getattr(conn, "total_changes", 0))
@@ -1544,20 +1594,50 @@ class JobManager:
                                     d = dict(row)
                                     try:
                                         self._update_gauges(domain=domain, queue=queue, job_type=job_type)
-                                        if inserted:
-                                            increment_created({"domain": domain, "queue": queue, "job_type": job_type})
                                     except _JOB_NONCRITICAL_EXCEPTIONS:
                                         pass
-                                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                        emit_job_event(
+                                    attrs = {
+                                        "idempotent": (not inserted),
+                                        "owner_user_id": d.get("owner_user_id"),
+                                        "retry_count": int(d.get("retry_count") or 0),
+                                    }
+                                    attrs_json = json.dumps(attrs)
+                                    conn.execute(
+                                        (
+                                            "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at) "
+                                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
+                                        ),
+                                        (
+                                            int(d.get("id")),
+                                            d.get("domain"),
+                                            d.get("queue"),
+                                            d.get("job_type"),
                                             "job.created",
-                                            job=d,
-                                            attrs={
-                                                "idempotent": (not inserted),
-                                                "owner_user_id": d.get("owner_user_id"),
-                                                "retry_count": int(d.get("retry_count") or 0),
-                                            },
+                                            attrs_json,
+                                            d.get("owner_user_id"),
+                                            request_id,
+                                            trace_id,
+                                        ),
+                                    )
+                                    if inserted:
+                                        _safe_increment_created_metric(
+                                            domain=domain,
+                                            queue=queue,
+                                            job_type=job_type,
                                         )
+                                    outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
+                                    if outbox_enabled:
+                                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                                            submit_job_audit_event(
+                                                "job.created",
+                                                job={**d, "request_id": request_id, "trace_id": trace_id},
+                                                attrs=attrs,
+                                            )
+                                    else:
+                                        try:
+                                            emit_job_event("job.created", job=d, attrs=attrs)
+                                        except _JOB_NONCRITICAL_EXCEPTIONS:
+                                            pass
                                     return d
                             # Non-idempotent (or no existing row on IGNORE path): normal insert
                             conn.execute(
@@ -1607,7 +1687,6 @@ class JobManager:
                             )
                             try:
                                 self._update_gauges(domain=domain, queue=queue, job_type=job_type)
-                                increment_created({"domain": domain, "queue": queue, "job_type": job_type})
                             except _JOB_NONCRITICAL_EXCEPTIONS:
                                 pass
                             try:
@@ -1631,33 +1710,35 @@ class JobManager:
                                     )
                             except _JOB_NONCRITICAL_EXCEPTIONS:
                                 pass
-                            try:
-                                attrs_json = json.dumps(
-                                    {
-                                        "idempotent": False,
-                                        "owner_user_id": d.get("owner_user_id"),
-                                        "retry_count": int(d.get("retry_count") or 0),
-                                    }
-                                )
-                                conn.execute(
-                                    (
-                                        "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at) "
-                                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
-                                    ),
-                                    (
-                                        int(d.get("id")),
-                                        d.get("domain"),
-                                        d.get("queue"),
-                                        d.get("job_type"),
-                                        "job.created",
-                                        attrs_json,
-                                        d.get("owner_user_id"),
-                                        request_id,
-                                        trace_id,
-                                    ),
-                                )
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
+                            attrs_json = json.dumps(
+                                {
+                                    "idempotent": False,
+                                    "owner_user_id": d.get("owner_user_id"),
+                                    "retry_count": int(d.get("retry_count") or 0),
+                                }
+                            )
+                            conn.execute(
+                                (
+                                    "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, attrs_json, owner_user_id, request_id, trace_id, created_at) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
+                                ),
+                                (
+                                    int(d.get("id")),
+                                    d.get("domain"),
+                                    d.get("queue"),
+                                    d.get("job_type"),
+                                    "job.created",
+                                    attrs_json,
+                                    d.get("owner_user_id"),
+                                    request_id,
+                                    trace_id,
+                                ),
+                            )
+                            _safe_increment_created_metric(
+                                domain=domain,
+                                queue=queue,
+                                job_type=job_type,
+                            )
                             # Emit event for in-process listeners when outbox is disabled
                             try:
                                 if not JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")):
@@ -2096,8 +2177,11 @@ class JobManager:
         self,
         *,
         domain: str | None = None,
+        queue: str | None = None,
         status: str | None = None,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
+        batch_group: str | None = None,
     ) -> int:
         """
         Return the number of jobs matching the provided filters.
@@ -2110,12 +2194,21 @@ class JobManager:
                 if domain:
                     query += " AND domain = %s"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = %s"
+                    params.append(queue)
                 if status:
                     query += " AND status = %s"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = %s"
                     params.append(owner_user_id)
+                if job_type:
+                    query += " AND job_type = %s"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = %s"
+                    params.append(batch_group)
                 with self._pg_cursor(conn) as cur:
                     cur.execute(query, params)
                     row = cur.fetchone()
@@ -2131,13 +2224,32 @@ class JobManager:
                 if domain:
                     query += " AND domain = ?"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = ?"
+                    params.append(queue)
                 if status:
                     query += " AND status = ?"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = ?"
                     params.append(owner_user_id)
-                row = conn.execute(query, params).fetchone()
+                if job_type:
+                    query += " AND job_type = ?"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = ?"
+                    params.append(batch_group)
+                try:
+                    row = conn.execute(query, params).fetchone()
+                except sqlite3.OperationalError as exc:
+                    if (
+                        batch_group
+                        and self._sqlite_missing_column_error(exc, "batch_group")
+                        and self._sqlite_ensure_batch_group(conn)
+                    ):
+                        row = conn.execute(query, params).fetchone()
+                    else:
+                        raise
                 if not row:
                     return 0
                 try:

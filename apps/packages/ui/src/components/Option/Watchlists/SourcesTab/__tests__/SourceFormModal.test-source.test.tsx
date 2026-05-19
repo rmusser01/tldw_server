@@ -2,6 +2,7 @@ import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { SourceFormModal } from "../SourceFormModal"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const formApi = {
   setFieldsValue: vi.fn(),
@@ -42,7 +43,19 @@ vi.mock("antd", () => {
   )
   FormComponent.useForm = () => [formApi]
 
-  const Modal = ({ open, title, children, onCancel, afterOpenChange }: any) => {
+  const Modal = ({
+    open,
+    title,
+    children,
+    onCancel,
+    onOk,
+    afterOpenChange,
+    width,
+    styles,
+    okText,
+    cancelText,
+    ...rest
+  }: any) => {
     const closeRef = React.useRef<HTMLButtonElement | null>(null)
     React.useEffect(() => {
       afterOpenChange?.(open)
@@ -53,12 +66,24 @@ vi.mock("antd", () => {
 
     if (!open) return null
     return (
-      <div>
+      <div
+        data-testid={rest["data-testid"]}
+        data-width={String(width ?? "")}
+        data-body-max-height={String(styles?.body?.maxHeight ?? "")}
+      >
         <h2>{title}</h2>
         <button type="button" ref={closeRef} onClick={() => onCancel?.()}>
           Close
         </button>
         {children}
+        <div data-testid="source-form-footer">
+          <button type="button" onClick={() => onCancel?.()}>
+            {cancelText}
+          </button>
+          <button type="button" onClick={() => onOk?.()}>
+            {okText}
+          </button>
+        </div>
       </div>
     )
   }
@@ -79,9 +104,9 @@ vi.mock("antd", () => {
         {children}
       </button>
     ),
-    Alert: ({ message, description, action }: any) => (
+    Alert: ({ title, message, description, action }: any) => (
       <div>
-        <span>{message}</span>
+        <span>{title ?? message}</span>
         <span>{description}</span>
         {action}
       </div>
@@ -103,9 +128,17 @@ vi.mock("@/services/watchlists", () => ({
 describe("SourceFormModal test-source preflight", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     formApi.validateFields.mockResolvedValue({
       url: "https://example.com/feed.xml",
-      source_type: "rss"
+      source_type: "rss",
+      scrape_item_selector: "",
+      scrape_link_selector: "",
+      scrape_title_selector: "",
+      scrape_summary_selector: "",
+      scrape_limit: null,
+      source_top_n: null,
+      discover_method: "auto"
     })
   })
 
@@ -170,7 +203,8 @@ describe("SourceFormModal test-source preflight", () => {
       expect(mocks.testWatchlistSourceDraft).toHaveBeenCalledWith(
         {
           url: "https://example.com/feed.xml",
-          source_type: "rss"
+          source_type: "rss",
+          settings: null
         },
         { limit: 10 }
       )
@@ -183,6 +217,98 @@ describe("SourceFormModal test-source preflight", () => {
     expect(
       screen.getByText("Run Test Feed to validate URL/type connectivity before saving.")
     ).toBeInTheDocument()
+  })
+
+  it("passes draft source settings to preflight", async () => {
+    formApi.validateFields.mockResolvedValue({
+      url: "https://example.com/news",
+      source_type: "site",
+      scrape_item_selector: "css:article",
+      scrape_link_selector: ".//a/@href",
+      scrape_title_selector: "css:h2",
+      scrape_summary_selector: "css:.summary",
+      scrape_limit: 10,
+      source_top_n: null,
+      discover_method: "auto"
+    })
+    mocks.testWatchlistSourceDraft.mockResolvedValue({
+      items: [],
+      total: 1,
+      ingestable: 1,
+      filtered: 0
+    })
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Feed" }))
+
+    await waitFor(() => {
+      expect(mocks.testWatchlistSourceDraft).toHaveBeenCalledWith(
+        {
+          url: "https://example.com/news",
+          source_type: "site",
+          settings: {
+            scrape_rules: {
+              item_selector: "css:article",
+              link_xpath: ".//a/@href",
+              title_selector: "css:h2",
+              summary_selector: "css:.summary",
+              limit: 10
+            }
+          }
+        },
+        { limit: 10 }
+      )
+    })
+  })
+
+  it("renders optional source validation diagnostics from preview", async () => {
+    formApi.validateFields.mockResolvedValue({
+      url: "https://example.com/news",
+      source_type: "site",
+      scrape_item_selector: "css:article",
+      scrape_link_selector: ".//a/@href",
+      scrape_title_selector: "css:h2",
+      scrape_limit: 10,
+      source_top_n: null,
+      discover_method: "auto"
+    })
+    mocks.testWatchlistSourceDraft.mockResolvedValue({
+      items: [],
+      total: 1,
+      ingestable: 1,
+      filtered: 0,
+      diagnostics: {
+        fetch_mode: "scrape_rules",
+        selector_warnings: ["title selector matched 0 nodes"],
+        dedupe_preview_key: "guid_xpath"
+      }
+    })
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Test Feed" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Validation diagnostics")).toBeInTheDocument()
+      expect(screen.getByText("Fetch mode: scrape_rules")).toBeInTheDocument()
+      expect(screen.getByText("title selector matched 0 nodes")).toBeInTheDocument()
+      expect(screen.getByText("Dedupe preview key: guid_xpath")).toBeInTheDocument()
+    })
   })
 
   it("shows inline remediation guidance when draft preflight fails", async () => {
@@ -251,5 +377,25 @@ describe("SourceFormModal test-source preflight", () => {
     })
 
     trigger.remove()
+  })
+
+  it("uses a full-width constrained dialog with reachable primary actions", () => {
+    setViewport(420)
+
+    render(
+      <SourceFormModal
+        open
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        existingTags={[]}
+      />
+    )
+
+    const modal = screen.getByTestId("source-form-modal")
+    expect(modal).toHaveAttribute("data-width", "100vw")
+    expect(modal.getAttribute("data-body-max-height")).toContain("calc(100vh")
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Test Feed" })).toBeInTheDocument()
   })
 })

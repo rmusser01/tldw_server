@@ -672,8 +672,8 @@ class WebhookPermissionManager:
                     # Check by webhook ID
                     row = self.db_adapter.fetch_one("""
                         SELECT user_id FROM webhook_registrations
-                        WHERE id = ? AND active = 1
-                    """, (webhook_id,))
+                        WHERE id = ? AND active = ?
+                    """, (webhook_id, True))
                     if row is None:
                         return False, "Webhook not found"
 
@@ -687,8 +687,8 @@ class WebhookPermissionManager:
                     if action != "register":
                         row = self.db_adapter.fetch_one("""
                             SELECT user_id FROM webhook_registrations
-                            WHERE user_id = ? AND url = ? AND active = 1
-                        """, (user_id, url))
+                            WHERE user_id = ? AND url = ? AND active = ?
+                        """, (user_id, url, True))
 
                         if not row:
                             return False, "Webhook not found or access denied"
@@ -718,16 +718,16 @@ class WebhookPermissionManager:
         """Get number of active webhooks for user."""
         count = self.db_adapter.fetch_value("""
             SELECT COUNT(*) FROM webhook_registrations
-            WHERE user_id = ? AND active = 1
-        """, (user_id,))
+            WHERE user_id = ? AND active = ?
+        """, (user_id, True))
         return count or 0
 
     def _get_url_registration_count(self, url: str) -> int:
         """Get number of active registrations for URL."""
         count = self.db_adapter.fetch_value("""
             SELECT COUNT(*) FROM webhook_registrations
-            WHERE url = ? AND active = 1
-        """, (url,))
+            WHERE url = ? AND active = ?
+        """, (url, True))
         return count or 0
 
 

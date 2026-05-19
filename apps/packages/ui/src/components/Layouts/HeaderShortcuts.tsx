@@ -8,7 +8,8 @@ import { useSetting } from "@/hooks/useSetting"
 import {
   HEADER_SHORTCUTS_EXPANDED_SETTING,
   HEADER_SHORTCUTS_LAUNCHER_VIEW_SETTING,
-  HEADER_SHORTCUT_SELECTION_SETTING
+  HEADER_SHORTCUT_SELECTION_SETTING,
+  HEADER_SHORTCUT_IDS
 } from "@/services/settings/ui-settings"
 import { Search } from "lucide-react"
 import { cn } from "@/libs/utils"
@@ -16,6 +17,7 @@ import {
   getHeaderShortcutGroups,
   type HeaderShortcutItem
 } from "./header-shortcut-items"
+import { useConnectionActions } from "@/hooks/useConnectionState"
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -31,6 +33,7 @@ const META_LABEL = isMac ? "\u2318" : "Ctrl+"
 type ResolvedItem = {
   item: HeaderShortcutItem
   label: string
+  description: string | null
   groupId: string
   groupTitle: string
 }
@@ -68,7 +71,8 @@ export function HeaderShortcuts({
   const [displayModePreference, setDisplayModePreference] = useSetting(
     HEADER_SHORTCUTS_LAUNCHER_VIEW_SETTING
   )
-  const [shortcutSelection] = useSetting(HEADER_SHORTCUT_SELECTION_SETTING)
+  const [shortcutSelection, setShortcutSelection] = useSetting(HEADER_SHORTCUT_SELECTION_SETTING)
+  const { setUserPersona } = useConnectionActions()
 
   /* ---------- open state ---------- */
   const isControlled = typeof expanded === "boolean"
@@ -117,6 +121,11 @@ export function HeaderShortcuts({
     [shortcutSelection]
   )
 
+  const isFiltered = useMemo(
+    () => !HEADER_SHORTCUT_IDS.every((id) => shortcutSelectionSet.has(id)),
+    [shortcutSelectionSet]
+  )
+
   const resolvedGroups = useMemo(() => {
     return getHeaderShortcutGroups().map((group) => ({
       ...group,
@@ -127,6 +136,9 @@ export function HeaderShortcuts({
           (item): ResolvedItem => ({
             item,
             label: t(item.labelKey, item.labelDefault),
+            description: item.descriptionKey
+              ? t(item.descriptionKey, item.descriptionDefault ?? "")
+              : item.descriptionDefault ?? null,
             groupId: group.id,
             groupTitle: t(group.titleKey, group.titleDefault)
           })
@@ -144,7 +156,11 @@ export function HeaderShortcuts({
     let items = allItems
     if (query) {
       const q = query.toLowerCase()
-      items = items.filter((ri) => ri.label.toLowerCase().includes(q))
+      items = items.filter(
+        (ri) =>
+          ri.label.toLowerCase().includes(q) ||
+          (ri.description && ri.description.toLowerCase().includes(q))
+      )
     }
     if (activeCategory !== ALL_CATEGORY) {
       items = items.filter((ri) => ri.groupId === activeCategory)
@@ -155,7 +171,14 @@ export function HeaderShortcuts({
   /* ---------- match counts per category ---------- */
   const matchCounts = useMemo(() => {
     const queryFiltered = query
-      ? allItems.filter((ri) => ri.label.toLowerCase().includes(query.toLowerCase()))
+      ? (() => {
+          const q = query.toLowerCase()
+          return allItems.filter(
+            (ri) =>
+              ri.label.toLowerCase().includes(q) ||
+              (ri.description && ri.description.toLowerCase().includes(q))
+          )
+        })()
       : allItems
     const counts: Record<string, number> = { [ALL_CATEGORY]: queryFiltered.length }
     for (const g of resolvedGroups) {
@@ -343,8 +366,8 @@ export function HeaderShortcuts({
 
       {/* Modal */}
       <div
-        className="fixed left-1/2 top-[15vh] z-50 flex w-[calc(100%-2rem)] max-w-[960px] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-modal"
-        style={{ maxHeight: "80vh" }}
+        className="fixed left-1/2 top-[15vh] z-50 flex w-[calc(100%-2rem)] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-modal"
+        style={{ maxWidth: "var(--content-max-width)", maxHeight: "80vh" }}
         role="dialog"
         aria-modal="true"
         aria-label={t("option:header.showShortcuts", "Shortcuts")}
@@ -488,8 +511,13 @@ export function HeaderShortcuts({
                           >
                             <Icon className="size-4" aria-hidden="true" />
                           </span>
-                          <span className="min-w-0 flex-1 truncate">
-                            {ri.label}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{ri.label}</span>
+                            {ri.description && (
+                              <span className="block truncate text-xs text-text-subtle/70">
+                                {ri.description}
+                              </span>
+                            )}
                           </span>
                           {ri.item.shortcutIndex != null && (
                             <kbd className="ml-auto shrink-0 rounded border border-border bg-surface2 px-1.5 py-0.5 text-xs text-text-subtle">
@@ -556,7 +584,14 @@ export function HeaderShortcuts({
                             )}
                           >
                             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                            <span className="min-w-0 truncate">{ri.label}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate">{ri.label}</span>
+                              {ri.description && (
+                                <span className="block truncate text-xs text-text-subtle/70">
+                                  {ri.description}
+                                </span>
+                              )}
+                            </span>
                             {ri.item.shortcutIndex != null && (
                               <kbd className="ml-auto shrink-0 rounded border border-border bg-surface2 px-1 py-0 text-[10px] text-text-subtle sm:px-1.5 sm:py-0.5 sm:text-xs">
                                 {META_LABEL}
@@ -598,6 +633,18 @@ export function HeaderShortcuts({
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {isFiltered && (
+              <button
+                type="button"
+                onClick={() => {
+                  void setUserPersona("explorer").catch(() => {})
+                  void setShortcutSelection([...HEADER_SHORTCUT_IDS]).catch(() => {})
+                }}
+                className="text-xs text-primary hover:text-primaryStrong"
+              >
+                {t("option:header.launcherShowAllFeatures", "Show all features")}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleDisplayModeToggle}

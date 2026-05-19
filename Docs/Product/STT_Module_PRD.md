@@ -2,11 +2,15 @@
 
 - **Meta**
   - Owner: Core Voice & API Team
-  - Status: Release Readiness Complete (Stage 5 closed; follow-ups tracked via known-issues)
+  - Status: Current-state contract updated for the STT vNext rollout on `codex/stt-vnext-slice-1-config`
   - Implementation Progress:
     - Provider registry + adapters implemented (`stt_provider_adapter.py`) and used by REST `/api/v1/audio/transcriptions`, ingestion persistence, and Jobs (CPU and GPU workers).
-    - Normalized STT artifact shape in place (`to_normalized_stt_artifact`, adapter `transcribe_batch`) and used internally by REST, `/media/add` ingestion, and Jobs; transcripts now upserted into `Transcripts` keyed by `(media_id, whisper_model)` with the full artifact stored in `Transcripts.transcription`.
+    - Normalized STT artifact shape in place (`to_normalized_stt_artifact`, adapter `transcribe_batch`) and used internally by REST, `/media/add` ingestion, and Jobs; transcripts now persist as append-only run-history rows with `Transcripts.transcription_run_id`, optional `idempotency_key`, and `Media.latest_transcription_run_id` / `Media.next_transcription_run_id` tracking the effective/default run.
     - Unified batch helpers for ingestion and Jobs (`run_stt_batch_via_registry`, `run_stt_job_via_registry`) wired into `perform_transcription` and `audio_jobs_worker`/`audio_transcribe_gpu_worker`; Stage 5 hardening/release artifacts are published in `Docs/Product/STT_Module_Release_Report_20260207.md`.
+    - WebSocket STT control v2 is implemented behind explicit `protocol_version=2` negotiation for `/api/v1/audio/stream/transcribe` and `/api/v1/audio/chat/stream`, while legacy top-level `commit` / `reset` / `stop` remain supported.
+    - Final/full transcript frames now carry deterministic diagnostics (`auto_commit`, `vad_status`, `diarization_status`, optional bounded `diarization_details`).
+    - Tenant-aware STT retention/redaction policy is implemented for REST, WS, and persistence paths, with org admin routes in multi-user mode and global config defaults in single-user mode.
+    - Bounded `audio_stt_*` metrics are registered and emitted for request, session, error, redaction, write-result, read-path, and latency visibility.
 
 - **Project Summary**
   - Speech-to-Text (STT) powers `/api/v1/audio/transcriptions` and `/api/v1/audio/stream/transcribe`.
@@ -14,14 +18,14 @@
   - The STT module should unify these providers, expose consistent REST/WebSocket behaviors, and integrate cleanly with Jobs, Media ingestion, Embeddings, and AuthNZ.
 
 - **Problem Statement**
-  Contributors need a single, predictable STT subsystem that accepts uploaded or streamed audio, selects the appropriate provider, and yields normalized transcripts plus metadata suitable for RAG pipelines. Current state: REST + WS parity exists, PCM TTS is available, STT/TTS/voice-to-voice metrics are wired, and release-hardening artifacts are complete. Remaining gaps are limited to tracked post-release follow-ups in the known-issues list.
+  Contributors need a single, predictable STT subsystem that accepts uploaded or streamed audio, selects the appropriate provider, and yields normalized transcripts plus metadata suitable for RAG pipelines. Current state: REST + WS parity exists, WS control v2 and deterministic transcript diagnostics are available, transcript run history is explicit in Media DB v2, tenant-aware retention/redaction policy is enforced, and bounded STT metrics are wired. Remaining gaps are limited to rollout tuning, operational thresholds, and follow-on enhancements tracked in the known-issues list and vNext ledger.
 
 - **Goals**
-  - Complete turn detection/auto-commit in unified WS STT for lower final latency (fail-open if VAD unavailable).
+  - Keep turn detection/auto-commit in unified WS STT deterministic and observable (fail-open if VAD unavailable).
   - Add phoneme/lexicon overrides for Kokoro (per-request/provider/global precedence).
   - Add optional WS TTS endpoint with backpressure/auth parity.
-  - Provide a small latency harness (voice-to-voice) and refreshed docs so contributors can validate the metrics that now exist.
-  - Keep unified provider interface and deterministic REST/WS behavior with normalized transcript artifacts (timestamps, diarization, confidence, language detection) and existing observability intact.
+  - Keep current docs aligned with the shipped STT control, persistence, policy, and metrics contracts.
+  - Keep unified provider interface and deterministic REST/WS behavior with normalized transcript artifacts (timestamps, diarization, confidence, language detection), explicit run history, and existing observability intact.
 
 - **Non-Goals**
   - No SIP ingestion, telephony gateways, or mobile SDKs in this release.
@@ -44,13 +48,13 @@
 - **Functional Requirements**
   - Provider abstraction located in `app/core/Ingestion_Media_Processing/Audio` implements batch, stream, diarization, and capability discovery.
   - REST STT endpoint (`/api/v1/audio/transcriptions`) handles multipart uploads (OpenAI-compatible); URL-based and yt-dlp flows remain in media ingestion endpoints that call into the shared STT module.
-  - Streaming endpoint supports partial/interim updates and final transcripts, accepts `auth`/`config`/`audio`/`commit` messages as in the current unified WS implementation, and respects lease/quota enforcement; any additional status/warning frames remain backward compatible with existing clients.
-  - Transcript schema includes segments with timestamps, speaker labels, confidence, optional diarization, and usage stats; shape aligns with the existing REST/WS schemas, with optional extra metadata for diagnostics.
-  - Persist transcripts and metadata into Media DB v2: normalized STT artifacts (including `text`, `segments`, `language`, `diarization`, `usage`, `metadata`) serialized into the `Transcripts` table (`transcription`), keyed by `(media_id, whisper_model)` (provider/model), with `Media.transcription_model` tracking the effective/default model. Segments/chunks are written via `MediaChunks`/`UnvectorizedMediaChunks`; ingestion result JSON continues to carry transcript content/segments in the established shape and may include `normalized_stt` for internal consumers.
+  - Streaming endpoints support partial/interim updates and final transcripts, accept legacy top-level `auth` / `config` / `audio` / `commit` / `reset` / `stop` messages, and also support WS control v2 via `protocol_version=2` plus `{"type":"control","action":"pause|resume|commit|stop"}`. v2-only `status` / `warning` frames are additive and gated by explicit negotiation.
+  - Transcript schema includes segments with timestamps, speaker labels, confidence, optional diarization, usage stats, and deterministic final-frame diagnostics (`auto_commit`, `vad_status`, `diarization_status`, optional bounded `diarization_details`).
+  - Persist transcripts and metadata into Media DB v2 as explicit run history: normalized STT artifacts (including `text`, `segments`, `language`, `diarization`, `usage`, `metadata`) serialized into `Transcripts.transcription`, with `transcription_run_id`, optional `idempotency_key`, and `supersedes_run_id` on transcript rows plus `Media.latest_transcription_run_id` / `Media.next_transcription_run_id` tracking the effective/default run. `whisper_model` is retained for compatibility/indexing. Segments/chunks are written via `MediaChunks` / `UnvectorizedMediaChunks`; ingestion result JSON continues to carry transcript content/segments in the established shape and may include `normalized_stt` for internal consumers.
   - Config-driven defaults with request-level overrides (bounded validation).
   - Rate limiting via RG ingress policies plus per-provider thresholds.
   - Retry/backoff policy with provider-specific fatal vs retriable errors; fallbacks must not mask auth/quota/validation failures and should be configurable per environment.
-  - Metrics and audit: emit `audio.stt.*` counters/histograms, hook into unified audit service for lifecycle events; STT/TTS/voice-to-voice metrics labels documented.
+  - Metrics and audit: register bounded `audio_stt_*` counters/histograms and emit the request/session/error/write-result/redaction/read-path families in current REST/WS/ingestion paths. `audio_stt_queue_wait_seconds` and `audio_stt_streaming_token_latency_seconds` are reserved for paths that can compute those timings without guesswork. Keep existing `stt_final_latency_seconds`, `tts_ttfb_seconds`, and `voice_to_voice_seconds` documented.
   - Failure modes: fail-open when VAD/diarization unavailable (log once, continue streaming) rather than blocking; record a clear metric/log label when operating in fail-open mode so latency/quality are interpreted correctly.
   - Worker SDK updates: strict worker_id/lease_id enforcement, explicit completion tokens, provider context metadata.
 
@@ -102,14 +106,15 @@
     }
     ```
   - Internal normalized artifact: this response shape is used inside ingestion/Jobs as the normalized STT transcript; the public OpenAI-compatible `/api/v1/audio/transcriptions` endpoint continues to use the `OpenAITranscriptionResponse` schema in `audio_schemas.py`.
-  - **Streaming Events**: partial/interim results (e.g., `partial`/`transcription`), final/full transcripts (e.g., `final`/`full_transcript`), and `error` frames as in the current unified WS implementation; additional `status`/`warning` frames may be emitted for diagnostics (e.g., diarization/VAD availability, persistence issues) without breaking existing clients.
+  - **Streaming Events**: partial/interim results (e.g., `partial`/`transcription`), final/full transcripts (e.g., `final`/`full_transcript`), `error` frames, and additive `status` / `warning` frames. In v2 sessions, `status=configured|paused|resumed|closing` and `warning_type=audio_dropped_during_pause` are part of the public contract. Final/full transcript payloads always include `auto_commit`, `vad_status`, and `diarization_status`, plus bounded `diarization_details` when relevant.
   - **Job Payload**: audio reference, provider override, diarization flag, chunk config, audit context.
-  - **Database Fields**: transcripts stored in `Transcripts.transcription` (keyed by `media_id` and provider/model) with `Media.transcription_model` tracking the effective model; segments/chunks persisted via `MediaChunks`/`UnvectorizedMediaChunks` when chunking is enabled.
+  - **Database Fields**: transcripts stored in `Transcripts.transcription` with append-only run-history fields (`transcription_run_id`, `supersedes_run_id`, `idempotency_key`) and `Media.latest_transcription_run_id` / `Media.next_transcription_run_id` for default-run resolution. `Media.transcription_model` remains a compatibility/reporting field; segments/chunks persist via `MediaChunks` / `UnvectorizedMediaChunks` when chunking is enabled.
 
 - **Configuration & Deployment**
   - Process environment: provider API keys and STT-related env flags (e.g., `STT_SKIP_AUDIO_PREVALIDATION`, transcript-cache bounds); see `tldw_Server_API/Config_Files/README.md` and `Docs/Published/Env_Vars.md` for the curated list. Optional `.env` / `Config_Files/.env` files may be loaded via the existing config/secret helpers.
-  - `Config_Files/config.txt` `STT-Settings` section: default provider/transcriber, diarization boolean, streaming toggles, buffering and model-variant settings, prompt biasing if needed.
-  - Feature flags: `STT_ENABLE_DIARIZATION`, `STT_STREAMING_ENABLED`, `STT_DEBUG_DUMP_AUDIO` (debug dumping is dev/test only, writes into a configurable debug directory, and must remain disabled in shared/production deployments).
+  - `Config_Files/config.txt` `STT-Settings` section: default provider/transcriber, diarization boolean, streaming toggles, buffering and model-variant settings, and the vNext controls exposed by `get_stt_config()` (`ws_control_v2_enabled`, `paused_audio_queue_cap_seconds`, `overflow_warning_interval_seconds`, `transcript_diagnostics_enabled`, `delete_audio_after_success`, `audio_retention_hours`, `redact_pii`, `allow_unredacted_partials`, `redact_categories`).
+  - Feature flags: `STT_WS_CONTROL_V2_ENABLED`, `STT_TRANSCRIPT_DIAGNOSTICS_ENABLED`, `STT_DELETE_AUDIO_AFTER_SUCCESS`, `STT_AUDIO_RETENTION_HOURS`, `STT_REDACT_PII`, `STT_ALLOW_UNREDACTED_PARTIALS`, and `STT_DEBUG_DUMP_AUDIO` (debug dumping is dev/test only, writes into a configurable debug directory, and must remain disabled in shared/production deployments).
+  - In multi-user mode, org admins can override the global STT policy via `/api/v1/admin/orgs/{org_id}/stt/settings`; in single-user mode, global config defaults are authoritative.
   - Deployment checklist: FFmpeg installed, CUDA (optional), model weights downloaded, Jobs workers configured, network egress allowed for remote providers.
 
 - **Testing Strategy**
@@ -122,8 +127,8 @@
   - Manual QA: real audio on GPU, long-form streaming with network interruptions, diarization accuracy sampling.
 
 - **Metrics & Observability**
-  - Counters: track STT requests, streaming sessions, and errors (including per-provider successes/failures) via the central metrics manager.
-  - Histograms: `stt_final_latency_seconds{model,variant,endpoint}`, `tts_ttfb_seconds{provider,voice,format}`, `voice_to_voice_seconds{provider,route}`.
+  - Counters: `audio_stt_requests_total`, `audio_stt_streaming_sessions_started_total`, `audio_stt_streaming_sessions_ended_total`, `audio_stt_errors_total`, `audio_stt_run_writes_total`, `audio_stt_redaction_total`, and `audio_stt_transcript_read_path_total` via the central metrics manager.
+  - Histograms: `audio_stt_latency_seconds`, plus registered `audio_stt_queue_wait_seconds` / `audio_stt_streaming_token_latency_seconds` families for paths that compute those timings, alongside `stt_final_latency_seconds{model,variant,endpoint}`, `tts_ttfb_seconds{provider,voice,format}`, and `voice_to_voice_seconds{provider,route}`.
   - Gauges: active workers, GPU memory usage (if available).
   - Logs: include request/job ID, provider, timing, errors.
   - Audit: create, updated, failed transcripts recorded when audit bridge enabled.
@@ -133,7 +138,7 @@
   - Input validation: MIME/type check, duration limit, safe temporary storage, optional virus scan hook.
   - Authentication: enforce API key/JWT per AuthNZ mode.
   - Secret handling: never log raw keys; sanitize provider responses.
-  - Data retention: config to delete original audio after transcription; redact transcripts if `STT_REDACT_PII` enabled (future).
+  - Data retention: delete-after-success, retention-hours, and transcript redaction are active STT policy controls. Effective policy resolves as org override > global default in multi-user mode, and global default only in single-user mode. Request-level overrides may only be stricter than the effective policy.
   - Multi-tenant: respect user IDs in path sanitization, separate storage directories.
 
 - **Dependencies & Integration Points**
@@ -184,4 +189,4 @@
   - Migration notes for legacy Gradio STT flows.
 
 - **Future Work & vNext**
-  - Additional enhancements that go beyond the current implementation—richer WS STT control/status protocol, explicit transcript run history, extended streaming diagnostics, STT-specific retention/PII knobs, and more granular STT metrics—are tracked in `Docs/Product/STT_Module_vNext_PRD.md` and, for end-to-end voice latency and WS TTS, in `Docs/Product/Realtime_Voice_Latency_PRD.md`.
+  - Remaining follow-up work beyond the current implementation is tracked in `Docs/Product/STT_Module_vNext_PRD.md` as a design ledger and rollout backlog. The canonical current contract for shipped WS control v2, transcript run history, deterministic diagnostics, STT policy enforcement, and bounded `audio_stt_*` metrics is this PRD plus `Docs/API-related/Audio_Transcription_API.md`.

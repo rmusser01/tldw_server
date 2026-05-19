@@ -164,7 +164,8 @@ async def test_record_failed_attempt_and_lockout_sqlite_backend_selection_uses_e
         q for q, _ in conn.execute_calls if "insert into account_lockouts" in q.lower()
     ]
     assert lockout_queries
-    assert "values (?, ?, ?)" in lockout_queries[0].lower()
+    assert "attempt_type" in lockout_queries[0].lower()
+    assert "values (?, ?, ?, ?)" in lockout_queries[0].lower()
 
 
 @pytest.mark.asyncio
@@ -178,5 +179,5 @@ async def test_get_active_lockout_postgres_backend_selection_uses_fetchrow():
     assert isinstance(locked_until, datetime)
     assert conn.fetchrow_calls
     query, params = conn.fetchrow_calls[0]
-    assert "where identifier = $1 and locked_until > $2" in query.lower()
-    assert params and params[0] == "id-3"
+    assert "where identifier = $1 and attempt_type = $2 and locked_until > $3" in query.lower()
+    assert params[:2] == ("id-3", "login")

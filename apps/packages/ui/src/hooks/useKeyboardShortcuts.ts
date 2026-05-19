@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from "react"
+import { useEffect, useLayoutEffect, useCallback, useRef } from "react"
 
 /**
  * Platform-aware keyboard shortcut system.
@@ -21,6 +21,9 @@ export interface Shortcut {
   /** Whether shortcut works when input is focused */
   allowInInput?: boolean
 }
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 /**
  * Detect if running on Mac
@@ -153,10 +156,12 @@ export function useShortcut(
   const actionRef = useRef(shortcut.action)
   actionRef.current = shortcut.action
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (shortcut.enabled === false) {
       return
     }
+
+    const listenerOptions: AddEventListenerOptions = { capture: true }
 
     const handler = (event: KeyboardEvent) => {
       // Skip if in input and not allowed
@@ -171,8 +176,22 @@ export function useShortcut(
       }
     }
 
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
+    const targets: Array<Document | Window> = []
+    if (typeof window !== "undefined") {
+      targets.push(window)
+    }
+    if (typeof document !== "undefined") {
+      targets.push(document)
+    }
+
+    for (const target of targets) {
+      target.addEventListener("keydown", handler, listenerOptions)
+    }
+    return () => {
+      for (const target of targets) {
+        target.removeEventListener("keydown", handler, listenerOptions)
+      }
+    }
     }, [
     shortcut.enabled,
     shortcut.key,
@@ -189,7 +208,9 @@ export function useShortcuts(shortcuts: Shortcut[], scope?: string) {
   const shortcutsRef = useRef(shortcuts)
   shortcutsRef.current = shortcuts
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
+    const listenerOptions: AddEventListenerOptions = { capture: true }
+
     const handler = (event: KeyboardEvent) => {
       for (const shortcut of shortcutsRef.current) {
         // Check scope
@@ -211,8 +232,22 @@ export function useShortcuts(shortcuts: Shortcut[], scope?: string) {
       }
     }
 
-    document.addEventListener("keydown", handler)
-    return () => document.removeEventListener("keydown", handler)
+    const targets: Array<Document | Window> = []
+    if (typeof window !== "undefined") {
+      targets.push(window)
+    }
+    if (typeof document !== "undefined") {
+      targets.push(document)
+    }
+
+    for (const target of targets) {
+      target.addEventListener("keydown", handler, listenerOptions)
+    }
+    return () => {
+      for (const target of targets) {
+        target.removeEventListener("keydown", handler, listenerOptions)
+      }
+    }
   }, [scope])
 }
 

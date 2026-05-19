@@ -1,4 +1,5 @@
 import { Component, Fragment, type ReactNode, type ErrorInfo } from "react"
+import * as SentryModule from "@sentry/nextjs"
 import BackendUnavailableRecovery, {
   type BackendUnavailableRecoveryDetails
 } from "@/components/Common/BackendUnavailableRecovery"
@@ -24,8 +25,8 @@ type StoredTldwConfig = {
   serverUrl?: unknown
 }
 
-const BACKEND_RECOVERY_TITLE = "Can't reach your tldw server"
-const BACKEND_RECOVERY_MESSAGE =
+const BACKEND_RECOVERY_FALLBACK_TITLE = "Can't reach your tldw server"
+const BACKEND_RECOVERY_FALLBACK_MESSAGE =
   "The web app could not reach your configured tldw server. Check that the server is running and reachable from this browser."
 
 const getStoredServerUrl = (value: unknown): string | undefined => {
@@ -45,8 +46,10 @@ const toBackendRecoveryDetails = (
   classification: BackendUnreachableClassification,
   serverUrl?: string
 ): BackendUnavailableRecoveryDetails => ({
-  title: BACKEND_RECOVERY_TITLE,
-  message: BACKEND_RECOVERY_MESSAGE,
+  title: classification.title || BACKEND_RECOVERY_FALLBACK_TITLE,
+  message: classification.message || BACKEND_RECOVERY_FALLBACK_MESSAGE,
+  fixHint: classification.fixHint,
+  subtype: classification.subtype,
   method: classification.method,
   path: classification.path,
   serverUrl,
@@ -121,18 +124,25 @@ export default class ErrorBoundary extends Component<
       return
     }
 
-    const sentry = (window as unknown as {
-      Sentry?: {
-        captureException?: (
-          err: Error,
-          context?: { extra?: Record<string, unknown> }
-        ) => void
-      }
-    }).Sentry
-    if (sentry?.captureException) {
-      sentry.captureException(error, {
+    // Use direct @sentry/nextjs import when available, fall back to window.Sentry
+    if (SentryModule?.captureException) {
+      SentryModule.captureException(error, {
         extra: { componentStack: info.componentStack }
       })
+    } else {
+      const sentry = (window as unknown as {
+        Sentry?: {
+          captureException?: (
+            err: Error,
+            context?: { extra?: Record<string, unknown> }
+          ) => void
+        }
+      }).Sentry
+      if (sentry?.captureException) {
+        sentry.captureException(error, {
+          extra: { componentStack: info.componentStack }
+        })
+      }
     }
 
     const analytics = (window as unknown as {

@@ -48,17 +48,38 @@ Then load the extension from the WXT dev server prompt, or open your browser’s
 # Build all targets (Chrome, Firefox, Edge)
 bun run build
 
+# Explicit profile overrides
+bun run build:prod
+bun run build:dev
+
 # Or build individually
 bun run build:chrome
+bun run build:chrome:prod
+bun run build:chrome:dev
 bun run build:firefox
 bun run build:edge
 
 # Create zipped artifacts for release
 bun run zip          # Chrome by default
+bun run zip:prod
+bun run zip:dev
 bun run zip:firefox  # Firefox
 ```
 
-By default the build output is placed in `build/`. Load that directory as an “unpacked”/temporary extension in your browser.
+Artifact profile defaults follow the checked-out branch:
+
+- `main` builds production artifacts.
+- Any other branch builds development artifacts.
+- Development builds keep the internal WXT roots stable for tooling, but exported install artifacts are branded with `-dev`.
+
+Exported install paths and zip names:
+
+- Production unpacked: `build/<browser>-mv3`
+- Development unpacked: `build/<browser>-mv3-dev`
+- Production zip: `.output/tldw-assistant-...-<browser>.zip`
+- Development zip: `.output/tldw-assistant-...-<browser>-dev.zip`
+
+Load the exported `build/` directory as an unpacked/temporary extension in your browser.
 
 ## Configuration (First Run)
 
@@ -144,7 +165,8 @@ Models are surfaced from your tldw_server configuration (OpenAI‑compatible pro
 - TailwindCSS for UI (`src/assets/tailwind.css`, `tailwind.config.js`).
 - Prettier + import sorting: `bunx prettier --write .`
 - Type‑check before PRs: `bun run compile`
-  - OpenAPI path enforcement: the web UI’s API calls are compile‑time checked against the bundled `openapi.json`. If you add or change an endpoint path/method, update `openapi.json` accordingly or your typecheck will fail.
+- Local artifact defaults are branch-aware. Use `bun run build:chrome:prod` or `bun run zip:prod` when you need release-like artifacts from a non-`main` branch.
+  - OpenAPI path enforcement: the web UI’s API calls are type-checked against the manually maintained `ClientPath` union. Run `bun run verify:openapi` from `apps/packages/ui` to verify that union and the bundled fallback schemas against the current OpenAPI spec. The verifier uses `apps/extension/openapi.json` when present and otherwise derives the spec from the checked-out backend.
   - CI: GitHub Actions runs the typecheck on each push/PR (`.github/workflows/typecheck.yml`).
   - Use the typed helpers `bgRequest`, `bgStream`, and `bgUpload` for all server calls. Direct `browser.runtime.sendMessage({ type: 'tldw:request' ... })` calls should pass a path typed as `AllowedPath` to participate in checks.
 

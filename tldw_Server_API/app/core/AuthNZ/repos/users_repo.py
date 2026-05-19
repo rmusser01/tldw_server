@@ -186,6 +186,7 @@ class AuthnzUsersRepo:
         role: str | None = None,
         admin_capable: bool = False,
         is_active: bool | None = None,
+        mfa_enabled: bool | None = None,
         search: str | None = None,
         org_ids: list[int] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -275,6 +276,18 @@ class AuthnzUsersRepo:
                 params.append(search_pattern)
                 params.append(search_pattern)
 
+        if mfa_enabled is not None:
+            if is_pg:
+                if mfa_enabled:
+                    conditions.append("COALESCE(users.two_factor_enabled, FALSE) = TRUE")
+                else:
+                    conditions.append("COALESCE(users.two_factor_enabled, FALSE) = FALSE")
+            else:
+                if mfa_enabled:
+                    conditions.append("COALESCE(users.two_factor_enabled, 0) = 1")
+                else:
+                    conditions.append("COALESCE(users.two_factor_enabled, 0) = 0")
+
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
         try:
@@ -289,7 +302,7 @@ class AuthnzUsersRepo:
                 offset_pos = param_count + 2
                 query_template = """
                     SELECT DISTINCT users.id, users.uuid, users.username, users.email, users.role, users.is_active, users.is_verified,
-                           created_at, last_login, storage_quota_mb, storage_used_mb
+                           users.two_factor_enabled, created_at, last_login, storage_quota_mb, storage_used_mb
                     FROM users{join_clause}{where_clause}
                     ORDER BY users.created_at DESC
                     LIMIT ${limit_pos} OFFSET ${offset_pos}
@@ -300,7 +313,7 @@ class AuthnzUsersRepo:
             else:
                 query_template = """
                     SELECT DISTINCT users.id, users.uuid, users.username, users.email, users.role, users.is_active, users.is_verified,
-                           created_at, last_login, storage_quota_mb, storage_used_mb
+                           users.two_factor_enabled, created_at, last_login, storage_quota_mb, storage_used_mb
                     FROM users{join_clause}{where_clause}
                     ORDER BY users.created_at DESC
                     LIMIT ? OFFSET ?
@@ -321,6 +334,7 @@ class AuthnzUsersRepo:
                         "role": r.get("role"),
                         "is_active": bool(r.get("is_active")),
                         "is_verified": bool(r.get("is_verified")),
+                        "mfa_enabled": bool(r.get("two_factor_enabled")),
                         "created_at": r.get("created_at"),
                         "last_login": r.get("last_login"),
                         "storage_quota_mb": int(r.get("storage_quota_mb") or 0),
@@ -335,10 +349,11 @@ class AuthnzUsersRepo:
                         "role": row[4],
                         "is_active": bool(row[5]),
                         "is_verified": bool(row[6]),
-                        "created_at": row[7],
-                        "last_login": row[8],
-                        "storage_quota_mb": int(row[9] or 0),
-                        "storage_used_mb": float(row[10] or 0.0),
+                        "mfa_enabled": bool(row[7]),
+                        "created_at": row[8],
+                        "last_login": row[9],
+                        "storage_quota_mb": int(row[10] or 0),
+                        "storage_used_mb": float(row[11] or 0.0),
                     }
                 users.append(user_dict)
 

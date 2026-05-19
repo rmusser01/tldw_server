@@ -187,13 +187,13 @@ describe("NotesManagerPage stage 15 keyword counts", () => {
       expect(mockGetAllNoteKeywordStats).toHaveBeenCalled()
     })
 
-    fireEvent.mouseDown(screen.getByText("Filter by keyword"))
+    fireEvent.mouseDown(screen.getByText("Filter by tag"))
     await waitFor(() => {
       expect(screen.getByText("research (12)")).toBeInTheDocument()
       expect(screen.getByText("ml (0)")).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse keywords" }))
+    fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await waitFor(() => {
       expect(screen.getByText("Apply filters")).toBeInTheDocument()
     })

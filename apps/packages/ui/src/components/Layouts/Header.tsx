@@ -13,6 +13,9 @@ import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
 import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import type { Character } from "@/types/character"
+import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
+import { dispatchCharacterChatModeIntent } from "@/utils/character-chat-mode-intent"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 import {
   tldwClient,
   type ConversationShareLinkSummary,
@@ -144,11 +147,26 @@ export const Header: React.FC<Props> = ({
 
   const startCharacterChat = React.useCallback(() => {
     setTemporaryChat(false)
-    clearChat()
-    if (!selectedCharacter && typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("tldw:open-actor-settings"))
+    const characterId = selectedCharacter?.id ?? null
+    if (!isChatRoute) {
+      navigate(buildCharacterChatPath({ characterId }))
+      return
     }
-  }, [clearChat, selectedCharacter, setTemporaryChat])
+    dispatchCharacterChatModeIntent({
+      source: "chat-header",
+      characterId
+    })
+    if (!selectedCharacter?.id) {
+      dispatchOpenAssistantSelect({
+        tab: "character",
+        source: "chat-header"
+      })
+      return
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
+    }
+  }, [isChatRoute, navigate, selectedCharacter, setTemporaryChat])
 
   const refreshShareLinks = React.useCallback(async () => {
     if (!serverChatId) {
@@ -357,10 +375,12 @@ export const Header: React.FC<Props> = ({
         notificationCount={notificationCount}
         onOpenNotifications={onOpenNotifications}
       />
-      <TtsClipsDrawer
-        open={ttsClipsOpen}
-        onClose={() => setTtsClipsOpen(false)}
-      />
+      {ttsClipsOpen ? (
+        <TtsClipsDrawer
+          open={ttsClipsOpen}
+          onClose={() => setTtsClipsOpen(false)}
+        />
+      ) : null}
       <Modal
         open={shareModalOpen}
         onCancel={() => setShareModalOpen(false)}

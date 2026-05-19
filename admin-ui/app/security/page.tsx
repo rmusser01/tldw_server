@@ -14,6 +14,7 @@ import { getKeyAgeIndicator, resolveUnifiedApiKeyStatus, type ApiKeyMetadataLike
 import { formatDateTime } from '@/lib/format';
 import { isSecurityHealthData } from '@/lib/type-guards';
 import type { SecurityHealthData } from '@/types';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { ShieldAlert, ShieldCheck, RefreshCw, AlertTriangle, Key, Users, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { CardSkeleton } from '@/components/ui/skeleton';
@@ -470,6 +471,13 @@ export default function SecurityPage() {
                           Estimated {riskBreakdown?.estimatedScore ?? 0}/100
                         </Badge>
                       </div>
+                      <div className="mb-3 flex flex-wrap gap-3 text-xs text-muted-foreground" data-testid="risk-weight-legend">
+                        <span>Weight legend:</span>
+                        <span title="Each user without MFA adds 3 points (cap 40)">MFA = <strong className="text-foreground">3</strong></span>
+                        <span title="Each aged API key adds 2 points (cap 25)">Keys = <strong className="text-foreground">2</strong></span>
+                        <span title="Each failed login adds 1 point (cap 20)">Failed logins = <strong className="text-foreground">1</strong></span>
+                        <span title="Each suspicious event adds 4 points (cap 20)">Suspicious = <strong className="text-foreground">4</strong></span>
+                      </div>
                       {riskBreakdownLoading ? (
                         <div className="text-sm text-muted-foreground">Loading risk factor details...</div>
                       ) : riskBreakdown ? (
@@ -661,7 +669,7 @@ export default function SecurityPage() {
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <CardSkeleton />
+                  <TableSkeleton rows={3} columns={3} />
                 ) : !alertStatus?.recent_alerts?.length ? (
                   <div className="text-center text-muted-foreground py-8">
                     <ShieldCheck className="h-12 w-12 mx-auto mb-2 text-green-500" />

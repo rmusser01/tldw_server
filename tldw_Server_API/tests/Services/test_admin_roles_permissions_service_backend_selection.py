@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -82,6 +83,36 @@ class _PostgresDbWithSqliteTraps:
         return {"id": 6, "name": "new-role", "description": "desc", "is_system": True}
 
 
+class _ExplodingSqliteDb:
+    _is_sqlite = True
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(self.message)
+
+
+async def _assert_role_permission_log_sanitized(
+    call: Callable[[], Awaitable[Any]],
+    *,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = svc.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        with pytest.raises(RuntimeError):
+            await call()
+    finally:
+        svc.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert expected_log in joined
+    assert raw_marker not in joined
+    assert "/private/" not in joined
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_list_roles_sqlite_backend_selection_uses_execute() -> None:
@@ -130,3 +161,77 @@ async def test_create_role_postgres_backend_selection_uses_postgres_queries() ->
     assert row["name"] == "new-role"
     assert db.fetchrow_calls
     assert any("$1" in q for q, _ in db.fetchrow_calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("call_factory", "expected_log", "raw_marker"),
+    [
+        (
+            lambda db: svc.list_roles(db),
+            "Failed to list roles",
+            "roles list failed",
+        ),
+        (
+            lambda db: svc.create_role(db, "new-role", "desc", False),
+            "Failed to create role",
+            "role create failed",
+        ),
+        (
+            lambda db: svc.delete_role(db, 42),
+            "Failed to delete role",
+            "role delete failed",
+        ),
+        (
+            lambda db: svc.list_role_permissions(db, 42),
+            "Failed to list role permissions",
+            "role permissions list failed",
+        ),
+        (
+            lambda db: svc.list_tool_permissions(db),
+            "Failed to list tool permissions",
+            "tool permissions list failed",
+        ),
+        (
+            lambda db: svc.delete_tool_permission(db, "tools.execute:test"),
+            "Failed to delete tool permission",
+            "tool permission delete failed",
+        ),
+        (
+            lambda db: svc.revoke_tool_permission_from_role(db, 42, "tools.execute:test"),
+            "Failed to revoke tool permission from role",
+            "tool permission revoke failed",
+        ),
+    ],
+)
+async def test_role_permission_service_sanitizes_backend_failure_logs(
+    call_factory: Callable[[Any], Awaitable[Any]],
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    db = _ExplodingSqliteDb(f"{raw_marker} at /private/rbac.db")
+
+    await _assert_role_permission_log_sanitized(
+        lambda: call_factory(db),
+        expected_log=expected_log,
+        raw_marker=raw_marker,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_grant_tool_permission_to_role_sanitizes_backend_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_ensure_permission(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"id": 7, "name": "tools.execute:test", "description": "desc", "category": "tools"}
+
+    db = _ExplodingSqliteDb("tool permission grant failed at /private/rbac.db")
+    monkeypatch.setattr(svc, "ensure_permission", fake_ensure_permission)
+
+    await _assert_role_permission_log_sanitized(
+        lambda: svc.grant_tool_permission_to_role(db, 42, "tools.execute:test", "desc"),
+        expected_log="Failed to grant tool permission to role",
+        raw_marker="tool permission grant failed",
+    )

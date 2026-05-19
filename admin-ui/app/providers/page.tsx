@@ -19,8 +19,10 @@ import { Cpu, RefreshCw, CheckCircle, XCircle, Key, ExternalLink, Plus, Trash2, 
 import { api } from '@/lib/api-client';
 import { getDeprecatedModelNotice } from '@/lib/deprecated-models';
 import { buildProviderTokenTrendMap, buildSparklinePoints } from '@/lib/provider-token-trends';
+import { TableSkeleton } from '@/components/ui/skeleton';
 import { LLMProvider, LLMProviderOverride, User as UserType, Organization } from '@/types';
 import { CardSkeleton } from '@/components/ui/skeleton';
+import { logger } from '@/lib/logger';
 
 interface ByokKey {
   id?: string;
@@ -463,7 +465,7 @@ export default function ProvidersPage() {
         setProviderTokenTrendUnavailable(true);
       }
     } catch (err: unknown) {
-      console.error('Failed to load data:', err);
+      logger.error('Failed to load data', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       setProviderUsageSummary({});
       setProviderUsageUnavailable(true);
       setProviderTokenTrends({});
@@ -484,7 +486,7 @@ export default function ProvidersPage() {
       const keys = await api.getUserByokKeys(user.id.toString());
       updateByokState({ userKeys: Array.isArray(keys) ? keys : [] });
     } catch (err: unknown) {
-      console.error('Failed to load user BYOK keys:', err);
+      logger.error('Failed to load user BYOK keys', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       updateByokState({ userKeys: [] });
       toastError('Failed to load user keys', err instanceof Error ? err.message : 'Unable to load BYOK keys');
     } finally {
@@ -498,7 +500,7 @@ export default function ProvidersPage() {
       const keys = await api.getOrgByokKeys(org.id.toString());
       updateByokState({ orgKeys: Array.isArray(keys) ? keys : [] });
     } catch (err: unknown) {
-      console.error('Failed to load org BYOK keys:', err);
+      logger.error('Failed to load org BYOK keys', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       updateByokState({ orgKeys: [] });
       toastError('Failed to load org keys', err instanceof Error ? err.message : 'Unable to load BYOK keys');
     } finally {
@@ -539,7 +541,7 @@ export default function ProvidersPage() {
         apiKey: '',
       });
     } catch (err: unknown) {
-      console.error('Failed to add BYOK key:', err);
+      logger.error('Failed to add BYOK key', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       toastError('Failed to add BYOK key', err instanceof Error ? err.message : 'Try again.');
     } finally {
       updateAddByokDialog({ isAdding: false });
@@ -565,7 +567,7 @@ export default function ProvidersPage() {
       await loadUserByokKeys(byokState.selectedUser);
       toastSuccess('BYOK key deleted', `Removed ${provider} for ${byokState.selectedUser.email}`);
     } catch (err: unknown) {
-      console.error('Failed to delete BYOK key:', err);
+      logger.error('Failed to delete BYOK key', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       toastError('Failed to delete BYOK key', err instanceof Error ? err.message : 'Try again.');
     } finally {
       setDeletingUserByokProvider((prev) => (prev === provider ? null : prev));
@@ -591,7 +593,7 @@ export default function ProvidersPage() {
       await loadOrgByokKeys(byokState.selectedOrg);
       toastSuccess('BYOK key deleted', `Removed ${provider} for ${byokState.selectedOrg.name}`);
     } catch (err: unknown) {
-      console.error('Failed to delete BYOK key:', err);
+      logger.error('Failed to delete BYOK key', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       toastError('Failed to delete BYOK key', err instanceof Error ? err.message : 'Try again.');
     } finally {
       setDeletingOrgByokProvider((prev) => (prev === provider ? null : prev));
@@ -726,7 +728,7 @@ export default function ProvidersPage() {
       updateOverrideDialog({ isOpen: false });
       await loadData();
     } catch (err: unknown) {
-      console.error('Failed to update provider override:', err);
+      logger.error('Failed to update provider override', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       toastError('Failed to update override', err instanceof Error ? err.message : 'Try again.');
     } finally {
       updateOverrideDialog({ isSaving: false });
@@ -754,7 +756,7 @@ export default function ProvidersPage() {
       updateOverrideDialog({ isOpen: false });
       await loadData();
     } catch (err: unknown) {
-      console.error('Failed to delete provider override:', err);
+      logger.error('Failed to delete provider override', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       toastError('Failed to remove override', err instanceof Error ? err.message : 'Try again.');
     } finally {
       updateOverrideDialog({ isDeleting: false });
@@ -776,7 +778,7 @@ export default function ProvidersPage() {
         `${formatProviderName(provider.name)} (${response?.model || 'default'})`
       );
     } catch (err: unknown) {
-      console.error('Failed to test provider:', err);
+      logger.error('Failed to test provider', { component: 'ProvidersPage', error: err instanceof Error ? err.message : String(err) });
       toastError('Provider test failed', err instanceof Error ? err.message : 'Try again.');
     } finally {
       setTestingProvider(null);
@@ -1096,7 +1098,7 @@ export default function ProvidersPage() {
                       )}
                     </div>
                     {loading ? (
-                      <CardSkeleton />
+                      <TableSkeleton rows={5} columns={4} />
                     ) : providers.length === 0 ? (
                       <div className="text-center text-muted-foreground py-8">
                         <Cpu className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -1279,7 +1281,7 @@ export default function ProvidersPage() {
                                           Per-model usage ({USAGE_WINDOW_DAYS}d)
                                         </div>
                                         {modelUsageState?.isLoading ? (
-                                          <div className="text-sm text-muted-foreground">Loading model usage...</div>
+                                          <div className="text-sm text-muted-foreground" role="status" aria-live="polite">Loading model usage...</div>
                                         ) : modelUsageState?.error ? (
                                           <div className="text-sm text-red-600">{modelUsageState.error}</div>
                                         ) : (modelUsageState?.items?.length ?? 0) === 0 ? (
@@ -1439,7 +1441,7 @@ export default function ProvidersPage() {
                           <p>Select a user to manage their BYOK keys</p>
                         </div>
                       ) : byokState.isLoading ? (
-                        <CardSkeleton />
+                        <TableSkeleton rows={3} columns={3} />
                       ) : byokState.userKeys.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                           <Key className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -1528,7 +1530,7 @@ export default function ProvidersPage() {
                           <p>Select an organization to manage BYOK keys</p>
                         </div>
                       ) : byokState.isLoading ? (
-                        <CardSkeleton />
+                        <TableSkeleton rows={3} columns={3} />
                       ) : byokState.orgKeys.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                           <Key className="h-12 w-12 mx-auto mb-2 opacity-50" />

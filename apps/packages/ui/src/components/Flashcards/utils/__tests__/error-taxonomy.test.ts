@@ -21,7 +21,7 @@ describe("flashcards error taxonomy", () => {
     )
 
     expect(mapped.code).toBe("FLASHCARDS_VERSION_CONFLICT")
-    expect(mapped.actionLabel).toBe("Reload card")
+    expect(mapped.actionLabel).toBe("Refresh")
     expect(formatFlashcardsUiErrorMessage(mapped)).toContain("[FLASHCARDS_VERSION_CONFLICT]")
   })
 

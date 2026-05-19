@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchScrapedItemsMock: vi.fn(),
   fetchWatchlistSourcesMock: vi.fn(),
   fetchWatchlistOutputsMock: vi.fn(),
+  getWatchlistRunAudioMock: vi.fn(),
   updateScrapedItemMock: vi.fn(),
   exportRunTalliesCsvMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
@@ -160,6 +161,7 @@ vi.mock("@/services/watchlists", () => ({
   fetchScrapedItems: (...args: any[]) => mocks.fetchScrapedItemsMock(...args),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistSources: (...args: any[]) => mocks.fetchWatchlistSourcesMock(...args),
+  getWatchlistRunAudio: (...args: any[]) => mocks.getWatchlistRunAudioMock(...args),
   getRunDetails: (...args: any[]) => mocks.getRunDetailsMock(...args),
   triggerWatchlistRun: (...args: any[]) => mocks.triggerWatchlistRunMock(...args),
   updateScrapedItem: (...args: any[]) => mocks.updateScrapedItemMock(...args)
@@ -276,7 +278,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.fetchWatchlistOutputsMock.mockResolvedValue({
@@ -285,6 +287,12 @@ describe("RunDetailDrawer stream lifecycle", () => {
       page: 1,
       size: 1,
       has_more: false
+    })
+    mocks.getWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      task_id: null,
+      status: "unknown",
+      download_url: null
     })
     mocks.updateScrapedItemMock.mockResolvedValue({})
     mocks.exportRunTalliesCsvMock.mockResolvedValue("")
@@ -364,6 +372,62 @@ describe("RunDetailDrawer stream lifecycle", () => {
     )
   })
 
+  it("loads and displays pending audio status when the run has an audio task", async () => {
+    mocks.getRunDetailsMock.mockResolvedValue({
+      ...baseRunDetails,
+      stats: {
+        ...baseRunDetails.stats,
+        audio_briefing_task_id: "audio-task-10"
+      }
+    })
+    mocks.getWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      task_id: "audio-task-10",
+      status: "pending",
+      download_url: null
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(mocks.getWatchlistRunAudioMock).toHaveBeenCalledWith(10)
+    })
+    expect(screen.getByText("Audio briefing")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText("Pending")).toBeInTheDocument()
+    })
+  })
+
+  it("displays completed audio with a final download link", async () => {
+    mocks.getRunDetailsMock.mockResolvedValue({
+      ...baseRunDetails,
+      status: "completed",
+      finished_at: "2026-02-18T10:01:00Z",
+      stats: {
+        ...baseRunDetails.stats,
+        audio_briefing_task_id: "audio-task-10"
+      }
+    })
+    mocks.getWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      task_id: "audio-task-10",
+      status: "completed",
+      download_url: "/api/v1/watchlists/runs/10/audio/download",
+      final_artifact: {
+        title: "Final mix",
+        mime_type: "audio/mpeg"
+      }
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Final audio available")).toBeInTheDocument()
+    })
+    const link = screen.getByRole("link", { name: "Download final audio" })
+    expect(link).toHaveAttribute("href", "/api/v1/watchlists/runs/10/audio/download")
+  })
+
   it("reconnects after unexpected close when run is non-terminal", async () => {
     vi.useFakeTimers()
     render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
@@ -406,6 +470,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Stream error")).toBeInTheDocument()
+      expect(screen.getByText("Stream error").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText("Live stream error")).toBeInTheDocument()
     })
 
@@ -478,6 +543,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Logs truncated")).toBeInTheDocument()
+      expect(screen.getByText("Logs truncated").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
 
     const pre = document.querySelector("pre")

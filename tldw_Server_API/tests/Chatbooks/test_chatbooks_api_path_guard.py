@@ -17,6 +17,11 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     close_all_chacha_db_instances,
     get_chacha_db_for_user,
 )
+from tldw_Server_API.tests.Chatbooks.test_chatbook_security import (
+    build_dangerous_file_archive_bytes,
+    build_symlink_archive_bytes,
+    build_traversal_archive_bytes,
+)
 
 
 @pytest.fixture()
@@ -99,3 +104,22 @@ def test_preview_rejects_unsafe_safe_filename(monkeypatch, client, unsafe_name):
 
     assert resp.status_code == 400
     assert resp.json().get("detail") == "Invalid file path"
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/chatbooks/import", "/api/v1/chatbooks/preview"])
+@pytest.mark.parametrize(
+    ("archive_bytes", "expected_error"),
+    [
+        (build_symlink_archive_bytes(), "symlink"),
+        (build_traversal_archive_bytes(), "unsafe"),
+        (build_dangerous_file_archive_bytes(), "dangerous"),
+    ],
+    ids=["symlink", "path-traversal", "dangerous-file-type"],
+)
+def test_api_rejects_malicious_archives(client, endpoint, archive_bytes, expected_error):
+    files = {"file": ("test.chatbook", archive_bytes, "application/zip")}
+
+    resp = client.post(endpoint, files=files)
+
+    assert resp.status_code == 400
+    assert expected_error in resp.json().get("detail", "").lower()

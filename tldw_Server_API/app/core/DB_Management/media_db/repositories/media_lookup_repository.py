@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from math import ceil
 import sqlite3
 from typing import Any
@@ -28,6 +29,19 @@ class MediaLookupRepository:
             db,
             error_message="db_instance must be a Database object.",
         ))
+
+    @staticmethod
+    def _parse_safe_metadata(raw_value: Any) -> dict[str, Any] | None:
+        """Normalize latest-version safe_metadata JSON for source-list consumers."""
+        if isinstance(raw_value, dict):
+            return dict(raw_value)
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            return None
+        try:
+            parsed = json.loads(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def by_id(
         self,
@@ -265,16 +279,42 @@ class MediaLookupRepository:
             if total_items > 0:
                 items_cursor = db.execute_query(
                     """
-                    SELECT id, title, type
-                    FROM Media
-                    WHERE deleted = 0
-                      AND is_trash = 0
-                    ORDER BY last_modified DESC, id DESC
+                    SELECT
+                        m.id,
+                        m.title,
+                        m.type,
+                        m.ingestion_date,
+                        m.last_modified,
+                        m.chunking_status,
+                        latest_source_metadata.safe_metadata AS safe_metadata
+                    FROM Media m
+                    LEFT JOIN (
+                        SELECT media_id, safe_metadata
+                        FROM (
+                            SELECT
+                                dv.media_id,
+                                dv.safe_metadata,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY dv.media_id
+                                    ORDER BY dv.version_number DESC, dv.id DESC
+                                ) AS row_number
+                            FROM DocumentVersions dv
+                            WHERE dv.deleted = 0
+                        ) latest_document_versions
+                        WHERE row_number = 1
+                    ) latest_source_metadata ON latest_source_metadata.media_id = m.id
+                    WHERE m.deleted = 0
+                      AND m.is_trash = 0
+                    ORDER BY m.last_modified DESC, m.id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (results_per_page, offset),
                 )
-                results = [dict(row) for row in items_cursor.fetchall()]
+                results = []
+                for row in items_cursor.fetchall():
+                    item = dict(row)
+                    item["safe_metadata"] = self._parse_safe_metadata(item.get("safe_metadata"))
+                    results.append(item)
 
             total_pages = ceil(total_items / results_per_page) if total_items > 0 else 0
             return results, total_pages, page, total_items

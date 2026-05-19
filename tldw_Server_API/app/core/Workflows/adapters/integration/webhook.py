@@ -46,6 +46,12 @@ _WORKFLOWS_WEBHOOK_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+def _adapter_error_message(operation: str, exc: BaseException) -> str:
+    if isinstance(exc, TimeoutError):
+        return f"{operation} timed out"
+    return f"{operation} failed"
+
+
 @registry.register(
     "notify",
     category="integration",
@@ -108,7 +114,7 @@ async def run_notify_adapter(config: dict[str, Any], context: dict[str, Any]) ->
         return {"dispatched": ok, "status_code": resp.status_code, "provider": prov}
 
     except _WORKFLOWS_WEBHOOK_NONCRITICAL_EXCEPTIONS as e:
-        return {"dispatched": False, "error": str(e)}
+        return {"dispatched": False, "error": _adapter_error_message("Notification dispatch", e)}
 
 
 @registry.register(
@@ -266,8 +272,8 @@ async def run_webhook_adapter(config: dict[str, Any], context: dict[str, Any]) -
                 block_private_override=block_private if isinstance(block_private, bool) else None,
             )
             return result.allowed, result.reason
-        except _WORKFLOWS_WEBHOOK_NONCRITICAL_EXCEPTIONS as e:
-            return False, str(e)
+        except _WORKFLOWS_WEBHOOK_NONCRITICAL_EXCEPTIONS:
+            return False, "policy_error"
 
     def _record_blocked(url_val: str) -> None:
         try:
@@ -591,7 +597,7 @@ async def run_webhook_adapter(config: dict[str, Any], context: dict[str, Any]) -
                         out["response_text"] = text
                 return out
         except _WORKFLOWS_WEBHOOK_NONCRITICAL_EXCEPTIONS as e:
-            return {"dispatched": False, "error": str(e)}
+            return {"dispatched": False, "error": _adapter_error_message("Workflow webhook dispatch", e)}
 
     # Default: use registered webhooks
     try:
@@ -602,4 +608,4 @@ async def run_webhook_adapter(config: dict[str, Any], context: dict[str, Any]) -
         await webhook_manager.send_webhook(user_id=user_id, event=event, evaluation_id="workflow", data=payload)
         return {"dispatched": True}
     except _WORKFLOWS_WEBHOOK_NONCRITICAL_EXCEPTIONS as e:
-        return {"dispatched": False, "error": str(e)}
+        return {"dispatched": False, "error": _adapter_error_message("Workflow webhook dispatch", e)}

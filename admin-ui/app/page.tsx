@@ -8,29 +8,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Checkbox } from '@/components/ui/checkbox';
-import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { useOrgContext } from '@/components/OrgContextSwitcher';
 import { AlertsBanner } from '@/components/dashboard/AlertsBanner';
 import { CreateOrganizationDialog } from '@/components/dashboard/CreateOrganizationDialog';
-import { CreateRegistrationCodeDialog } from '@/components/dashboard/CreateRegistrationCodeDialog';
 import { CreateUserDialog } from '@/components/dashboard/CreateUserDialog';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
-import { StatsGrid } from '@/components/dashboard/StatsGrid';
+import { StatsGrid, type RealtimeStats } from '@/components/dashboard/StatsGrid';
 import { ActivitySection } from '@/components/dashboard/ActivitySection';
 import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
 import { QuickActionsCard } from '@/components/dashboard/QuickActionsCard';
 import {
-  Building2, Clipboard, CreditCard, Settings, Trash2, UserPlus, ShieldAlert
+  Building2, CreditCard, KeyRound, Settings, UserPlus, ShieldAlert
 } from 'lucide-react';
-import { AccessibleIconButton } from '@/components/ui/accessible-icon-button';
 import { api } from '@/lib/api-client';
 import {
   fetchDashboardBillingStats,
   isBillingEnabled,
 } from '@/lib/billing';
-import { AuditLog, LLMProvider, Organization, RegistrationCode, RegistrationSettings, type SecurityHealthData, User } from '@/types';
+import { AuditLog, LLMProvider, Organization, RegistrationCode, type SecurityHealthData, User } from '@/types';
 import { buildDashboardUIStats, type DashboardUIStats } from '@/lib/dashboard';
 import {
   aggregateUsageDailyRows,
@@ -61,6 +57,7 @@ import {
   type DashboardUptimeSummary,
 } from '@/lib/dashboard-uptime';
 import Link from 'next/link';
+import { logger } from '@/lib/logger';
 
 type ServerStatusState = 'online' | 'degraded' | 'offline' | 'unknown';
 
@@ -136,15 +133,6 @@ const processRegistrationCodes = (result: PromiseSettledResult<unknown>): Regist
   return Array.isArray(result.value) ? result.value : [];
 };
 
-const processRegistrationSettings = (
-  result: PromiseSettledResult<unknown>
-): RegistrationSettings | null => {
-  if (result.status !== 'fulfilled' || !result.value) {
-    return null;
-  }
-  return result.value as RegistrationSettings;
-};
-
 const computeUserStats = (users: User[]) => ({
   activeUsers: users.filter((user) => user.is_active).length,
   totalStorage: users.reduce((acc, user) => acc + (user.storage_used_mb || 0), 0),
@@ -154,7 +142,6 @@ const computeUserStats = (users: User[]) => ({
 export default function DashboardPage() {
   const router = useRouter();
   const { selectedOrg } = useOrgContext();
-  const confirm = useConfirm();
   const { success, error: showError } = useToast();
   const [stats, setStats] = useState<DashboardUIStats>({
     users: 0,
@@ -199,19 +186,6 @@ export default function DashboardPage() {
   const [activityOverlayRows, setActivityOverlayRows] = useState<DailyOverlayRow[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [registrationCodes, setRegistrationCodes] = useState<RegistrationCode[]>([]);
-  const [registrationSettings, setRegistrationSettings] = useState<RegistrationSettings | null>(null);
-  const [registrationSettingsError, setRegistrationSettingsError] = useState('');
-  const [savingRegistrationSettings, setSavingRegistrationSettings] = useState(false);
-  const [showRegistrationDialog, setShowRegistrationDialog] = useState(false);
-  const [registrationForm, setRegistrationForm] = useState({
-    max_uses: 1,
-    expiry_days: 7,
-    role_to_grant: 'user',
-  });
-  const [registrationError, setRegistrationError] = useState('');
-  const [creatingRegistration, setCreatingRegistration] = useState(false);
-  const [deletingRegistrationId, setDeletingRegistrationId] = useState<string | null>(null);
-  const [latestRegistrationCode, setLatestRegistrationCode] = useState<RegistrationCode | null>(null);
   const [showCreateUserDialog, setShowCreateUserDialog] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({
     username: '',
@@ -228,9 +202,13 @@ export default function DashboardPage() {
   const [orgError, setOrgError] = useState('');
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(false); // Ref-based guard for auto-refresh overlap
   const [error, setError] = useState<string | null>(null);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [securityHealth, setSecurityHealth] = useState<SecurityHealthData | null>(null);
   const [securityHealthError, setSecurityHealthError] = useState('');
+  const [realtimeStats, setRealtimeStats] = useState<RealtimeStats | null>(null);
   const [billingStats, setBillingStats] = useState<{
     active_subscriptions: number;
     past_due_count: number;
@@ -246,6 +224,7 @@ export default function DashboardPage() {
     dashboardLoadInFlightRef.current = true;
 
     try {
+      loadingRef.current = true;
       setLoading(true);
       setError(null);
       setSecurityHealthError('');
@@ -278,7 +257,6 @@ export default function DashboardPage() {
         llmUsageSummaryResult,
         jobsStatsResult,
         metricsTextResult,
-        registrationSettingsResult,
         registrationCodesResult,
         healthResult,
         llmHealthResult,
@@ -288,6 +266,7 @@ export default function DashboardPage() {
         embeddingsHealthResult,
         securityHealthResult,
         incidentsResult,
+        realtimeStatsResult,
       ] = await Promise.allSettled([
         api.getDashboardStats(),
         api.getUsers(orgParams),
@@ -302,7 +281,6 @@ export default function DashboardPage() {
         api.getLlmUsageSummary(llmUsageSummaryParams),
         api.getJobsStats(),
         api.getMetricsText(),
-        api.getRegistrationSettings(),
         api.getRegistrationCodes(),
         api.getHealth(),
         api.getLlmHealth(),
@@ -312,6 +290,7 @@ export default function DashboardPage() {
         api.getEmbeddingsHealth(),
         api.getSecurityHealth(),
         api.getIncidents({ limit: '200' }),
+        api.getRealtimeStats(),
       ]);
 
       const users = processUsers(usersResult);
@@ -327,12 +306,6 @@ export default function DashboardPage() {
       setAlerts(alertsList.filter((alert) => !alert.acknowledged));
 
       setActivityData(resolveDashboardActivityPoints(activityResult, activityRange));
-      setRegistrationSettings(processRegistrationSettings(registrationSettingsResult));
-      setRegistrationSettingsError(
-        registrationSettingsResult.status === 'rejected'
-          ? 'Failed to load registration settings'
-          : ''
-      );
       setRegistrationCodes(processRegistrationCodes(registrationCodesResult));
 
       const operationalKpiModel = buildDashboardOperationalKpis({
@@ -385,6 +358,13 @@ export default function DashboardPage() {
       const resolvedSecurityHealth = resolveSecurityHealth(securityHealthResult);
       setSecurityHealth(resolvedSecurityHealth.data);
       setSecurityHealthError(resolvedSecurityHealth.error);
+
+      // Process realtime stats (active sessions + token consumption)
+      if (realtimeStatsResult.status === 'fulfilled' && realtimeStatsResult.value) {
+        setRealtimeStats(realtimeStatsResult.value as RealtimeStats);
+      } else {
+        setRealtimeStats(null);
+      }
 
       const { activeUsers, totalStorage, totalQuota } = computeUserStats(users);
 
@@ -450,16 +430,17 @@ export default function DashboardPage() {
         { key: 'tts_health', label: 'TTS health', result: ttsHealthResult },
         { key: 'stt_health', label: 'STT health', result: sttHealthResult },
         { key: 'embeddings_health', label: 'embeddings health', result: embeddingsHealthResult },
+        { key: 'realtime_stats', label: 'realtime stats', result: realtimeStatsResult },
       ].filter((entry): entry is {
         key: string;
         label: string;
         result: PromiseRejectedResult;
       } => entry.result.status === 'rejected');
       if (optionalHealthFailures.length > 0) {
-        console.warn(
-          'Optional dashboard subsystem health fetch failures:',
-          optionalHealthFailures.map((entry) => ({ key: entry.key, reason: entry.result.reason }))
-        );
+        logger.warn('Optional dashboard subsystem health fetch failures', {
+          component: 'DashboardPage',
+          failures: optionalHealthFailures.map((entry) => entry.key).join(', '),
+        });
       }
 
       const failures = [
@@ -474,7 +455,6 @@ export default function DashboardPage() {
         { key: 'llm_usage_summary', label: 'LLM usage summary', result: llmUsageSummaryResult },
         { key: 'jobs_stats', label: 'jobs stats', result: jobsStatsResult },
         { key: 'metrics_text', label: 'metrics text', result: metricsTextResult },
-        { key: 'registration_settings', label: 'registration settings', result: registrationSettingsResult },
         { key: 'registration_codes', label: 'registration codes', result: registrationCodesResult },
         { key: 'health', label: 'health', result: healthResult },
         { key: 'security_health', label: 'security health', result: securityHealthResult },
@@ -487,22 +467,21 @@ export default function DashboardPage() {
 
       if (failures.length > 0) {
         const failedLabels = failures.map((entry) => entry.label);
-        console.warn(
-          'Dashboard data fetch failures:',
-          failures.map((entry) => ({ key: entry.key, reason: entry.result.reason }))
-        );
+        logger.warn('Dashboard data fetch failures', {
+          component: 'DashboardPage',
+          failures: failedLabels.join(', '),
+        });
         setError(`Some dashboard data failed to load: ${failedLabels.join(', ')}`);
       }
     } catch (err: unknown) {
-      console.error('Failed to load dashboard data:', err);
+      logger.error('Failed to load dashboard data', { component: 'DashboardPage', error: err instanceof Error ? err.message : String(err) });
       setError('Failed to load dashboard statistics');
       setOperationalKpis(DEFAULT_DASHBOARD_OPERATIONAL_KPIS);
       setUptimeSummary(DEFAULT_DASHBOARD_UPTIME_SUMMARY);
     } finally {
-      if (dashboardLoadRequestIdRef.current === requestId) {
-        dashboardLoadInFlightRef.current = false;
-        setLoading(false);
-      }
+      loadingRef.current = false;
+      setLoading(false);
+      setLastRefreshed(new Date());
     }
   }, [activityRange, selectedOrg]);
 
@@ -510,22 +489,19 @@ export default function DashboardPage() {
     void loadDashboardData();
   }, [loadDashboardData]);
 
-  // Auto-refresh every 60 seconds
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
-
+  // Auto-refresh: 60-second interval, paused when tab is not visible
   useEffect(() => {
     if (!autoRefreshEnabled) return;
-    const id = setInterval(() => { void loadDashboardData(); }, 60_000);
-    return () => clearInterval(id);
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible' && !loadingRef.current) {
+        void loadDashboardData();
+      }
+    }, 60_000);
+
+    return () => clearInterval(intervalId);
   }, [autoRefreshEnabled, loadDashboardData]);
 
-  // Track last refresh timestamp
-  useEffect(() => {
-    if (!loading) {
-      setLastRefreshedAt(new Date());
-    }
-  }, [loading]);
 
   const formatTimeAgo = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -567,22 +543,6 @@ export default function DashboardPage() {
     }
   };
 
-  const formatShortDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleDateString();
-  };
-
-  const copyToClipboard = async (value: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      success('Copied to clipboard', `${label} copied.`);
-    } catch (err: unknown) {
-      console.error('Failed to copy to clipboard:', err);
-      showError('Copy failed', 'Please copy manually or check browser permissions.');
-    }
-  };
-
   const isRegistrationCodeActive = (code: RegistrationCode) => {
     if (!code.expires_at) {
       return code.times_used < code.max_uses;
@@ -592,74 +552,6 @@ export default function DashboardPage() {
       return code.times_used < code.max_uses;
     }
     return expiresAt >= new Date() && code.times_used < code.max_uses;
-  };
-
-  const handleRegistrationSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setRegistrationError('');
-    setCreatingRegistration(true);
-    try {
-      const created = await api.createRegistrationCode(registrationForm);
-      setLatestRegistrationCode(created as RegistrationCode);
-      success('Registration code created', `Role: ${registrationForm.role_to_grant}`);
-      setShowRegistrationDialog(false);
-      setRegistrationForm({ max_uses: 1, expiry_days: 7, role_to_grant: 'user' });
-      await loadDashboardData();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to create registration code';
-      setRegistrationError(message);
-      showError('Registration code failed', message);
-    } finally {
-      setCreatingRegistration(false);
-    }
-  };
-
-  const handleRegistrationDelete = async (code: RegistrationCode) => {
-    const codeId = String(code.id);
-    if (deletingRegistrationId === codeId) return;
-    const confirmed = await confirm({
-      title: 'Delete registration code',
-      message: `Delete code ${code.code.slice(0, 6)}…? Users will no longer be able to register with it.`,
-      confirmText: 'Delete',
-      variant: 'danger',
-      icon: 'key',
-    });
-    if (!confirmed) return;
-
-    try {
-      setDeletingRegistrationId(codeId);
-      await api.deleteRegistrationCode(code.id);
-      success('Registration code deleted', `Code ${code.code.slice(0, 6)}… removed.`);
-      await loadDashboardData();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to delete registration code';
-      showError('Delete failed', message);
-    } finally {
-      setDeletingRegistrationId((prev) => (prev === codeId ? null : prev));
-    }
-  };
-
-  const handleRegistrationSettingsUpdate = async (
-    updates: Partial<RegistrationSettings>,
-    toastMessage: string
-  ) => {
-    if (!registrationSettings || savingRegistrationSettings) return;
-    const previous = registrationSettings;
-    setRegistrationSettings({ ...registrationSettings, ...updates });
-    setRegistrationSettingsError('');
-    setSavingRegistrationSettings(true);
-    try {
-      const updated = await api.updateRegistrationSettings(updates as Record<string, unknown>);
-      setRegistrationSettings(updated as RegistrationSettings);
-      success('Registration settings updated', toastMessage);
-    } catch (err: unknown) {
-      setRegistrationSettings(previous);
-      const message = err instanceof Error ? err.message : 'Failed to update registration settings';
-      setRegistrationSettingsError(message);
-      showError('Registration settings failed', message);
-    } finally {
-      setSavingRegistrationSettings(false);
-    }
   };
 
   const handleCreateUserSubmit = async (event: React.FormEvent) => {
@@ -707,11 +599,6 @@ export default function DashboardPage() {
     setOrgForm((prev) => ({ ...prev, slug }));
   };
 
-  const handleRegistrationDialogOpenChange = (open: boolean) => {
-    setShowRegistrationDialog(open);
-    if (!open) setRegistrationError('');
-  };
-
   const handleCreateUserDialogOpenChange = (open: boolean) => {
     setShowCreateUserDialog(open);
     if (!open) setCreateUserError('');
@@ -741,6 +628,20 @@ export default function DashboardPage() {
     }
   };
 
+  const handleAcknowledgeAlerts = useCallback(async () => {
+    try {
+      await Promise.allSettled(
+        alerts
+          .filter((a) => a.id !== undefined)
+          .map((a) => api.acknowledgeAlert(String(a.id)))
+      );
+      success('Alerts acknowledged', 'All visible alerts acknowledged.');
+      await loadDashboardData();
+    } catch {
+      showError('Acknowledge failed', 'Could not acknowledge alerts.');
+    }
+  }, [alerts, loadDashboardData, success, showError]);
+
   const activityChartData = useMemo(
     () => mergeOverlayData(
       buildDashboardActivityChartData(activityData, activityRange),
@@ -758,11 +659,7 @@ export default function DashboardPage() {
   const hasSecurityHealth = securityHealth !== null;
 
   const activeRegistrationCount = registrationCodes.filter(isRegistrationCodeActive).length;
-  const recentRegistrationCodes = registrationCodes.slice(0, 3);
   const recentOrganizations = organizations.slice(0, 3);
-  const registrationEnabled = registrationSettings?.enable_registration ?? false;
-  const registrationRequiresCode = registrationSettings?.require_registration_code ?? false;
-  const registrationBlocked = registrationSettings?.self_registration_allowed === false && registrationEnabled;
   const handleActivityRangeChange = (nextRange: DashboardActivityRange) => {
     if (nextRange === activityRange) return;
     setActivityRange(nextRange);
@@ -790,9 +687,9 @@ export default function DashboardPage() {
             uptimeWindowDays={uptimeSummary.windowDays}
             loading={loading}
             onRefresh={loadDashboardData}
+            lastRefreshed={lastRefreshed}
             autoRefreshEnabled={autoRefreshEnabled}
-            onToggleAutoRefresh={() => setAutoRefreshEnabled(prev => !prev)}
-            lastRefreshedAt={lastRefreshedAt}
+            onAutoRefreshToggle={() => setAutoRefreshEnabled((prev) => !prev)}
           />
 
           {error && (
@@ -801,20 +698,15 @@ export default function DashboardPage() {
             </Alert>
           )}
 
-          <AlertsBanner
-            alerts={alerts}
-            onAcknowledgeAll={async () => {
-              const unack = alerts.filter(a => (a.severity === 'critical' || a.severity === 'error') && !a.acknowledged);
-              await Promise.allSettled(unack.map(a => api.acknowledgeAlert(String(a.id))));
-              loadDashboardData();
-            }}
-          />
+          <AlertsBanner alerts={alerts} onAcknowledgeAll={handleAcknowledgeAlerts} />
 
           <StatsGrid
             loading={loading}
             stats={stats}
             storagePercentage={storagePercentage}
             operationalKpis={operationalKpis}
+            realtimeStats={realtimeStats}
+            cacheHitRatePct={systemHealth.cache.cacheHitRatePct}
           />
 
           {isBillingEnabled() && billingStats && (
@@ -872,160 +764,34 @@ export default function DashboardPage() {
                     <UserPlus className="h-5 w-5" />
                     User Registration
                   </CardTitle>
-                  <CardDescription>Issue codes and onboard new users</CardDescription>
+                  <CardDescription>Onboard new users</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {registrationSettingsError && (
-                    <Alert variant="destructive" className="mb-4">
-                      <AlertDescription>{registrationSettingsError}</AlertDescription>
-                    </Alert>
-                  )}
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm text-muted-foreground">Active codes</p>
                       <p className="text-2xl font-bold">{activeRegistrationCount}</p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <CreateRegistrationCodeDialog
-                        open={showRegistrationDialog}
-                        onOpenChange={handleRegistrationDialogOpenChange}
-                        error={registrationError}
-                        form={registrationForm}
-                        setForm={setRegistrationForm}
-                        creating={creatingRegistration}
-                        onSubmit={handleRegistrationSubmit}
-                      />
-
-                      <CreateUserDialog
-                        open={showCreateUserDialog}
-                        onOpenChange={handleCreateUserDialogOpenChange}
-                        error={createUserError}
-                        form={createUserForm}
-                        setForm={setCreateUserForm}
-                        creating={creatingUser}
-                        onSubmit={handleCreateUserSubmit}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-3 rounded-lg border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">Self-registration</p>
-                        <p className="text-xs text-muted-foreground">Allow new users to sign up.</p>
-                      </div>
-                      <Checkbox
-                        id="registration-enabled"
-                        aria-label="Toggle self-registration"
-                        checked={registrationEnabled}
-                        disabled={!registrationSettings || savingRegistrationSettings}
-                        onCheckedChange={(checked) => {
-                          const enabled = Boolean(checked);
-                          handleRegistrationSettingsUpdate(
-                            { enable_registration: enabled },
-                            enabled ? 'Self-registration enabled.' : 'Self-registration disabled.'
-                          );
-                        }}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">Require registration code</p>
-                        <p className="text-xs text-muted-foreground">Limit signups to issued codes.</p>
-                      </div>
-                      <Checkbox
-                        id="registration-requires-code"
-                        aria-label="Toggle registration code requirement"
-                        checked={registrationRequiresCode}
-                        disabled={!registrationSettings || savingRegistrationSettings}
-                        onCheckedChange={(checked) => {
-                          const required = Boolean(checked);
-                          handleRegistrationSettingsUpdate(
-                            { require_registration_code: required },
-                            required ? 'Registration codes required.' : 'Registration codes optional.'
-                          );
-                        }}
-                      />
-                    </div>
-                    {registrationBlocked && (
-                      <p className="text-xs text-muted-foreground">
-                        Self-registration is blocked by profile {registrationSettings?.profile ?? 'local-single-user'}.
-                      </p>
-                    )}
-                    {registrationSettings && (
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        <Badge className={registrationEnabled ? 'bg-green-500' : 'bg-muted text-muted-foreground'}>
-                          {registrationEnabled ? 'Registration enabled' : 'Registration disabled'}
-                        </Badge>
-                        <Badge variant="secondary">
-                          {registrationRequiresCode ? 'Codes required' : 'Codes optional'}
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
-
-                  {latestRegistrationCode && (
-                    <div className="mt-4 rounded-lg border bg-muted/40 p-3">
-                      <p className="text-xs text-muted-foreground">Latest code</p>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs break-all">{latestRegistrationCode.code}</span>
-                        <AccessibleIconButton
-                          icon={Clipboard}
-                          label="Copy registration code"
-                          variant="ghost"
-                          onClick={() => copyToClipboard(latestRegistrationCode.code, 'Registration code')}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-4 space-y-3">
-                    {recentRegistrationCodes.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No active registration codes yet.</p>
-                    ) : (
-                      recentRegistrationCodes.map((code) => {
-                        const active = isRegistrationCodeActive(code);
-                        const isDeleting = deletingRegistrationId === String(code.id);
-                        return (
-                          <div key={code.id} className="flex items-start justify-between gap-2 rounded-lg border p-3">
-                            <div className="min-w-0 space-y-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-mono text-xs break-all">{code.code}</span>
-                                <Badge className={active ? 'bg-green-500' : 'bg-muted text-muted-foreground'}>
-                                  {active ? 'Active' : 'Expired'}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                Role {code.role_to_grant} • {code.times_used}/{code.max_uses} used •
-                                Expires {formatShortDate(String(code.expires_at))}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <AccessibleIconButton
-                                icon={Clipboard}
-                                label="Copy registration code"
-                                variant="ghost"
-                                onClick={() => copyToClipboard(code.code, 'Registration code')}
-                              />
-                              <AccessibleIconButton
-                                icon={Trash2}
-                                label={isDeleting ? 'Deleting registration code' : 'Delete registration code'}
-                                variant="ghost"
-                                onClick={() => handleRegistrationDelete(code)}
-                                disabled={isDeleting}
-                                loading={isDeleting}
-                                className="text-destructive hover:text-destructive"
-                              />
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
+                    <CreateUserDialog
+                      open={showCreateUserDialog}
+                      onOpenChange={handleCreateUserDialogOpenChange}
+                      error={createUserError}
+                      form={createUserForm}
+                      setForm={setCreateUserForm}
+                      creating={creatingUser}
+                      onSubmit={handleCreateUserSubmit}
+                    />
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
+                    <Link href="/users/registration">
+                      <Button variant="outline" size="sm">
+                        <KeyRound className="mr-2 h-4 w-4" />
+                        Manage Registration Codes
+                      </Button>
+                    </Link>
                     <Link href="/users">
-                      <Button variant="outline" size="sm">Manage users</Button>
+                      <Button variant="ghost" size="sm">Manage users</Button>
                     </Link>
                     <Link href="/roles">
                       <Button variant="ghost" size="sm">Roles & access</Button>

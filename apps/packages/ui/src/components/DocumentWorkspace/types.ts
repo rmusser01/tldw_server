@@ -5,7 +5,7 @@
 
 export type DocumentType = "pdf" | "epub"
 
-export type SidebarTab = "insights" | "figures" | "toc" | "info" | "references"
+export type SidebarTab = "insights" | "pages" | "toc" | "info" | "references"
 
 export type RightPanelTab = "chat" | "annotations" | "citations" | "quiz"
 
@@ -161,6 +161,9 @@ export interface DocumentWorkspaceState {
   // Open documents (tabs)
   openDocuments: OpenDocument[]
 
+  // Recently closed documents (for undo)
+  recentlyClosed: ClosedDocument[]
+
   // Layout
   leftSidebarCollapsed: boolean
   rightPanelCollapsed: boolean
@@ -204,11 +207,17 @@ export interface DocumentWorkspaceState {
 }
 
 // Store actions interface
+export interface ClosedDocument {
+  doc: OpenDocument
+  closedAt: number
+}
+
 export interface DocumentWorkspaceActions {
   // Document management
   openDocument: (doc: OpenDocument) => void
   closeDocument: (id: number) => void
   setActiveDocument: (id: number | null) => void
+  undoCloseDocument: () => OpenDocument | null
 
   // Layout
   setLeftSidebarCollapsed: (collapsed: boolean) => void
@@ -270,6 +279,7 @@ export const DEFAULT_DOCUMENT_WORKSPACE_STATE: DocumentWorkspaceState = {
   activeDocumentId: null,
   activeDocumentType: null,
   openDocuments: [],
+  recentlyClosed: [],
   leftSidebarCollapsed: false,
   rightPanelCollapsed: false,
   activeSidebarTab: "insights",

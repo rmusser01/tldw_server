@@ -194,7 +194,8 @@ describe("WorldBooksManager entry drawer stage-4 bulk add workflow", () => {
     const user = userEvent.setup()
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await screen.findByRole("columnheader", { name: "Keywords" })
     await user.click(getBulkModeSwitch())
     await user.click(screen.getByText("Supported formats"))
@@ -223,7 +224,8 @@ describe("WorldBooksManager entry drawer stage-4 bulk add workflow", () => {
 
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Manage entries" }))
+    // Select the world book to show detail panel with entries tab
+    await user.click(screen.getByText("Arcana"))
     await screen.findByRole("columnheader", { name: "Keywords" })
     await user.click(getBulkModeSwitch())
 

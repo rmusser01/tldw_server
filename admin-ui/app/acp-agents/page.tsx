@@ -18,12 +18,7 @@ import { useToast } from '@/components/ui/toast';
 import { RefreshCw, Bot, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 import { AccessibleIconButton } from '@/components/ui/accessible-icon-button';
 import { api, ApiError } from '@/lib/api-client';
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return String(n);
-}
+import { TagInput } from '@/components/ui/tag-input';
 
 interface AgentConfig {
   id: number;
@@ -42,6 +37,49 @@ interface AgentConfig {
   created_at: string;
   updated_at: string | null;
   max_token_budget: number | null;
+}
+
+interface AgentMetrics {
+  agent_type: string;
+  session_count: number;
+  active_sessions: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  total_messages: number;
+  last_used_at: string | null;
+  total_estimated_cost_usd: number | null;
+}
+
+function formatTokens(n: number): string {
+  if (n === 0) return '0';
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return '\u2014';
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const diffMs = now - then;
+  if (diffMs < 0) return 'just now';
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+function formatCost(usd: number | null | undefined): string {
+  if (usd == null) return '\u2014';
+  return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
 }
 
 interface PermissionPolicy {
@@ -69,6 +107,8 @@ const defaultAgentForm = {
   max_token_budget: '',
   requires_api_key: '',
   enabled: true,
+  default_token_budget: '',
+  default_auto_terminate_at_budget: true,
 };
 
 const defaultPolicyForm = {
@@ -105,6 +145,7 @@ function extractToolNames(response: unknown): string[] {
 export default function ACPAgentsPage() {
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [policies, setPolicies] = useState<PermissionPolicy[]>([]);
+  const [agentMetrics, setAgentMetrics] = useState<Map<string, AgentMetrics>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -141,6 +182,12 @@ export default function ACPAgentsPage() {
       ]);
       setAgents(agentsRes.agents || []);
       setPolicies(policiesRes.policies || []);
+
+      // Fetch metrics separately — non-blocking; failures are silently ignored
+      api.getACPAgentMetrics().then(({ items }) => {
+        const map = new Map(items.map(m => [m.agent_type, m]));
+        setAgentMetrics(map);
+      }).catch(() => {});
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to load data';
       setError(message);
@@ -188,6 +235,8 @@ export default function ACPAgentsPage() {
       requires_api_key: agent.requires_api_key || '',
       max_token_budget: agent.max_token_budget != null ? String(agent.max_token_budget) : '',
       enabled: agent.enabled,
+      default_token_budget: String((agent.parameters as Record<string, unknown>).default_token_budget ?? ''),
+      default_auto_terminate_at_budget: (agent.parameters as Record<string, unknown>).default_auto_terminate_at_budget !== false,
     });
     setAgentDialogOpen(true);
   };
@@ -205,6 +254,8 @@ export default function ACPAgentsPage() {
           ...(agentForm.temperature ? { temperature: parseFloat(agentForm.temperature) } : {}),
           ...(agentForm.model ? { model: agentForm.model } : {}),
           ...(agentForm.max_tokens ? { max_tokens: parseInt(agentForm.max_tokens) } : {}),
+          ...(agentForm.default_token_budget ? { default_token_budget: parseInt(agentForm.default_token_budget) } : {}),
+          ...(agentForm.default_token_budget ? { default_auto_terminate_at_budget: agentForm.default_auto_terminate_at_budget } : {}),
         },
         requires_api_key: agentForm.requires_api_key || null,
         enabled: agentForm.enabled,
@@ -403,9 +454,11 @@ export default function ACPAgentsPage() {
                         <TableHead>Status</TableHead>
                         <TableHead>Model</TableHead>
                         <TableHead>Tools</TableHead>
+                        <TableHead>Sessions</TableHead>
                         <TableHead className="text-right">Invocations</TableHead>
                         <TableHead className="text-right">Tokens</TableHead>
                         <TableHead className="text-right">Cost</TableHead>
+                        <TableHead>Last Used</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -450,17 +503,56 @@ export default function ACPAgentsPage() {
                             {agent.allowed_tools ? `${agent.allowed_tools.length} allowed` : 'All'}
                             {agent.denied_tools ? `, ${agent.denied_tools.length} denied` : ''}
                           </TableCell>
+                          {(() => {
+                            const metrics = agentMetrics.get(agent.type);
+                            return (
+                              <>
+                                <TableCell>
+                                  {metrics ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{metrics.session_count}</span>
+                                      {metrics.active_sessions > 0 && (
+                                        <Badge variant="default" className="text-xs px-1.5 py-0">
+                                          {metrics.active_sessions} active
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">{'\u2014'}</span>
+                                  )}
+                                </TableCell>
+                              </>
+                            );
+                          })()}
                           <TableCell className="text-right font-mono text-sm">
                             {agentUsage[agent.type]?.invocation_count ?? '—'}
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
-                            {agentUsage[agent.type] ? formatTokens(agentUsage[agent.type].total_tokens) : '—'}
+                            {agentUsage[agent.type]
+                              ? formatTokens(agentUsage[agent.type].total_tokens)
+                              : (() => {
+                                  const metrics = agentMetrics.get(agent.type);
+                                  return metrics ? formatTokens(metrics.total_tokens) : '—';
+                                })()}
                           </TableCell>
                           <TableCell className="text-right font-mono text-sm">
                             {agentUsage[agent.type]?.estimated_cost_usd != null
                               ? `$${agentUsage[agent.type].estimated_cost_usd.toFixed(2)}`
-                              : '—'}
+                              : (() => {
+                                  const metrics = agentMetrics.get(agent.type);
+                                  return metrics?.total_estimated_cost_usd != null
+                                    ? formatCost(metrics.total_estimated_cost_usd)
+                                    : '—';
+                                })()}
                           </TableCell>
+                          {(() => {
+                            const metrics = agentMetrics.get(agent.type);
+                            return (
+                              <TableCell className="text-xs text-muted-foreground">
+                                {metrics ? formatRelativeTime(metrics.last_used_at) : '\u2014'}
+                              </TableCell>
+                            );
+                          })()}
                           <TableCell>
                             <div className="flex gap-1">
                               <AccessibleIconButton
@@ -618,22 +710,36 @@ export default function ACPAgentsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="agent-allowed">Allowed Tools</Label>
-                    <Input id="agent-allowed" list="available-tools-list" value={agentForm.allowed_tools} onChange={(e) => setAgentForm(f => ({ ...f, allowed_tools: e.target.value }))} placeholder="Type to search tools, comma-separated" />
+                    <TagInput id="agent-allowed" value={agentForm.allowed_tools} onChange={(v) => setAgentForm(f => ({ ...f, allowed_tools: v }))} placeholder="Type tool name, press Enter" />
                     {availableTools.length > 0 && (
-                      <p className="text-xs text-muted-foreground">{availableTools.length} tools available — type to autocomplete</p>
+                      <p className="text-xs text-muted-foreground">{availableTools.length} backend tools available. Enter exact tool names to allow.</p>
                     )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="agent-denied">Denied Tools</Label>
-                    <Input id="agent-denied" list="available-tools-list" value={agentForm.denied_tools} onChange={(e) => setAgentForm(f => ({ ...f, denied_tools: e.target.value }))} placeholder="Type to search tools, comma-separated" />
+                    <TagInput id="agent-denied" value={agentForm.denied_tools} onChange={(v) => setAgentForm(f => ({ ...f, denied_tools: v }))} placeholder="Type tool name, press Enter" />
                   </div>
                 </div>
-                <datalist id="available-tools-list">
-                  {availableTools.map(t => <option key={t} value={t} />)}
-                </datalist>
                 <div className="space-y-2">
                   <Label htmlFor="agent-key">Required API Key (env var name)</Label>
                   <Input id="agent-key" value={agentForm.requires_api_key} onChange={(e) => setAgentForm(f => ({ ...f, requires_api_key: e.target.value }))} placeholder="ANTHROPIC_API_KEY" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="agent-default-budget">Default Token Budget</Label>
+                    <Input id="agent-default-budget" type="number" min={0} value={agentForm.default_token_budget} onChange={(e) => setAgentForm(f => ({ ...f, default_token_budget: e.target.value }))} placeholder="e.g. 100000 (empty = no budget)" />
+                  </div>
+                  <div className="flex items-end pb-2">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="agent-auto-terminate"
+                        checked={agentForm.default_auto_terminate_at_budget}
+                        onCheckedChange={(checked) => setAgentForm(f => ({ ...f, default_auto_terminate_at_budget: checked === true }))}
+                        disabled={!agentForm.default_token_budget}
+                      />
+                      <Label htmlFor="agent-auto-terminate">Auto-terminate at budget</Label>
+                    </div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox

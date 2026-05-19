@@ -295,6 +295,22 @@ providers:
     tokenizer_max_payload_mb: 20
     voice_clone_prompt_max_kb: 256
 
+  # OmniVoice Configuration
+  omnivoice:
+    enabled: false
+    runtime: "sidecar"
+    model: "omnivoice"
+    sample_rate: 24000
+    max_concurrent_generations: 1
+    extra_params:
+      repo_path: "../OmniVoice"
+      host: "127.0.0.1"
+      port: 8039
+      autoselect_port: true
+      warmup_on_startup: false
+      idle_shutdown_seconds: 900
+      resident_mode: false
+
 # Voice mappings for cross-provider compatibility
 # NOTE: Providers like index_tts rely on uploaded reference audio; the
 #       "clone_required" placeholder indicates the caller must supply

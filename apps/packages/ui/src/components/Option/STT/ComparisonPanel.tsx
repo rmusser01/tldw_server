@@ -209,6 +209,7 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
       <div className="flex flex-wrap items-center gap-3">
         <Select
           mode="multiple"
+          data-testid="stt-model-selector"
           placeholder={t(
             "stt.comparison.selectModels",
             "Select models to compare"

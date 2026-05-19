@@ -1383,7 +1383,7 @@ _CREATE_API_KEYS_TABLES = [
             key_prefix VARCHAR(16) NOT NULL,
             name VARCHAR(255),
             description TEXT,
-            scope VARCHAR(50) DEFAULT 'read',
+            scope VARCHAR(50),
             status VARCHAR(20) DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP,
@@ -1402,7 +1402,7 @@ _CREATE_API_KEYS_TABLES = [
         """,
         (),
     ),
-    ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS scope VARCHAR(50) DEFAULT 'read'", ()),
+    ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS scope VARCHAR(50)", ()),
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'", ()),
     ("ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_id VARCHAR(32)", ()),
     ("ALTER TABLE api_keys ALTER COLUMN key_hash TYPE TEXT", ()),
@@ -1882,7 +1882,18 @@ _CREATE_USAGE_TABLES = [
             remote_ip TEXT,
             user_agent TEXT,
             token_name TEXT,
-            conversation_id TEXT
+            conversation_id TEXT,
+            cached_input_tokens INTEGER,
+            cache_write_input_tokens INTEGER,
+            cache_read_input_tokens INTEGER,
+            billable_input_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            choice_count INTEGER,
+            estimate_source TEXT,
+            prompt_fingerprint TEXT,
+            prompt_fingerprint_version TEXT,
+            world_book_fingerprint TEXT,
+            raw_usage_metadata_json TEXT
         )
         """,
         (),
@@ -1891,6 +1902,17 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS user_agent TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS token_name TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS conversation_id TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cache_write_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cache_read_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS billable_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS choice_count INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS estimate_source TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint_version TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS world_book_fingerprint TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)", ()),
@@ -2114,6 +2136,25 @@ _CREATE_GENERATED_FILES_TABLES = [
         "ON generated_files(user_id, file_category, is_deleted)",
         (),
     ),
+]
+
+_CREATE_ORG_STT_SETTINGS = [
+    (
+        """
+        CREATE TABLE IF NOT EXISTS org_stt_settings (
+            org_id INTEGER PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
+            delete_audio_after_success BOOLEAN NOT NULL DEFAULT TRUE,
+            audio_retention_hours DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            redact_pii BOOLEAN NOT NULL DEFAULT FALSE,
+            allow_unredacted_partials BOOLEAN NOT NULL DEFAULT FALSE,
+            redact_categories_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            updated_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        (),
+    ),
+    ("CREATE INDEX IF NOT EXISTS idx_org_stt_settings_updated_by ON org_stt_settings(updated_by)", ()),
 ]
 
 _CREATE_DATA_SUBJECT_REQUESTS_TABLES = [
@@ -2880,6 +2921,43 @@ async def ensure_org_provider_secrets_pg(pool: DatabasePool | None = None) -> bo
         return True
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL org_provider_secrets table: {exc}")
+        return False
+
+
+def _looks_like_postgres(obj: Any) -> bool:
+    """Detect Postgres-compatible DB handles including raw asyncpg connections."""
+    if isinstance(obj, DatabasePool):
+        return True
+    if getattr(obj, "pool", None) is not None:
+        return True
+    module = getattr(type(obj), "__module__", "")
+    return isinstance(module, str) and module.startswith("asyncpg")
+
+
+async def ensure_org_stt_settings_pg(pool: Any | None = None) -> bool:
+    """Ensure org_stt_settings table exists for PostgreSQL backends."""
+    try:
+        db_target = pool or await get_db_pool()
+        if not callable(getattr(db_target, "execute", None)):
+            return False
+
+        if _looks_like_postgres(db_target):
+            try:
+                await ensure_authnz_core_tables_pg(db_target)
+            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"ensure_org_stt_settings_pg: core table ensure skipped/failed: {exc}")
+
+        for sql, params in _CREATE_ORG_STT_SETTINGS:
+            try:
+                await db_target.execute(sql, *params)
+            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"PG ensure org_stt_settings DDL failed: {exc}")
+                return False
+
+        logger.info("Ensured PostgreSQL org_stt_settings table (idempotent)")
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL org_stt_settings table: {exc}")
         return False
 
 

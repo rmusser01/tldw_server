@@ -71,6 +71,21 @@ export function MediaIngestJobsPanel() {
     setBatchDraft(String(savedBatchId || ''))
   }, [savedBatchId])
 
+  // Auto-link batch ID and expand panel when Quick Ingest completes
+  useEffect(() => {
+    const handleIngestComplete = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail
+      const batchId = detail?.batchId
+      if (batchId) {
+        setBatchDraft(batchId)
+        void setSavedBatchId(batchId)
+        void setCollapsed(false)
+      }
+    }
+    window.addEventListener("tldw:quick-ingest-complete", handleIngestComplete)
+    return () => window.removeEventListener("tldw:quick-ingest-complete", handleIngestComplete)
+  }, [setSavedBatchId, setCollapsed])
+
   const summary = useMemo(() => {
     return jobs.reduce(
       (acc, job) => {

@@ -17,21 +17,12 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, RequireRole, resolve_user_id_for_request, User
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    get_auth_principal,
-    rbac_rate_limit,
-    require_permissions,
-    require_roles,
-)
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig, ChunkingMethod
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import settings
@@ -373,8 +364,8 @@ async def create_vector_store(
                 raise HTTPException(status_code=409, detail=f"A vector store named '{payload.name}' already exists for this user")
         except HTTPException:
             raise
-        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-            logger.warning(f"Meta DB uniqueness check failed: {_e}")
+        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Meta DB uniqueness check failed; falling back to adapter scan")
         # As a fallback when meta lookup fails, scan adapter collections by metadata.name
         try:
             for col in await adapter.list_collections():
@@ -424,8 +415,8 @@ async def create_vector_store(
     # Register in meta DB
     try:
         meta_register_store(uid, store_id, name)
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Failed to register vector store in meta DB: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to register vector store in meta DB")
 
     # Track expected dimension in-memory for correctness in tests and fakes
     with contextlib.suppress(_VECTORSTORE_NONCRITICAL_EXCEPTIONS):
@@ -481,8 +472,8 @@ async def list_vector_stores(
                 used_ids.add(row['id'])
             except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
                 continue
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Meta DB list failed; falling back to Chroma-only: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Meta DB list failed; falling back to Chroma-only")
     # Include any collections not in meta DB
     try:
         adapter2 = await _get_adapter_for_user(current_user, 1536)
@@ -511,8 +502,8 @@ async def list_vector_stores(
 @router.get(
     "/vector_stores/admin/users",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -560,7 +551,7 @@ async def list_vector_store_users(current_user: User = Depends(get_request_user)
                 'batch_count': batch_count
             })
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-        raise HTTPException(status_code=500, detail=f"Failed to scan user directories: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to list vector store users") from e
 
     return { 'data': users }
 
@@ -644,8 +635,8 @@ async def update_vector_store(
             else:
                 # Not present: register with the new name
                 meta_register_store(uid_str, store_id, payload.name)
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Failed to update/register vector store meta name: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to persist vector store meta name update")
 
     return VectorStoreObject(
         id=md.get("openai_id", store_id),
@@ -672,8 +663,8 @@ async def delete_vector_store(
             ),
             store_id,
         )
-    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
-        logger.warning(f"Failed to delete store from meta DB: {_e}")
+    except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Failed to delete vector store from meta DB")
     # Remove from in-memory registry
     with contextlib.suppress(_VECTORSTORE_NONCRITICAL_EXCEPTIONS):
         _STORE_DIMENSIONS.pop(store_id, None)
@@ -978,8 +969,8 @@ class HNSWEfSearchRequest(BaseModel):
 @router.get(
     "/vector_stores/{store_id}/admin/index_info",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1005,8 +996,8 @@ async def get_index_info(
 @router.post(
     "/vector_stores/admin/hnsw_ef_search",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1034,8 +1025,8 @@ class RebuildIndexRequest(BaseModel):
 @router.post(
     "/vector_stores/{store_id}/admin/rebuild_index",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1070,8 +1061,8 @@ class DeleteByFilterRequest(BaseModel):
 @router.post(
     "/vector_stores/{store_id}/admin/delete_by_filter",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1128,8 +1119,8 @@ async def delete_by_filter(
 @router.get(
     "/vector_stores/admin/health",
     dependencies=[
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
         Depends(RBAC_VECTOR_ADMIN),
     ],
 )
@@ -1141,7 +1132,7 @@ async def vector_stores_health(current_user: User = Depends(get_request_user)):
         try:
             return await fn()  # type: ignore[misc]
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": "Vector store health check failed"}
     return {"ok": True}
 
 
@@ -1202,8 +1193,8 @@ async def list_vectors(
                     metadata=row.get('metadata') or {},
                     content=row.get('content') or "",
                 ))
-        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Adapter list_vectors_paginated failed; falling back to Chroma path: {e}")
+        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Adapter list_vectors_paginated failed; falling back to Chroma path")
     if not items and total == 0:
         # Fallback to Chroma collection semantics
         try:
@@ -1230,10 +1221,13 @@ async def list_vectors(
                 items.sort(key=lambda x: (x.metadata or {}).get(key, ''), reverse=reverse)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Vector listing failed: {e}")
-    next_offset = None
     returned = len(items)
-    if returned == limit and (offset + returned) < total:
-        next_offset = offset + returned
+    pagination = build_offset_pagination_meta(
+        limit=limit,
+        offset=offset,
+        total=total,
+        count=returned,
+    ).model_dump(mode="json")
 
     serialized_items: list[dict[str, Any]] = []
     for item in items:
@@ -1251,12 +1245,9 @@ async def list_vectors(
 
     return {
         "data": serialized_items,
-        "pagination": {
-            "limit": limit,
-            "offset": offset,
-            "next_offset": next_offset,
-            "total": total
-        }
+        "pagination": pagination,
+        "has_more": pagination["has_more"],
+        "next_offset": pagination["next_offset"],
     }
 
 
@@ -1469,9 +1460,11 @@ async def upsert_vectors_batch(
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
     except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-        _BATCH_STATUS[batch_id].update({"status": "failed", "error": str(e)})
+        logger.error("Vector batch upsert failed for batch {}", batch_id)
+        safe_error = "Vector batch upsert failed"
+        _BATCH_STATUS[batch_id].update({"status": "failed", "error": safe_error})
         try:
-            db_update_batch(batch_id, user_id=uid, status='failed', error=str(e))
+            db_update_batch(batch_id, user_id=uid, status='failed', error=safe_error)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as _e:
             logger.warning(f"Failed to persist batch failure: {_e}")
         raise
@@ -1531,8 +1524,23 @@ async def list_vector_batches(
                 detail="Admin privileges required",
             )
         requested_user_id = str(user_id)
-    rows = db_list_batches(user_id=requested_user_id, status=status, limit=limit, offset=offset)
-    return { 'data': rows, 'pagination': { 'limit': limit, 'offset': offset, 'count': len(rows) } }
+    fetched = db_list_batches(user_id=requested_user_id, status=status, limit=limit + 1, offset=offset)
+    rows = fetched[:limit]
+    has_more = len(fetched) > limit
+    pagination = build_offset_pagination_meta(
+        total=None,
+        limit=limit,
+        offset=offset,
+        count=len(rows),
+        has_more=has_more,
+    ).model_dump(mode="json")
+    pagination["count"] = len(rows)
+    return {
+        'data': rows,
+        'pagination': pagination,
+        'has_more': pagination["has_more"],
+        'next_offset': pagination["next_offset"],
+    }
 
 
 class CreateFromMediaRequest(BaseModel):
@@ -1787,8 +1795,16 @@ async def create_store_from_media(
             embed_fn = _get_embeddings_fn()
             vecs = await loop.run_in_executor(None, embed_fn, subtexts, app_config, model_id)
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS as e:
-            db_update_batch(batch_id, user_id=uid, status='failed', error=str(e))
-            raise HTTPException(500, detail=f"Embedding failed: {e}") from e
+            db_update_batch(
+                batch_id,
+                user_id=uid,
+                status='failed',
+                error="Failed to generate embeddings for media content",
+            )
+            raise HTTPException(
+                500,
+                detail="Failed to generate embeddings for media content",
+            ) from e
         # Prepare corresponding slice metadata
         slice_ids = ids[start:start+step]
         slice_docs = subtexts

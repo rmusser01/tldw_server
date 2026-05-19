@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
 import type { MediaResultItem } from '@/components/Media/types'
+import { getDesignSystemState } from '@/design-system'
 
 export type MediaLibraryStorageUsage = {
   loading: boolean
@@ -53,6 +54,8 @@ const formatInteger = (value: number): string => {
 const formatMegabytes = (value: number): string => {
   return `${value.toFixed(1)} MB`
 }
+
+const UNAVAILABLE_STATE_LABEL = getDesignSystemState('unavailable').label
 
 export const MediaLibraryStatsPanel: React.FC<MediaLibraryStatsPanelProps> = ({
   results,
@@ -217,7 +220,7 @@ export const MediaLibraryStatsPanel: React.FC<MediaLibraryStatsPanelProps> = ({
             ) : (
               <p className="m-0 text-text-muted" data-testid="media-library-stats-storage-empty">
                 {t('review:mediaPage.libraryStorageUnavailable', {
-                  defaultValue: 'Unavailable'
+                  defaultValue: UNAVAILABLE_STATE_LABEL
                 })}
               </p>
             )}

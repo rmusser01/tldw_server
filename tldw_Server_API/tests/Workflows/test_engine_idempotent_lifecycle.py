@@ -68,6 +68,54 @@ def test_duplicate_pause_resume_requests_are_already_applied(tmp_path):
     assert second_resume == "already_applied"
 
 
+def test_pause_rejects_terminal_run_without_mutating_status(tmp_path):
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = "run-pause-terminal"
+    _create_run(db, run_id)
+    db.update_run_status(run_id, status="succeeded")
+
+    engine = WorkflowEngine(db)
+    result = engine.pause(run_id)
+
+    run = db.get_run(run_id)
+    assert result == "invalid_state"
+    assert run is not None
+    assert run.status == "succeeded"
+    assert db.get_events(run_id, types=["run_paused"]) == []
+
+
+def test_resume_requires_paused_status_without_mutating_run(tmp_path):
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = "run-resume-invalid"
+    _create_run(db, run_id)
+    db.update_run_status(run_id, status="waiting_human", status_reason="awaiting_review")
+
+    engine = WorkflowEngine(db)
+    result = engine.resume(run_id)
+
+    run = db.get_run(run_id)
+    assert result == "invalid_state"
+    assert run is not None
+    assert run.status == "waiting_human"
+    assert db.get_events(run_id, types=["run_resumed"]) == []
+
+
+def test_cancel_rejects_terminal_run_without_mutating_status(tmp_path):
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = "run-cancel-terminal"
+    _create_run(db, run_id)
+    db.update_run_status(run_id, status="succeeded")
+
+    engine = WorkflowEngine(db)
+    result = engine.cancel(run_id)
+
+    run = db.get_run(run_id)
+    assert result == "invalid_state"
+    assert run is not None
+    assert run.status == "succeeded"
+    assert db.get_events(run_id, types=["run_cancelled"]) == []
+
+
 @pytest.mark.asyncio
 async def test_control_run_cancel_duplicate_returns_already_applied(tmp_path):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))

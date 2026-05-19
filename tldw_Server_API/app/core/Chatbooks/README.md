@@ -94,7 +94,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 
 **Overview**
 - Produces ZIP archives containing a `manifest.json` plus referenced files (media, documents) based on user selections.
-- Supports export/import in both sync and async modes; async jobs run via the core Jobs backend.
+- Supports export/import in both sync and async modes; async jobs run via the core Jobs backend. Continuation exports are currently sync-only.
 - Enforces strong validation and security: filename/path sanitization, ZIP checks, signed download URLs (optional), per-user storage dirs.
 
 **Key Files**
@@ -120,9 +120,10 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 **API Endpoints**
 - File: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py`
 - Base prefix: `/api/v1/chatbooks`
-- `POST /export` → create chatbook (sync or async). Validates metadata, enforces quotas, returns file (sync) or job id (async).
-- `POST /import` → import chatbook ZIP (sync or async). Supports conflict resolution strategies and selection filters.
-- `POST /preview` → preview manifest without importing.
+- `POST /export` → create chatbook (sync or async). Sync returns a completed job reference with `job_id` + `download_url`; async returns `job_id`.
+- `POST /export/continue` → continue a truncated export in sync mode. `async_mode=true` is rejected.
+- `POST /import` → import chatbook ZIP (sync or async) using direct multipart form fields. Current API support is limited to `skip` and `rename`; media/embedding imports remain disabled.
+- `POST /preview` → preview manifest without importing. Invalid archives/manifests return `400`.
 - `GET  /export/jobs` and `GET /import/jobs` → list jobs; `GET /export/jobs/{id}`/`GET /import/jobs/{id}` → job status.
 - `DELETE /export/jobs/{id}` and `DELETE /import/jobs/{id}` → cancel in-flight jobs.
 - `GET  /download/{job_id}` → download completed export; supports optional signed URLs.
@@ -141,7 +142,7 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 **Import Flow**
 - Save uploaded ZIP to secure per-user temp; validate ZIP thoroughly.
 - If async, create `ImportJob` row and process in background via core Jobs. Track `progress`, `conflicts`, `warnings`.
-- Apply conflict resolution: `skip`, `overwrite`, `rename`, `merge` (where supported).
+- Apply conflict resolution: `skip` and `rename` today; broader strategies are planned.
 
 **Security & Validation**
 - Filename and path sanitization, symlink rejection, traversal prevention.

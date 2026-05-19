@@ -1,0 +1,31 @@
+archetype:
+  key: blank_canvas
+  label: Blank Canvas
+  tagline: Start from scratch and configure everything yourself
+  icon: sparkles
+
+  persona:
+    name: Assistant
+    system_prompt: >-
+      You are a helpful assistant. Follow the user's instructions and
+      adapt to their needs.
+    personality_traits: []
+
+  mcp_modules:
+    enabled: []
+    disabled: []
+
+  suggested_external_servers: []
+
+  policy:
+    confirmation_mode: destructive_only
+    tool_overrides: []
+
+  voice_defaults:
+    stt_language: en
+
+  scope_rules: []
+
+  buddy: {}
+
+  starter_commands: []

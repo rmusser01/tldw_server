@@ -1,307 +1,406 @@
-import { test, expect } from '@playwright/test'
-import http from 'node:http'
-import { AddressInfo } from 'node:net'
-import { launchWithBuiltExtension } from './utils/extension-build'
-import { waitForConnectionStore, forceConnected } from './utils/connection'
+import { type Locator, type Page, expect, test } from "@playwright/test"
+import http from "node:http"
+import { AddressInfo } from "node:net"
 
-/**
- * Tests for Single Media Page UX fixes:
- * 1. hasActiveFilters passed to SearchBar - shows clear button
- * 2. isLoading passed to ResultsList - shows skeleton
- * 3. Debounced search - auto-triggers after typing
- * 4. Keyboard shortcuts - j/k for items, arrows for pages
- * 5. Visible Chat button in header
- * 6. Improved empty state with keyboard hint
- * 7. Loading skeleton in results
- * 8. Error toasts on search failure
- */
+import { forceConnected, waitForConnectionStore } from "./utils/connection"
+import { launchWithBuiltExtension } from "./utils/extension-build"
 
-function createMockServer(options?: { delayMs?: number; failSearch?: boolean }) {
-  const items = [
-    { id: 1, title: 'First Video', snippet: 'Video transcript', type: 'video', keywords: ['demo'] },
-    { id: 2, title: 'Second Document', snippet: 'PDF content', type: 'document', keywords: ['pdf'] },
-    { id: 3, title: 'Third Audio', snippet: 'Audio transcript', type: 'audio', keywords: ['audio'] }
-  ]
+type MockServerOptions = {
+  delayMs?: number
+  failSearch?: boolean
+}
 
-  const details: Record<number, any> = {
-    1: { id: 1, title: 'First Video', type: 'video', content: { text: 'Full video transcript content here' }, keywords: ['demo'] },
-    2: { id: 2, title: 'Second Document', type: 'document', content: { text: 'Full document content here' }, keywords: ['pdf'] },
-    3: { id: 3, title: 'Third Audio', type: 'audio', content: { text: 'Full audio transcript here' }, keywords: ['audio'] }
+type MockServerHandle = {
+  server: http.Server
+}
+
+const MEDIA_ITEMS = [
+  {
+    id: 1,
+    title: "First Video",
+    snippet: "Video transcript",
+    type: "video",
+    keywords: ["demo", "video"]
+  },
+  {
+    id: 2,
+    title: "Second Document",
+    snippet: "PDF content",
+    type: "document",
+    keywords: ["pdf", "reference"]
+  },
+  {
+    id: 3,
+    title: "Third Audio",
+    snippet: "Audio transcript",
+    type: "audio",
+    keywords: ["audio", "podcast"]
+  }
+]
+
+const MEDIA_DETAILS: Record<number, Record<string, unknown>> = {
+  1: {
+    id: 1,
+    title: "First Video",
+    type: "video",
+    content: { text: "Full video transcript content here" },
+    keywords: ["demo", "video"]
+  },
+  2: {
+    id: 2,
+    title: "Second Document",
+    type: "document",
+    content: { text: "Full document content here" },
+    keywords: ["pdf", "reference"]
+  },
+  3: {
+    id: 3,
+    title: "Third Audio",
+    type: "audio",
+    content: { text: "Full audio transcript here" },
+    keywords: ["audio", "podcast"]
+  }
+}
+
+function createMockServer(options: MockServerOptions = {}): MockServerHandle {
+  const filterItems = (body: Record<string, unknown> | null) => {
+    const query =
+      typeof body?.query === "string" ? body.query.trim().toLowerCase() : ""
+    const mediaTypes = Array.isArray(body?.media_types)
+      ? body.media_types
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.toLowerCase())
+      : []
+
+    return MEDIA_ITEMS.filter((item) => {
+      const matchesQuery =
+        query.length === 0 ||
+        item.title.toLowerCase().includes(query) ||
+        item.snippet.toLowerCase().includes(query) ||
+        item.keywords.some((keyword) => keyword.toLowerCase().includes(query))
+
+      const matchesMediaType =
+        mediaTypes.length === 0 || mediaTypes.includes(item.type.toLowerCase())
+
+      return matchesQuery && matchesMediaType
+    })
   }
 
   const server = http.createServer((req, res) => {
-    const url = req.url || ''
-    const method = (req.method || 'GET').toUpperCase()
+    const url = req.url || ""
+    const method = (req.method || "GET").toUpperCase()
 
-    const writeJson = (code: number, body: any) => {
+    const writeJson = (code: number, body: unknown) => {
       res.writeHead(code, {
-        'content-type': 'application/json',
-        'access-control-allow-origin': '*',
-        'access-control-allow-credentials': 'true'
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+        "access-control-allow-credentials": "true"
       })
       res.end(JSON.stringify(body))
     }
 
-    const respond = (code: number, body: any) => {
-      if (options?.delayMs) {
+    const respond = (code: number, body: unknown) => {
+      if (options.delayMs) {
         setTimeout(() => writeJson(code, body), options.delayMs)
       } else {
         writeJson(code, body)
       }
     }
 
-    if (method === 'OPTIONS') {
+    const readJsonBody = async (): Promise<Record<string, unknown> | null> => {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+      }
+
+      const raw = Buffer.concat(chunks).toString("utf8").trim()
+      if (!raw) return null
+
+      try {
+        return JSON.parse(raw) as Record<string, unknown>
+      } catch {
+        return null
+      }
+    }
+
+    if (method === "OPTIONS") {
       res.writeHead(204, {
-        'access-control-allow-origin': '*',
-        'access-control-allow-credentials': 'true',
-        'access-control-allow-headers': 'content-type, x-api-key, authorization'
+        "access-control-allow-origin": "*",
+        "access-control-allow-credentials": "true",
+        "access-control-allow-headers": "content-type, x-api-key, authorization"
       })
-      return res.end()
+      res.end()
+      return
     }
 
-    if (url === '/api/v1/health') return respond(200, { status: 'ok' })
-    if (url === '/api/v1/llm/models') return respond(200, ['mock/model'])
-
-    // Media detail endpoint
-    if (url.match(/^\/api\/v1\/media\/\d+$/) && method === 'GET') {
-      const id = Number(url.split('/').pop())
-      if (details[id]) return respond(200, details[id])
-      return respond(404, { detail: 'not found' })
+    if (url === "/api/v1/health" && method === "GET") {
+      respond(200, { status: "ok" })
+      return
     }
 
-    // Media search - can simulate failure
-    if (url.includes('/api/v1/media/search') && method === 'POST') {
-      if (options?.failSearch) return respond(500, { detail: 'Search failed' })
-      return respond(200, { items, pagination: { total_items: items.length, total_pages: 1 } })
+    if (url === "/api/v1/llm/models" && method === "GET") {
+      respond(200, ["mock/model"])
+      return
     }
 
-    // Media list
-    if (url.startsWith('/api/v1/media') && method === 'GET') {
-      return respond(200, { items, pagination: { total_items: items.length, total_pages: 1 } })
+    if (/^\/api\/v1\/media\/\d+$/.test(url) && method === "GET") {
+      const id = Number(url.split("/").pop())
+      const detail = MEDIA_DETAILS[id]
+      respond(detail ? 200 : 404, detail ?? { detail: "not found" })
+      return
     }
 
-    if (url === '/openapi.json') {
-      return respond(200, {
-        openapi: '3.0.0',
-        paths: { '/api/v1/media/': {}, '/api/v1/media/search': {}, '/api/v1/health': {} }
+    if (url.includes("/api/v1/media/search") && method === "POST") {
+      void (async () => {
+        const body = await readJsonBody()
+
+        if (options.failSearch) {
+          respond(500, { detail: "Search failed" })
+          return
+        }
+
+        const items = filterItems(body)
+        respond(200, {
+          items,
+          pagination: {
+            total_items: items.length,
+            total_pages: 1
+          }
+        })
+      })()
+      return
+    }
+
+    if (url.startsWith("/api/v1/media") && method === "GET") {
+      respond(200, {
+        items: MEDIA_ITEMS,
+        pagination: {
+          total_items: MEDIA_ITEMS.length,
+          total_pages: 1
+        }
       })
+      return
     }
 
-    respond(404, { detail: 'not found' })
+    if (url === "/openapi.json" && method === "GET") {
+      respond(200, {
+        openapi: "3.0.0",
+        paths: {
+          "/api/v1/media/": {},
+          "/api/v1/media/search": {},
+          "/api/v1/health": {},
+          "/api/v1/llm/models": {}
+        }
+      })
+      return
+    }
+
+    respond(404, { detail: "not found" })
   })
 
-  return server
+  return { server }
 }
 
-async function setupConnectedPage(server: http.Server) {
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const addr = server.address() as AddressInfo
-  const baseUrl = `http://127.0.0.1:${addr.port}`
+async function closeMockServer(server: http.Server) {
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+}
+
+async function setupConnectedMediaPage(
+  handle: MockServerHandle,
+  options: { waitForResults?: boolean } = {}
+) {
+  await new Promise<void>((resolve) =>
+    handle.server.listen(0, "127.0.0.1", resolve)
+  )
+  const address = handle.server.address() as AddressInfo
+  const baseUrl = `http://127.0.0.1:${address.port}`
 
   const { context, page, optionsUrl } = await launchWithBuiltExtension({
     allowOffline: true,
-    seedConfig: { serverUrl: baseUrl, authMode: 'single-user', apiKey: 'test' }
+    seedConfig: {
+      serverUrl: baseUrl,
+      authMode: "single-user",
+      apiKey: "test"
+    }
   })
 
-  await page.goto(optionsUrl, { waitUntil: 'networkidle' })
-  await waitForConnectionStore(page, 'ux-fixes-test')
-  await forceConnected(page, { serverUrl: baseUrl }, 'ux-fixes-test')
+  await page.goto(optionsUrl, { waitUntil: "domcontentloaded" })
+  await waitForConnectionStore(page, "single-media-ux-fixes:init")
+  await forceConnected(
+    page,
+    { serverUrl: baseUrl },
+    "single-media-ux-fixes:connected"
+  )
 
-  return { context, page, optionsUrl, baseUrl }
+  await page.goto(`${optionsUrl}#/media`, { waitUntil: "domcontentloaded" })
+  await expect(page.getByTestId("media-search-input")).toBeVisible()
+  if (options.waitForResults !== false) {
+    await expect
+      .poll(async () => getResultRows(page).count(), {
+        timeout: 10_000,
+        message: "Expected seeded media results to render in the sidebar"
+      })
+      .toBe(MEDIA_ITEMS.length)
+  }
+
+  return { context, page, baseUrl }
 }
 
-test.describe('Single Media Page UX Fixes', () => {
+const getResultRows = (page: Page): Locator =>
+  page.locator(
+    "[data-testid='media-results-list'] [role='button'][aria-selected]"
+  )
 
-  test('Fix 6: Empty state shows keyboard hint', async () => {
-    const server = createMockServer()
-    const { context, page, optionsUrl } = await setupConnectedPage(server)
+const getResultRowByTitle = (page: Page, title: string): Locator =>
+  getResultRows(page).filter({ hasText: title }).first()
 
-    await page.goto(optionsUrl + '#/media')
-    await page.waitForLoadState('networkidle')
+test.describe("Single Media Page UX", () => {
+  test("shows empty-state guidance before a user selects media", async () => {
+    const handle = createMockServer()
+    const { context, page } = await setupConnectedMediaPage(handle)
 
-    // Wait for page to stabilize
-    await page.waitForTimeout(500)
-
-    // Empty state should show keyboard hint
-    const emptyState = page.locator('text=No media item selected')
-    await expect(emptyState).toBeVisible()
-
-    const keyboardHint = page.locator('text=Tip: Use j/k to navigate')
-    await expect(keyboardHint).toBeVisible()
-
-    // Screenshot: Empty state with keyboard hint
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix6-empty-state-keyboard-hint.png',
-      fullPage: false
-    })
-
-    await context.close()
-    await new Promise<void>((r) => server.close(() => r()))
-  })
-
-  test('Fix 5: Chat button visible in header when media selected', async () => {
-    const server = createMockServer()
-    const { context, page, optionsUrl } = await setupConnectedPage(server)
-
-    await page.goto(optionsUrl + '#/media')
-    await page.waitForLoadState('networkidle')
-
-    // Wait for results
-    await page.waitForSelector('button[aria-label*="Select"]', { timeout: 10000 })
-
-    // Click first result
-    await page.locator('button[aria-label*="Select"]').first().click()
-    await page.waitForTimeout(500)
-
-    // Chat button should be visible
-    const chatButton = page.locator('button[aria-label*="Chat with this media"]')
-    await expect(chatButton).toBeVisible()
-
-    // Screenshot: Header with Chat button
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix5-chat-button-in-header.png',
-      fullPage: false
-    })
-
-    await context.close()
-    await new Promise<void>((r) => server.close(() => r()))
-  })
-
-  test('Fix 4: Keyboard navigation j/k works', async () => {
-    const server = createMockServer()
-    const { context, page, optionsUrl } = await setupConnectedPage(server)
-
-    await page.goto(optionsUrl + '#/media')
-    await page.waitForLoadState('networkidle')
-
-    // Wait for results
-    await page.waitForSelector('button[aria-label*="Select"]', { timeout: 10000 })
-
-    // Select first item
-    await page.locator('button[aria-label*="Select"]').first().click()
-    await page.waitForTimeout(300)
-
-    // Screenshot: First item selected
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix4-keyboard-nav-first-item.png',
-      fullPage: false
-    })
-
-    // Verify first item title visible
-    await expect(page.locator('h3:has-text("First Video")')).toBeVisible()
-
-    // Press j to go to next
-    await page.keyboard.press('j')
-    await page.waitForTimeout(300)
-
-    // Verify second item now shown
-    await expect(page.locator('h3:has-text("Second Document")')).toBeVisible()
-
-    // Screenshot: Second item after j press
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix4-keyboard-nav-after-j.png',
-      fullPage: false
-    })
-
-    // Press k to go back
-    await page.keyboard.press('k')
-    await page.waitForTimeout(300)
-
-    // Verify first item again
-    await expect(page.locator('h3:has-text("First Video")')).toBeVisible()
-
-    await context.close()
-    await new Promise<void>((r) => server.close(() => r()))
-  })
-
-  test('Fix 1: hasActiveFilters shows clear button in SearchBar', async () => {
-    const server = createMockServer()
-    const { context, page, optionsUrl } = await setupConnectedPage(server)
-
-    await page.goto(optionsUrl + '#/media')
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(500)
-
-    // Expand media types filter
-    await page.locator('text=Media types').click()
-    await page.waitForTimeout(200)
-
-    // Check a filter checkbox
-    const checkbox = page.locator('input[type="checkbox"]').first()
-    if (await checkbox.isVisible()) {
-      await checkbox.check()
-      await page.waitForTimeout(300)
-
-      // Screenshot: Filter active with clear button
-      await page.screenshot({
-        path: 'tests/e2e/screenshots/fix1-filter-active-clear-button.png',
-        fullPage: false
-      })
-
-      // Clear all button should be visible
-      const clearAll = page.locator('button:has-text("Clear all"), a:has-text("Clear all")')
-      await expect(clearAll).toBeVisible()
+    try {
+      await expect(
+        page.getByRole("heading", { name: /No media item selected/i })
+      ).toBeVisible()
+      await expect(
+        page.getByText(/Tip: Use j\/k to navigate items/i)
+      ).toBeVisible()
+      await expect(
+        page.getByRole("button", { name: /Open Quick Ingest/i })
+      ).toBeVisible()
+    } finally {
+      await context.close()
+      await closeMockServer(handle.server)
     }
-
-    await context.close()
-    await new Promise<void>((r) => server.close(() => r()))
   })
 
-  test('Fix 7: Loading skeleton appears during search', async () => {
-    // Use a delayed server to see skeleton
-    const server = createMockServer({ delayMs: 2000 })
-    const { context, page, optionsUrl } = await setupConnectedPage(server)
+  test("selecting media reveals chat actions and marks the active row", async () => {
+    const handle = createMockServer()
+    const { context, page } = await setupConnectedMediaPage(handle)
 
-    await page.goto(optionsUrl + '#/media')
+    try {
+      const firstRow = getResultRowByTitle(page, "First Video")
+      await firstRow.click()
 
-    // Screenshot: Should show skeleton during initial load
-    await page.waitForTimeout(500)
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix7-loading-skeleton.png',
-      fullPage: false
-    })
-
-    // Wait for actual results
-    await page.waitForSelector('button[aria-label*="Select"]', { timeout: 10000 })
-
-    // Screenshot: After loading complete
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix7-after-loading.png',
-      fullPage: false
-    })
-
-    await context.close()
-    await new Promise<void>((r) => server.close(() => r()))
+      await expect(firstRow).toHaveAttribute("aria-selected", "true")
+      await expect(
+        page.getByRole("button", { name: /Chat with this media/i })
+      ).toBeVisible()
+      await expect(page.getByRole("button", { name: /Actions/i })).toBeVisible()
+      await expect(
+        page.getByRole("heading", { name: /First Video/i }).last()
+      ).toBeVisible()
+    } finally {
+      await context.close()
+      await closeMockServer(handle.server)
+    }
   })
 
-  test('Fix 3: Debounced search auto-triggers', async () => {
-    const server = createMockServer()
-    const { context, page, optionsUrl } = await setupConnectedPage(server)
+  test("keyboard shortcuts keep result selection and preview state in sync", async () => {
+    const handle = createMockServer()
+    const { context, page } = await setupConnectedMediaPage(handle)
 
-    await page.goto(optionsUrl + '#/media')
-    await page.waitForLoadState('networkidle')
-    await page.waitForSelector('button[aria-label*="Select"]', { timeout: 10000 })
+    try {
+      const firstRow = getResultRowByTitle(page, "First Video")
+      const secondRow = getResultRowByTitle(page, "Second Document")
 
-    // Type in search box (use specific media search placeholder)
-    const searchInput = page.locator('input[placeholder="Search media (title/content)"]')
-    await searchInput.fill('test query')
+      await firstRow.click()
+      await expect(firstRow).toHaveAttribute("aria-selected", "true")
+      await expect(
+        page.getByRole("heading", { name: /First Video/i }).last()
+      ).toBeVisible()
 
-    // Screenshot: After typing (before debounce triggers)
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix3-debounce-typing.png',
-      fullPage: false
-    })
+      await page.keyboard.press("j")
 
-    // Wait for debounce (300ms) + search time
-    await page.waitForTimeout(800)
+      await expect(secondRow).toHaveAttribute("aria-selected", "true")
+      await expect(firstRow).toHaveAttribute("aria-selected", "false")
+      await expect(
+        page.getByRole("heading", { name: /Second Document/i }).last()
+      ).toBeVisible()
 
-    // Screenshot: After debounced search
-    await page.screenshot({
-      path: 'tests/e2e/screenshots/fix3-debounce-after-search.png',
-      fullPage: false
-    })
+      await page.keyboard.press("k")
 
-    await context.close()
-    await new Promise<void>((r) => server.close(() => r()))
+      await expect(firstRow).toHaveAttribute("aria-selected", "true")
+      await expect(secondRow).toHaveAttribute("aria-selected", "false")
+      await expect(
+        page.getByRole("heading", { name: /First Video/i }).last()
+      ).toBeVisible()
+    } finally {
+      await context.close()
+      await closeMockServer(handle.server)
+    }
+  })
+
+  test("metadata mode updates the filter clear-all affordance", async () => {
+    const handle = createMockServer()
+    const { context, page } = await setupConnectedMediaPage(handle)
+
+    try {
+      const metadataModeButton = page.getByRole("button", {
+        name: /metadata search/i
+      })
+      const clearAll = page.getByRole("button", { name: /^Clear all/ })
+
+      await expect(clearAll).toHaveText("Clear all")
+
+      await metadataModeButton.click()
+
+      await expect(metadataModeButton).toHaveAttribute("aria-pressed", "true")
+      await expect(clearAll).toHaveText(/Clear all \(1\)/)
+
+      await clearAll.click()
+
+      await expect(metadataModeButton).toHaveAttribute("aria-pressed", "false")
+      await expect(clearAll).toHaveText("Clear all")
+    } finally {
+      await context.close()
+      await closeMockServer(handle.server)
+    }
+  })
+
+  test("slash shortcut focuses the search field", async () => {
+    const handle = createMockServer()
+    const { context, page } = await setupConnectedMediaPage(handle)
+
+    try {
+      const searchInput = page.getByTestId("media-search-input")
+
+      await page.locator("body").click()
+      await page.keyboard.press("/")
+
+      await expect(searchInput).toBeFocused()
+    } finally {
+      await context.close()
+      await closeMockServer(handle.server)
+    }
+  })
+
+  test("search input exposes a clear affordance and restores the default list when cleared", async () => {
+    const handle = createMockServer()
+    const { context, page } = await setupConnectedMediaPage(handle)
+
+    try {
+      const searchInput = page.getByTestId("media-search-input")
+      await searchInput.fill("audio")
+
+      const clearSearch = page.getByTestId("media-search-clear")
+      await expect(clearSearch).toBeVisible()
+
+      await clearSearch.click()
+
+      await expect(searchInput).toHaveValue("")
+      await expect(clearSearch).toHaveCount(0)
+      await expect
+        .poll(async () => getResultRows(page).count(), {
+          timeout: 10_000,
+          message:
+            "Expected clearing the query to restore the default result list"
+        })
+        .toBe(MEDIA_ITEMS.length)
+    } finally {
+      await context.close()
+      await closeMockServer(handle.server)
+    }
   })
 })

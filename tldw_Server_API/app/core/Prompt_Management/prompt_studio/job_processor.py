@@ -353,7 +353,7 @@ class JobProcessor:
                 entity_id,
                 {
                     "status": "failed",
-                    "error_message": str(e),
+                    "error_message": "Prompt Studio evaluation job failed",
                     "completed_at": datetime.now(timezone.utc),
                 },
             )

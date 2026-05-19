@@ -23,6 +23,11 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://tldw_user:${POSTGRES_PASSWORD:-TestPassword123!}@postgres:5432/${POSTGRES_DB:-tldw_users}}
 
+      # Multi-user admin bootstrap (set for first run, remove after):
+      # ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+
       # Networking / CORS
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://your.domain.com}
 

@@ -1,4 +1,5 @@
 import React from "react"
+import { Link } from "react-router-dom"
 import {
   Alert,
   Button,
@@ -2297,9 +2298,16 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                 })}
               </p>
               <p className="text-sm text-text-subtle">
-                {t("option:quiz.empty.createFirst", {
-                  defaultValue:
-                    "Generate one from media or create one manually, then come back to take it"
+                {t("option:quiz.empty.createFirstPrefix", {
+                  defaultValue: "Generate one from your "
+                })}
+                <Link to="/media" className="text-primary hover:text-primary/80 underline">
+                  {t("option:quiz.empty.mediaLibrary", {
+                    defaultValue: "media library"
+                  })}
+                </Link>
+                {t("option:quiz.empty.createFirstSuffix", {
+                  defaultValue: " or create one manually, then come back to take it."
                 })}
               </p>
             </div>

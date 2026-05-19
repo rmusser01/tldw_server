@@ -7,13 +7,29 @@
  *  - new Function("return this")()
  *
  * into a safe, direct global object lookup that does not use the Function
- * constructor. Runs over all .js files under ./build.
+ * constructor. Defaults to scanning ./build, but also accepts --dir <path>.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 
 const root = process.cwd()
-const buildDir = path.join(root, 'build')
+const DEFAULT_BUILD_DIR = path.join(root, 'build')
+
+function parseTargetDir(argv = process.argv.slice(2)) {
+  const dirIndex = argv.indexOf('--dir')
+  if (dirIndex === -1) {
+    return DEFAULT_BUILD_DIR
+  }
+
+  const explicitDir = argv[dirIndex + 1]
+  if (!explicitDir) {
+    throw new Error('Missing value for --dir')
+  }
+
+  return path.resolve(root, explicitDir)
+}
+
+const buildDir = parseTargetDir()
 
 if (!fs.existsSync(buildDir)) {
   process.exit(0)
@@ -89,5 +105,7 @@ for (const file of jsFiles) {
 }
 
 if (!changedAny) {
-  console.log('[strip-dangerous-eval] No dangerous eval patterns found under build/')
+  console.log(
+    `[strip-dangerous-eval] No dangerous eval patterns found under ${path.relative(root, buildDir) || '.'}`
+  )
 }

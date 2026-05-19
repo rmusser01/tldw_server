@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+  useMemo
+} from "react"
 import { createPortal } from "react-dom"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -28,11 +35,14 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import { useShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import type { KeyboardShortcut as ConfiguredKeyboardShortcut } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
+import { CHAT_PATH, WORKSPACE_PLAYGROUND_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
 
 type CommandShortcut = { key: string; modifiers: ShortcutModifier[] }
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect
 
 const buildShortcut = (
   key: string,
@@ -81,6 +91,7 @@ export interface CommandPaletteProps {
   onSearchHistory?: () => void
   onSwitchChat?: (chatId: string) => void
   sidepanelChats?: { id: string; label: string }[]
+  onQueryChange?: (query: string) => void
   scope?: "global" | "sidepanel"
   openSignal?: number
   registerGlobalOpenShortcut?: boolean
@@ -98,6 +109,7 @@ export function CommandPalette({
   onSearchHistory,
   onSwitchChat,
   sidepanelChats,
+  onQueryChange,
   scope = "global",
   openSignal,
   registerGlobalOpenShortcut = true,
@@ -116,14 +128,27 @@ export function CommandPalette({
   const shortcutEnabled = location.pathname !== WORKSPACE_PLAYGROUND_PATH
   const { shortcuts: configuredShortcuts } = useShortcutConfig()
 
-  // Register ⌘K shortcut to open
+  const openPalette = useCallback(() => {
+    setOpen(true)
+  }, [])
+
+  // Register Cmd/Ctrl+K shortcut to open
   useShortcut({
     key: "k",
     modifiers: ["meta"],
-    action: () => setOpen(true),
+    action: openPalette,
     description: "Open command palette",
     enabled: registerGlobalOpenShortcut && shortcutEnabled,
-    allowInInput: false,
+    allowInInput: true,
+  })
+
+  useShortcut({
+    key: "k",
+    modifiers: ["ctrl"],
+    action: openPalette,
+    description: "Open command palette",
+    enabled: registerGlobalOpenShortcut && shortcutEnabled,
+    allowInInput: true,
   })
 
   // Also allow Escape to close
@@ -135,7 +160,7 @@ export function CommandPalette({
     allowInInput: true,
   })
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!listenForOpenEvents) {
       return
     }
@@ -162,8 +187,8 @@ export function CommandPalette({
         id: "nav-chat",
         label: t("common:commandPalette.goToChat", "Go to Chat"),
         icon: <MessageSquare className="size-4" />,
-        action: () => { navigate("/"); setOpen(false) },
-        targetPath: "/",
+        action: () => { navigate(CHAT_PATH); setOpen(false) },
+        targetPath: CHAT_PATH,
         category: "navigation",
         keywords: ["playground", "conversation"],
       },
@@ -540,6 +565,10 @@ export function CommandPalette({
     setSelectedIndex(0)
   }, [query])
 
+  useEffect(() => {
+    onQueryChange?.(query)
+  }, [onQueryChange, query])
+
   // Focus input when opened
   useEffect(() => {
     if (open) {
@@ -713,7 +742,9 @@ export function CommandPalette({
                           key={cmd.id}
                           onClick={() => executeCommand(cmd)}
                           onMouseEnter={() => setSelectedIndex(currentIndex)}
+                          data-command-id={cmd.id}
                           data-selected={isSelected}
+                          data-target-path={cmd.targetPath}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
                             focusRingClasses,

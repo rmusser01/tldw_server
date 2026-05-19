@@ -7,6 +7,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   listAllCharacters: vi.fn(async () => []),
   listPersonaProfiles: vi.fn(async () => []),
+  selectedAssistant: {
+    value: null as null | {
+      kind: "character" | "persona"
+      id: string
+      name: string
+    }
+  },
   setSelectedAssistant: vi.fn(async () => undefined)
 }))
 
@@ -31,7 +38,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: () => [
-    null,
+    mocks.selectedAssistant.value,
     mocks.setSelectedAssistant,
     { isLoading: false, setRenderValue: vi.fn() }
   ]
@@ -109,6 +116,9 @@ const renderAssistantSelect = () => {
 
   render(
     <QueryClientProvider client={queryClient}>
+      <button id="assistant-rail-trigger" type="button">
+        Runtime rail trigger
+      </button>
       <AssistantSelect variant="dropdown" />
     </QueryClientProvider>
   )
@@ -117,6 +127,7 @@ const renderAssistantSelect = () => {
 describe("AssistantSelect behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.selectedAssistant.value = null
     mocks.listAllCharacters.mockResolvedValue([
       { id: "char-1", name: "Alpha" },
       { id: "char-2", name: "Beta" }
@@ -131,11 +142,11 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.type(
-      await screen.findByRole("textbox", { name: /search assistants/i }),
+      await screen.findByRole("textbox", { name: /search characters and personas/i }),
       "beta"
     )
 
@@ -143,12 +154,28 @@ describe("AssistantSelect behavior", () => {
     expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull()
   })
 
+  it("uses solid design-token backgrounds for the selector panel", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    const panel = await screen.findByTestId("assistant-select-panel")
+    expect(panel).toHaveClass("bg-elevated")
+    expect(panel).not.toHaveClass("bg-background")
+    expect(await screen.findByRole("button", { name: "Alpha" })).toHaveClass(
+      "bg-surface"
+    )
+  })
+
   it("does not select a character when its favorite star is clicked", async () => {
     const user = userEvent.setup()
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(
@@ -156,6 +183,147 @@ describe("AssistantSelect behavior", () => {
     )
 
     expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+  })
+
+  it("opens the character tab when character chat requests character selection", async () => {
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: { tab: "character", source: "chat-header" }
+      })
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Alpha" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Characters" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+  })
+
+  it("opens the persona tab from an assistant-select event", async () => {
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: { tab: "persona", source: "playground-cockpit" }
+      })
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Personas" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+  })
+
+  it("returns focus to the requested rail trigger after selection", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+    const railTrigger = screen.getByRole("button", {
+      name: "Runtime rail trigger"
+    })
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "persona",
+          source: "playground-cockpit",
+          returnFocusSelector: "#assistant-rail-trigger"
+        }
+      })
+    )
+
+    await user.click(await screen.findByRole("button", { name: "Guide Persona" }))
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(railTrigger)
+    })
+  })
+
+  it("closes the menu and restores focus without waiting for selection persistence", async () => {
+    const user = userEvent.setup()
+    let resolveSelection: (() => void) | undefined
+    mocks.setSelectedAssistant.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSelection = resolve
+        })
+    )
+
+    renderAssistantSelect()
+    const railTrigger = screen.getByRole("button", {
+      name: "Runtime rail trigger"
+    })
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "character",
+          source: "playground-cockpit",
+          returnFocusSelector: "#assistant-rail-trigger"
+        }
+      })
+    )
+
+    await user.click(await screen.findByRole("button", { name: "Alpha" }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("assistant-select-menu")).toBeNull()
+      expect(document.activeElement).toBe(railTrigger)
+    })
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "character", id: "char-1", name: "Alpha" })
+    )
+
+    resolveSelection?.()
+  })
+
+  it("returns focus to the requested rail trigger after Escape closes the menu", async () => {
+    renderAssistantSelect()
+    const railTrigger = screen.getByRole("button", {
+      name: "Runtime rail trigger"
+    })
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "character",
+          source: "playground-cockpit",
+          returnFocusSelector: "#assistant-rail-trigger"
+        }
+      })
+    )
+
+    expect(await screen.findByRole("button", { name: "Alpha" })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(railTrigger)
+    })
+  })
+
+  it("labels identity and optional scene choices without mixing character and persona concepts", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    expect(
+      screen.getByRole("tablist", { name: "Character or persona" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Characters" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Personas" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Optional scene context" })
+    ).toBeInTheDocument()
   })
 
   it("keeps personas accessible and dispatches the actor footer action", async () => {
@@ -166,7 +334,7 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(await screen.findByRole("tab", { name: "Personas" }))
@@ -175,11 +343,119 @@ describe("AssistantSelect behavior", () => {
     ).toBeInTheDocument()
 
     await user.click(
-      await screen.findByRole("button", { name: /scene director \(actor\)/i })
+      await screen.findByRole("button", { name: "Optional scene context" })
     )
 
     expect(actorListener).toHaveBeenCalledTimes(1)
     window.removeEventListener("tldw:open-actor-settings", actorListener)
+  })
+
+  it("lists and selects personas with canonical buddy summary payloads", async () => {
+    const user = userEvent.setup()
+    mocks.listPersonaProfiles.mockResolvedValue([
+      {
+        id: "persona-1",
+        name: "Guide Persona",
+        avatar_url: "https://example.com/guide.png",
+        buddy_summary: {
+          has_buddy: true,
+          persona_name: "Guide Persona",
+          role_summary: "Keeps the chat on course",
+          visual: {
+            species_id: "owl",
+            silhouette_id: "perch",
+            palette_id: "dawn"
+          }
+        }
+      }
+    ])
+
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
+
+    const personaButton = await screen.findByRole("button", {
+      name: "Guide Persona"
+    })
+    expect(within(personaButton).getByRole("img", { name: "Guide Persona" })).toHaveAttribute(
+      "src",
+      "https://example.com/guide.png"
+    )
+
+    await user.click(personaButton)
+
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "persona",
+        id: "persona-1",
+        name: "Guide Persona",
+        avatar_url: "https://example.com/guide.png",
+        buddy_summary: {
+          has_buddy: true,
+          persona_name: "Guide Persona",
+          role_summary: "Keeps the chat on course",
+          visual: {
+            species_id: "owl",
+            silhouette_id: "perch",
+            palette_id: "dawn"
+          }
+        }
+      })
+    )
+  })
+
+  it.each([
+    {
+      label: "character to another character",
+      source: { kind: "character" as const, id: "char-1", name: "Alpha" },
+      targetTab: "Characters",
+      targetName: "Beta",
+      expected: { kind: "character", id: "char-2", name: "Beta" }
+    },
+    {
+      label: "character to persona",
+      source: { kind: "character" as const, id: "char-1", name: "Alpha" },
+      targetTab: "Personas",
+      targetName: "Guide Persona",
+      expected: { kind: "persona", id: "persona-1", name: "Guide Persona" }
+    },
+    {
+      label: "persona to character",
+      source: { kind: "persona" as const, id: "persona-1", name: "Guide Persona" },
+      targetTab: "Characters",
+      targetName: "Alpha",
+      expected: { kind: "character", id: "char-1", name: "Alpha" }
+    },
+    {
+      label: "none to persona",
+      source: null,
+      targetTab: "Personas",
+      targetName: "Guide Persona",
+      expected: { kind: "persona", id: "persona-1", name: "Guide Persona" }
+    }
+  ])("supports $label from the assistant selector", async ({ source, targetTab, targetName, expected }) => {
+    const user = userEvent.setup()
+    mocks.selectedAssistant.value = source
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: source?.name ?? "Select character or persona"
+      })
+    )
+
+    await user.click(await screen.findByRole("tab", { name: targetTab }))
+    mocks.setSelectedAssistant.mockClear()
+    await user.click(await screen.findByRole("button", { name: targetName }))
+
+    expect(mocks.setSelectedAssistant).toHaveBeenCalledTimes(1)
+    expect(mocks.setSelectedAssistant).toHaveBeenLastCalledWith(
+      expect.objectContaining(expected)
+    )
   })
 
   it("moves a favorited character ahead of other characters and closes on escape", async () => {
@@ -187,7 +463,7 @@ describe("AssistantSelect behavior", () => {
     renderAssistantSelect()
 
     await user.click(
-      await screen.findByRole("button", { name: "Select assistant" })
+      await screen.findByRole("button", { name: "Select character or persona" })
     )
 
     await user.click(

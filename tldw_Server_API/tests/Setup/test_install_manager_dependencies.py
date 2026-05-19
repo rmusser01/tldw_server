@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
 import types
@@ -9,6 +10,21 @@ import pytest
 
 from tldw_Server_API.app.core.Setup import install_manager
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan, TTSInstall
+
+
+class _CapturingLogger:
+    def __init__(self):
+        self.records = []
+
+    def debug(self, message, *args, **kwargs):
+        self.records.append(("debug", message, args, dict(kwargs)))
+
+    def warning(self, message, *args, **kwargs):
+        self.records.append(("warning", message, args, dict(kwargs)))
+
+
+def _joined_records(logger: _CapturingLogger) -> str:
+    return "\n".join(f"{level} {message} {args!r} {kwargs!r}" for level, message, args, kwargs in logger.records)
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +37,29 @@ def reset_dependency_cache():
 def _read_status(path: str):
     with open(path, 'r', encoding='utf-8') as handle:
         return json.load(handle)
+
+
+def test_install_status_file_candidate_failure_log_is_sanitized(tmp_path, monkeypatch):
+    status_dir = tmp_path / "private" / "install-state"
+    logger = _CapturingLogger()
+    original_open = Path.open
+
+    def _raise_write_probe(self, *args, **kwargs):
+        if self.name == ".write_test":
+            raise OSError(f"install status write denied at {self}")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(install_manager, "logger", logger)
+    monkeypatch.setattr(install_manager, "_candidate_status_dirs", lambda: [status_dir])
+    monkeypatch.setattr(install_manager.Path, "open", _raise_write_probe)
+
+    assert install_manager._resolve_status_file() is None
+
+    joined = _joined_records(logger)
+    assert "Install status directory not writable" in joined
+    assert str(status_dir) not in joined
+    assert "install status write denied" not in joined
+    assert "exc_info" not in joined
 
 
 def test_dependencies_skipped_when_pip_disabled(monkeypatch):
@@ -100,6 +139,13 @@ def test_install_plan_accepts_kitten_tts():
 
     assert plan.tts[0].engine == 'kitten_tts'
     assert plan.tts[0].variants == ['nano']
+
+
+def test_install_plan_accepts_omnivoice():
+    plan = InstallPlan(tts=[TTSInstall(engine='omnivoice')])
+
+    assert plan.tts[0].engine == 'omnivoice'
+    assert plan.tts[0].variants == []
 
 
 def test_kitten_tts_dependencies_trigger_pip_install(monkeypatch):
@@ -223,3 +269,126 @@ def test_install_kitten_tts_prefetch_uses_configured_cache_dir(monkeypatch):
     assert download_calls == [
         ("KittenML/kitten-tts-nano-0.8", "cache/kitten_tts", True, None)
     ]
+
+
+def _patch_omnivoice_sidecar_installer(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    config_patched: bool,
+) -> list[tuple[str, object]]:
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    calls: list[tuple[str, object]] = []
+    source_checkout = tmp_path / "OmniVoice"
+
+    monkeypatch.setattr(
+        installer,
+        "resolve_source_checkout",
+        lambda repo_root=None: calls.append(("resolve_source_checkout", repo_root)) or source_checkout,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "build_runtime_layout",
+        lambda runtime_base, repo_root=None: calls.append(("build_runtime_layout", runtime_base)) or types.SimpleNamespace(
+            runtime_base=Path(runtime_base),
+            venv_dir=Path(runtime_base) / ".venv",
+            runtime_dir=Path(runtime_base) / "runtime",
+            logs_dir=Path(runtime_base) / "logs",
+            interpreter_path=Path(runtime_base) / ".venv" / "bin" / "python",
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "create_runtime_layout",
+        lambda layout: calls.append(("create_runtime_layout", layout.runtime_base)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "clone_repository",
+        lambda repo_url, source_dir: calls.append(("clone_repository", repo_url, source_dir)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "create_virtualenv",
+        lambda venv_dir: calls.append(("create_virtualenv", venv_dir)),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "install_sidecar_runtime",
+        lambda *, interpreter_path, repo_root, source_checkout: calls.append(
+            ("install_sidecar_runtime", interpreter_path, repo_root, source_checkout)
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "validate_runtime_layout",
+        lambda layout: calls.append(("validate_runtime_layout", layout.runtime_base)) or [],
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
+        "patch_tts_config",
+        lambda **kwargs: calls.append(("patch_tts_config", kwargs["config_path"])) or config_patched,
+        raising=True,
+    )
+
+    return calls
+
+
+def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
+    calls = _patch_omnivoice_sidecar_installer(
+        monkeypatch,
+        tmp_path,
+        config_patched=True,
+    )
+
+    install_manager._install_omnivoice()
+
+    assert [entry[0] for entry in calls] == [
+        "resolve_source_checkout",
+        "build_runtime_layout",
+        "create_runtime_layout",
+        "clone_repository",
+        "create_virtualenv",
+        "install_sidecar_runtime",
+        "validate_runtime_layout",
+        "patch_tts_config",
+    ]
+
+
+def test_omnivoice_install_fails_when_config_patch_does_not_update_provider(
+    monkeypatch,
+    tmp_path,
+):
+    calls = _patch_omnivoice_sidecar_installer(
+        monkeypatch,
+        tmp_path,
+        config_patched=False,
+    )
+
+    with pytest.raises(RuntimeError, match="provider configuration could not be updated"):
+        install_manager._install_omnivoice()
+
+    assert [entry[0] for entry in calls][-1] == "patch_tts_config"
+
+
+def test_omnivoice_install_checks_download_policy_before_running_installer(monkeypatch):
+    calls: list[tuple[str, object]] = []
+
+    def _blocked(label):
+        calls.append(("ensure_downloads_allowed", label))
+        raise install_manager.DownloadBlockedError("downloads blocked for test")
+
+    monkeypatch.setattr(install_manager, "_ensure_downloads_allowed", _blocked, raising=True)
+
+    with pytest.raises(install_manager.DownloadBlockedError, match="downloads blocked for test"):
+        install_manager._install_omnivoice()
+
+    assert calls == [("ensure_downloads_allowed", "OmniVoice sidecar runtime")]

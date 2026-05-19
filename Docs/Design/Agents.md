@@ -1,11 +1,77 @@
 # Agents.md
 
 
+```
+I essentially have 3 modes:
+
+1. Everything is specified, written and tested by me, then cleaned up by AI. This is for the core of the application.
+
+2. AI writes the functions, then sets up stub tests for me to write. Here I’ll often rewrite the functions as they often don’t do what I want, or do too much. I just find it gets rid of a lot of boilerplate to do things this way.
+
+3. AI does everything. This is for experiments or parts of an application that I am perfectly willing to delete. About 70% of the time I do end up deleting these parts. I don’t allow it to touch 1 or 2.
+```
+
 ## Skills
 
+https://github.com/rcarmo/piclaw
+https://github.com/rcarmo/piclaw/blob/main/docs/tools-and-skills.md
+https://ai.gopubby.com/harness-engineering-what-every-ai-engineer-needs-to-know-in-2026-0ab649e5686a?gi=cd3b96478c4e
+https://github.com/VILA-Lab/Dive-into-Claude-Code
+https://github.com/outsourc-e/hermes-workspace
+https://charlielabs.ai/
+https://archive.is/UhxWz
 
+
+https://github.com/itayinbarr/little-coder
+
+Allow the user to modify the tool call before its executed to fix typos/change intent of call
+
+https://www.youtube.com/watch?v=am_oeAoUhew
+https://www.warp.dev/?
+https://github.com/getagentseal/codeburn
+
+https://claude.com/blog/introducing-routines-in-claude-code
+	https://code.claude.com/docs/en/routines
+	https://platform.claude.com/docs/en/managed-agents/overview
+
+
+https://github.com/mattpocock/skills/tree/main
+https://www.aihero.dev/5-agent-skills-i-use-every-day
+https://github.com/3stoneBrother/code-audit
+https://github.com/NousResearch/hermes-agent/tree/main/skills/creative/manim-video
+https://pub.towardsai.net/openais-harness-engineering-experiment-zero-manually-written-code-100a24ad04cf
+https://github.com/ScaleML/AgentSPEX
+https://openai.com/index/introducing-workspace-agents-in-chatgpt/
 https://github.com/openai/symphony
+https://ai.gopubby.com/harness-engineering-what-every-ai-engineer-needs-to-know-in-2026-0ab649e5686a?gi=faae0708f1c3
+https://github.com/minghinmatthewlam/pi-gui
+https://levelup.gitconnected.com/building-claude-code-with-harness-engineering-d2e8c0da85f0
+https://github.com/aiming-lab/WebXSkill
 
+https://github.com/semgrep/mythos-bench?utm_source=tldrsec.com&utm_medium=newsletter&utm_campaign=tl-dr-sec-325-dissecting-mythos-the-0-security-stack-github-action-red-team-framework
+https://cursor.com/blog/self-driving-codebases
+https://github.com/nizos/tdd-guard
+https://securitycryptographywhatever.com/2026/03/25/ai-bug-finding/
+https://github.com/withmartian/code-review-benchmark
+https://github.com/alibaba/aacr-bench
+https://github.com/weareaisle/nano-analyzer
+https://dirac.run/posts/hash-anchors-myers-diff-single-token
+https://github.com/dirac-run/dirac
+https://github.com/tanukihat/PiClaw
+https://www.reddit.com/r/LocalLLaMA/comments/1stjwg5/been_using_pi_coding_agent_with_local_qwen36_35b/
+https://maggieappleton.com/zero-alignment
+https://github.com/ryoppippi/ccusage
+https://rdi.berkeley.edu/blog/trustworthy-benchmarks-cont/
+https://recursive-mode.dev/introduction
+https://platform.claude.com/docs/en/managed-agents/overview
+https://code.claude.com/docs/en/channels
+https://maggieappleton.com/zero-alignment
+https://github.com/FareedKhan-dev/claude-code-staff-engineer
+https://www.generativestorytelling.ai/blog/posts/useful-corporate-agents/
+https://www.youtube.com/watch?v=RjfbvDXpFls
+https://github.com/The-Vibe-Company/companion
+https://github.com/milisp/codexia
+https://developers.openai.com/codex/app/features#floating-pop-out-window
 https://skills.sh/
 https://skills.sh/remotion-dev/skills/remotion-best-practices
 https://github.com/coreyhaines31/marketingskills

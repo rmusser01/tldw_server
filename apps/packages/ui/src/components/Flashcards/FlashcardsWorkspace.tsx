@@ -13,7 +13,11 @@ import {
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import ConnectionProblemBanner from "@/components/Common/ConnectionProblemBanner"
 import { StatusBadge } from "@/components/Common/StatusBadge"
+import { getDesignSystemState } from "@/design-system"
 import { getDemoFlashcardDecks } from "@/utils/demo-content"
+const FlipCardDemo = React.lazy(() =>
+  import("./components/FlipCardDemo").then((m) => ({ default: m.FlipCardDemo }))
+)
 const FlashcardsManager = React.lazy(() =>
   import("./FlashcardsManager").then((m) => ({ default: m.FlashcardsManager }))
 )
@@ -106,8 +110,9 @@ export const FlashcardsWorkspace: React.FC = () => {
       }
     }
     if (uxState === "unconfigured" || uxState === "configuring_url") {
+      const setupRequiredState = getDesignSystemState("setup_required")
       return {
-        badgeLabel: "Setup required",
+        badgeLabel: setupRequiredState.label,
         title: t("option:flashcards.setupTitle", {
           defaultValue: "Finish setup to use Flashcards"
         }),
@@ -259,24 +264,15 @@ export const FlashcardsWorkspace: React.FC = () => {
           })}
           onPrimaryAction={scrollToServerCard}
         />
-        <div className="rounded-lg border border-dashed border-border bg-surface p-3 text-xs text-text">
-          <div className="mb-2 font-semibold">
+        <div className="rounded-lg border border-dashed border-border bg-surface p-4">
+          <div className="mb-3 text-center text-xs font-semibold text-text">
             {t("option:flashcards.demoPreviewHeading", {
-              defaultValue: "Example decks (preview only)"
+              defaultValue: "Try sample flashcards"
             })}
           </div>
-          <div className="divide-y divide-border">
-            {demoDecks.map((deck) => (
-              <div key={deck.id} className="py-2">
-                <div className="text-sm font-medium text-text">
-                  {deck.name}
-                </div>
-                <div className="mt-1 text-[11px] text-text-muted">
-                  {deck.summary}
-                </div>
-              </div>
-            ))}
-          </div>
+          <React.Suspense fallback={null}>
+            <FlipCardDemo />
+          </React.Suspense>
         </div>
       </div>
     ) : (
@@ -308,10 +304,19 @@ export const FlashcardsWorkspace: React.FC = () => {
             </span>
           </span>
         }
-        description={t("option:flashcards.offlineDescription", {
-          defaultValue:
-            "This tldw server does not advertise the Flashcards endpoints. Upgrade your server to a version that includes /api/v1/flashcards... to use this workspace."
-        })}
+        description={
+          <>
+            {t("option:flashcards.offlineDescription", {
+              defaultValue:
+                "This tldw server does not advertise the Flashcards endpoints. Upgrade your server to a version that includes /api/v1/flashcards... to use this workspace."
+            })}
+            {" "}
+            {t("option:flashcards.offlineVersionHint", {
+              defaultValue:
+                "The Flashcards API requires tldw_server v0.1.25 or later."
+            })}
+          </>
+        }
         examples={[
           t("option:flashcards.offlineExample1", {
             defaultValue:
@@ -320,6 +325,10 @@ export const FlashcardsWorkspace: React.FC = () => {
           t("option:flashcards.offlineExample2", {
             defaultValue:
               "After upgrading, reload the extension and return to Flashcards."
+          }),
+          t("option:flashcards.offlineExample3", {
+            defaultValue:
+              "If you just updated your server, it may take a moment for capabilities to refresh."
           })
         ]}
         primaryActionLabel={t("settings:healthSummary.diagnostics", {

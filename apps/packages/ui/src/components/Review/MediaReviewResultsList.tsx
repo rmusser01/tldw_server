@@ -1,7 +1,14 @@
 import React from "react"
-import { Tag, Checkbox, Pagination, Skeleton, Empty, Button } from "antd"
+import { Tag, Checkbox, Pagination, Skeleton, Empty, Button, Input } from "antd"
+import { Upload } from "lucide-react"
 import type { MediaReviewState, MediaReviewActions } from "@/components/Review/media-review-types"
 import { includesId } from "@/components/Review/media-review-types"
+import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
+import {
+  persistFirstIngestDismissed,
+  readFirstIngestDismissed,
+  clearFirstIngestDismissed
+} from "@/utils/ftux-storage"
 
 interface MediaReviewResultsListProps {
   state: MediaReviewState
@@ -13,10 +20,32 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
     t,
     allResults, hasResults,
     selectedIds, previewedId,
-    isFetching,
+    isFetching, query,
     total, page, pageSize, setPage, setPageSize,
     listParentRef, listVirtualizer
   } = state
+
+  const [tutorialDismissed, setTutorialDismissed] = React.useState(() => {
+    return readFirstIngestDismissed()
+  })
+
+  const handleDismissTutorial = React.useCallback(() => {
+    setTutorialDismissed(true)
+    persistFirstIngestDismissed()
+  }, [])
+
+  const handleRequestQuickIngestOpen = React.useCallback(() => {
+    requestQuickIngestOpen()
+  }, [])
+
+  const handleShowTutorialAgain = React.useCallback(() => {
+    setTutorialDismissed(false)
+    clearFirstIngestDismissed()
+  }, [])
+
+  // Show first-ingest tutorial when library is empty (no query, no results, not fetching)
+  const showFirstIngestTutorial =
+    !hasResults && !isFetching && !query.trim() && !tutorialDismissed
 
   const { previewItem, toggleSelect, clearSelectionWithGuard } = actions
 
@@ -153,8 +182,71 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
             <Pagination size="small" current={page} pageSize={pageSize} total={total} onChange={(p, ps) => { setPage(p); setPageSize(ps); }} />
           </div>
         </>
+      ) : showFirstIngestTutorial ? (
+        <div
+          className="rounded-xl border-2 border-dashed border-border p-8 text-center"
+          data-testid="first-ingest-tutorial"
+        >
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+            <Upload className="h-6 w-6 text-primary" />
+          </div>
+          <h3 className="text-lg font-semibold text-text">
+            {t("mediaPage.firstIngest.title", "Get started -- ingest your first content")}
+          </h3>
+          <p className="mt-2 text-sm text-text-muted">
+            {t("mediaPage.firstIngest.description", "Try pasting a YouTube URL to see tldw in action:")}
+          </p>
+          <div className="mx-auto mt-4 max-w-md">
+            <Input
+              placeholder="https://www.youtube.com/watch?v=..."
+              className="text-center"
+              onPressEnter={handleRequestQuickIngestOpen}
+              aria-label={t("mediaPage.firstIngest.urlInputLabel", "Paste a URL to ingest") as string}
+            />
+          </div>
+          <Button
+            type="primary"
+            className="mt-3"
+            onClick={handleRequestQuickIngestOpen}
+          >
+            {t("mediaPage.firstIngest.ingestButton", "Ingest")}
+          </Button>
+          <p className="mt-4 text-sm text-text-muted">
+            {t(
+              "mediaPage.firstIngest.hint",
+              "You can also upload PDFs, audio files, EPUBs, or paste any web URL."
+            )}
+          </p>
+          <Button
+            type="link"
+            size="small"
+            className="mt-2"
+            onClick={handleDismissTutorial}
+          >
+            {t("mediaPage.firstIngest.dismiss", "Dismiss")}
+          </Button>
+        </div>
       ) : (
-        <Empty description={t("mediaPage.noResults", "No results")} />
+        <Empty description={t("mediaPage.noResults", "No results")}>
+          <div className="flex flex-col items-center gap-2">
+            <Button
+              type="primary"
+              icon={<Upload className="inline h-4 w-4 mr-1" />}
+              onClick={handleRequestQuickIngestOpen}
+            >
+              {t("mediaPage.openQuickIngest", "Open Quick Ingest")}
+            </Button>
+            {tutorialDismissed && (
+              <Button
+                type="link"
+                size="small"
+                onClick={handleShowTutorialAgain}
+              >
+                {t("mediaPage.showTutorialAgain", "Show tutorial again")}
+              </Button>
+            )}
+          </div>
+        </Empty>
       )}
     </>
   )

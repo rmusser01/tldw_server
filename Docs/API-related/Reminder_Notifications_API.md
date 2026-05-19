@@ -102,6 +102,7 @@ Base: `/api/v1/notifications`
 
 - `GET /api/v1/notifications?limit=100&offset=0&include_archived=false`
 - Permission: `notifications.read`
+- Archived notification items include `snooze_until` when the notification has an active snooze reminder backing it.
 
 ### Unread Count
 
@@ -130,6 +131,7 @@ Request:
 
 - `POST /api/v1/notifications/{notification_id}/snooze`
 - Permission: `notifications.control`
+- Creates the reminder task and dismisses the source notification from the active inbox.
 
 Request:
 
@@ -145,6 +147,20 @@ Response:
 {
   "task_id": "task_abc123",
   "run_at": "2026-03-01T10:30:00+00:00"
+}
+```
+
+### Cancel Snooze
+
+- `DELETE /api/v1/notifications/{notification_id}/snooze`
+- Permission: `notifications.control`
+
+Response:
+
+```json
+{
+  "cancelled": true,
+  "deleted_tasks": 1
 }
 ```
 

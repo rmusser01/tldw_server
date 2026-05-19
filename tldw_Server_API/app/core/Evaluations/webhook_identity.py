@@ -7,6 +7,7 @@ legacy identifiers in tests or internal call sites.
 from __future__ import annotations
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Evaluations.identity import evaluations_identity_from_user
 
 
 def _strip_user_prefix(value: str) -> str:
@@ -20,25 +21,7 @@ def webhook_user_id_from_user(user: User, *, fallback: str = "1") -> str:
 
     Prefers numeric IDs when available; preserves existing user_ prefix when present.
     """
-    raw = None
-    try:
-        raw = user.id_int
-    except Exception:
-        raw = None
-
-    if raw is None:
-        try:
-            raw = _strip_user_prefix(user.id_str)
-        except Exception:
-            raw = None
-
-    raw_str = str(raw or "").strip()
-    if not raw_str:
-        raw_str = str(fallback)
-
-    if raw_str.startswith("user_"):
-        return raw_str
-    return f"user_{raw_str}"
+    return evaluations_identity_from_user(user, fallback=fallback).webhook_user_id
 
 
 def webhook_user_id_from_value(value: str | None) -> str | None:

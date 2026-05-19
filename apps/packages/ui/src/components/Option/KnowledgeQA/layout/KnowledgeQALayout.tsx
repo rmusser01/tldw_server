@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from "react"
 import { Download, PanelLeftOpen, PanelLeftClose } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
+import { DEFAULT_RAG_SETTINGS, type RagSettings } from "@/services/rag/unified-rag"
 import { isKnowledgeQaHistoryItem, sortHistoryNewestFirst } from "../historyUtils"
 import { KnowledgeContextBar } from "../context/KnowledgeContextBar"
 import { CompactToolbar } from "../context/CompactToolbar"
@@ -10,6 +11,12 @@ import { KnowledgeReadyState } from "../empty/KnowledgeReadyState"
 import { AnswerWorkspace } from "../panels/AnswerWorkspace"
 import { useLayoutMode } from "../hooks/useLayoutMode"
 import { useMobile } from "@/hooks/useMediaQuery"
+import {
+  ALL_RAG_SOURCES,
+  getRagSourceLabel,
+  isRagSource,
+} from "@/services/rag/sourceMetadata"
+import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 
 const LazyHistoryPane = React.lazy(() =>
   import("../history/HistoryPane").then((module) => ({ default: module.HistoryPane })),
@@ -46,24 +53,44 @@ const READY_STATE_ONBOARDING_SUGGESTIONS = [
   "Show me an example of a cited answer",
 ]
 
-function normalizeSourceSet(values: string[]): string {
-  return [...values].sort((left, right) => left.localeCompare(right)).join("|")
+function normalizeSourceSet(values: Array<string | null | undefined>): string {
+  return Array.from(
+    new Set(values.filter((value): value is typeof ALL_RAG_SOURCES[number] => isRagSource(value)))
+  )
+    .sort(
+      (left, right) =>
+        ALL_RAG_SOURCES.indexOf(left) -
+        ALL_RAG_SOURCES.indexOf(right)
+    )
+    .join("|")
 }
 
 function normalizeNumberSet(values: Array<number | null | undefined>): string {
-  return values
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
-    .map((value) => Math.round(value))
-    .sort((left, right) => left - right)
-    .join("|")
+  return dedupeNumberValues(values).join("|")
 }
 
 function normalizeStringSet(values: Array<string | null | undefined>): string {
-  return values
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .map((value) => value.trim())
-    .sort((left, right) => left.localeCompare(right))
-    .join("|")
+  return dedupeStringValues(values).join("|")
+}
+
+function dedupeNumberValues(values: Array<number | null | undefined>): number[] {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+        .map((value) => Math.round(value))
+    )
+  ).sort((left, right) => left - right)
+}
+
+function dedupeStringValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    )
+  ).sort((left, right) => left.localeCompare(right))
 }
 
 function hasConversationId(item: { conversationId?: string }): boolean {
@@ -105,7 +132,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const queryStage = knowledgeQa.queryStage ?? "idle"
   const preset = knowledgeQa.preset ?? "balanced"
   const setPreset = knowledgeQa.setPreset ?? (() => undefined)
-  const settings = knowledgeQa.settings ?? {
+  const settings: RagSettings = knowledgeQa.settings ?? {
+    ...DEFAULT_RAG_SETTINGS,
     sources: [],
     enable_web_fallback: true,
     top_k: 10,
@@ -133,6 +161,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   }
   const focusSource = knowledgeQa.focusSource ?? (() => undefined)
   const settingsPanelOpen = knowledgeQa.settingsPanelOpen ?? false
+  const sourceHealth = knowledgeQa.sourceHealth
+  const refreshSourceHealth = knowledgeQa.refreshSourceHealth ?? (async () => undefined)
 
   const isMobile = useMobile()
   const { mode, setLayoutMode, isSimple, isResearch, showPromotionToast, dismissPromotion, acceptPromotion } =
@@ -148,6 +178,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
   const hasResults = results.length > 0 || Boolean(answer)
   const showNoResultsState =
     hasSearched && !isSearching && !error && results.length === 0 && !answer
+  const nearestMatchesAvailable =
+    (knowledgeQa.searchDetails?.alsoConsidered?.length ?? 0) > 0
   const hasVisibleResultsArea =
     hasResults || showNoResultsState || Boolean(error) || isSearching
   const recentHistoryItem = useMemo(() => {
@@ -182,25 +214,73 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
       : READY_STATE_ONBOARDING_SUGGESTIONS
   const isDesktopReadyState = effectiveSimple && !isMobile && !hasVisibleResultsArea
 
-  const contextChangedSinceLastRun = useMemo(() => {
-    if (!lastSearchScope) return false
-    const currentMediaScope = [
+  const scopeChangeDetails = useMemo<string[]>(() => {
+    if (!lastSearchScope) return []
+    const changes: string[] = []
+    const currentMediaScope = dedupeNumberValues([
       ...(Array.isArray(settings.include_media_ids) ? settings.include_media_ids : []),
       ...pinnedSourceFilters.mediaIds,
-    ]
-    const currentNoteScope = [
+    ])
+    const currentNoteScope = dedupeStringValues([
       ...(Array.isArray(settings.include_note_ids) ? settings.include_note_ids : []),
       ...pinnedSourceFilters.noteIds,
-    ]
-    return (
-      lastSearchScope.preset !== preset ||
-      lastSearchScope.webFallback !== settings.enable_web_fallback ||
-      normalizeSourceSet(lastSearchScope.sources) !== normalizeSourceSet(settings.sources) ||
+    ])
+    if (lastSearchScope.preset !== preset) {
+      const presetLabels: Record<string, string> = {
+        fast: "Fast",
+        balanced: "Balanced",
+        thorough: "Deep",
+        custom: "Custom",
+      }
+      changes.push(
+        `Preset: changed from '${presetLabels[lastSearchScope.preset] ?? lastSearchScope.preset}' to '${presetLabels[preset] ?? preset}'`
+      )
+    }
+    if (normalizeSourceSet(lastSearchScope.sources) !== normalizeSourceSet(settings.sources)) {
+      const formatSources = (sources: Array<string | null | undefined>) => {
+        const normalizedSources = Array.from(
+          new Set(
+            sources.filter((source): source is typeof ALL_RAG_SOURCES[number] => isRagSource(source))
+          )
+        ).sort(
+          (left, right) =>
+            ALL_RAG_SOURCES.indexOf(left) - ALL_RAG_SOURCES.indexOf(right)
+        )
+
+        if (normalizedSources.length === 0) return "None"
+        if (normalizedSources.length >= ALL_RAG_SOURCES.length) return "All sources"
+        return normalizedSources.map((source) => getRagSourceLabel(source)).join(", ")
+      }
+      changes.push(
+        `Sources: changed from '${formatSources(lastSearchScope.sources)}' to '${formatSources(settings.sources)}'`
+      )
+    }
+    if (lastSearchScope.webFallback !== settings.enable_web_fallback) {
+      changes.push(
+        `Web fallback: turned ${settings.enable_web_fallback ? "on" : "off"}`
+      )
+    }
+    if (
       normalizeNumberSet(lastSearchScope.includeMediaIds ?? []) !==
-        normalizeNumberSet(currentMediaScope) ||
+      normalizeNumberSet(currentMediaScope)
+    ) {
+      const prevCount = dedupeNumberValues(lastSearchScope.includeMediaIds ?? []).length
+      const currCount = currentMediaScope.length
+      changes.push(
+        `Document filters: changed from ${prevCount === 0 ? "all" : `${prevCount} selected`} to ${currCount === 0 ? "all" : `${currCount} selected`}`
+      )
+    }
+    if (
       normalizeStringSet(lastSearchScope.includeNoteIds ?? []) !==
-        normalizeStringSet(currentNoteScope)
-    )
+      normalizeStringSet(currentNoteScope)
+    ) {
+      const prevCount = dedupeStringValues(lastSearchScope.includeNoteIds ?? []).length
+      const currCount = currentNoteScope.length
+      changes.push(
+        `Note filters: changed from ${prevCount === 0 ? "all" : `${prevCount} selected`} to ${currCount === 0 ? "all" : `${currCount} selected`}`
+      )
+    }
+    return changes
   }, [
     lastSearchScope,
     pinnedSourceFilters.mediaIds,
@@ -211,6 +291,8 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
     settings.include_note_ids,
     settings.sources,
   ])
+
+  const contextChangedSinceLastRun = scopeChangeDetails.length > 0
   const latestUserTurnKey = useMemo(() => getLatestUserTurnKey(messages), [messages])
 
   useEffect(() => {
@@ -265,12 +347,15 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
 
   const handleSuggestedPrompt = (prompt: string) => {
     setQuery(prompt)
-    focusSearchInput()
-  }
-
-  const handleBroadenScope = () => {
-    updateSetting("top_k", Math.min(50, Math.max(settings.top_k + 5, 10)))
-    setSettingsPanelOpen(true)
+    // Select all text so the user can type to replace without manually clearing
+    requestAnimationFrame(() => {
+      const input = document.getElementById(
+        "knowledge-search-input"
+      ) as HTMLInputElement | null
+      if (!input) return
+      input.focus()
+      input.select()
+    })
   }
 
   const handleEnableWeb = () => {
@@ -281,7 +366,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
 
   const handleShowNearestMatches = () => {
     setEvidenceRailOpen(true)
-    setEvidenceRailTab("sources")
+    setEvidenceRailTab(results.length > 0 ? "sources" : "details")
     if (results.length > 0) {
       focusSource(0)
     }
@@ -302,6 +387,16 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
       return
     }
     setSettingsPanelOpen(true)
+  }
+
+  const handleAddSources = () => {
+    const request = requestQuickIngestOpen(
+      { source: "knowledge_qa" },
+      { focusTrigger: true }
+    )
+    if (!request) {
+      handleOpenSourceSelector()
+    }
   }
 
   return (
@@ -354,6 +449,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                     updateSetting("enable_web_fallback", !settings.enable_web_fallback)
                   }
                   onOpenSourceSelector={handleOpenSourceSelector}
+                  onAddSources={handleAddSources}
                   onOpenSettings={() => setSettingsPanelOpen(true)}
                   generationProvider={settings.generation_provider ?? null}
                   generationModel={settings.generation_model ?? null}
@@ -364,6 +460,10 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                     updateSetting("generation_model", model)
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
+                  scopeChangeDetails={scopeChangeDetails}
+                  sourceHealth={sourceHealth}
+                  onRefreshSourceHealth={refreshSourceHealth}
+                  showAddSources={isMobile}
                   className={isDesktopReadyState ? "justify-center" : undefined}
                 />
               ) : (
@@ -391,6 +491,9 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                     updateSetting("generation_model", model)
                   }
                   contextChangedSinceLastRun={contextChangedSinceLastRun}
+                  scopeChangeDetails={scopeChangeDetails}
+                  sourceHealth={sourceHealth}
+                  onRefreshSourceHealth={refreshSourceHealth}
                   onOpenSettings={() => setSettingsPanelOpen(true)}
                 />
               )}
@@ -406,8 +509,12 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                       }
                     }}
                     onSelectSources={handleOpenSourceSelector}
+                    onAddSources={handleAddSources}
                     hasSources={settings.sources.length > 0}
+                    selectedSources={settings.sources}
+                    sourceHealth={sourceHealth}
                     hasRecentSession={Boolean(recentHistoryItem)}
+                    webFallbackEnabled={settings.enable_web_fallback}
                   />
                   {/* Inline recent sessions for returning users in Simple mode */}
                   {effectiveSimple && recentSessions.length > 0 && (
@@ -456,10 +563,14 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                 {showNoResultsState ? (
                   <React.Suspense fallback={null}>
                     <LazyNoResultsRecovery
-                      onBroadenScope={handleBroadenScope}
+                      onOpenQuickIngest={handleAddSources}
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}
                       webEnabled={settings.enable_web_fallback}
+                      selectedSources={settings.sources}
+                      sourceHealth={sourceHealth}
+                      sourceStatus={knowledgeQa.searchDetails?.sourceStatus}
+                      showNearestMatchesAvailable={nearestMatchesAvailable}
                     />
                   </React.Suspense>
                 ) : null}
@@ -490,13 +601,13 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
         ) : null}
       </main>
 
-      {/* Mode toggle + promotion toast */}
+      {/* Mode toggle + promotion toast + help link */}
       <div className="fixed bottom-4 right-4 z-20 flex flex-col items-end gap-2">
         {showPromotionToast && !isMobile && (
           <div className="rounded-lg border border-border bg-surface px-4 py-3 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <p className="text-sm font-medium text-text">Switch to workspace view?</p>
+            <p className="text-sm font-medium text-text">Switch to detailed view?</p>
             <p className="mt-0.5 text-xs text-text-muted">
-              Get a full research layout with history sidebar and evidence panel.
+              Get a detailed layout with history sidebar and evidence panel.
             </p>
             <div className="mt-2 flex items-center gap-2">
               <button
@@ -504,7 +615,7 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
                 onClick={acceptPromotion}
                 className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-primaryStrong transition-colors"
               >
-                Open workspace
+                Switch to detailed view
               </button>
               <button
                 type="button"
@@ -521,17 +632,27 @@ export function KnowledgeQALayout({ onExportClick }: KnowledgeQALayoutProps) {
           <button
             type="button"
             onClick={() => setLayoutMode(isSimple ? "research" : "simple")}
-            className="rounded-lg border border-border bg-surface p-2 shadow-sm hover:bg-hover transition-colors"
-            title={isSimple ? "Open workspace view" : "Simplify view"}
-            aria-label={isSimple ? "Open workspace view" : "Simplify view"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-xs font-medium text-text-muted shadow-sm hover:bg-hover hover:text-text transition-colors"
+            title={isSimple ? "Switch to detailed view" : "Switch to simple view"}
+            aria-label={isSimple ? "Switch to detailed view" : "Switch to simple view"}
           >
             {isSimple ? (
               <PanelLeftOpen className="h-4 w-4 text-text-muted" />
             ) : (
               <PanelLeftClose className="h-4 w-4 text-text-muted" />
             )}
+            <span>{isSimple ? "Detailed" : "Simple"}</span>
           </button>
         )}
+
+        <a
+          href="https://github.com/rmusser01/tldw_server2#readme"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-text-muted hover:text-primary transition-colors"
+        >
+          Help &amp; Documentation
+        </a>
       </div>
     </div>
   )

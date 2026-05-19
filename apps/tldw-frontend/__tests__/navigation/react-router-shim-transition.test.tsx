@@ -2,6 +2,7 @@ import React from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import * as routerShim from "@web/extension/shims/react-router-dom"
 import {
   Navigate,
   UNSAFE_DataRouterContext,
@@ -61,6 +62,10 @@ const ParamsReader = () => {
   const params = useParams<{ sourceId?: string }>()
   return <span>{params.sourceId ?? "missing"}</span>
 }
+
+const RouterContextReader = () => (
+  <span>{routerShim.useInRouterContext?.() ? "in-router" : "out-of-router"}</span>
+)
 
 describe("react-router-dom Next.js shim transitions", () => {
   let startTransitionSpy: ReturnType<typeof vi.spyOn>
@@ -128,5 +133,11 @@ describe("react-router-dom Next.js shim transitions", () => {
 
   it("exports UNSAFE_DataRouterContext for shared route modules", () => {
     expect(UNSAFE_DataRouterContext).toBeDefined()
+  })
+
+  it("reports router context availability for shared components", () => {
+    render(<RouterContextReader />)
+
+    expect(screen.getByText("in-router")).toBeInTheDocument()
   })
 })

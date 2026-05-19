@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { CharactersManager, withCharacterNameInLabel } from "../Manager"
 import { DEFAULT_CHARACTER_STORAGE_KEY } from "@/utils/default-character-preference"
+import { ensureLocalStorageApi } from "./testUtils"
 
 const TEMPLATE_CHOOSER_SEEN_KEY = "characters-template-chooser-seen"
 
@@ -18,6 +19,7 @@ const {
   useMutationMock,
   useQueryClientMock,
   useNavigateMock,
+  useIsConnectedMock,
   useCharacterShortcutsMock,
   generateFullCharacterMock,
   generateFieldMock,
@@ -32,6 +34,7 @@ const {
   setSelectedCharacterMock,
   focusComposerMock,
   notificationMock,
+  storeSetters,
   tldwClientMock,
   templateData
 } = vi.hoisted(() => ({
@@ -39,6 +42,7 @@ const {
   useMutationMock: vi.fn(),
   useQueryClientMock: vi.fn(),
   useNavigateMock: vi.fn(),
+  useIsConnectedMock: vi.fn(() => true),
   useCharacterShortcutsMock: vi.fn((_options?: any) => undefined),
   generateFullCharacterMock: vi.fn(),
   generateFieldMock: vi.fn(
@@ -58,6 +62,21 @@ const {
   navigateMock: vi.fn(),
   setSelectedCharacterMock: vi.fn(),
   focusComposerMock: vi.fn(),
+  storeSetters: {
+    setHistory: vi.fn(),
+    setMessages: vi.fn(),
+    setHistoryId: vi.fn(),
+    setServerChatId: vi.fn(),
+    setServerChatState: vi.fn(),
+    setServerChatTopic: vi.fn(),
+    setServerChatClusterId: vi.fn(),
+    setServerChatSource: vi.fn(),
+    setServerChatExternalRef: vi.fn(),
+    setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatMetaLoaded: vi.fn()
+  },
   notificationMock: {
     success: vi.fn(),
     info: vi.fn(),
@@ -187,6 +206,10 @@ vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => notificationMock
 }))
 
+vi.mock("@/hooks/useConnectionState", () => ({
+  useIsConnected: () => useIsConnectedMock()
+}))
+
 vi.mock("@/components/Common/confirm-danger", () => ({
   useConfirmDanger: () => confirmDangerMock
 }))
@@ -229,17 +252,7 @@ vi.mock("@/hooks/useComposerFocus", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: (selector: any) =>
-    selector({
-      setHistory: vi.fn(),
-      setMessages: vi.fn(),
-      setHistoryId: vi.fn(),
-      setServerChatId: vi.fn(),
-      setServerChatState: vi.fn(),
-      setServerChatTopic: vi.fn(),
-      setServerChatClusterId: vi.fn(),
-      setServerChatSource: vi.fn(),
-      setServerChatExternalRef: vi.fn()
-    })
+    selector(storeSetters)
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -289,6 +302,12 @@ const resolveStorageKey = (key: unknown): string => {
   return ""
 }
 
+const expectDesignSystemAlertForText = (text: string) => {
+  const alert = screen.getByText(text).closest('[data-ds-component="Alert"]')
+  expect(alert).not.toBeNull()
+  return alert as HTMLElement
+}
+
 const openAdvancedFilters = async (
   user: ReturnType<typeof userEvent.setup>
 ) => {
@@ -312,9 +331,10 @@ const findEditSubmitButton = async (timeout = 15000) =>
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.localStorage.clear()
+    ensureLocalStorageApi().clear()
     window.history.replaceState({}, "", "/")
     useNavigateMock.mockReturnValue(navigateMock)
+    useIsConnectedMock.mockReturnValue(true)
     confirmDangerMock.mockResolvedValue(true)
     tldwClientMock.fetchWithAuth.mockReset()
     useStorageMock.mockImplementation(
@@ -1622,7 +1642,9 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(saveButton)
 
     await waitFor(() => {
-      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1)
+      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1) as unknown as
+        | [string, Record<string, unknown>]
+        | undefined
       expect(latestCall?.[0]).toBe("folder-edit-1")
       expect(latestCall?.[1]).toEqual(
         expect.objectContaining({
@@ -2985,13 +3007,22 @@ describe("CharactersManager first-use onboarding", () => {
     const user = userEvent.setup()
     let listCharactersData: any[] = []
 
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: listCharactersData, status: "success" })
       }
       if (key === "getModelsForFieldGeneration") {
-        return makeUseQueryResult({ data: [] })
+        return makeUseQueryResult({
+          data: [{ model: "mock-chat-model", provider: "openai" }]
+        })
       }
       if (key === "getAllModelsForGeneration") {
         return makeUseQueryResult({ data: [] })
@@ -3093,7 +3124,9 @@ describe("CharactersManager first-use onboarding", () => {
         greeting: expect.any(String)
       })
     )
-    expect(navigateMock).toHaveBeenCalledWith("/")
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/chat?mode=character&characterId=char-1"
+    )
     expect(focusComposerMock).toHaveBeenCalled()
   }, 30000)
 
@@ -3156,7 +3189,9 @@ describe("CharactersManager first-use onboarding", () => {
     fireEvent.submit(editFormElement as HTMLFormElement)
 
     await waitFor(() => {
-      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1)
+      const latestCall = tldwClientMock.updateCharacter.mock.calls.at(-1) as unknown as
+        | [string, Record<string, unknown>]
+        | undefined
       expect(latestCall?.[0]).toBe("char-edit-flow")
       expect(latestCall?.[1]).toEqual(
         expect.objectContaining({
@@ -3464,6 +3499,268 @@ describe("CharactersManager first-use onboarding", () => {
     expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
   }, 30000)
 
+  it("shows an in-context blocker when quick chat has no chat model", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "104",
+      name: "No Model Character",
+      system_prompt: "Stay in character.",
+      greeting: "Ready when a model is configured.",
+      description: "Quick chat blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return [null, vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(await screen.findByRole("button", { name: /More actions/i }))
+    await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
+
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as No Model Character"
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Saved characters are still available. Configure a chat model, then return here to continue with No Model Character."
+      )
+    ).toBeInTheDocument()
+    expectDesignSystemAlertForText(
+      "Choose a chat model before chatting as No Model Character"
+    )
+    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
+      "href",
+      "/settings/model"
+    )
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+    expect(tldwClientMock.createChat).not.toHaveBeenCalled()
+    expect(navigateMock).not.toHaveBeenCalled()
+  }, 30000)
+
+  it("preserves row chat intent locally when no chat model is configured", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "intent-no-model",
+      name: "Intent Character",
+      system_prompt: "Stay in character.",
+      greeting: "Intent preserved.",
+      description: "Row chat intent blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return [null, vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chat as Intent Character" })
+    )
+
+    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "intent-no-model",
+        name: "Intent Character"
+      })
+    )
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as Intent Character"
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Saved characters are still available. Configure a chat model, then return here to continue with Intent Character."
+      )
+    ).toBeInTheDocument()
+    expectDesignSystemAlertForText(
+      "Choose a chat model before chatting as Intent Character"
+    )
+    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
+      "href",
+      "/settings/model"
+    )
+    expect(screen.getByRole("button", { name: "Retry character chat" })).toBeEnabled()
+    const returnButton = screen.getByRole("button", { name: "Return to character" })
+    expect(returnButton).toBeEnabled()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
+
+    await user.click(returnButton)
+    await waitFor(() => {
+      expect(
+        screen.queryByText(
+          "Choose a chat model before chatting as Intent Character"
+        )
+      ).not.toBeInTheDocument()
+    })
+    expect(setSelectedCharacterMock).toHaveBeenLastCalledWith(null)
+  }, 30000)
+
+  it("does not treat the first catalog model as an implicit row chat selection", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "intent-implicit-catalog-model",
+      name: "Implicit Catalog Character",
+      system_prompt: "Keep implicit catalog fallback local.",
+      greeting: "Ready when explicitly configured.",
+      description: "Row chat implicit catalog model blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return [null, vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({
+          data: [{ model: "implicit-catalog-model", provider: "openai" }]
+        })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chat as Implicit Catalog Character" })
+    )
+
+    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "intent-implicit-catalog-model",
+        name: "Implicit Catalog Character"
+      })
+    )
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as Implicit Catalog Character"
+      )
+    ).toBeInTheDocument()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
+  }, 30000)
+
+  it("keeps row chat intent local when a stale selected model exists before the model catalog resolves", async () => {
+    const user = userEvent.setup()
+    const characterRecord = {
+      id: "intent-stale-model",
+      name: "Stale Model Character",
+      system_prompt: "Keep the stale model path local.",
+      greeting: "Still here.",
+      description: "Row chat stale model blocker test",
+      version: 1
+    }
+
+    useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
+      if (resolveStorageKey(key) === "selectedModel") {
+        return ["stale-chat-model", vi.fn(), { isLoading: false }]
+      }
+      return [defaultValue ?? null, vi.fn(), { isLoading: false }]
+    })
+
+    useQueryMock.mockImplementation((opts: any) => {
+      const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord], status: "success" })
+      }
+      if (key === "getModelsForFieldGeneration") {
+        return makeUseQueryResult({
+          data: undefined,
+          status: "pending",
+          isPending: true,
+          isLoading: true
+        })
+      }
+      if (key === "getAllModelsForGeneration") {
+        return makeUseQueryResult({ data: [] })
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({})
+    })
+
+    render(<CharactersManager />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Chat as Stale Model Character" })
+    )
+
+    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "intent-stale-model",
+        name: "Stale Model Character"
+      })
+    )
+    expect(
+      await screen.findByText(
+        "Choose a chat model before chatting as Stale Model Character"
+      )
+    ).toBeInTheDocument()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
+  }, 30000)
+
   it("opens quick chat from gallery preview actions", async () => {
     const user = userEvent.setup()
     const characterRecord = {
@@ -3505,11 +3802,16 @@ describe("CharactersManager first-use onboarding", () => {
 
     render(<CharactersManager />)
 
-    await user.click(await screen.findByText("Gallery Quick Chat Character"))
-    // "Test in popup" is now in the overflow menu
-    const moreButton = await screen.findByRole("button", {
-      name: /More actions/i
-    })
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Click to preview Gallery Quick Chat Character"
+      })
+    )
+    // The gallery preview action menu lives inside the preview modal, so target
+    // its explicit aria-label instead of the tooltip text node from the card.
+    const moreButton = await screen.findByLabelText(
+      "More actions for Gallery Quick Chat Character"
+    )
     await user.click(moreButton)
     await user.click(
       await screen.findByRole("menuitem", {
@@ -3728,6 +4030,8 @@ describe("CharactersManager first-use onboarding", () => {
       system_prompt: "Promotion prompt",
       greeting: "Promotion greeting",
       description: "Promotion test",
+      alternate_greetings: ["Backup greeting"],
+      extensions: { tone: "steady" },
       version: 1
     }
 
@@ -3781,14 +4085,22 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(screen.getByRole("button", { name: "Open full chat" }))
 
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith("/")
+      expect(navigateMock).toHaveBeenCalledWith(
+        "/chat?mode=character&characterId=303"
+      )
     })
     expect(setSelectedCharacterMock).toHaveBeenCalled()
     expect(setSelectedCharacterMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "Promote Quick Chat Character"
+        name: "Promote Quick Chat Character",
+        alternate_greetings: expect.any(Array),
+        extensions: expect.anything()
       })
     )
+    expect(storeSetters.setServerChatCharacterId).toHaveBeenCalledWith("303")
+    expect(storeSetters.setServerChatAssistantKind).toHaveBeenCalledWith("character")
+    expect(storeSetters.setServerChatAssistantId).toHaveBeenCalledWith("303")
+    expect(storeSetters.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
     expect(tldwClientMock.deleteChat).not.toHaveBeenCalled()
   }, 30000)
 
@@ -3836,7 +4148,7 @@ describe("CharactersManager first-use onboarding", () => {
         })
       )
       expect(openSpy).toHaveBeenCalledWith(
-        expect.any(String),
+        expect.stringContaining("/chat?mode=character&characterId=char-new-tab"),
         "_blank",
         "noopener,noreferrer"
       )
@@ -3890,7 +4202,9 @@ describe("CharactersManager first-use onboarding", () => {
         })
       )
       expect(openSpy).toHaveBeenCalledWith(
-        expect.any(String),
+        expect.stringContaining(
+          "/chat?mode=character&characterId=char-new-tab-gallery"
+        ),
         "_blank",
         "noopener,noreferrer"
       )

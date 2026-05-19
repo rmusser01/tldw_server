@@ -49,6 +49,7 @@ import {
   hasMediaFilterParams
 } from '@/components/Review/mediaFilterParams'
 import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
+import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 import {
   getMediaNavigationResumeEntry,
   resolveMediaNavigationResumeSelection,
@@ -198,6 +199,16 @@ const ViewMediaPage: React.FC = () => {
                 'This feature requires connection to the tldw server. Please check your server connection.'
             })}
             examples={[]}
+            primaryActionLabel={t('option:buttonRetry', {
+              defaultValue: 'Retry connection'
+            })}
+            onPrimaryAction={() => {
+              void checkOnce()
+            }}
+            secondaryActionLabel={t('settings:tldw.openSettings', {
+              defaultValue: 'Open Settings'
+            })}
+            onSecondaryAction={() => navigate('/settings/tldw')}
           />
         </div>
       )
@@ -213,6 +224,16 @@ const ViewMediaPage: React.FC = () => {
             defaultValue: 'Please check your server connection.'
           })}
           examples={[]}
+          primaryActionLabel={t('option:buttonRetry', {
+            defaultValue: 'Retry connection'
+          })}
+          onPrimaryAction={() => {
+            void checkOnce()
+          }}
+          secondaryActionLabel={t('settings:tldw.openSettings', {
+            defaultValue: 'Open Settings'
+          })}
+          onSecondaryAction={() => navigate('/settings/tldw')}
         />
       </div>
     )
@@ -252,10 +273,16 @@ const ViewMediaPage: React.FC = () => {
               'Technical details: this tldw server does not advertise the Media endpoints (for example, /api/v1/media and /api/v1/media/search).'
           })
         ]}
-        primaryActionLabel={t('settings:healthSummary.diagnostics', {
+        primaryActionLabel={t('option:buttonRetry', {
+          defaultValue: 'Retry connection'
+        })}
+        onPrimaryAction={() => {
+          void checkOnce()
+        }}
+        secondaryActionLabel={t('settings:healthSummary.diagnostics', {
           defaultValue: 'Open Diagnostics'
         })}
-        onPrimaryAction={() => navigate('/settings/health')}
+        onSecondaryAction={() => navigate('/settings/health')}
       />
     )
   }
@@ -276,8 +303,29 @@ const MediaPageContent: React.FC = () => {
 
   // --- Hooks ---
   const search = useMediaSearch({ t, message })
+  const { refetch: searchRefetch } = search
 
   const viewPrefs = useMediaViewPreferences()
+
+  // Auto-refresh media results when Quick Ingest completes
+  const searchRefetchRef = useRef(searchRefetch)
+  const ingestRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => { searchRefetchRef.current = searchRefetch }, [searchRefetch])
+  useEffect(() => {
+    const handleIngestComplete = () => {
+      if (ingestRefreshTimeoutRef.current !== null) {
+        clearTimeout(ingestRefreshTimeoutRef.current)
+      }
+      ingestRefreshTimeoutRef.current = setTimeout(() => { searchRefetchRef.current() }, 1500)
+    }
+    window.addEventListener("tldw:quick-ingest-complete", handleIngestComplete)
+    return () => {
+      if (ingestRefreshTimeoutRef.current !== null) {
+        clearTimeout(ingestRefreshTimeoutRef.current)
+      }
+      window.removeEventListener("tldw:quick-ingest-complete", handleIngestComplete)
+    }
+  }, [])
 
   // Compute display results (filtered by favorites/collections)
   // Need selection hook first for favorites/collections, but selection needs displayResults.
@@ -955,6 +1003,34 @@ const MediaPageContent: React.FC = () => {
     [message, navigate, nav.selected, t]
   )
 
+  const handleCreateStudyPackFromMedia = useCallback(() => {
+    const selectedMedia = nav.selected?.kind === "media" ? nav.selected : null
+    const mediaTitle = selectedMedia?.title?.trim() || ""
+    const mediaId = selectedMedia?.id
+
+    if (!mediaTitle || mediaId == null) {
+      message.warning(
+        t("review:mediaPage.studyPackMissingSelection", {
+          defaultValue: "Select media before creating a study pack."
+        })
+      )
+      return
+    }
+
+    navigate(
+      buildStudyPackRoute({
+        title: mediaTitle,
+        sourceItems: [
+          {
+            sourceType: "media",
+            sourceId: String(mediaId),
+            sourceTitle: mediaTitle
+          }
+        ]
+      })
+    )
+  }, [message, nav.selected, navigate, t])
+
   const handleCreateNoteWithContent = useCallback(async (noteContent: string, title: string) => {
     try {
       await bgRequest({
@@ -1010,6 +1086,52 @@ const MediaPageContent: React.FC = () => {
       void refetchNavigation()
     })
   }, [nav, showNavigationPanel, refetchNavigation])
+
+  // When the library is truly empty (no results, no search/filters active, not loading),
+  // render a single-column centered onboarding view instead of the two-column split.
+  const isEmptyLibrary =
+    search.activeTotalCount === 0 &&
+    !hasActiveFilters &&
+    !search.query?.trim() &&
+    !search.isLoading &&
+    !search.isFetching
+
+  if (isEmptyLibrary) {
+    return (
+      <div
+        className="relative flex min-h-full bg-bg"
+        style={{ minHeight: `${sidebarDimensions.mediaPageMinHeightPx}px` }}
+      >
+        <div className="flex flex-1 items-center justify-center p-8">
+          <div className="max-w-lg w-full">
+            <ResultsList
+              results={displayResults}
+              selectedId={null}
+              onSelect={() => {}}
+              totalCount={search.activeTotalCount}
+              loadedCount={displayResults.length}
+              isLoading={false}
+              hasActiveFilters={false}
+              searchQuery=""
+              onClearSearch={() => {}}
+              onClearFilters={() => {}}
+              onOpenQuickIngest={(detail) => {
+                requestQuickIngestOpen(detail)
+              }}
+              favorites={selection.favoritesSet}
+              onToggleFavorite={selection.toggleFavorite}
+              selectionMode={false}
+              selectedIds={new Set()}
+              onToggleSelected={() => {}}
+              readingProgress={selection.readingProgressMap}
+              viewMode="standard"
+              onViewModeChange={() => {}}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -1385,8 +1507,8 @@ const MediaPageContent: React.FC = () => {
                   search.setQuery('')
                 }}
                 onClearFilters={resetAllFilters}
-                onOpenQuickIngest={() => {
-                  requestQuickIngestOpen()
+                onOpenQuickIngest={(detail) => {
+                  requestQuickIngestOpen(detail)
                 }}
                 favorites={selection.favoritesSet}
                 onToggleFavorite={selection.toggleFavorite}
@@ -1595,6 +1717,18 @@ const MediaPageContent: React.FC = () => {
           ) : null}
 
           <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex items-center justify-end gap-2 border-b border-border bg-surface px-3 py-2">
+              <button
+                type="button"
+                onClick={handleCreateStudyPackFromMedia}
+                className="inline-flex items-center rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!nav.selected || !nav.selected?.title?.trim()}
+              >
+                {t("review:mediaPage.createStudyPack", {
+                  defaultValue: "Create study pack"
+                })}
+              </button>
+            </div>
             {nav.staleSelectionNotice ? (
               <div
                 className="mx-3 mt-3 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
@@ -1644,6 +1778,7 @@ const MediaPageContent: React.FC = () => {
               hasNext={nav.hasNext}
               currentIndex={nav.selectedIndex >= 0 ? nav.selectedIndex : 0}
               totalResults={displayResults.length}
+              isLibraryEmpty={isEmptyLibrary}
               onChatWithMedia={handleChatWithMedia}
               onChatAboutMedia={handleChatAboutMedia}
               onGenerateFlashcardsFromContent={handleGenerateFlashcardsFromMedia}

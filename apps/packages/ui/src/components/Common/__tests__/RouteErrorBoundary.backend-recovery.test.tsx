@@ -37,8 +37,10 @@ vi.mock("../BackendUnavailableRecovery", () => ({
 
 const BACKEND_UNREACHABLE_RESULT = {
   kind: "backend_unreachable" as const,
-  title: "Backend unreachable",
-  message: "The browser could not reach the configured backend server.",
+  subtype: "connection_refused" as const,
+  title: "Cannot connect to the API server",
+  message: "Cannot reach the API server at the configured server URL.",
+  fixHint: "Make sure the tldw server is running and reachable from this browser.",
   rawMessage: "Failed to fetch",
   diagnostics: {
     matchedPattern: "failed_to_fetch"

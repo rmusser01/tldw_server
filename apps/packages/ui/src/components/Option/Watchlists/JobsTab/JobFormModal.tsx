@@ -20,7 +20,12 @@ import type {
   WatchlistJob,
   WatchlistJobCreate
 } from "@/types/watchlists"
-import { CronDisplay, WatchlistsHelpTooltip } from "../shared"
+import {
+  buildWatchlistsModalChrome,
+  CronDisplay,
+  useWatchlistsViewport,
+  WatchlistsHelpTooltip
+} from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import {
   getFocusableActiveElement,
@@ -52,6 +57,7 @@ interface JobFormModalProps {
   onClose: () => void
   onSuccess: () => void
   initialValues?: WatchlistJob
+  watchlistId?: number | null
 }
 
 interface FormValues {
@@ -239,7 +245,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   open,
   onClose,
   onSuccess,
-  initialValues
+  initialValues,
+  watchlistId
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [form] = Form.useForm<FormValues>()
@@ -248,6 +255,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const isEditing = !!initialValues
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 700, {
+    maxHeight: "70vh",
+    overflowY: "auto"
+  })
 
   useLayoutEffect(() => {
     if (open) {
@@ -551,6 +563,45 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       }
     }
 
+    const hasRecurringSchedule = Boolean(schedule && schedule.trim().length > 0)
+    const existingAutoOutput = isRecord(basePrefs.auto_output)
+      ? { ...basePrefs.auto_output }
+      : {}
+    const shouldAutoOutput = (
+      hasRecurringSchedule &&
+      (
+        deliveryEmailEnabled ||
+        deliveryChatbookEnabled ||
+        audioBriefingEnabled ||
+        existingAutoOutput.enabled === true
+      )
+    )
+    if (shouldAutoOutput) {
+      existingAutoOutput.enabled = true
+      existingAutoOutput.type =
+        typeof existingAutoOutput.type === "string" && existingAutoOutput.type.trim().length > 0
+          ? existingAutoOutput.type.trim()
+          : "briefing_markdown"
+      if (isOutputFormat(outputTemplateFormat)) {
+        existingAutoOutput.format = outputTemplateFormat
+      } else {
+        delete existingAutoOutput.format
+      }
+      if (normalizedTemplateName) {
+        existingAutoOutput.template_name = normalizedTemplateName
+      } else {
+        delete existingAutoOutput.template_name
+      }
+      if (typeof outputTemplateVersion === "number" && outputTemplateVersion > 0) {
+        existingAutoOutput.template_version = Math.floor(outputTemplateVersion)
+      } else {
+        delete existingAutoOutput.template_version
+      }
+      basePrefs.auto_output = existingAutoOutput
+    } else {
+      delete basePrefs.auto_output
+    }
+
     if (Object.keys(basePrefs).length > 0) {
       return basePrefs as JobOutputPrefs
     }
@@ -759,7 +810,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     let cancelled = false
 
     Promise.all([
-      fetchWatchlistSources({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE }),
+      fetchWatchlistSources({
+        watchlist_id: watchlistId ?? undefined,
+        page: 1,
+        size: JOB_SCOPE_CATALOG_PAGE_SIZE
+      }),
       fetchWatchlistGroups({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE })
     ])
       .then(([sourcesResult, groupsResult]) => {
@@ -782,7 +837,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, watchlistId])
 
   useEffect(() => {
     if (!open || !isEditing || !initialValues?.id) {
@@ -991,7 +1046,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         schedule_expr: schedule || undefined,
         timezone: timezone || undefined,
         output_prefs: isEditing ? (outputPrefs || {}) : outputPrefs,
-        job_filters: filters.length > 0 ? { filters } : undefined
+        job_filters: filters.length > 0 ? { filters } : undefined,
+        watchlist_id: watchlistId ?? undefined
       }
 
       const confirmationItems: string[] = []
@@ -1416,7 +1472,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
           <span className="text-danger ml-1">*</span>
         </span>
       ),
-      children: <ScopeSelector value={scope} onChange={setScope} />,
+      children: <ScopeSelector value={scope} onChange={setScope} watchlistId={watchlistId} />,
       forceRender: true
     },
     {
@@ -1985,8 +2041,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       cancelText={t("common:cancel", "Cancel")}
       confirmLoading={submitting}
       destroyOnHidden
-      width={700}
-      styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+      data-testid="job-form-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       <Form form={form} layout="vertical" className="mt-4">
         <div className="mb-4 rounded-lg border border-border bg-surface p-3">

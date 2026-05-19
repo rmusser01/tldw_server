@@ -80,6 +80,7 @@ describe('buildDashboardSystemHealth', () => {
     expect(systemHealth.tts.status).toBe('healthy');
     expect(systemHealth.stt.status).toBe('down');
     expect(systemHealth.embeddings.status).toBe('degraded');
+    expect(systemHealth.jobQueue.status).toBe('unknown');
     expect(systemHealth.api.checkedAt).toBe('2026-02-17T09:59:00.000Z');
     expect(systemHealth.cache.checkedAt).toBe('2026-02-17T09:59:20.000Z');
   });
@@ -105,6 +106,7 @@ describe('buildDashboardSystemHealth', () => {
     expect(systemHealth.tts.status).toBe('down');
     expect(systemHealth.stt.status).toBe('down');
     expect(systemHealth.embeddings.status).toBe('down');
+    expect(systemHealth.jobQueue.status).toBe('unknown');
     expect(systemHealth.api.checkedAt).toBe(referenceTime);
     expect(systemHealth.stt.checkedAt).toBe(referenceTime);
   });

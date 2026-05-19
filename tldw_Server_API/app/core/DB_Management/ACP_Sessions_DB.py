@@ -5,11 +5,12 @@ to avoid circular imports with the in-memory session store layer.
 """
 from __future__ import annotations
 
+import fnmatch as _fnmatch
 import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
@@ -17,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 14
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -47,7 +48,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     policy_snapshot_refreshed_at TEXT,
     policy_summary TEXT,
     policy_provenance_summary TEXT,
-    policy_refresh_error TEXT
+    policy_refresh_error TEXT,
+    model TEXT,
+    token_budget INTEGER DEFAULT NULL,
+    auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0,
+    budget_exhausted INTEGER NOT NULL DEFAULT 0,
+    ancestry_chain_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON sessions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
@@ -85,6 +91,12 @@ CREATE TABLE IF NOT EXISTS agent_registry (
     mcp_llm_model TEXT,
     mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
     mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+    entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+    acp_command TEXT NOT NULL DEFAULT '',
+    acp_args TEXT NOT NULL DEFAULT '[]',
+    adapter_source TEXT,
+    adapter_docs_url TEXT,
+    certification_blocker TEXT,
     source TEXT NOT NULL DEFAULT 'api',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -100,6 +112,66 @@ CREATE TABLE IF NOT EXISTS agent_health_history (
 );
 CREATE INDEX IF NOT EXISTS idx_health_agent_time
     ON agent_health_history(agent_type, checked_at DESC);
+
+CREATE TABLE IF NOT EXISTS permission_policies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    rules_json TEXT NOT NULL,
+    conditions_json TEXT,
+    org_id TEXT,
+    team_id TEXT,
+    priority INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS permission_decisions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    tool_pattern TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'session',
+    session_id TEXT,
+    persona_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT,
+    reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_perm_dec_user ON permission_decisions(user_id);
+CREATE INDEX IF NOT EXISTS idx_perm_dec_pattern ON permission_decisions(tool_pattern);
+
+CREATE TABLE IF NOT EXISTS webhook_triggers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'generic',
+    secret_encrypted TEXT NOT NULL,
+    owner_user_id INTEGER NOT NULL,
+    agent_config_json TEXT NOT NULL DEFAULT '{}',
+    prompt_template TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_triggers_owner
+    ON webhook_triggers(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS config_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    scope TEXT NOT NULL DEFAULT 'system',
+    scope_id TEXT,
+    base_template_id INTEGER,
+    schema_version TEXT NOT NULL DEFAULT '1',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_config_templates_scope
+    ON config_templates(scope, scope_id);
+CREATE INDEX IF NOT EXISTS idx_config_templates_name
+    ON config_templates(name);
 """
 
 # Columns that are stored as INTEGER 0/1 but should be returned as bool
@@ -108,10 +180,12 @@ _BOOL_FIELDS = frozenset({
     "needs_bootstrap",
     "mcp_structured_response",
     "mcp_refresh_tools",
+    "auto_terminate_at_budget",
+    "budget_exhausted",
 })
 
 # Columns that are stored as JSON TEXT but should be returned as parsed objects
-_JSON_LIST_FIELDS = frozenset({"tags", "mcp_servers"})
+_JSON_LIST_FIELDS = frozenset({"tags", "mcp_servers", "ancestry_chain_json"})
 _JSON_OBJECT_FIELDS = frozenset({"policy_summary", "policy_provenance_summary"})
 _ALLOWED_MIGRATION_COLUMNS = {
     "sessions": {
@@ -121,6 +195,11 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "policy_summary": "policy_summary TEXT",
         "policy_provenance_summary": "policy_provenance_summary TEXT",
         "policy_refresh_error": "policy_refresh_error TEXT",
+        "model": "model TEXT",
+        "token_budget": "token_budget INTEGER DEFAULT NULL",
+        "auto_terminate_at_budget": "auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0",
+        "budget_exhausted": "budget_exhausted INTEGER NOT NULL DEFAULT 0",
+        "ancestry_chain_json": "ancestry_chain_json TEXT",
     },
     "agent_registry": {
         "mcp_orchestration": "mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven'",
@@ -130,6 +209,15 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "mcp_llm_model": "mcp_llm_model TEXT",
         "mcp_max_iterations": "mcp_max_iterations INTEGER NOT NULL DEFAULT 20",
         "mcp_refresh_tools": "mcp_refresh_tools INTEGER NOT NULL DEFAULT 0",
+        "entrypoint_strategy": "entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate'",
+        "acp_command": "acp_command TEXT NOT NULL DEFAULT ''",
+        "acp_args": "acp_args TEXT NOT NULL DEFAULT '[]'",
+        "adapter_source": "adapter_source TEXT",
+        "adapter_docs_url": "adapter_docs_url TEXT",
+        "certification_blocker": "certification_blocker TEXT",
+    },
+    "permission_policies": {
+        "conditions_json": "conditions_json TEXT",
     },
 }
 
@@ -154,6 +242,32 @@ def _ensure_column(
     if column_name in existing_columns:
         return
     conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN {column_sql}')
+
+
+def _ensure_config_template_unique_index(conn: sqlite3.Connection) -> None:
+    """Enforce deterministic template lookup within a scope."""
+    duplicate = conn.execute(
+        """
+        SELECT name, scope, COALESCE(scope_id, '') AS normalized_scope_id, COUNT(*) AS duplicate_count
+        FROM config_templates
+        GROUP BY name, scope, COALESCE(scope_id, '')
+        HAVING COUNT(*) > 1
+        LIMIT 1
+        """
+    ).fetchone()
+    if duplicate is not None:
+        raise sqlite3.IntegrityError(
+            "Duplicate config_templates rows detected for "
+            f"name={duplicate['name']!r}, scope={duplicate['scope']!r}, "
+            f"scope_id={duplicate['normalized_scope_id']!r}"
+        )
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_config_templates_name_scope_unique
+        ON config_templates(name, scope, COALESCE(scope_id, ''))
+        """
+    )
 
 
 class ACPSessionsDB:
@@ -219,6 +333,12 @@ class ACPSessionsDB:
                         mcp_llm_model TEXT,
                         mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
                         mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+                        entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+                        acp_command TEXT NOT NULL DEFAULT '',
+                        acp_args TEXT NOT NULL DEFAULT '[]',
+                        adapter_source TEXT,
+                        adapter_docs_url TEXT,
+                        certification_blocker TEXT,
                         source TEXT NOT NULL DEFAULT 'api',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
@@ -317,6 +437,153 @@ class ACPSessionsDB:
                     "mcp_refresh_tools",
                     "mcp_refresh_tools INTEGER NOT NULL DEFAULT 0",
                 )
+            if current_version < 6:
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "model",
+                    "model TEXT",
+                )
+            if current_version < 7:
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "token_budget",
+                    "token_budget INTEGER DEFAULT NULL",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "auto_terminate_at_budget",
+                    "auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "budget_exhausted",
+                    "budget_exhausted INTEGER NOT NULL DEFAULT 0",
+                )
+            if current_version < 8:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS permission_policies (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        description TEXT DEFAULT '',
+                        rules_json TEXT NOT NULL,
+                        org_id TEXT,
+                        team_id TEXT,
+                        priority INTEGER DEFAULT 0,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    );
+                """)
+            if current_version < 9:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS permission_decisions (
+                        id TEXT PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        tool_pattern TEXT NOT NULL,
+                        decision TEXT NOT NULL,
+                        scope TEXT NOT NULL DEFAULT 'session',
+                        session_id TEXT,
+                        persona_id TEXT,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        expires_at TEXT,
+                        reason TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_perm_dec_user
+                        ON permission_decisions(user_id);
+                    CREATE INDEX IF NOT EXISTS idx_perm_dec_pattern
+                        ON permission_decisions(tool_pattern);
+                """)
+            if current_version < 10:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS webhook_triggers (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        source_type TEXT NOT NULL DEFAULT 'generic',
+                        secret_encrypted TEXT NOT NULL,
+                        owner_user_id INTEGER NOT NULL,
+                        agent_config_json TEXT NOT NULL DEFAULT '{}',
+                        prompt_template TEXT NOT NULL DEFAULT '',
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_webhook_triggers_owner
+                        ON webhook_triggers(owner_user_id);
+                """)
+            if current_version < 11:
+                conn.executescript("""
+                    CREATE TABLE IF NOT EXISTS config_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        description TEXT NOT NULL DEFAULT '',
+                        scope TEXT NOT NULL DEFAULT 'system',
+                        scope_id TEXT,
+                        base_template_id INTEGER,
+                        schema_version TEXT NOT NULL DEFAULT '1',
+                        config_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_config_templates_scope
+                        ON config_templates(scope, scope_id);
+                    CREATE INDEX IF NOT EXISTS idx_config_templates_name
+                        ON config_templates(name);
+                """)
+            if current_version < 12:
+                _ensure_column(
+                    conn,
+                    "permission_policies",
+                    "conditions_json",
+                    "conditions_json TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "ancestry_chain_json",
+                    "ancestry_chain_json TEXT",
+                )
+            if current_version < 13:
+                _ensure_config_template_unique_index(conn)
+            if current_version < 14:
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "entrypoint_strategy",
+                    "entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "acp_command",
+                    "acp_command TEXT NOT NULL DEFAULT ''",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "acp_args",
+                    "acp_args TEXT NOT NULL DEFAULT '[]'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_source",
+                    "adapter_source TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_docs_url",
+                    "adapter_docs_url TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "certification_blocker",
+                    "certification_blocker TEXT",
+                )
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -371,6 +638,9 @@ class ACPSessionsDB:
         policy_refresh_error: str | None = None,
         forked_from: str | None = None,
         needs_bootstrap: bool = False,
+        model: str | None = None,
+        token_budget: int | None = None,
+        auto_terminate_at_budget: bool = False,
     ) -> dict[str, Any]:
         """Insert a new session record and return it as a dict."""
         conn = self._get_conn()
@@ -384,8 +654,9 @@ class ACPSessionsDB:
                 persona_id, workspace_id, workspace_group_id, scope_snapshot_id,
                 policy_snapshot_version, policy_snapshot_fingerprint, policy_snapshot_refreshed_at,
                 policy_summary, policy_provenance_summary, policy_refresh_error,
-                forked_from, needs_bootstrap
-            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                forked_from, needs_bootstrap, model,
+                token_budget, auto_terminate_at_budget
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id, user_id, agent_type, name, cwd,
@@ -402,6 +673,9 @@ class ACPSessionsDB:
                 else None,
                 policy_refresh_error,
                 forked_from, int(needs_bootstrap),
+                model,
+                token_budget,
+                int(auto_terminate_at_budget),
             ),
         )
         conn.commit()
@@ -588,6 +862,79 @@ class ACPSessionsDB:
 
         return [self._row_to_dict(r) for r in rows], total
 
+    def list_sessions_since(
+        self,
+        *,
+        since_iso: str,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List sessions created or active at or after an ISO timestamp."""
+        conn = self._get_conn()
+        count_row = conn.execute(
+            "SELECT COUNT(*) FROM sessions "
+            "WHERE (created_at >= ? OR COALESCE(last_activity_at, '') >= ?)",
+            (since_iso, since_iso),
+        ).fetchone()
+        total = count_row[0] if count_row else 0
+        rows = conn.execute(
+            "SELECT * FROM sessions "
+            "WHERE (created_at >= ? OR COALESCE(last_activity_at, '') >= ?) "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (since_iso, since_iso, limit, offset),
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows], total
+
+    def aggregate_metrics_by_agent(self) -> list[dict[str, Any]]:
+        """Aggregate session metrics grouped by agent_type.
+
+        Returns a list of dicts sorted by total_tokens descending, each with:
+        agent_type, session_count, active_sessions, total_prompt_tokens,
+        total_completion_tokens, total_tokens, total_messages, last_used_at.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT
+                agent_type,
+                COUNT(*)                                       AS session_count,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_sessions,
+                COALESCE(SUM(prompt_tokens), 0)                AS total_prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0)            AS total_completion_tokens,
+                COALESCE(SUM(total_tokens), 0)                 AS total_tokens,
+                COALESCE(SUM(message_count), 0)                AS total_messages,
+                MAX(COALESCE(last_activity_at, created_at))    AS last_used_at
+            FROM sessions
+            GROUP BY agent_type
+            ORDER BY total_tokens DESC
+            """
+        ).fetchall()
+        return [
+            {
+                "agent_type": r["agent_type"],
+                "session_count": r["session_count"],
+                "active_sessions": r["active_sessions"],
+                "total_prompt_tokens": r["total_prompt_tokens"],
+                "total_completion_tokens": r["total_completion_tokens"],
+                "total_tokens": r["total_tokens"],
+                "total_messages": r["total_messages"],
+                "last_used_at": r["last_used_at"],
+            }
+            for r in rows
+        ]
+
+    def get_session_cost_data(self) -> list[dict[str, Any]]:
+        """Return per-session (agent_type, model, prompt_tokens, completion_tokens).
+
+        Used by the service layer to compute estimated costs using the
+        pricing catalog (which lives outside the DB module).
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT agent_type, model, prompt_tokens, completion_tokens FROM sessions"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_agent_usage_stats(self, *, since_iso: str) -> list[dict[str, Any]]:
         """Aggregate per-agent token usage for sessions created on or after *since_iso*."""
         conn = self._get_conn()
@@ -610,6 +957,114 @@ class ACPSessionsDB:
         )
         rows = conn.execute(query, [since_iso]).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Run history queries (date-filtered)
+    # ------------------------------------------------------------------
+
+    def list_runs(
+        self,
+        *,
+        user_id: int | None = None,
+        status: str | None = None,
+        agent_type: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Query session records with optional filters including date range.
+
+        Returns ``(rows, total_count)`` where each row is a deserialized dict.
+        """
+        conn = self._get_conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if agent_type is not None:
+            clauses.append("agent_type = ?")
+            params.append(agent_type)
+        if from_date is not None:
+            clauses.append("created_at >= ?")
+            params.append(from_date)
+        if to_date is not None:
+            clauses.append("created_at <= ?")
+            params.append(to_date)
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        count_row = conn.execute(
+            f"SELECT COUNT(*) FROM sessions{where}", params,
+        ).fetchone()
+        total = count_row[0] if count_row else 0
+
+        rows = conn.execute(
+            f"SELECT * FROM sessions{where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+
+        return [self._row_to_dict(r) for r in rows], total
+
+    def aggregate_runs(
+        self,
+        *,
+        user_id: int | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate token usage and session counts with optional filters.
+
+        Returns a summary dict with total_sessions, prompt_tokens,
+        completion_tokens, total_tokens, and per-session cost data for the
+        service layer to compute estimated costs.
+        """
+        conn = self._get_conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if from_date is not None:
+            clauses.append("created_at >= ?")
+            params.append(from_date)
+        if to_date is not None:
+            clauses.append("created_at <= ?")
+            params.append(to_date)
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        row = conn.execute(
+            f"SELECT "
+            f"  COUNT(*) AS total_sessions, "
+            f"  COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens, "
+            f"  COALESCE(SUM(completion_tokens), 0) AS completion_tokens, "
+            f"  COALESCE(SUM(total_tokens), 0) AS total_tokens "
+            f"FROM sessions{where}",
+            params,
+        ).fetchone()
+
+        result: dict[str, Any] = {
+            "total_sessions": row["total_sessions"] if row else 0,
+            "prompt_tokens": row["prompt_tokens"] if row else 0,
+            "completion_tokens": row["completion_tokens"] if row else 0,
+            "total_tokens": row["total_tokens"] if row else 0,
+        }
+
+        # Also return per-session cost data so the service layer can compute costs
+        cost_rows = conn.execute(
+            f"SELECT model, prompt_tokens, completion_tokens FROM sessions{where}",
+            params,
+        ).fetchall()
+        result["_cost_rows"] = [dict(r) for r in cost_rows]
+
+        return result
 
     # ------------------------------------------------------------------
     # Text normalization (local helper — no external imports)
@@ -781,6 +1236,55 @@ class ACPSessionsDB:
             results.append(d)
         return results
 
+    def get_messages_for_sessions(
+        self,
+        session_ids: list[str],
+        *,
+        chunk_size: int = 500,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return ordered messages grouped by session ID for multiple sessions."""
+        if not session_ids:
+            return {}
+
+        conn = self._get_conn()
+        grouped: dict[str, list[dict[str, Any]]] = {
+            session_id: [] for session_id in session_ids
+        }
+        safe_chunk_size = max(1, int(chunk_size))
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS temp_acp_message_session_ids "
+            "(session_id TEXT PRIMARY KEY)"
+        )
+
+        for start in range(0, len(session_ids), safe_chunk_size):
+            chunk = session_ids[start:start + safe_chunk_size]
+            conn.execute("DELETE FROM temp_acp_message_session_ids")
+            conn.executemany(
+                "INSERT INTO temp_acp_message_session_ids(session_id) VALUES (?)",
+                [(session_id,) for session_id in chunk],
+            )
+            rows = conn.execute(
+                """
+                SELECT m.session_id, m.role, m.content, m.timestamp, m.raw_data
+                FROM session_messages AS m
+                JOIN temp_acp_message_session_ids AS ids
+                  ON ids.session_id = m.session_id
+                ORDER BY m.session_id, m.message_index
+                """
+            ).fetchall()
+            for row in rows:
+                d = dict(row)
+                session_id = str(d.pop("session_id"))
+                if d.get("raw_data"):
+                    try:
+                        d["raw_data"] = json.loads(d["raw_data"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                grouped.setdefault(session_id, []).append(d)
+
+        conn.execute("DELETE FROM temp_acp_message_session_ids")
+        return grouped
+
     def update_token_usage(
         self,
         session_id: str,
@@ -802,6 +1306,74 @@ class ACPSessionsDB:
             (prompt_tokens, completion_tokens, total, _utcnow_iso(), session_id),
         )
         conn.commit()
+
+    def update_session_budget(
+        self,
+        session_id: str,
+        token_budget: int | None,
+        auto_terminate_at_budget: bool,
+    ) -> bool:
+        """Update token budget settings for a session.
+
+        Returns True if the session was found and updated.
+        """
+        conn = self._get_conn()
+        cursor = conn.execute(
+            """
+            UPDATE sessions
+            SET token_budget = ?,
+                auto_terminate_at_budget = ?,
+                last_activity_at = ?
+            WHERE session_id = ?
+            """,
+            (
+                token_budget,
+                int(auto_terminate_at_budget),
+                _utcnow_iso(),
+                session_id,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def check_budget_and_terminate(self, session_id: str) -> bool:
+        """Check if a session has exceeded its token budget.
+
+        If auto_terminate_at_budget is enabled and total_tokens >= token_budget,
+        marks the session as closed with budget_exhausted = 1.
+
+        Returns True if the session was terminated due to budget exhaustion.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT total_tokens, token_budget, auto_terminate_at_budget, status "
+            "FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        # Skip if no budget set, auto-terminate not enabled, or already closed
+        if row["token_budget"] is None or not row["auto_terminate_at_budget"]:
+            return False
+        if row["status"] != "active":
+            return False
+        if row["total_tokens"] >= row["token_budget"]:
+            now = _utcnow_iso()
+            conn.execute(
+                "UPDATE sessions SET status = 'closed', budget_exhausted = 1, "
+                "last_activity_at = ? WHERE session_id = ?",
+                (now, session_id),
+            )
+            conn.commit()
+            logger.info(
+                "ACP session {} auto-terminated: token budget exhausted "
+                "({}/{})",
+                session_id,
+                row["total_tokens"],
+                row["token_budget"],
+            )
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Fork
@@ -839,6 +1411,7 @@ class ACPSessionsDB:
             scope_snapshot_id=source.get("scope_snapshot_id"),
             forked_from=source_session_id,
             needs_bootstrap=True,
+            model=source.get("model"),
         )
 
         # Copy messages from source up to message_index (inclusive)
@@ -1043,6 +1616,47 @@ class ACPSessionsDB:
         logger.info("Evicted {} expired ACP sessions", len(expired_ids))
         return len(expired_ids)
 
+    def purge_retained_sessions(
+        self,
+        *,
+        retention_days: int,
+        now: datetime | None = None,
+    ) -> int:
+        """Hard-delete closed/error sessions older than the retention window.
+
+        Session messages are deleted through the session table's cascade
+        relationship. Active sessions are never hard-deleted by retention; TTL
+        eviction must close them first.
+        """
+        try:
+            retention_days_int = int(retention_days)
+        except (TypeError, ValueError):
+            retention_days_int = 30
+        if retention_days_int < 0:
+            return 0
+
+        now_dt = now or datetime.now(timezone.utc)
+        cutoff = now_dt - timedelta(days=retention_days_int)
+        cutoff_iso = cutoff.isoformat()
+        conn = self._get_conn()
+        with conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM sessions
+                WHERE status IN ('closed', 'error')
+                  AND COALESCE(last_activity_at, created_at) < ?
+                """,
+                (cutoff_iso,),
+            )
+        deleted = cursor.rowcount
+        if deleted:
+            logger.info(
+                "Purged {} retained ACP sessions (retention={}d)",
+                deleted,
+                retention_days_int,
+            )
+        return deleted
+
     # ------------------------------------------------------------------
     # Agent Registry CRUD
     # ------------------------------------------------------------------
@@ -1068,6 +1682,12 @@ class ACPSessionsDB:
         mcp_llm_model = entry_dict.get("mcp_llm_model")
         mcp_max_iterations = int(entry_dict.get("mcp_max_iterations", 20))
         mcp_refresh_tools = int(bool(entry_dict.get("mcp_refresh_tools", 0)))
+        entrypoint_strategy = entry_dict.get("entrypoint_strategy", "documented_candidate")
+        acp_command = entry_dict.get("acp_command", "")
+        acp_args = entry_dict.get("acp_args", "[]")
+        adapter_source = entry_dict.get("adapter_source")
+        adapter_docs_url = entry_dict.get("adapter_docs_url")
+        certification_blocker = entry_dict.get("certification_blocker")
         source = entry_dict.get("source", "api")
 
         conn.execute(
@@ -1077,8 +1697,10 @@ class ACPSessionsDB:
                 requires_api_key, is_default, install_instructions, docs_url,
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
+                entrypoint_strategy, acp_command, acp_args,
+                adapter_source, adapter_docs_url, certification_blocker,
                 source, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_type) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -1096,6 +1718,12 @@ class ACPSessionsDB:
                 mcp_llm_model = excluded.mcp_llm_model,
                 mcp_max_iterations = excluded.mcp_max_iterations,
                 mcp_refresh_tools = excluded.mcp_refresh_tools,
+                entrypoint_strategy = excluded.entrypoint_strategy,
+                acp_command = excluded.acp_command,
+                acp_args = excluded.acp_args,
+                adapter_source = excluded.adapter_source,
+                adapter_docs_url = excluded.adapter_docs_url,
+                certification_blocker = excluded.certification_blocker,
                 source = excluded.source,
                 updated_at = excluded.updated_at
             """,
@@ -1104,6 +1732,8 @@ class ACPSessionsDB:
                 requires_api_key, is_default, install_instructions, docs_url,
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
+                entrypoint_strategy, acp_command, acp_args,
+                adapter_source, adapter_docs_url, certification_blocker,
                 source, now, now,
             ),
         )
@@ -1177,6 +1807,408 @@ class ACPSessionsDB:
             (agent_type, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Permission Policy CRUD
+    # ------------------------------------------------------------------
+
+    def create_permission_policy(
+        self,
+        name: str,
+        rules_json: str,
+        priority: int = 0,
+        description: str = "",
+        org_id: str | None = None,
+        team_id: str | None = None,
+    ) -> int:
+        """Insert a permission policy. Returns the new row ID."""
+        conn = self._get_conn()
+        now = _utcnow_iso()
+        cursor = conn.execute(
+            """
+            INSERT INTO permission_policies
+                (name, description, rules_json, org_id, team_id, priority,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (name, description, rules_json, org_id, team_id, priority, now, now),
+        )
+        conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_permission_policy(self, policy_id: int) -> dict[str, Any] | None:
+        """Fetch a single policy by ID, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM permission_policies WHERE id = ?", (policy_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_permission_policies(self) -> list[dict[str, Any]]:
+        """List all policies ordered by priority DESC, then name ASC."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM permission_policies ORDER BY priority DESC, name ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_permission_policy(self, policy_id: int, **kwargs: Any) -> bool:
+        """Update fields on a permission policy.
+
+        Accepted kwargs: name, description, rules_json, org_id, team_id, priority.
+        Returns True if the row was found and updated.
+        """
+        allowed = {"name", "description", "rules_json", "org_id", "team_id", "priority"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return False
+        updates["updated_at"] = _utcnow_iso()
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values()) + [policy_id]
+        conn = self._get_conn()
+        cursor = conn.execute(
+            f"UPDATE permission_policies SET {set_clause} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_permission_policy(self, policy_id: int) -> bool:
+        """Delete a policy by ID. Returns True if a row was removed."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM permission_policies WHERE id = ?", (policy_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def resolve_permission_tier(self, tool_name: str) -> str | None:
+        """Query all policies, match tool_name against rules using fnmatch.
+
+        Returns the tier from the highest-priority matching rule, or None
+        if no rule matches.
+        """
+        policies = self.list_permission_policies()
+        best_priority = -1
+        best_tier: str | None = None
+        for pol in policies:
+            priority = pol.get("priority", 0)
+            raw = pol.get("rules_json", "[]")
+            try:
+                rules = json.loads(raw) if isinstance(raw, str) else raw
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for rule in rules:
+                pattern = rule.get("tool_pattern", "")
+                tier = rule.get("tier", "")
+                if _fnmatch.fnmatch(tool_name.lower(), pattern.lower()):
+                    if priority > best_priority:
+                        best_priority = priority
+                        best_tier = tier
+        return best_tier
+
+    # ------------------------------------------------------------------
+    # Permission Decision CRUD
+    # ------------------------------------------------------------------
+
+    def insert_permission_decision(
+        self,
+        id: str,
+        user_id: int,
+        tool_pattern: str,
+        decision: str,
+        scope: str = "session",
+        session_id: str | None = None,
+        persona_id: str | None = None,
+        reason: str | None = None,
+        expires_at: str | None = None,
+    ) -> None:
+        """Insert a persisted permission decision."""
+        conn = self._get_conn()
+        conn.execute(
+            """
+            INSERT INTO permission_decisions
+                (id, user_id, tool_pattern, decision, scope,
+                 session_id, persona_id, created_at, expires_at, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                id, user_id, tool_pattern, decision, scope,
+                session_id, persona_id, _utcnow_iso(), expires_at, reason,
+            ),
+        )
+        conn.commit()
+
+    def list_permission_decisions(
+        self,
+        user_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """List permission decisions, optionally filtered by user_id."""
+        conn = self._get_conn()
+        if user_id is not None:
+            rows = conn.execute(
+                "SELECT * FROM permission_decisions WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM permission_decisions ORDER BY created_at DESC"
+            ).fetchall()
+        now_iso = _utcnow_iso()
+        results: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            # Skip expired decisions
+            if d.get("expires_at") and d["expires_at"] < now_iso:
+                continue
+            results.append(d)
+        return results
+
+    def check_permission_decision(
+        self,
+        user_id: int,
+        tool_name: str,
+        session_id: str | None = None,
+    ) -> str | None:
+        """Find a matching persisted decision for user_id + tool_name.
+
+        Returns ``'allow'`` or ``'deny'`` if a matching non-expired decision
+        exists, otherwise ``None``.  Global scope is checked first, then
+        session scope (if *session_id* is provided).
+        """
+        decisions = self.list_permission_decisions(user_id=user_id)
+        for d in decisions:
+            if not _fnmatch.fnmatch(tool_name, d["tool_pattern"]):
+                continue
+            if d["scope"] == "global":
+                return d["decision"]
+            if d["scope"] == "session" and d.get("session_id") == session_id:
+                return d["decision"]
+        return None
+
+    def delete_permission_decision(self, decision_id: str) -> bool:
+        """Delete a permission decision by ID. Returns True if a row was removed."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM permission_decisions WHERE id = ?", (decision_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_permission_decision(self, decision_id: str) -> dict[str, Any] | None:
+        """Fetch a single permission decision by ID, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM permission_decisions WHERE id = ?", (decision_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    # ------------------------------------------------------------------
+    # Webhook trigger CRUD
+    # ------------------------------------------------------------------
+
+    def create_webhook_trigger(
+        self,
+        trigger_id: str,
+        name: str,
+        source_type: str,
+        secret_encrypted: str,
+        owner_user_id: int,
+        agent_config_json: str = "{}",
+        prompt_template: str = "",
+        enabled: bool = True,
+    ) -> None:
+        """Insert a new webhook trigger row."""
+        conn = self._get_conn()
+        now = _utcnow_iso()
+        conn.execute(
+            """
+            INSERT INTO webhook_triggers
+                (id, name, source_type, secret_encrypted, owner_user_id,
+                 agent_config_json, prompt_template, enabled,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trigger_id,
+                name,
+                source_type,
+                secret_encrypted,
+                owner_user_id,
+                agent_config_json,
+                prompt_template,
+                1 if enabled else 0,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+    def list_webhook_triggers(self, owner_user_id: int) -> list[dict[str, Any]]:
+        """Return all webhook triggers owned by *owner_user_id*."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM webhook_triggers WHERE owner_user_id = ? ORDER BY created_at DESC",
+            (owner_user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_webhook_trigger(self, trigger_id: str) -> dict[str, Any] | None:
+        """Return a single webhook trigger by id, or ``None``."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM webhook_triggers WHERE id = ?", (trigger_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    _WEBHOOK_TRIGGER_UPDATABLE_COLS = frozenset({
+        "name", "source_type", "secret_encrypted", "agent_config_json",
+        "prompt_template", "enabled", "updated_at",
+    })
+
+    def update_webhook_trigger(self, trigger_id: str, updates: dict[str, Any]) -> bool:
+        """Update fields of a webhook trigger. Returns True if a row was modified."""
+        if not updates:
+            return False
+        for k in updates:
+            if k not in self._WEBHOOK_TRIGGER_UPDATABLE_COLS:
+                raise ValueError(f"Cannot update column: {k!r}")
+        conn = self._get_conn()
+        updates["updated_at"] = _utcnow_iso()
+        set_clauses = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [trigger_id]
+        cursor = conn.execute(
+            f"UPDATE webhook_triggers SET {set_clauses} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_webhook_trigger(self, trigger_id: str) -> bool:
+        """Delete a webhook trigger. Returns True if a row was removed."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM webhook_triggers WHERE id = ?", (trigger_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Config Template CRUD
+    # ------------------------------------------------------------------
+
+    def create_config_template(
+        self,
+        name: str,
+        description: str = "",
+        scope: str = "system",
+        scope_id: str | None = None,
+        base_template_id: int | None = None,
+        schema_version: str = "1",
+        config_json: str = "{}",
+    ) -> int:
+        """Insert a new config template. Returns the new row ID."""
+        conn = self._get_conn()
+        now = _utcnow_iso()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO config_templates
+                    (name, description, scope, scope_id, base_template_id,
+                     schema_version, config_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    name, description, scope, scope_id, base_template_id,
+                    schema_version, config_json, now, now,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Config template already exists for this scope") from exc
+        conn.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_config_template(self, template_id: int) -> dict[str, Any] | None:
+        """Fetch a single config template by ID, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM config_templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_config_templates(
+        self,
+        *,
+        scope: str | None = None,
+        scope_id: str | None = None,
+        name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List config templates with optional filters.
+
+        Filters are AND-combined when provided.
+        """
+        conn = self._get_conn()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if scope is not None:
+            clauses.append("scope = ?")
+            params.append(scope)
+        if scope_id is not None:
+            clauses.append("scope_id = ?")
+            params.append(scope_id)
+        if name is not None:
+            clauses.append("name = ?")
+            params.append(name)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM config_templates{where} ORDER BY id",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    _CONFIG_TEMPLATE_UPDATABLE_COLS = frozenset({
+        "name", "description", "scope", "scope_id", "base_template_id",
+        "schema_version", "config_json",
+    })
+
+    def update_config_template(self, template_id: int, **kwargs: Any) -> bool:
+        """Update fields on a config template.
+
+        Returns True if the row was found and updated.
+        """
+        updates = {k: v for k, v in kwargs.items() if k in self._CONFIG_TEMPLATE_UPDATABLE_COLS}
+        if not updates:
+            return False
+        updates["updated_at"] = _utcnow_iso()
+        set_clause = ", ".join(f"{col} = ?" for col in updates)
+        values = list(updates.values()) + [template_id]
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                f"UPDATE config_templates SET {set_clause} WHERE id = ?",  # nosec B608
+                values,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Config template already exists for this scope") from exc
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def delete_config_template(self, template_id: int) -> bool:
+        """Delete a config template by ID. Returns True if a row was removed."""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM config_templates WHERE id = ?", (template_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     # ------------------------------------------------------------------
     # Lifecycle

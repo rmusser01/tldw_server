@@ -1,7 +1,7 @@
 /**
  * Common test helpers for E2E tests
  */
-import { type Locator, type Page } from '@playwright/test';
+import { type Locator, type Page, type Route } from '@playwright/test';
 
 /**
  * Environment configuration for tests
@@ -23,6 +23,14 @@ const resolveSeedServerUrl = (cfg: Partial<typeof TEST_CONFIG>): string => {
     return normalizeOrigin(cfg.webUrl.trim());
   }
   return normalizeOrigin(TEST_CONFIG.serverUrl);
+};
+
+const fulfillJson = async (route: Route, status: number, data: unknown): Promise<void> => {
+  await route.fulfill({
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify(data),
+  });
 };
 
 /**
@@ -238,6 +246,9 @@ export async function seedAuth(
       localStorage.setItem('__tldw_first_run_complete', 'true');
     } catch {}
     try {
+      localStorage.setItem('assistant_setup_dismissed', 'true');
+    } catch {}
+    try {
       if (cfg.allowOffline) {
         localStorage.setItem('__tldw_allow_offline', 'true');
       }
@@ -262,6 +273,56 @@ export async function seedAuth(
       contentType: 'application/json',
       body: JSON.stringify({ llm_enabled: false, default_strategy: 'heuristic' }),
     });
+  });
+}
+
+/**
+ * Stub the notifications API family for suites that do not exercise
+ * notifications behavior directly but still mount the global bridge.
+ */
+export async function stubNotificationsApi(page: Page): Promise<void> {
+  await page.route(/\/api\/v1\/notifications(?:\/.*)?(?:\?.*)?$/, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const { pathname } = url;
+    const method = request.method().toUpperCase();
+
+    if (method === 'GET' && pathname === '/api/v1/notifications') {
+      await fulfillJson(route, 200, {
+        items: [],
+        total: 0,
+      });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/v1/notifications/unread-count') {
+      await fulfillJson(route, 200, {
+        unread_count: 0,
+      });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/v1/notifications/preferences') {
+      await fulfillJson(route, 200, {
+        user_id: 'e2e-user',
+        reminder_enabled: false,
+        job_completed_enabled: false,
+        job_failed_enabled: false,
+        updated_at: new Date().toISOString(),
+      });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/v1/notifications/stream') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: '',
+      });
+      return;
+    }
+
+    await fulfillJson(route, 200, {});
   });
 }
 
@@ -370,12 +431,46 @@ export function getAntdSelectTrigger(
     ariaLabel: string | RegExp;
   }
 ): Locator {
-  const combobox = page.getByRole('combobox', { name: options.ariaLabel }).first();
+  // The ARIA combobox is the stable interactive target across Ant Design
+  // render variants; the wrapper classes can disappear in some E2E builds.
+  return page.getByRole('combobox', { name: options.ariaLabel }).first();
+}
+export function getVisibleAntdSelectOption(
+  page: Page,
+  options: {
+    text: string | RegExp;
+  }
+): Locator {
   return page
-    .locator('.ant-select')
-    .filter({ has: combobox })
-    .locator('.ant-select-selector')
+    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+    .filter({ hasText: options.text })
     .first();
+}
+
+export async function dispatchKeyboardShortcut(
+  page: Page,
+  options: {
+    key: string;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+    shiftKey?: boolean;
+    metaKey?: boolean;
+  }
+): Promise<void> {
+  await page.evaluate((shortcut) => {
+    const eventInit: KeyboardEventInit = {
+      key: shortcut.key,
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: Boolean(shortcut.ctrlKey),
+      altKey: Boolean(shortcut.altKey),
+      shiftKey: Boolean(shortcut.shiftKey),
+      metaKey: Boolean(shortcut.metaKey)
+    }
+
+    window.dispatchEvent(new KeyboardEvent("keydown", eventInit))
+    document.dispatchEvent(new KeyboardEvent("keydown", eventInit))
+  }, options)
 }
 
 /**
@@ -559,6 +654,7 @@ export const BENIGN_PATTERNS = [
   /Hydration failed/,
   /There was an error while hydrating/,
   /cannot connect to an AudioNode belonging to a different audio context/i,
+  /Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node\./,
 ];
 
 /**

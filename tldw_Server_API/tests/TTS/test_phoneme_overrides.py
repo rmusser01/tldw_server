@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
 from tldw_Server_API.app.core.TTS.adapters.kokoro_adapter import KokoroAdapter
@@ -13,6 +14,20 @@ from tldw_Server_API.app.core.TTS.phoneme_overrides import (
     merge_override_entries,
     parse_override_entries,
 )
+
+
+@pytest.fixture
+def captured_phoneme_override_logs():
+    messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="DEBUG",
+        format="{message}",
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(sink_id)
 
 
 def test_apply_overrides_respects_lang_and_boundaries():
@@ -140,3 +155,50 @@ async def test_kokoro_generate_applies_overrides_in_generate_flow(monkeypatch: p
     response = await adapter.generate(request)
     assert response.audio_data == b"audio-bytes"
     assert "[[request-level]]" in captured["text"]
+
+
+def test_invalid_config_path_candidate_log_omits_raw_path_and_exception_text(
+    captured_phoneme_override_logs,
+):
+    secret_path = "SECRET_CONFIG_PATH_" + ("a" * 10_000)
+
+    entries = load_override_entries(secret_path)
+
+    log_text = "\n".join(captured_phoneme_override_logs)
+    assert entries == []
+    assert "Skipping invalid config path candidate" in log_text
+    assert "OSError" in log_text
+    assert "SECRET_CONFIG_PATH" not in log_text
+    assert "File name too long" not in log_text
+
+
+def test_failed_entry_parse_log_omits_raw_exception_text(captured_phoneme_override_logs):
+    class SecretStrFailure:
+        def __str__(self) -> str:
+            raise ValueError("SECRET_PARSE_VALUE")
+
+    entries = parse_override_entries([{"term": SecretStrFailure(), "phonemes": "AH"}])
+
+    log_text = "\n".join(captured_phoneme_override_logs)
+    assert entries == []
+    assert "Failed to parse phoneme override entry" in log_text
+    assert "ValueError" in log_text
+    assert "SECRET_PARSE_VALUE" not in log_text
+
+
+def test_failed_load_from_path_log_omits_raw_path_and_exception_text(
+    tmp_path: Path,
+    captured_phoneme_override_logs,
+):
+    override_file = tmp_path / "SECRET_LOAD_PATH_tts_phonemes.json"
+    override_file.write_text("{not-valid-json", encoding="utf-8")
+
+    entries = load_override_entries(str(override_file))
+
+    log_text = "\n".join(captured_phoneme_override_logs)
+    assert entries == []
+    assert "Failed to load phoneme overrides" in log_text
+    assert "JSONDecodeError" in log_text
+    assert str(override_file) not in log_text
+    assert "SECRET_LOAD_PATH" not in log_text
+    assert "Expecting property name" not in log_text

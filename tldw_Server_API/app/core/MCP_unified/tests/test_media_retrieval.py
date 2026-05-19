@@ -7,7 +7,10 @@ from typing import Any, Dict, List
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import media_module as media_module_impl
-from tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module import MediaModule
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module import (
+    MediaModule,
+    UnsupportedMediaQueueBackendError,
+)
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -79,21 +82,21 @@ async def test_media_get_chunk_with_siblings_budget():
             "retrieval": {
                 "mode": "chunk_with_siblings",
                 "max_tokens": 25,  # can fit 2 chunks (10 + 10) and not a third (would be 30)
-                "chars_per_token": 1,
+                "chars_per_token": 1,  # nosec B105
                 "loc": {"approx_offset": 12},
             },
         },
         context=context,
     )
 
-    assert isinstance(out, dict)
-    assert out["meta"]["loc"]["chunk_index"] == 1
+    assert isinstance(out, dict)  # nosec B101
+    assert out["meta"]["loc"]["chunk_index"] == 1  # nosec B101
     body = out["content"]
     # Greedy expansion adds left(0) then right(2) or vice versa depending on order; our code checks left then right
     # Anchor chunk_index 1 → chunks 1 and 0 can fit within 25 tokens (20 total); third chunk would exceed.
-    assert body in ("B" * 10 + "\n\n" + "A" * 10, "A" * 10 + "\n\n" + "B" * 10)
+    assert body in ("B" * 10 + "\n\n" + "A" * 10, "A" * 10 + "\n\n" + "B" * 10)  # nosec B101
     # Ensure total chars <= 25
-    assert len(body.replace("\n", "")) <= 25
+    assert len(body.replace("\n", "")) <= 25  # nosec B101
 
 
 class RecordingDB:
@@ -148,20 +151,20 @@ async def test_search_media_cache_respects_filters():
     mod._cache_ttl = 300
 
     await mod._search_media(query="foo", search_type="keyword", limit=5, offset=0, media_types=["video"])
-    assert len(mod.db.calls) == 1
+    assert len(mod.db.calls) == 1  # nosec B101
 
     await mod._search_media(query="foo", search_type="keyword", limit=5, offset=0, media_types=["audio"])
-    assert len(mod.db.calls) == 2  # different filter should bypass cache
+    assert len(mod.db.calls) == 2  # different filter should bypass cache  # nosec B101
 
     await mod._search_media(query="foo", search_type="keyword", limit=5, offset=0, media_types=["audio"])
-    assert len(mod.db.calls) == 2  # cached response reused
+    assert len(mod.db.calls) == 2  # cached response reused  # nosec B101
 
 
 def test_clear_media_cache_flushes_all_entries():
     mod = MediaModule(ModuleConfig(name="media"))
     mod._media_cache = {"k": {"time": datetime.utcnow(), "data": {}}}
     mod._clear_media_cache(1)
-    assert mod._media_cache == {}
+    assert mod._media_cache == {}  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -171,13 +174,13 @@ async def test_media_resources_use_search_api():
 
     recent = await mod.read_resource("media://recent")
     popular = await mod.read_resource("media://popular")
-    assert len(mod.db.calls) == 2
-    assert mod.db.calls[0]["sort_by"] == "last_modified_desc"
-    assert mod.db.calls[1]["sort_by"] == "date_desc"
-    assert recent["items"][0]["title"].startswith("T")
+    assert len(mod.db.calls) == 2  # nosec B101
+    assert mod.db.calls[0]["sort_by"] == "last_modified_desc"  # nosec B101
+    assert mod.db.calls[1]["sort_by"] == "date_desc"  # nosec B101
+    assert recent["items"][0]["title"].startswith("T")  # nosec B101
     types_resource = await mod.read_resource("media://types")
-    assert "video" in types_resource["items"]
-    assert "pdf" in types_resource["items"]
+    assert "video" in types_resource["items"]  # nosec B101
+    assert "pdf" in types_resource["items"]  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -204,9 +207,9 @@ async def test_search_media_semantic_path(monkeypatch):
 
     mod._get_semantic_retriever = MethodType(lambda self, db, ctx: StubRetriever(), mod)  # type: ignore
     result = await mod._search_media(query="hello", search_type="semantic", limit=5, offset=0)
-    assert result["count"] == 1
-    assert result["results"][0]["id"] == 42
-    assert result["results"][0]["semantic_score"] == pytest.approx(0.9)
+    assert result["count"] == 1  # nosec B101
+    assert result["results"][0]["id"] == 42  # nosec B101
+    assert result["results"][0]["semantic_score"] == pytest.approx(0.9)  # nosec B101
 
 
 def test_media_open_db_requires_context():
@@ -222,7 +225,7 @@ def test_media_open_db_allows_injected_non_owner_db_without_context():
     injected_db = SimpleNamespace(db_path_str=":memory:", close_connection=lambda: None)
     mod.db = injected_db
 
-    assert mod._open_media_db(context=None) is injected_db
+    assert mod._open_media_db(context=None) is injected_db  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -238,12 +241,54 @@ async def test_get_transcript_srt_vtt_fallback(monkeypatch):
     monkeypatch.setattr(media_module_impl, "get_latest_transcription", lambda _db, _media_id: "Hello world")
 
     srt = await mod.execute_tool("get_transcript", {"media_id": 1, "format": "srt"}, context=context)
-    assert "Hello world" in srt["transcript"]
-    assert "-->" in srt["transcript"]
+    assert "Hello world" in srt["transcript"]  # nosec B101
+    assert "-->" in srt["transcript"]  # nosec B101
 
     vtt = await mod.execute_tool("get_transcript", {"media_id": 1, "format": "vtt"}, context=context)
-    assert "WEBVTT" in vtt["transcript"]
-    assert "Hello world" in vtt["transcript"]
+    assert "WEBVTT" in vtt["transcript"]  # nosec B101
+    assert "Hello world" in vtt["transcript"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_ingest_media_falls_back_to_inline_processing_when_queue_backend_is_unimplemented(monkeypatch):
+    mod = MediaModule(ModuleConfig(name="media", settings={"ingestion_queue": "rq"}))
+    events = []
+    original_queue = mod._queue_media_job
+
+    async def _fake_process(job_id: str):
+        events.append(("process", job_id))
+
+    monkeypatch.setattr(mod, "_validate_url", lambda _url: True)
+    monkeypatch.setattr(mod, "_process_media_job", _fake_process)
+
+    async def _recording_queue(job_id: str):
+        events.append(("queue", job_id))
+        return await original_queue(job_id)
+
+    monkeypatch.setattr(mod, "_queue_media_job", _recording_queue)
+
+    result = await mod._ingest_media(url="https://example.com/video", priority="normal")
+
+    assert result["status"] == "processing"  # nosec B101
+    assert events == [("queue", result["job_id"]), ("process", result["job_id"])]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_ingest_media_propagates_generic_queue_runtime_error(monkeypatch):
+    mod = MediaModule(ModuleConfig(name="media", settings={"ingestion_queue": "rq"}))
+    monkeypatch.setattr(mod, "_validate_url", lambda _url: True)
+
+    async def _boom(_job_id: str):
+        raise RuntimeError("queue worker unavailable")
+
+    async def _unexpected_process(_job_id: str):
+        raise AssertionError("inline fallback should not run for generic queue failures")
+
+    monkeypatch.setattr(mod, "_queue_media_job", _boom)
+    monkeypatch.setattr(mod, "_process_media_job", _unexpected_process)
+
+    with pytest.raises(RuntimeError, match="queue worker unavailable"):
+        await mod._ingest_media(url="https://example.com/video", priority="normal")
 
 
 def test_media_access_enforces_owner_user_id():
@@ -328,10 +373,10 @@ async def test_get_media_metadata_sanitizes_and_adds_description(monkeypatch):
 
     ctx = SimpleNamespace(user_id="1", metadata={})
     result = await mod._get_media_metadata(media_id=1, include_stats=False, context=ctx)
-    assert result["description"] == "desc"
-    assert "content" not in result
-    assert "client_id" not in result
-    assert "vector_embedding" not in result
+    assert result["description"] == "desc"  # nosec B101
+    assert "content" not in result  # nosec B101
+    assert "client_id" not in result  # nosec B101
+    assert "vector_embedding" not in result  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -360,7 +405,7 @@ async def test_media_get_includes_description(monkeypatch):
 
     ctx = SimpleNamespace(user_id="1", metadata={})
     result = await mod._media_get_normalized(media_id=1, retrieval=None, context=ctx)
-    assert result["meta"]["description"] == "desc"
+    assert result["meta"]["description"] == "desc"  # nosec B101
 
 
 @pytest.mark.asyncio

@@ -82,7 +82,12 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState)
+    selector(testState),
+  createWorkspaceStorage: () => ({
+    getItem: vi.fn(() => null),
+    setItem: vi.fn(),
+    removeItem: vi.fn()
+  })
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -211,7 +216,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
   it("opens and closes workspace search with keyboard shortcuts", async () => {
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    fireEvent.keyDown(window, { key: "k", altKey: true })
 
     const dialog = await screen.findByRole("dialog", { name: "Search workspace" })
     expect(dialog).toBeInTheDocument()
@@ -234,7 +239,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
   it("closes workspace search when Escape is pressed inside the search input", async () => {
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    fireEvent.keyDown(window, { key: "k", altKey: true })
 
     const dialog = await screen.findByRole("dialog", { name: "Search workspace" })
     expect(dialog).toBeInTheDocument()
@@ -256,17 +261,17 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
   it("routes pane focus shortcuts and workspace creation shortcuts", () => {
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "1", metaKey: true })
+    fireEvent.keyDown(window, { key: "1", altKey: true })
     expect(testState.setLeftPaneCollapsed).toHaveBeenCalledWith(false)
 
-    fireEvent.keyDown(window, { key: "3", metaKey: true })
+    fireEvent.keyDown(window, { key: "3", altKey: true })
     expect(testState.setRightPaneCollapsed).toHaveBeenCalledWith(false)
 
-    fireEvent.keyDown(window, { key: "N", metaKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: "N", altKey: true, shiftKey: true })
     expect(testState.createNewWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it("starts a new note draft with Cmd/Ctrl+N", () => {
+  it("starts a new note draft with Alt+N", () => {
     testState.currentNote = {
       id: undefined,
       title: "",
@@ -277,7 +282,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
 
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "n", ctrlKey: true })
+    fireEvent.keyDown(window, { key: "n", altKey: true })
 
     expect(testState.clearCurrentNote).toHaveBeenCalledTimes(1)
     return waitFor(() => {
@@ -285,7 +290,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
     })
   })
 
-  it("uses undo-managed clear flow for non-empty notes from Cmd/Ctrl+N", async () => {
+  it("uses undo-managed clear flow for non-empty notes from Alt+N", async () => {
     testState.currentNote = {
       id: 9,
       title: "Draft note",
@@ -296,7 +301,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
 
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "n", ctrlKey: true })
+    fireEvent.keyDown(window, { key: "n", altKey: true })
 
     fireEvent.click(
       await screen.findByRole("button", { name: "New note" })
@@ -366,7 +371,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
 
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
+    fireEvent.keyDown(window, { key: "k", altKey: true })
     const searchInput = await screen.findByPlaceholderText(
       "Search sources, chat, and notes..."
     )
@@ -403,7 +408,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
 
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    fireEvent.keyDown(window, { key: "k", altKey: true })
     const searchInput = await screen.findByPlaceholderText(
       "Search sources, chat, and notes..."
     )
@@ -417,7 +422,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
       )
     })
 
-    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    fireEvent.keyDown(window, { key: "k", altKey: true })
     const noteSearchInput = await screen.findByPlaceholderText(
       "Search sources, chat, and notes..."
     )
@@ -465,7 +470,7 @@ describe("WorkspacePlayground stage 3 global navigation", () => {
 
     render(<WorkspacePlayground />)
 
-    fireEvent.keyDown(window, { key: "k", metaKey: true })
+    fireEvent.keyDown(window, { key: "k", altKey: true })
     const searchInput = await screen.findByPlaceholderText(
       "Search sources, chat, and notes..."
     )

@@ -381,8 +381,8 @@ JSON:"""
                     if 0 <= strip_num < len(batch):
                         batch[strip_num].relevance_score = min(1.0, max(0.0, relevance))
 
-            except Exception as e:
-                logger.warning(f"LLM strip scoring failed, falling back to heuristic: {e}")
+            except Exception:
+                logger.warning("LLM strip scoring failed, falling back to heuristic")
                 # Fall back to heuristic for this batch
                 for strip in batch:
                     strip.relevance_score = _score_strip_relevance(query, strip.text)

@@ -1,9 +1,12 @@
 import os
 import json
+import asyncio
 from pathlib import Path
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import (
+    TopicMonitoringService,
     get_topic_monitoring_service,
     _reset_topic_monitoring_service,
 )
@@ -432,6 +435,32 @@ def test_topic_monitoring_reload_updates_paths(tmp_path: Path, monkeypatch: pyte
     assert len(items) == 1
 
 
+def test_topic_monitoring_reload_refreshes_dedupe_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_file = tmp_path / "alerts.db"
+    wl_file = tmp_path / "watchlists.json"
+    wl_file.write_text(json.dumps({"watchlists": []}), encoding="utf-8")
+
+    monkeypatch.setenv("MONITORING_ALERTS_DB", str(db_file))
+    monkeypatch.setenv("MONITORING_WATCHLISTS_FILE", str(wl_file))
+    monkeypatch.setenv("MONITORING_ENABLED", "true")
+    monkeypatch.setenv("TOPIC_MONITOR_DEDUP_SECONDS", "300")
+    monkeypatch.setenv("TOPIC_MONITOR_SIMHASH_DISTANCE", "3")
+
+    _reset_topic_monitoring_service()
+    svc = get_topic_monitoring_service()
+
+    assert svc._dedup_window_seconds == 300
+    assert svc._simhash_distance == 3
+
+    monkeypatch.setenv("TOPIC_MONITOR_DEDUP_SECONDS", "30")
+    monkeypatch.setenv("TOPIC_MONITOR_SIMHASH_DISTANCE", "1")
+
+    svc.reload()
+
+    assert svc._dedup_window_seconds == 30
+    assert svc._simhash_distance == 1
+
+
 def test_topic_monitoring_dedupe_prunes_stale_streams(tmp_path, monkeypatch):
     import tldw_Server_API.app.core.Monitoring.topic_monitoring_service as tms
 
@@ -454,3 +483,77 @@ def test_topic_monitoring_dedupe_prunes_stale_streams(tmp_path, monkeypatch):
     monkeypatch.setattr(tms.time, "monotonic", lambda: 2.0)
     svc._dedupe_should_skip(stream_id="s2", rule_id="r1", text="beta")
     assert "s1" not in svc._dedupe_state
+
+
+def test_topic_monitoring_notify_fallback_log_omits_raw_exception(tmp_path, monkeypatch):
+    import tldw_Server_API.app.core.Monitoring.topic_monitoring_service as tms
+
+    db_file = tmp_path / "alerts.db"
+    monkeypatch.setenv("MONITORING_ALERTS_DB", str(db_file))
+    monkeypatch.setenv("MONITORING_ENABLED", "true")
+    wl_file = tmp_path / "watchlists.json"
+    wl_file.write_text(json.dumps({"watchlists": []}), encoding="utf-8")
+    monkeypatch.setenv("MONITORING_WATCHLISTS_FILE", str(wl_file))
+
+    _reset_topic_monitoring_service()
+    svc = get_topic_monitoring_service()
+    svc.reload()
+
+    wl = Watchlist(
+        name="Notify Fallback WL",
+        description="Force notification fallback",
+        enabled=True,
+        scope_type="user",
+        scope_id="u1",
+        rules=[WatchlistRule(pattern="notify", category="custom", severity="warning")],
+    )
+    svc.upsert_watchlist(wl)
+
+    class FailingNotifier:
+        def notify(self, alert):
+            raise RuntimeError("raw secret path /tmp/topic-monitoring-secret api_key=abc123")
+
+    logs: list[str] = []
+    handler_id = logger.add(logs.append, level="DEBUG", format="{message}")
+    monkeypatch.setattr(tms, "get_notification_service", lambda: FailingNotifier())
+    try:
+        created = svc.evaluate_and_alert(user_id="u1", text="notify user", source="chat.input")
+    finally:
+        logger.remove(handler_id)
+
+    assert created == 1
+    joined = "\n".join(logs)
+    assert "Topic monitoring notify skipped" in joined
+    assert "raw secret path" not in joined
+    assert "/tmp/topic-monitoring-secret" not in joined
+    assert "api_key=abc123" not in joined
+
+
+@pytest.mark.asyncio
+async def test_topic_monitoring_background_fallback_log_omits_raw_exception(monkeypatch):
+    svc = TopicMonitoringService.__new__(TopicMonitoringService)
+    monkeypatch.setattr(svc, "_monitoring_active", lambda: True)
+    monkeypatch.setattr(svc, "_applicable_watchlists", lambda *args, **kwargs: [("wl", object())])
+
+    def fail_evaluate(*args, **kwargs):
+        raise RuntimeError("raw background path /tmp/topic-background-secret token=abc123")
+
+    async def run_inline(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(svc, "evaluate_and_alert", fail_evaluate)
+    monkeypatch.setattr(asyncio, "to_thread", run_inline)
+
+    logs: list[str] = []
+    handler_id = logger.add(logs.append, level="DEBUG", format="{message}")
+    try:
+        svc.schedule_evaluate_and_alert(user_id="u1", text="body", source="chat.input")
+        await asyncio.sleep(0)
+    finally:
+        logger.remove(handler_id)
+
+    joined = "\n".join(logs)
+    assert "Topic monitoring background evaluation failed" in joined
+    assert "raw background path" not in joined
+    assert "/tmp/topic-background-secret" not in joined
+    assert "token=abc123" not in joined

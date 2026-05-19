@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { TakeQuizTab } from "../TakeQuizTab"
 import {
   useAttemptsQuery,
@@ -11,6 +12,10 @@ import {
 import { useQuizAutoSave } from "../../hooks/useQuizAutoSave"
 import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { buildShuffledOptionEntries } from "../../utils/optionShuffle"
+
+vi.mock("react-router-dom", () => ({
+  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+}))
 
 const interpolate = (template: string, values: Record<string, unknown> | undefined) => {
   return template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_, key: string) => {
@@ -192,10 +197,12 @@ describe("TakeQuizTab start flow", () => {
     vi.mocked(useStartAttemptMutation).mockReturnValue({ mutateAsync } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
@@ -212,10 +219,12 @@ describe("TakeQuizTab start flow", () => {
 
   it("renders expanded quiz metadata on list cards", () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     expect(screen.getByText("Pass: 75%")).toBeInTheDocument()
@@ -237,10 +246,12 @@ describe("TakeQuizTab start flow", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     expect(
@@ -252,17 +263,19 @@ describe("TakeQuizTab start flow", () => {
 
   it("renders shared-assignment context with due date and note", () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-        startQuizId={7}
-        highlightQuizId={7}
-        navigationSource="assignment"
-        assignmentMode="shared"
-        assignmentDueAt="2026-03-01T14:30:00.000Z"
-        assignmentNote="Complete before the lab session."
-        assignedByRole="lead"
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+          startQuizId={7}
+          highlightQuizId={7}
+          navigationSource="assignment"
+          assignmentMode="shared"
+          assignmentDueAt="2026-03-01T14:30:00.000Z"
+          assignmentNote="Complete before the lab session."
+          assignedByRole="lead"
+        />
+      </MemoryRouter>
     )
 
     expect(
@@ -289,10 +302,12 @@ describe("TakeQuizTab start flow", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
@@ -306,10 +321,12 @@ describe("TakeQuizTab start flow", () => {
 
   it("adds semantic grouping for question radios and labels progress", async () => {
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
@@ -333,10 +350,12 @@ describe("TakeQuizTab start flow", () => {
     })
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
@@ -435,10 +454,12 @@ describe("TakeQuizTab start flow", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))
@@ -525,10 +546,12 @@ describe("TakeQuizTab start flow", () => {
     } as any)
 
     render(
-      <TakeQuizTab
-        onNavigateToGenerate={() => {}}
-        onNavigateToCreate={() => {}}
-      />
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Start Quiz/i }))

@@ -1,6 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { StopCircle } from "lucide-react"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 interface VoiceChatIndicatorProps {
   state: "idle" | "connecting" | "listening" | "thinking" | "speaking" | "error"
@@ -31,10 +32,31 @@ export const VoiceChatIndicator: React.FC<VoiceChatIndicatorProps> = ({
 
   const stateEmoji = emoji[state] || ""
 
+  const badgeVariant: BadgeVariant = (() => {
+    switch (state) {
+      case "listening":
+        return "success"
+      case "error":
+        return "danger"
+      case "connecting":
+      case "thinking":
+      case "speaking":
+      default:
+        return "primary"
+    }
+  })()
+
   return (
-    <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 rounded-full bg-surface border border-border px-3 py-2 shadow-lg">
-      <span className="text-lg" aria-hidden="true">{stateEmoji}</span>
-      <span className="text-sm font-medium">{statusLabel}</span>
+    <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 rounded-full bg-surface border border-border px-2 py-1.5 shadow-lg">
+      <Badge
+        data-testid="voice-chat-status-badge"
+        variant={badgeVariant}
+        size="md"
+        className="gap-1.5"
+      >
+        <span className="text-sm" aria-hidden="true">{stateEmoji}</span>
+        <span>{statusLabel}</span>
+      </Badge>
       <button
         type="button"
         onClick={onStop}

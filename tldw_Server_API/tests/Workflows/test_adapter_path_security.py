@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 import tldw_Server_API.app.core.Workflows.adapters as wf_adapters
+import tldw_Server_API.app.core.Workflows.adapters._common as workflow_common
 
 
 pytestmark = pytest.mark.unit
@@ -33,7 +34,7 @@ async def test_prompt_adapter_sanitizes_artifact_dir(monkeypatch, tmp_path):
 async def test_tts_adapter_sanitizes_output_filename(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
-    from tldw_Server_API.app.core.TTS import tts_service_v2 as tts_mod
+    from tldw_Server_API.app.core.Workflows.adapters.audio import tts as tts_adapter
 
     class _FakeTTSService:
         async def generate_speech(self, request, provider=None, fallback=True, voice_to_voice_start=None, voice_to_voice_route="audio.speech"):
@@ -42,7 +43,7 @@ async def test_tts_adapter_sanitizes_output_filename(monkeypatch, tmp_path):
     async def _fake_get_tts_service_v2(config=None):
         return _FakeTTSService()
 
-    monkeypatch.setattr(tts_mod, "get_tts_service_v2", _fake_get_tts_service_v2, raising=True)
+    monkeypatch.setattr(tts_adapter, "get_tts_service_v2", _fake_get_tts_service_v2, raising=True)
 
     config = {
         "input": "hello",
@@ -256,3 +257,229 @@ def test_resolve_workflow_file_path_unsafe_denies_without_allowlist(monkeypatch,
     target = allow_dir / "blocked.txt"
     with pytest.raises(wf_adapters.AdapterError):
         wf_adapters._resolve_workflow_file_path(str(target), {})
+
+
+def test_is_subpath_sanitizes_resolve_failure_logs():
+    class _BrokenPath:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        def __fspath__(self) -> str:
+            return f"/private/{self.label}"
+
+        def __str__(self) -> str:
+            return f"/private/{self.label}"
+
+        def resolve(self, strict: bool = False):  # noqa: ARG002, ANN201
+            raise OSError(f"secret resolve failure for {self.label}")
+
+        def relative_to(self, _other):  # noqa: ANN001, ANN201
+            raise ValueError
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.is_subpath(_BrokenPath("parent-token"), _BrokenPath("child-token")) is False
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Failed to resolve workflow parent path" in joined
+    assert "Failed to resolve workflow child path" in joined
+    assert "parent-token" not in joined
+    assert "child-token" not in joined
+    assert "secret resolve failure" not in joined
+
+
+def test_resolve_workflows_file_allowlist_sanitizes_invalid_path_logs(monkeypatch, tmp_path):
+    original_resolve = workflow_common.Path.resolve
+    allowlist_path = tmp_path / "allowlist-token"
+
+    def broken_resolve(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if "allowlist-token" in str(self):
+            raise OSError("secret allowlist backend at /private/allowlist.db")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(workflow_common.Path, "resolve", broken_resolve)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.resolve_workflows_file_allowlist_paths([str(allowlist_path)]) == []
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Workflow file allowlist: invalid path skipped" in joined
+    assert "allowlist-token" not in joined
+    assert "private/allowlist.db" not in joined
+
+
+def test_resolve_workflows_file_allowlist_sanitizes_project_root_logs(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Utils import Utils as utils_mod
+
+    def broken_project_root():  # noqa: ANN202
+        raise RuntimeError("secret project root at /private/allowlist-root")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(utils_mod, "get_project_root", broken_project_root)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        resolved = workflow_common.resolve_workflows_file_allowlist_paths(["relative-allowlist"])
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    assert resolved == [(tmp_path / "relative-allowlist").resolve(strict=False)]
+    joined = "\n".join(messages)
+    assert "Workflow file allowlist: failed to resolve project root" in joined
+    assert "allowlist-root" not in joined
+    assert "private/allowlist-root" not in joined
+
+
+def test_workflow_file_base_dir_sanitizes_relative_override_logs(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Utils import Utils as utils_mod
+
+    def broken_project_root():  # noqa: ANN202
+        raise RuntimeError("secret project root at /private/workflows-root")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", "relative-secret-base")
+    monkeypatch.setattr(utils_mod, "get_project_root", broken_project_root)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.workflow_file_base_dir({}, None) == (tmp_path / "relative-secret-base").resolve()
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Workflow file base dir: failed to resolve relative override" in joined
+    assert "relative-secret-base" not in joined
+    assert "private/workflows-root" not in joined
+
+
+def test_workflow_file_base_dir_sanitizes_invalid_user_id_logs(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management import db_path_utils
+
+    monkeypatch.delenv("WORKFLOWS_FILE_BASE_DIR", raising=False)
+    monkeypatch.setattr(db_path_utils.DatabasePaths, "get_single_user_id", lambda: 7)
+    monkeypatch.setattr(
+        db_path_utils.DatabasePaths,
+        "get_user_base_directory",
+        lambda user_id: tmp_path / f"user-{user_id}",
+    )
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.workflow_file_base_dir({"user_id": "secret-user-token"}, None) == tmp_path / "user-7"
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Workflow file base dir: invalid user id; using single-user fallback" in joined
+    assert "secret-user-token" not in joined
+
+
+def test_workflow_file_base_dir_sanitizes_per_user_failure_logs(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management import db_path_utils
+
+    def broken_user_base(user_id):  # noqa: ANN001, ANN202
+        raise RuntimeError("secret per-user base at /private/user-base.db")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("WORKFLOWS_FILE_BASE_DIR", raising=False)
+    monkeypatch.setattr(db_path_utils.DatabasePaths, "get_single_user_id", lambda: 7)
+    monkeypatch.setattr(db_path_utils.DatabasePaths, "get_user_base_directory", broken_user_base)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.workflow_file_base_dir({}, None) == (tmp_path / "Databases").resolve()
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Workflow file base dir: failed to resolve per-user base dir; using Databases fallback" in joined
+    assert "private/user-base.db" not in joined
+
+
+def test_resolve_artifacts_dir_sanitizes_base_resolve_logs(monkeypatch, tmp_path):
+    base_dir = tmp_path / "artifacts-base-token"
+    base_dir.mkdir()
+    original_resolve = workflow_common.Path.resolve
+
+    def broken_resolve(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if self == base_dir:
+            raise OSError("secret artifacts backend at /private/artifacts.db")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(workflow_common, "artifacts_base_dir", lambda: base_dir)
+    monkeypatch.setattr(workflow_common.Path, "resolve", broken_resolve)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.resolve_artifacts_dir("run-1") == (base_dir / "run-1").resolve(strict=False)
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Artifacts base dir resolve failed. Using unresolved base dir." in joined
+    assert "artifacts-base-token" not in joined
+    assert "private/artifacts.db" not in joined
+
+
+def test_resolve_workflow_file_path_sanitizes_base_resolve_logs(monkeypatch, tmp_path):
+    base_dir = tmp_path / "base-dir-token"
+    base_dir.mkdir()
+    original_resolve = workflow_common.Path.resolve
+
+    def broken_resolve(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        if self == base_dir:
+            raise OSError("secret base resolve at /private/base-dir.db")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(workflow_common, "workflow_file_base_dir", lambda context, config: base_dir)
+    monkeypatch.setattr(workflow_common.Path, "resolve", broken_resolve)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.resolve_workflow_file_path("child.txt", {}, None) == (
+            base_dir / "child.txt"
+        ).resolve(strict=False)
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Failed to resolve workflow file base directory" in joined
+    assert "base-dir-token" not in joined
+    assert "private/base-dir.db" not in joined
+
+
+def test_resolve_workflow_file_path_sanitizes_allowlist_failure_logs(monkeypatch, tmp_path):
+    base_dir = tmp_path / "base"
+    target = base_dir / "allowed.txt"
+    base_dir.mkdir()
+
+    def broken_allowlist(context):  # noqa: ANN001, ANN202
+        raise RuntimeError("secret allowlist policy at /private/allowlist-policy.db")
+
+    monkeypatch.setenv("WORKFLOWS_ALLOW_UNSAFE_FILE_ACCESS", "true")
+    monkeypatch.setattr(workflow_common, "workflow_file_base_dir", lambda context, config: base_dir)
+    monkeypatch.setattr(workflow_common, "workflow_file_allowlist", broken_allowlist)
+
+    messages: list[str] = []
+    sink_id = workflow_common.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+    try:
+        assert workflow_common.resolve_workflow_file_path(str(target), {}, None) == target.resolve(strict=False)
+    finally:
+        workflow_common.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert "Workflow file allowlist: failed to resolve allowlist" in joined
+    assert "private/allowlist-policy.db" not in joined

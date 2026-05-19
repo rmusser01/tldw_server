@@ -204,6 +204,20 @@
       "quizContent": "Jump into Quiz mode from your selected deck to validate retention with assessments."
     }
   },
+  "moderation": {
+    "basics": {
+      "label": "Content Rules Basics",
+      "description": "Learn how to set up moderation policies, blocklists, overrides, and tests.",
+      "heroTitle": "Content Rules",
+      "heroContent": "This is your rule configuration hub. The status badge shows whether your server is connected.",
+      "policyTitle": "Policy & Settings",
+      "policyContent": "Start here. Set your base content safety policy — what categories to filter and how strictly.",
+      "blocklistTitle": "Blocklist Studio",
+      "blocklistContent": "Add specific words, phrases, or patterns you want to always block or flag.",
+      "testTitle": "Test Sandbox",
+      "testContent": "Try your rules in real time. Type a message and see whether it would be allowed or blocked."
+    }
+  },
   "worldBooks": {
     "basics": {
       "label": "World Books Basics",
@@ -218,6 +232,64 @@
       "tableContent": "Select a row to manage entries, attachments, and advanced actions for each world book.",
       "actionsTitle": "Create and Import",
       "actionsContent": "Create a new world book or import an existing JSON bundle to seed your knowledge base."
+    }
+  },
+  "mcpHub": {
+    "basics": {
+      "label": "MCP Hub Basics",
+      "description": "Learn how to browse tools, connect servers, and manage permissions.",
+      "welcomeTitle": "Welcome to MCP Hub",
+      "welcomeContent": "MCP Hub manages external AI tools. Start here to see what tools are available and connect new servers.",
+      "catalogTitle": "Tool Catalog",
+      "catalogContent": "Browse all registered tools here. Each tool shows its capabilities and risk level.",
+      "credentialsTitle": "Servers & Credentials",
+      "credentialsContent": "Connect external MCP servers here. Each server provides additional tools for your AI assistant.",
+      "profilesTitle": "Access Workflow",
+      "profilesContent": "Use Access to create profiles and assign which tools each user or persona can reach.",
+      "auditTitle": "Governance Audit",
+      "auditContent": "Review policy findings and configuration issues across all your MCP Hub settings."
+    }
+  },
+  "quiz": {
+    "basics": {
+      "label": "Quiz Basics",
+      "description": "Learn how to generate, take, and review quizzes from your media content.",
+      "tabsTitle": "Quiz Playground",
+      "tabsContent": "The Quiz Playground has five tabs. Generate quizzes from your media, create them manually, take quizzes, manage your library, and review results.",
+      "generateTitle": "Generate from Media",
+      "generateContent": "Start here. Select a video, article, or document from your media library, and the AI will generate quiz questions for you.",
+      "createTitle": "Create Manually",
+      "createContent": "Prefer to write your own? Create quizzes with multiple choice, true/false, fill-in-the-blank, and matching questions.",
+      "takeTitle": "Take a Quiz",
+      "takeContent": "Once you have quizzes, come here to take them. Your answers are saved and scored automatically.",
+      "resultsTitle": "Review Results",
+      "resultsContent": "See your scores, review incorrect answers, and track your progress over time."
+    }
+  },
+  "watchlists": {
+    "basics": {
+      "label": "Watchlists Basics",
+      "description": "Learn how to add feeds, create monitors, and review collected articles",
+      "setupTitle": "Quick Setup",
+      "setupContent": "Start here to add your first feed and create a monitor. The guided setup walks you through it step by step.",
+      "feedsTitle": "Add Feeds",
+      "feedsContent": "Feeds are sources like RSS feeds or websites that your monitors check for new content.",
+      "monitorsTitle": "Create Monitors",
+      "monitorsContent": "Monitors run on a schedule to fetch and process content from your feeds. Choose a preset schedule like daily or hourly.",
+      "articlesTitle": "Review Articles",
+      "articlesContent": "Articles are collected content from successful monitor runs. Switch to the Articles tab to browse and read them."
+    }
+  },
+  "monitoring": {
+    "basics": {
+      "label": "Monitoring Basics",
+      "description": "Learn how to monitor server health and set up alert rules",
+      "overviewTitle": "System Overview",
+      "overviewContent": "This section shows your server's current health metrics and security status. Use the refresh button or enable auto-refresh to keep it up to date.",
+      "createRuleTitle": "Create Alert Rules",
+      "createRuleContent": "Set up rules to be notified when metrics cross thresholds. Pick a metric name, set a threshold and duration, then choose a severity level.",
+      "historyTitle": "Alert History",
+      "historyContent": "When alerts trigger, they appear here. You can assign alerts to yourself, snooze them, or escalate to critical."
     }
   }
 }

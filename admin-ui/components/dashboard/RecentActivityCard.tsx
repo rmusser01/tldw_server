@@ -64,13 +64,30 @@ const formatAuditDetails = (log: AuditLog): string => {
   return JSON.stringify(detailSource, null, 2);
 };
 
+const SEVERITY_LEVELS: ActivitySeverity[] = ['critical', 'warning', 'info'];
+
+const SEVERITY_LABELS: Record<ActivitySeverity, string> = {
+  critical: 'Critical',
+  warning: 'Warning',
+  info: 'Info',
+};
+
+const SEVERITY_BADGE_CLASS: Record<ActivitySeverity, string> = {
+  critical: 'bg-red-100 text-red-700 border-red-200',
+  warning: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  info: 'bg-blue-100 text-blue-700 border-blue-200',
+};
+
 export const RecentActivityCard = ({
   loading,
   recentActivity,
   formatTimeAgo,
 }: RecentActivityCardProps) => {
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
-  const [severityFilter, setSeverityFilter] = useState<'all' | ActivitySeverity>('all');
+  const [activeSeverities, setActiveSeverities] = useState<Set<ActivitySeverity>>(
+    new Set(SEVERITY_LEVELS)
+  );
+
   const activityWithMetadata = useMemo(() => recentActivity.map((log) => ({
     ...log,
     severity: getActivitySeverity(log),
@@ -78,50 +95,72 @@ export const RecentActivityCard = ({
     actorLabel: log.username?.trim() ? log.username : `User ${log.user_id}`,
     detailText: formatAuditDetails(log),
   })), [recentActivity]);
+
+  const severityCounts = useMemo(() => {
+    const counts: Record<ActivitySeverity, number> = { critical: 0, warning: 0, info: 0 };
+    activityWithMetadata.forEach((log) => { counts[log.severity]++; });
+    return counts;
+  }, [activityWithMetadata]);
+
   const filteredActivity = useMemo(
-    () => activityWithMetadata.filter((activity) => severityFilter === 'all' || activity.severity === severityFilter),
-    [activityWithMetadata, severityFilter]
+    () => activityWithMetadata.filter((log) => activeSeverities.has(log.severity)),
+    [activityWithMetadata, activeSeverities]
   );
+
+  const toggleSeverity = (severity: ActivitySeverity) => {
+    setActiveSeverities((prev) => {
+      const next = new Set(prev);
+      if (next.has(severity)) {
+        if (next.size > 1) {
+          next.delete(severity);
+        }
+      } else {
+        next.add(severity);
+      }
+      return next;
+    });
+  };
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Recent Activity
-          </CardTitle>
-          <CardDescription>Latest system events</CardDescription>
+      <CardHeader className="space-y-3">
+        <div className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Recent Activity
+            </CardTitle>
+            <CardDescription>Latest system events</CardDescription>
+          </div>
+          <Link href="/audit">
+            <Button variant="ghost" size="sm">
+              View All
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </Link>
         </div>
-        <Link href="/audit">
-          <Button variant="ghost" size="sm">
-            View All
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-        </Link>
-      </CardHeader>
-      {!loading && recentActivity.length > 0 && (
-        <div className="px-6 pb-2 flex gap-1 flex-wrap">
-          {(['all', 'critical', 'warning', 'info'] as const).map((level) => {
-            const count = level === 'all'
-              ? activityWithMetadata.length
-              : activityWithMetadata.filter(a => a.severity === level).length;
-            return (
-              <Button
-                key={level}
-                variant={severityFilter === level ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSeverityFilter(level)}
-                className="text-xs"
-                aria-pressed={severityFilter === level}
+        <div className="flex items-center gap-2 flex-wrap" role="group" aria-label="Severity filter">
+          {SEVERITY_LEVELS.map((severity) => (
+            <Button
+              key={severity}
+              type="button"
+              size="sm"
+              variant={activeSeverities.has(severity) ? 'default' : 'outline'}
+              onClick={() => toggleSeverity(severity)}
+              aria-pressed={activeSeverities.has(severity)}
+              className="text-xs gap-1.5"
+            >
+              {SEVERITY_LABELS[severity]}
+              <Badge
+                variant="outline"
+                className={`ml-0.5 text-xs px-1.5 py-0 h-4 ${SEVERITY_BADGE_CLASS[severity]}`}
               >
-                {level === 'all' ? 'All' : level.charAt(0).toUpperCase() + level.slice(1)}
-                <Badge variant="secondary" className="ml-1 text-xs">{count}</Badge>
-              </Button>
-            );
-          })}
+                {severityCounts[severity]}
+              </Badge>
+            </Button>
+          ))}
         </div>
-      )}
+      </CardHeader>
       <CardContent>
         {loading ? (
           <div className="space-y-4">
@@ -135,10 +174,10 @@ export const RecentActivityCard = ({
               </div>
             ))}
           </div>
-        ) : recentActivity.length === 0 ? (
-          <p className="text-center text-muted-foreground py-8">No recent activity</p>
         ) : filteredActivity.length === 0 ? (
-          <p className="py-8 text-center text-muted-foreground">No activity matches the selected severity.</p>
+          <p className="text-center text-muted-foreground py-8">
+            {recentActivity.length === 0 ? 'No recent activity' : 'No events match selected filters'}
+          </p>
         ) : (
           <div className="space-y-3">
             {filteredActivity.map((log) => {

@@ -106,17 +106,23 @@ async def create_user(
         logger.info("Admin created user {} (id={})", payload.username, user_info["user_id"])
         return user
     except DuplicateUserError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists.") from exc
     except WeakPasswordError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password does not meet requirements.",
+        ) from exc
     except RegistrationDisabledError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is currently disabled.",
+        ) from exc
     except RegistrationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Registration failed.") from exc
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to create user: {exc}")
+        logger.error("Failed to create user")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user",
@@ -131,6 +137,7 @@ async def list_users(
     role: str | None,
     admin_capable: bool,
     is_active: bool | None,
+    mfa_enabled: bool | None = None,
     search: str | None,
     org_id: int | None,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -146,12 +153,13 @@ async def list_users(
             role=role,
             admin_capable=admin_capable,
             is_active=is_active,
+            mfa_enabled=mfa_enabled,
             search=search,
             org_ids=org_ids,
         )
         return users, total
     except Exception as e:
-        logger.error(f"Failed to list users: {e}")
+        logger.error("Failed to list users")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve users",
@@ -192,7 +200,7 @@ async def export_users(
             default_name = "users.csv"
         return content, media_type, default_name
     except Exception as exc:
-        logger.error(f"Failed to export users: {exc}")
+        logger.error("Failed to export users")
         raise HTTPException(status_code=500, detail="Failed to export users") from exc
 
 
@@ -224,7 +232,7 @@ async def get_user_details(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get user {user_id}: {e}")
+        logger.error("Failed to get user")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user details",
@@ -360,7 +368,7 @@ async def update_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update user {user_id}: {e}")
+        logger.error("Failed to update user")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update user",
@@ -481,7 +489,7 @@ async def reset_user_password(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to reset password for user {user_id}: {exc}")
+        logger.error("Failed to reset password")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reset password",
@@ -589,7 +597,7 @@ async def set_user_mfa_requirement(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to update MFA requirement for user {user_id}: {exc}")
+        logger.error("Failed to update MFA requirement")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update MFA requirement",
@@ -656,7 +664,7 @@ async def delete_user(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete user {user_id}: {e}")
+        logger.error("Failed to delete user")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user",

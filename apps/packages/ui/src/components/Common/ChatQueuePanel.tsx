@@ -2,6 +2,7 @@ import React from "react"
 import type { TFunction } from "i18next"
 import { useTranslation } from "react-i18next"
 
+import { getDesignSystemState } from "@/design-system"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 
 type ChatQueuePanelProps = {
@@ -17,6 +18,8 @@ type ChatQueuePanelProps = {
   onOpenDiagnostics?: () => void
   forceRunDisabledReason?: string | null
 }
+
+const BLOCKED_STATE_LABEL = getDesignSystemState("blocked").label
 
 const formatBlockedReason = (
   blockedReason: string | null,
@@ -36,7 +39,7 @@ const formatBlockedReason = (
     default:
       return blockedReason
         ? blockedReason
-        : t("playground:composer.queue.blocked", "Blocked")
+        : t("playground:composer.queue.blocked", BLOCKED_STATE_LABEL)
   }
 }
 

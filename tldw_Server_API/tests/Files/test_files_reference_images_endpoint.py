@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.Image_Generation.reference_images import ReferenceImageOperationalError
 from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
 from tldw_Server_API.tests.test_utils import create_test_media
@@ -236,6 +237,24 @@ def test_reference_images_endpoint_surfaces_storage_failures(client_with_user) -
     finally:
         client_with_user.app.dependency_overrides.pop(get_media_db_for_user, None)
         media_db.close_connection()
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "reference_image_storage_unavailable"
+
+
+def test_reference_images_endpoint_sanitizes_operational_failures(client_with_user, monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import files as files_endpoint
+
+    async def _raise_operational_error(*_args, **_kwargs):
+        raise ReferenceImageOperationalError("reference image backend exploded")
+
+    monkeypatch.setattr(
+        files_endpoint,
+        "list_reference_image_candidates",
+        _raise_operational_error,
+    )
+
+    response = client_with_user.get("/api/v1/files/reference-images")
 
     assert response.status_code == 503, response.text
     assert response.json()["detail"] == "reference_image_storage_unavailable"

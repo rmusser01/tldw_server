@@ -1,5 +1,6 @@
 import { useCallback, type MutableRefObject } from 'react';
 import { api } from '@/lib/api-client';
+import { logger } from '@/lib/logger';
 import { measureTimedEndpoint } from '@/lib/monitoring-health';
 import type { MonitoringTimeRangeOption } from '@/lib/monitoring-metrics';
 import {
@@ -81,7 +82,7 @@ export const useMonitoringDataLoader = ({
 
       monitoringLoadResultEntries(settledResults).forEach(({ name, result }) => {
         if (result.status === 'rejected') {
-          console.warn(`Failed to load ${name}:`, result.reason);
+          logger.warn(`Failed to load ${name}`, { component: 'useMonitoringDataLoader', error: result.reason instanceof Error ? result.reason.message : String(result.reason) });
         }
       });
 
@@ -115,7 +116,7 @@ export const useMonitoringDataLoader = ({
       void loadMetricsHistoryForRange(timeRange, customRangeStart, customRangeEnd);
       markMonitoringDataUpdated();
     } catch (err: unknown) {
-      console.error('Failed to load monitoring data:', err);
+      logger.error('Failed to load monitoring data', { component: 'useMonitoringDataLoader', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to load monitoring data');
       setNotificationSettingsStatus('rejected');
       setNotificationSettings(null);

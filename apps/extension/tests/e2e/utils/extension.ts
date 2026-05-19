@@ -2,6 +2,7 @@ import { BrowserContext, Page, chromium } from '@playwright/test'
 import path from 'path'
 import fs from 'fs'
 
+import { resolveExtensionHeadlessMode } from './extension-common'
 import { resolveExtensionId } from './extension-id'
 import { prioritizeExtensionBuildCandidates } from './extension-paths'
 
@@ -114,15 +115,6 @@ function resolvePlaywrightChannel(): string | undefined {
   }
 
   return process.env.CI ? 'chromium' : undefined
-}
-
-function resolveExtensionHeadlessMode(): boolean {
-  const explicitHeadless = String(process.env.TLDW_E2E_EXTENSION_HEADLESS || "").trim().toLowerCase()
-  if (explicitHeadless) {
-    return !["0", "false", "no", "off"].includes(explicitHeadless)
-  }
-
-  return !!process.env.CI
 }
 
 export interface LaunchWithExtensionResult {

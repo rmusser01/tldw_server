@@ -20,7 +20,7 @@ const MAX_DEPTH_ROUTES: RouteDepthCheck[] = [
   { path: '/content-review' },
   { path: '/claims-review', expectedPath: '/content-review' },
   { path: '/watchlists' },
-  { path: '/workspace-playground' }
+  { path: '/research-studio' }
 ]
 
 const fulfillJson = async (route: Route, status: number, data: unknown) => {

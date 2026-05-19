@@ -3,6 +3,8 @@ import uuid
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.media_db import legacy_transcripts
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
@@ -49,17 +51,57 @@ def test_sqlite_upsert_transcript_roundtrip(tmp_path):
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="unit-sqlite")
     media_id = _insert_minimal_media(db)
 
-    # Insert new transcript
     p1 = upsert_transcript(db, media_id, transcription="hello world", whisper_model="base")
     assert p1["media_id"] == media_id and p1["version"] >= 1 and p1["uuid"]
+    assert p1["transcription_run_id"] == 1
 
-    # Update same transcript (same whisper_model), verify version bump
     p2 = upsert_transcript(db, media_id, transcription="updated text", whisper_model="base")
-    assert p2["version"] == p1["version"] + 1
+    assert p2["uuid"] != p1["uuid"]
+    assert p2["version"] == 1
+    assert p2["transcription_run_id"] == 2
 
-    # Latest transcription should be updated
+    latest_row = db.execute_query(
+        "SELECT latest_transcription_run_id, next_transcription_run_id FROM Media WHERE id = ?",
+        (media_id,),
+    ).fetchone()
+    assert latest_row is not None
+    assert latest_row["latest_transcription_run_id"] == 2
+    assert latest_row["next_transcription_run_id"] == 3
+
     latest = get_latest_transcription(db, media_id)
     assert latest == "updated text"
+
+@pytest.mark.unit
+def test_sqlite_upsert_transcript_records_superseded_run_id(tmp_path):
+
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="unit-sqlite-supersedes")
+    media_id = _insert_minimal_media(db)
+
+    p1 = upsert_transcript(db, media_id, transcription="hello world", whisper_model="base")
+    p2 = upsert_transcript(db, media_id, transcription="updated text", whisper_model="base")
+
+    rows = list(
+        db.execute_query(
+            """
+            SELECT transcription_run_id, supersedes_run_id
+            FROM Transcripts
+            WHERE media_id = ?
+            ORDER BY transcription_run_id ASC
+            """,
+            (media_id,),
+        )
+        or []
+    )
+
+    assert p1["transcription_run_id"] == 1
+    assert p1["supersedes_run_id"] is None
+    assert p2["transcription_run_id"] == 2
+    assert p2["supersedes_run_id"] == 1
+    assert len(rows) == 2
+    assert rows[0]["transcription_run_id"] == 1
+    assert rows[0]["supersedes_run_id"] is None
+    assert rows[1]["transcription_run_id"] == 2
+    assert rows[1]["supersedes_run_id"] == 1
 
 
 @pytest.mark.integration
@@ -82,12 +124,96 @@ def test_postgres_upsert_transcript_roundtrip_if_available(tmp_path, pg_eval_par
 
     p1 = upsert_transcript(db, media_id, transcription="pg hello", whisper_model="large-v3")
     assert p1["media_id"] == media_id and p1["version"] >= 1 and p1["uuid"]
+    assert p1["transcription_run_id"] == 1
 
     p2 = upsert_transcript(db, media_id, transcription="pg updated", whisper_model="large-v3")
-    assert p2["version"] == p1["version"] + 1
+    assert p2["uuid"] != p1["uuid"]
+    assert p2["version"] == 1
+    assert p2["transcription_run_id"] == 2
+
+    latest_row = db.execute_query(
+        "SELECT latest_transcription_run_id, next_transcription_run_id FROM Media WHERE id = ?",
+        (media_id,),
+    ).fetchone()
+    assert latest_row is not None
+    assert latest_row["latest_transcription_run_id"] == 2
+    assert latest_row["next_transcription_run_id"] == 3
 
     latest = get_latest_transcription(db, media_id)
     assert latest == "pg updated"
+
+
+@pytest.mark.unit
+def test_sqlite_upsert_transcript_reuses_existing_run_for_idempotency_key(tmp_path):
+
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="unit-sqlite-idem")
+    media_id = _insert_minimal_media(db)
+
+    p1 = upsert_transcript(
+        db,
+        media_id,
+        transcription="hello world",
+        whisper_model="base",
+        idempotency_key="stream-1",
+    )
+    p2 = upsert_transcript(
+        db,
+        media_id,
+        transcription="hello world final",
+        whisper_model="base",
+        idempotency_key="stream-1",
+    )
+
+    rows = list(
+        db.execute_query(
+            """
+            SELECT uuid, transcription, version, transcription_run_id, idempotency_key
+            FROM Transcripts
+            WHERE media_id = ?
+            ORDER BY id ASC
+            """,
+            (media_id,),
+        )
+        or []
+    )
+
+    assert p2["uuid"] == p1["uuid"]
+    assert p2["version"] == p1["version"] + 1
+    assert p2["transcription_run_id"] == p1["transcription_run_id"] == 1
+    assert len(rows) == 1
+    assert rows[0]["transcription"] == "hello world final"
+    assert rows[0]["idempotency_key"] == "stream-1"
+
+
+@pytest.mark.unit
+def test_upsert_transcript_retries_wrapped_unique_conflict(monkeypatch, tmp_path):
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="unit-sqlite-retry")
+    media_id = _insert_minimal_media(db)
+
+    attempts = {"count": 0}
+    real_upsert_once = legacy_transcripts._upsert_transcript_once
+
+    def _fake_upsert_once(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise DatabaseError(
+                "Backend execute failed: duplicate key value violates unique constraint idx_transcripts_media_idempotency_key"
+            )
+        return real_upsert_once(*args, **kwargs)
+
+    monkeypatch.setattr(legacy_transcripts, "_upsert_transcript_once", _fake_upsert_once)
+
+    payload = upsert_transcript(
+        db,
+        media_id,
+        transcription="hello world",
+        whisper_model="base",
+        idempotency_key="stream-1",
+    )
+
+    assert attempts["count"] == 2
+    assert payload["transcription_run_id"] == 1
+    assert payload["idempotency_key"] == "stream-1"
 
 
 @pytest.mark.integration

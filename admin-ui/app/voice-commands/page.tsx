@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useState, Suspense } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -24,12 +24,14 @@ import { Eye, Mic, MicOff, Search, Plus, Trash2, BarChart2 } from 'lucide-react'
 import { AccessibleIconButton } from '@/components/ui/accessible-icon-button';
 import { api } from '@/lib/api-client';
 import { parseVoiceCommandInputs, testVoiceCommandPhraseMatch, type VoiceCommandMatchResult } from '@/lib/voice-commands';
+import { exportVoiceCommands } from '@/lib/export';
 import type { VoiceCommand, VoiceActionType, VoiceAnalyticsSummary } from '@/types';
 import { Skeleton, TableSkeleton } from '@/components/ui/skeleton';
 import { useUrlState, useUrlPagination } from '@/lib/use-url-state';
-import { useConfirm } from '@/components/ui/confirm-dialog';
+import { usePrivilegedActionDialog } from '@/components/ui/privileged-action-dialog';
 import { useToast } from '@/components/ui/toast';
 import Link from 'next/link';
+import { logger } from '@/lib/logger';
 import { UsageTrendsChart, TopCommandsChart, ActiveSessionsPanel } from './components';
 
 const ACTION_TYPE_OPTIONS: { value: VoiceActionType; label: string }[] = [
@@ -154,7 +156,7 @@ function DryRunPanel() {
 }
 
 function VoiceCommandsPageContent() {
-  const confirm = useConfirm();
+  const promptPrivilegedAction = usePrivilegedActionDialog();
   const { success, error: showError } = useToast();
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [analytics, setAnalytics] = useState<VoiceAnalyticsSummary | null>(null);
@@ -166,6 +168,7 @@ function VoiceCommandsPageContent() {
   const [deletingCommandId, setDeletingCommandId] = useState<string | null>(null);
   const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [phraseTestInput, setPhraseTestInput] = useState('');
 
   const createForm = useForm<CreateCommandFormInput, unknown, CreateCommandFormData>({
     resolver: zodResolver(createCommandSchema),
@@ -207,7 +210,7 @@ function VoiceCommandsPageContent() {
       const items = Array.isArray(data) ? data : (data?.commands || data?.items || []);
       setCommands(items);
     } catch (err: unknown) {
-      console.error('Failed to load voice commands:', err);
+      logger.error('Failed to load voice commands', { component: 'VoiceCommandsPage', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error ? err.message : 'Failed to load voice commands');
       setCommands([]);
     } finally {
@@ -221,7 +224,7 @@ function VoiceCommandsPageContent() {
       const data = await api.getVoiceAnalytics({ days: 7 });
       setAnalytics(data);
     } catch (err: unknown) {
-      console.warn('Failed to load voice analytics:', err);
+      logger.warn('Failed to load voice analytics', { component: 'VoiceCommandsPage', error: err instanceof Error ? err.message : String(err) });
     } finally {
       setAnalyticsLoading(false);
     }
@@ -231,6 +234,20 @@ function VoiceCommandsPageContent() {
     loadCommands();
     loadAnalytics();
   }, [loadCommands, loadAnalytics]);
+
+  // Phrase test: find best matching command
+  const phraseTestResult = useMemo(() => {
+    if (!phraseTestInput.trim() || commands.length === 0) return null;
+    let bestMatch: { command: VoiceCommand; confidence: number; bestPhrase: string | null } | null = null;
+    for (const cmd of commands) {
+      if (!cmd.enabled || !cmd.phrases?.length) continue;
+      const result = testVoiceCommandPhraseMatch(phraseTestInput, cmd.phrases);
+      if (result.matched && (!bestMatch || result.confidence > bestMatch.confidence)) {
+        bestMatch = { command: cmd, confidence: result.confidence, bestPhrase: result.bestPhrase };
+      }
+    }
+    return bestMatch;
+  }, [phraseTestInput, commands]);
 
   const filteredCommands = commands.filter((cmd) => {
     if (!searchQuery) return true;
@@ -340,14 +357,13 @@ function VoiceCommandsPageContent() {
 
   const handleDeleteCommand = async (command: VoiceCommand) => {
     if (deletingCommandId === command.id) return;
-    const confirmed = await confirm({
+    const result = await promptPrivilegedAction({
       title: 'Delete Voice Command',
       message: `Delete "${command.name}"? This cannot be undone.`,
       confirmText: 'Delete',
-      variant: 'danger',
-      icon: 'delete',
+      requirePassword: false,
     });
-    if (!confirmed) return;
+    if (!result) return;
 
     try {
       setDeletingCommandId(command.id);
@@ -386,16 +402,10 @@ function VoiceCommandsPageContent() {
               <h1 className="text-3xl font-bold">Voice Commands</h1>
               <p className="text-muted-foreground">Manage voice assistant commands and triggers</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap gap-2">
               <ExportMenu
-                onExport={(format: ExportFormat) => {
-                  exportData({
-                    data: commands as unknown as Record<string, unknown>[],
-                    filename: 'voice-commands',
-                    format,
-                  });
-                }}
-                disabled={commands.length === 0}
+                onExport={(format: ExportFormat) => exportVoiceCommands(filteredCommands, format)}
+                disabled={filteredCommands.length === 0}
               />
               <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
@@ -404,7 +414,7 @@ function VoiceCommandsPageContent() {
                     Create Command
                   </Button>
                 </DialogTrigger>
-              <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-lg">
                 <DialogHeader>
                   <DialogTitle>Create Voice Command</DialogTitle>
                   <DialogDescription>Define a new voice command with trigger phrases and actions.</DialogDescription>
@@ -478,7 +488,7 @@ function VoiceCommandsPageContent() {
                   </Form>
                 </FormProvider>
               </DialogContent>
-            </Dialog>
+              </Dialog>
             </div>
           </div>
 
@@ -619,6 +629,51 @@ function VoiceCommandsPageContent() {
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Phrase Test */}
+          <Card className="mb-6">
+            <CardContent className="pt-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="relative flex-1 max-w-md">
+                  <Mic className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  <label htmlFor="phrase-test" className="sr-only">
+                    Test a phrase
+                  </label>
+                  <Input
+                    id="phrase-test"
+                    placeholder="Test a phrase to see which command matches..."
+                    value={phraseTestInput}
+                    onChange={(e) => setPhraseTestInput(e.target.value)}
+                    className="pl-10"
+                    data-testid="phrase-test-input"
+                  />
+                </div>
+                {phraseTestInput.trim() && (
+                  <div className="text-sm" data-testid="phrase-test-result">
+                    {phraseTestResult ? (
+                      <span>
+                        Matches{' '}
+                        <Link href={`/voice-commands/${phraseTestResult.command.id}`} className="font-medium text-primary hover:underline">
+                          {phraseTestResult.command.name}
+                        </Link>
+                        {' '}
+                        <Badge variant="outline" className="text-xs">
+                          {Math.round(phraseTestResult.confidence * 100)}% confidence
+                        </Badge>
+                        {phraseTestResult.bestPhrase && (
+                          <span className="text-muted-foreground ml-1">
+                            via &ldquo;{phraseTestResult.bestPhrase}&rdquo;
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">No command matched</span>
+                    )}
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

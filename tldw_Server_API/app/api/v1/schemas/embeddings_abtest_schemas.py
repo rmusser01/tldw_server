@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
 
 
 class ABTestArm(BaseModel):
@@ -89,9 +92,14 @@ class ArmSummary(BaseModel):
 
 class EmbeddingsABTestResultSummary(BaseModel):
     test_id: str
-    status: Literal['pending', 'running', 'completed', 'failed', 'canceled']
+    status: Literal['pending', 'running', 'completed', 'failed', 'cancelled']
     arms: list[ArmSummary] = Field(default_factory=list)
     per_query: list[dict[str, Any]] | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, value: Any) -> str:
+        return normalize_run_status(value)
 
 
 class EmbeddingsABTestResultRow(BaseModel):
@@ -118,8 +126,13 @@ class EmbeddingsABTestCreateResponse(BaseModel):
 
 class EmbeddingsABTestStatusResponse(BaseModel):
     test_id: str
-    status: Literal['pending', 'running', 'completed', 'failed', 'canceled']
+    status: Literal['pending', 'running', 'completed', 'failed', 'cancelled']
     progress: dict[str, float] | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _normalize_status(cls, value: Any) -> str:
+        return normalize_run_status(value)
 
 
 class EmbeddingsABTestResultsResponse(BaseModel):
@@ -128,6 +141,7 @@ class EmbeddingsABTestResultsResponse(BaseModel):
     page: int = 1
     page_size: int = 50
     total: int = 0
+    pagination: PagePaginationMeta
 
 
 class EmbeddingsABTestRunRequest(BaseModel):

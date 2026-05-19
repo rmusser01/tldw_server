@@ -201,15 +201,26 @@ class FilesystemModule(BaseModule):
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
         metadata_map = dict(metadata) if isinstance(metadata, dict) else {}
+        session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            metadata_map.get("session_id"),
+        )
+        user_id = _first_nonempty(
+            getattr(context, "user_id", None),
+            metadata_map.get("user_id"),
+        )
+        workspace_trust_source = _first_nonempty(
+            metadata_map.get("workspace_trust_source"),
+            metadata_map.get("selected_workspace_trust_source"),
+        )
+        if session_id and not user_id and workspace_trust_source != "shared_registry":
+            raise PermissionError("workspace_root_unavailable")
 
         resolution = await self._workspace_root_resolver.resolve_for_context(
-            session_id=_first_nonempty(getattr(context, "session_id", None), metadata_map.get("session_id")),
-            user_id=_first_nonempty(getattr(context, "user_id", None), metadata_map.get("user_id")),
+            session_id=session_id,
+            user_id=user_id,
             workspace_id=_first_nonempty(metadata_map.get("workspace_id")),
-            workspace_trust_source=_first_nonempty(
-                metadata_map.get("workspace_trust_source"),
-                metadata_map.get("selected_workspace_trust_source"),
-            ),
+            workspace_trust_source=workspace_trust_source,
             owner_scope_type=_first_nonempty(
                 metadata_map.get("owner_scope_type"),
                 metadata_map.get("selected_workspace_scope_type"),

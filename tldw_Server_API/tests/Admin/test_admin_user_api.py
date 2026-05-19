@@ -39,6 +39,7 @@ async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
         role: str | None,
         admin_capable: bool,
         is_active: bool | None,
+        mfa_enabled: bool | None = None,
         search: str | None,
         org_id: int | None,
     ):
@@ -47,6 +48,7 @@ async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
         assert role is None
         assert admin_capable is True
         assert is_active is None
+        assert mfa_enabled is None
         assert search is None
         assert org_id is None
         return (
@@ -59,6 +61,7 @@ async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
                     "role": "user",
                     "is_active": True,
                     "is_verified": True,
+                    "mfa_enabled": False,
                     "created_at": "2026-03-12T00:00:00Z",
                     "last_login": None,
                     "storage_quota_mb": 1024,
@@ -78,3 +81,9 @@ async def test_list_users_forwards_admin_capable_filter(monkeypatch, tmp_path):
     payload = response.json()
     assert payload["total"] == 1
     assert payload["users"][0]["id"] == 7
+    assert payload["pagination"]["total"] == 1
+    assert payload["pagination"]["limit"] == 25
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["has_more"] is False
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None

@@ -7,6 +7,7 @@
 
 import React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { TFunction } from "i18next"
 import {
   createWritingTemplate,
   createWritingTheme,
@@ -55,7 +56,7 @@ export interface UseWritingTemplateLibraryDeps {
   handleTemplateChange: (name: string | null) => void
   handleThemeChange: (name: string | null) => void
   settingsDisabled: boolean
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  t: TFunction
 }
 
 export function useWritingTemplateLibrary(deps: UseWritingTemplateLibraryDeps) {

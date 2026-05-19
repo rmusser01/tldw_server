@@ -48,6 +48,18 @@ _USER_DB_BASE_DIR_ALLOWED_ROOT_ENVS = (
 )
 _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOTS_KEY = "ingestion_source_allowed_roots"
+_OPTIONAL_EMPTY_VALUE_FIELDS = {
+    ("LlamaCpp", "executable_path"),
+    ("LlamaCpp", "models_dir"),
+    ("LlamaCpp", "default_host"),
+    ("LlamaCpp", "default_port"),
+    ("LlamaCpp", "default_threads"),
+    ("LlamaCpp", "default_n_gpu_layers"),
+    ("LlamaCpp", "default_ctx_size"),
+    ("LlamaCpp", "port_probe_max"),
+    ("LlamaCpp", "allowed_paths"),
+    ("LlamaCpp", "log_output_file"),
+}
 
 _remote_access_hook: Callable[[bool], None] | None = None
 
@@ -278,6 +290,14 @@ def _coerce_to_string(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def validate_config_value_single_line(section: str, key: str, value: Any) -> str:
+    """Return a config value string after rejecting multiline injection chars."""
+    text = _coerce_to_string(value)
+    if any(char in text for char in ("\r", "\n", "\x00")):
+        raise ValueError(f"Invalid config value for {section}.{key}: line breaks and NUL bytes are not allowed.")
+    return text
 
 
 def _infer_type(raw_value: str) -> str:
@@ -565,13 +585,16 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
       - Leave comments and spacing outside the key/value token intact where reasonable.
     """
     try:
-        original_lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        with config_path.open("r", encoding="utf-8", newline="") as handle:
+            original_lines = handle.read().splitlines(keepends=True)
     except FileNotFoundError:
         raise
+    default_line_ending = "\r\n" if any(line.endswith("\r\n") for line in original_lines) else "\n"
 
     # Prepare a mutable copy of updates: section -> key -> str(value)
     pending: dict[str, dict[str, str]] = {
-        section: {k: _coerce_to_string(v) for k, v in items.items()} for section, items in updates.items()
+        section: {k: validate_config_value_single_line(section, k, v) for k, v in items.items()}
+        for section, items in updates.items()
     }
 
     current_section: str | None = None
@@ -606,12 +629,13 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
                     leading_ws_len = len(left) - len(left.lstrip(" \t"))
                     leading_ws = left[:leading_ws_len]
                     new_value = items.pop(key)
+                    line_ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
                     # Build normalized key/value token; keep one space around '='
                     new_code = f"{leading_ws}{key} = {new_value}"
                     # Ensure a space before inline comment if it exists and doesn't already start with whitespace
                     if comment_part and not comment_part.startswith((" ", "\t")):
                         comment_part = " " + comment_part
-                    out_lines.append(new_code + comment_part)
+                    out_lines.append(new_code + comment_part + ("" if comment_part else line_ending))
                     continue
 
         out_lines.append(line)
@@ -628,12 +652,13 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
             # Append under a section header (create if missing)
             header = f"[{section}]"
             if header not in text:
-                text += f"\n{header}\n"
+                text += f"{default_line_ending}{header}{default_line_ending}"
             for k, v in items.items():
-                text += f"{k} = {v}\n"
+                text += f"{k} = {v}{default_line_ending}"
         out_lines = [text]
 
-    config_path.write_text("".join(out_lines), encoding="utf-8")
+    with config_path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write("".join(out_lines))
 
 
 def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) -> None:
@@ -649,6 +674,7 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
         if not parser.has_section(section):
             raise ValueError(f"Unknown section '{section}' in updates")
         for key, new_value in items.items():
+            serialized_value = validate_config_value_single_line(section, key, new_value)
             allows_new_ingestion_roots = (
                 section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION
                 and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY
@@ -666,12 +692,14 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
 
             current_value = parser.get(section, key, fallback="")
             expected_type = _infer_type(current_value)
+            if serialized_value.strip() == "" and (section, key) in _OPTIONAL_EMPTY_VALUE_FIELDS:
+                continue
 
             # Accept any string when expected type is string
             if expected_type == "string":
                 continue
 
-            raw = str(new_value)
+            raw = serialized_value
             if expected_type == "boolean":
                 lowered = raw.strip().lower()
                 if lowered not in {"true", "false", "yes", "no", "on", "off", "1", "0"}:

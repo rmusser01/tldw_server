@@ -5,6 +5,9 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.quizzes import (
     AttemptListResponse,
     AttemptResponse,
@@ -32,6 +35,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantRespondRequest,
     StudyAssistantRespondResponse,
 )
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -42,6 +46,13 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_quiz_attempt_question_context,
     generate_study_assistant_reply,
+)
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.StudySuggestions.jobs import (
+    STUDY_SUGGESTIONS_DOMAIN,
+    STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
+    build_study_suggestions_job_payload,
+    study_suggestions_jobs_queue,
 )
 from tldw_Server_API.app.services.quiz_generator import (
     QuizProvenanceValidationError,
@@ -57,6 +68,16 @@ def _ensure_workspace_exists(db: CharactersRAGDB, workspace_id: Optional[str]) -
         return
     if db.get_workspace(workspace_id) is None:
         raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
+
+
+def _format_import_error(exc: Exception, *, default_detail: str) -> str:
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+
+    detail = str(map_db_error_to_http(exc, default_detail=default_detail).detail)
+    if detail == default_detail:
+        return default_detail
+    return f"{default_detail}: {detail}"
 
 
 def _build_assistant_context_snapshot(context: dict[str, Any]) -> dict[str, Any]:
@@ -104,6 +125,34 @@ def _mark_orphaned_remediation_items(
     return marked_items
 
 
+def _enqueue_study_suggestions_refresh(
+    *,
+    jm: Optional[JobManager],
+    current_user: User,
+    anchor_type: str,
+    anchor_id: int,
+) -> None:
+    if jm is None:
+        logger.debug("Study-suggestions refresh enqueue skipped (no JobManager)")
+        return
+    try:
+        jm.create_job(
+            domain=STUDY_SUGGESTIONS_DOMAIN,
+            queue=study_suggestions_jobs_queue(),
+            job_type=STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
+            payload=build_study_suggestions_job_payload(
+                job_type=STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
+                anchor_type=anchor_type,
+                anchor_id=anchor_id,
+            ),
+            owner_user_id=str(current_user.id),
+            priority=5,
+            max_retries=1,
+        )
+    except Exception:
+        logger.warning("Study-suggestions refresh enqueue skipped")
+
+
 @router.get("", response_model=QuizListResponse)
 def list_quizzes(
     q: Optional[str] = None,
@@ -116,7 +165,7 @@ def list_quizzes(
 ):
     """List quizzes with pagination and optional filters."""
     try:
-        return db.list_quizzes(
+        payload = db.list_quizzes(
             q=q,
             media_id=media_id,
             workspace_id=workspace_id,
@@ -124,9 +173,20 @@ def list_quizzes(
             limit=limit,
             offset=offset,
         )
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to list quizzes: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list quizzes") from e
+        items = list(payload.get("items") or [])
+        total = int(payload.get("count") or 0)
+        return QuizListResponse(
+            items=items,
+            count=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(items),
+            ),
+        )
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list quizzes") from exc
 
 
 @router.post("", response_model=QuizResponse)
@@ -139,9 +199,8 @@ def create_quiz(payload: QuizCreate, db: CharactersRAGDB = Depends(get_chacha_db
         if not quiz:
             raise HTTPException(status_code=500, detail="Failed to load created quiz")
         return quiz
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to create quiz: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create quiz") from e
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create quiz") from exc
 
 
 @router.post("/import/json", response_model=QuizImportResponse)
@@ -166,23 +225,13 @@ def import_quizzes_json(
             _ensure_workspace_exists(db, entry.quiz.workspace_id)
             quiz_id = db.create_quiz(**entry.quiz.model_dump())
             imported_quizzes += 1
-        except HTTPException as exc:
+        except (HTTPException, InputError, ConflictError, CharactersRAGDBError) as exc:
             failed_quizzes += 1
             errors.append(
                 QuizImportError(
                     source_index=source_index,
                     quiz_name=quiz_name,
-                    error=str(exc.detail),
-                )
-            )
-            continue
-        except CharactersRAGDBError as exc:
-            failed_quizzes += 1
-            errors.append(
-                QuizImportError(
-                    source_index=source_index,
-                    quiz_name=quiz_name,
-                    error=f"Failed to create quiz: {exc}",
+                    error=_format_import_error(exc, default_detail="Failed to create quiz"),
                 )
             )
             continue
@@ -199,7 +248,7 @@ def import_quizzes_json(
                 )
                 imported_questions += 1
                 entry_imported_questions += 1
-            except CharactersRAGDBError as exc:
+            except (InputError, ConflictError, CharactersRAGDBError) as exc:
                 failed_questions += 1
                 entry_failed_questions += 1
                 errors.append(
@@ -207,7 +256,7 @@ def import_quizzes_json(
                         source_index=source_index,
                         quiz_name=quiz_name,
                         question_index=question_index,
-                        error=f"Failed to create question: {exc}",
+                        error=_format_import_error(exc, default_detail="Failed to create question"),
                     )
                 )
 
@@ -233,7 +282,10 @@ def import_quizzes_json(
 @router.get("/{quiz_id:int}", response_model=QuizResponse)
 def get_quiz(quiz_id: int, db: CharactersRAGDB = Depends(get_chacha_db_for_user)):
     """Get a quiz by ID."""
-    quiz = db.get_quiz(quiz_id)
+    try:
+        quiz = db.get_quiz(quiz_id)
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch quiz") from exc
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
     return quiz
@@ -257,11 +309,8 @@ def update_quiz(
         if not quiz:
             raise HTTPException(status_code=404, detail="Quiz not found")
         return quiz
-    except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to update quiz: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update quiz") from e
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update quiz") from exc
 
 
 @router.delete("/{quiz_id:int}")
@@ -277,17 +326,13 @@ def delete_quiz(
         if not ok:
             raise HTTPException(status_code=404, detail="Quiz not found")
         return {"status": "deleted"}
-    except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to delete quiz: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete quiz") from e
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete quiz") from exc
 
 
 @router.get(
     "/{quiz_id:int}/questions",
     response_model=QuestionListResponse,
-    response_model_exclude_none=True,
 )
 def list_questions(
     quiz_id: int,
@@ -299,10 +344,21 @@ def list_questions(
 ):
     """List all questions for a quiz (use include_answers=true for Manage/Edit flows)."""
     try:
-        return db.list_questions(quiz_id, q=q, include_answers=include_answers, limit=limit, offset=offset)
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to list questions: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list questions") from e
+        payload = db.list_questions(quiz_id, q=q, include_answers=include_answers, limit=limit, offset=offset)
+        items = list(payload.get("items") or [])
+        total = int(payload.get("count") or 0)
+        return QuestionListResponse(
+            items=items,
+            count=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(items),
+            ),
+        )
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list questions") from exc
 
 
 @router.post("/{quiz_id:int}/questions", response_model=QuestionAdminResponse)
@@ -319,10 +375,12 @@ def create_question(
             raise HTTPException(status_code=500, detail="Failed to load created question")
         return item
     except ConflictError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to create question: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create question") from e
+        raise map_db_error_to_http(
+            e,
+            conflict_status_code=404,
+        ) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create question") from exc
 
 
 @router.patch("/{quiz_id:int}/questions/{question_id:int}", response_model=QuestionAdminResponse)
@@ -341,11 +399,8 @@ def update_question(
         if not item:
             raise HTTPException(status_code=404, detail="Question not found")
         return item
-    except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to update question: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update question") from e
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update question") from exc
 
 
 @router.delete("/{quiz_id:int}/questions/{question_id:int}")
@@ -362,11 +417,8 @@ def delete_question(
         if not ok:
             raise HTTPException(status_code=404, detail="Question not found")
         return {"status": "deleted"}
-    except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to delete question: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete question") from e
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete question") from exc
 
 
 @router.post("/{quiz_id:int}/attempts", response_model=AttemptResponse, response_model_exclude_none=True)
@@ -377,11 +429,13 @@ def start_attempt(
     """Start a new quiz attempt."""
     try:
         return db.start_attempt(quiz_id)
-    except ConflictError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to start attempt: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start attempt") from e
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=404,
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to start attempt") from exc
 
 
 @router.put("/attempts/{attempt_id:int}", response_model=AttemptResponse, response_model_exclude_none=True)
@@ -389,18 +443,29 @@ def submit_attempt(
     attempt_id: int,
     submission: AttemptSubmitRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+    jm: Optional[JobManager] = Depends(get_job_manager),
 ):
     """Submit answers for an attempt."""
     try:
-        return db.submit_attempt(attempt_id, [a.model_dump() for a in submission.answers])
-    except ConflictError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to submit attempt: {e}")
-        raise HTTPException(status_code=500, detail="Failed to submit attempt") from e
+        attempt = db.submit_attempt(attempt_id, [a.model_dump() for a in submission.answers])
+        _enqueue_study_suggestions_refresh(
+            jm=jm,
+            current_user=current_user,
+            anchor_type="quiz_attempt",
+            anchor_id=int(attempt["id"]),
+        )
+        return attempt
+    except ConflictError as exc:
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=404,
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to submit attempt") from exc
 
 
-@router.get("/attempts", response_model=AttemptListResponse, response_model_exclude_none=True)
+@router.get("/attempts", response_model=AttemptListResponse)
 def list_attempts(
     quiz_id: Optional[int] = None,
     limit: int = Query(50, ge=1, le=200),
@@ -409,10 +474,21 @@ def list_attempts(
 ):
     """List quiz attempts."""
     try:
-        return db.list_attempts(quiz_id=quiz_id, limit=limit, offset=offset)
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to list attempts: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list attempts") from e
+        payload = db.list_attempts(quiz_id=quiz_id, limit=limit, offset=offset)
+        items = list(payload.get("items") or [])
+        total = int(payload.get("count") or 0)
+        return AttemptListResponse(
+            items=items,
+            count=total,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                offset=offset,
+                limit=limit,
+                count=len(items),
+            ),
+        )
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list attempts") from exc
 
 
 @router.get("/attempts/{attempt_id:int}", response_model=AttemptResponse, response_model_exclude_none=True)
@@ -423,7 +499,10 @@ def get_attempt(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ):
     """Get attempt details."""
-    attempt = db.get_attempt(attempt_id, include_questions=include_questions, include_answers=include_answers)
+    try:
+        attempt = db.get_attempt(attempt_id, include_questions=include_questions, include_answers=include_answers)
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch attempt") from exc
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
     return attempt
@@ -438,16 +517,17 @@ def get_attempt_remediation_conversions(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> QuizRemediationConversionListResponse:
     """Return server-backed remediation conversion state for a completed attempt."""
-    attempt = db.get_attempt(attempt_id, include_questions=False, include_answers=False)
-    if not attempt:
-        raise HTTPException(status_code=404, detail="Attempt not found")
     try:
+        attempt = db.get_attempt(attempt_id, include_questions=False, include_answers=False)
+        if not attempt:
+            raise HTTPException(status_code=404, detail="Attempt not found")
         payload = db.list_attempt_remediation_conversions(attempt_id)
         payload["items"] = _mark_orphaned_remediation_items(list(payload.get("items") or []), db)
         return payload
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to list remediation conversions for attempt {attempt_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to list remediation conversions") from exc
+    except HTTPException:
+        raise
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list remediation conversions") from exc
 
 
 @router.post(
@@ -461,11 +541,17 @@ def convert_attempt_remediation_conversions(
 ) -> QuizRemediationConvertResponse:
     """Create remediation flashcards plus conversion records for missed attempt questions."""
     try:
+        create_deck_review_prompt_side = (
+            payload.create_deck_review_prompt_side
+            if "create_deck_review_prompt_side" in payload.model_fields_set
+            else None
+        )
         return db.convert_quiz_remediation_questions(
             attempt_id=attempt_id,
             question_ids=payload.question_ids,
             target_deck_id=payload.target_deck_id,
             create_deck_name=payload.create_deck_name,
+            create_deck_review_prompt_side=create_deck_review_prompt_side,
             create_deck_scheduler_type=payload.create_deck_scheduler_type,
             create_deck_scheduler_settings=(
                 payload.create_deck_scheduler_settings.model_dump()
@@ -474,13 +560,8 @@ def convert_attempt_remediation_conversions(
             ),
             replace_active=payload.replace_active,
         )
-    except InputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to convert remediation questions for attempt {attempt_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to convert remediation questions") from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to convert remediation questions") from exc
 
 
 @router.get(
@@ -501,10 +582,12 @@ def get_quiz_attempt_question_assistant(
             "available_actions": context["available_actions"],
         }
     except ConflictError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to fetch quiz question assistant context: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to fetch study assistant context") from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_status_code=404,
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch study assistant context") from exc
 
 
 @router.post(
@@ -568,12 +651,14 @@ async def respond_quiz_attempt_question_assistant(
     except HTTPException:
         raise
     except ConflictError as exc:
-        raise HTTPException(status_code=409, detail="Study assistant thread version mismatch") from exc
-    except CharactersRAGDBError as exc:
-        logger.error(f"Failed to respond with quiz question assistant: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to generate study assistant response") from exc
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="Study assistant thread version mismatch",
+        ) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to generate study assistant response") from exc
     except (AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
-        logger.error(f"Unexpected quiz question assistant failure: {exc}")
+        logger.error("Unexpected quiz question assistant failure")
         raise HTTPException(status_code=500, detail="Failed to generate study assistant response") from exc
 
 
@@ -610,11 +695,13 @@ async def generate_quiz(
     except QuizProvenanceValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except ConflictError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise map_db_error_to_http(
+            e,
+            conflict_status_code=404,
+        ) from e
     except ChatConfigurationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to generate quiz") from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"Failed to generate quiz: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate quiz") from e

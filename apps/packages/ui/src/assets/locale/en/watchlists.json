@@ -12,8 +12,8 @@
       "monitor": "Monitor",
       "monitors": "Monitors",
       "activity": "Activity",
-      "article": "Article",
-      "articles": "Articles",
+      "article": "Update",
+      "articles": "Updates",
       "report": "Report",
       "reports": "Reports"
     },
@@ -21,7 +21,8 @@
       "sources": "Feeds",
       "jobs": "Monitors",
       "runs": "Activity",
-      "items": "Articles",
+      "items": "Updates",
+      "alerts": "Alerts",
       "outputs": "Reports"
     }
   },
@@ -30,7 +31,10 @@
     "sources": "Feeds",
     "jobs": "Monitors",
     "runs": "Activity",
-    "items": "Articles",
+    "items": "Updates",
+    "itemsTooltip": "Updates collected from your sources",
+    "alerts": "Alerts",
+    "alertsTooltip": "Content matches from your Watchlist alert rules",
     "outputs": "Reports",
     "templates": "Templates",
     "settings": "Settings",
@@ -42,7 +46,8 @@
     "sources": "Set up feeds",
     "jobs": "Configure monitors",
     "runs": "Check activity",
-    "items": "Review articles",
+    "items": "Review updates",
+    "alerts": "Review alerts",
     "outputs": "View reports"
   },
   "taskViews": {
@@ -50,9 +55,66 @@
     "collect": "Collect",
     "collectHint": "Feeds and monitors",
     "review": "Review",
-    "reviewHint": "Activity and articles",
+    "reviewHint": "Alerts, activity, and updates",
     "briefings": "Briefings",
     "briefingsHint": "Reports and templates"
+  },
+  "mobileNav": {
+    "title": "Manage Watchlist",
+    "fallbackLabel": "Manage Watchlist",
+    "navigationLabel": "Watchlist management destinations",
+    "overviewGroup": "Overview",
+    "collectGroup": "Collect",
+    "reviewGroup": "Review",
+    "reportsGroup": "Reports",
+    "settingsGroup": "Settings",
+    "overviewDescription": "Intent, health, and next actions",
+    "sourcesDescription": "Sources, groups, tags, and imports",
+    "jobsDescription": "Schedules, scope, filters, and run now",
+    "alertsDescription": "Content matches and alert rules",
+    "itemsDescription": "Triage, saved views, and report queue",
+    "runsDescription": "Run history, health, and details",
+    "outputsDescription": "Generated reports, evidence, and downloads",
+    "templatesDescription": "Report template authoring and preview",
+    "settingsDescription": "Lifecycle, defaults, and subscriptions"
+  },
+  "setupWizard": {
+    "title": "Create Watchlist",
+    "presets": {
+      "cti_osint": {
+        "label": "CTI / OSINT",
+        "description": "Track vulnerabilities, malware, actors, advisories, and source changes."
+      },
+      "news": {
+        "label": "News",
+        "description": "Track developing events, people, organizations, and source diversity."
+      },
+      "general": {
+        "label": "General",
+        "description": "Track a topic and collect updates for review."
+      },
+      "blank": {
+        "label": "Blank",
+        "description": "Start with an empty Watchlist and configure details yourself."
+      }
+    },
+    "startModes": {
+      "sources": {
+        "label": "Start from sources",
+        "description": "Create a Watchlist with initial feeds and an optional monitor."
+      },
+      "topic": {
+        "label": "Start from topic",
+        "description": "Create the Watchlist objective first, then add feeds before collection starts."
+      },
+      "report_goal": {
+        "label": "Start from report goal",
+        "description": "Define the briefing goal first, then connect sources and templates."
+      }
+    },
+    "boundaries": {
+      "alerts": "Content-match alerts come later. This setup defines the Watchlist and its initial collection scope."
+    }
   },
   "orientation": {
     "showTabGuidance": "Show tab guidance",
@@ -61,7 +123,7 @@
       "openFeeds": "Open Feeds",
       "openMonitors": "Open Monitors",
       "openActivity": "Open Activity",
-      "openArticles": "Open Articles",
+      "openArticles": "Open Updates",
       "openReports": "Open Reports",
       "openTemplates": "Open Templates"
     },
@@ -82,8 +144,12 @@
       "description": "Inspect failures and logs here. Next, open Reports to view generated briefings."
     },
     "items": {
-      "title": "Articles: triage captured content",
-      "description": "Review and prioritize captured items. Next, tune monitor scope or open reports."
+      "title": "Updates: triage captured content",
+      "description": "Review and prioritize captured updates. Next, tune monitor scope or open reports."
+    },
+    "alerts": {
+      "title": "Alerts: review matched content",
+      "description": "Create content alert rules and triage item matches here. Run failures stay in Activity as health issues."
     },
     "outputs": {
       "title": "Reports: generated briefing outputs",
@@ -106,11 +172,29 @@
     "openJobs": "Open",
     "openItems": "Open",
     "openRuns": "Open",
+    "noWatchlist": {
+      "title": "Create a Watchlist first",
+      "description": "Use the Watchlist setup action above to create the project container before adding sources, monitors, or reports."
+    },
     "health": {
       "healthyTitle": "System healthy",
       "healthyDescription": "No recent failed runs and source health is stable.",
       "degradedTitle": "System requires attention",
       "degradedDescription": "Some sources or recent runs show failures. Open failed runs to investigate."
+    },
+    "alertHealth": {
+      "title": "Alerts and health",
+      "contentTitle": "Content alerts",
+      "unreadAlerts": "Unread content alerts",
+      "noUnreadAlerts": "No unread content alerts",
+      "contentDescription": "New updates matching your Watchlist alert rules.",
+      "reviewAlerts": "Review alerts",
+      "createRule": "Create content alert rule",
+      "healthTitle": "Health issues",
+      "healthIssues": "Health issues",
+      "noHealthIssues": "No health issues",
+      "healthDescription": "Run failures and source problems are health issues, not content alerts.",
+      "openActivity": "Open Activity"
     },
     "attention": {
       "title": "Attention needed",
@@ -121,46 +205,46 @@
       "jobs": "Monitors need schedule fixes ({{count}})"
     },
     "onboarding": {
-      "title": "Quick setup",
-      "pipeline": "Add Feed -> Configure Monitor -> Check Activity -> Review Articles -> View Reports",
+      "title": "Add initial collection",
+      "pipeline": "Add feeds -> Configure monitor -> Check Activity -> Review Updates -> Generate Reports",
       "path": {
         "label": "Onboarding mode",
         "beginner": "Beginner (guided)",
         "advanced": "Advanced (direct forms)",
-        "beginnerHint": "Guided setup keeps the flow simple. You can customize exact timing and template formatting later.",
-        "advancedHint": "Advanced mode opens full Feed and Monitor forms, including custom schedules and template options."
+        "beginnerHint": "Guided collection setup keeps this Watchlist scoped before advanced schedules and templates.",
+        "advancedHint": "Advanced mode opens direct feed and monitor forms for this Watchlist."
       },
       "steps": {
         "addFeed": {
-          "title": "Add your first feed",
-          "description": "Start by adding an RSS/site feed in Feeds."
+          "title": "Add feeds to this Watchlist",
+          "description": "Add RSS/site feeds inside the selected Watchlist."
         },
         "createMonitor": {
-          "title": "Create your first monitor",
-          "description": "Pick feeds, then set a schedule with presets."
+          "title": "Create a monitor",
+          "description": "Pick Watchlist feeds, then set a schedule with presets."
         },
         "reviewResults": {
           "title": "Review results",
-          "description": "Open Activity for monitor health, Articles for captured content, and Reports for generated briefings."
+          "description": "Open Activity for monitor health, Updates for captured content, and Reports for generated briefings."
         }
       },
       "cta": {
         "addFeed": "Add first feed",
         "createMonitor": "Create first monitor",
-        "reviewArticles": "Open Articles",
-        "guidedSetup": "Guided setup"
+        "reviewArticles": "Open Updates",
+        "guidedSetup": "Add initial collection"
       },
       "quickSetup": {
-        "title": "Guided quick setup",
+        "title": "Add initial collection",
         "steps": {
           "feed": "Feed",
           "monitor": "Monitor",
           "review": "Review"
         },
         "help": {
-          "feed": "Tip: paste a feed URL now. You can adjust feed settings later.",
-          "monitor": "No cron needed: choose a preset schedule for now.",
-          "review": "You can change any of these settings later from Feeds and Monitors."
+          "feed": "Add one or more feed URLs to this Watchlist. You can adjust feed settings later.",
+          "monitor": "Choose how this Watchlist monitor runs; presets avoid cron setup first.",
+          "review": "Review the scoped feeds and monitor before adding them to this Watchlist."
         },
         "fields": {
           "sourceName": "Feed name",
@@ -207,13 +291,13 @@
           "runNow": "Run test now",
           "destination": "After create"
         },
-        "reviewDescription": "Preview sample candidates and expected briefing, then create your feed and monitor.",
+        "reviewDescription": "Preview sample candidates and expected briefing, then add feeds and monitor to this Watchlist.",
         "candidatePreview": {
           "title": "Feed sample preview",
           "loading": "Loading sample candidates...",
           "summary": "{{ingestable}} ingestable, {{filtered}} filtered from {{total}} sample items.",
-          "empty": "No sample candidates returned yet. You can still create setup and validate with a test run.",
-          "error": "Could not load feed sample preview right now. You can still create setup and use a test run to verify results."
+          "empty": "No sample candidates returned yet. You can still add the collection and validate with a test run.",
+          "error": "Could not load feed sample preview right now. You can still add the collection and use a test run to verify results."
         },
         "templatePreview": {
           "title": "Briefing preview (template: {{template}})",
@@ -222,7 +306,7 @@
         "outcome": {
           "textOnly": "Text briefing",
           "textAndAudio": "Text + audio briefing",
-          "triage": "Article triage only"
+          "triage": "Update triage only"
         },
         "destinationHint": {
           "runNow": "Starts one test run immediately and opens Activity details.",
@@ -230,21 +314,21 @@
           "triage": "Opens Monitors after setup so you can run checks when ready."
         },
         "actions": {
-          "finish": "Create setup",
-          "finishWithTest": "Create setup + run test",
+          "finish": "Create collection",
+          "finishWithTest": "Create collection + run test",
           "retryPreview": "Retry preview"
         },
-        "created": "Quick setup complete. Feed and monitor created.",
-        "createdBriefing": "Quick setup complete. Feed and monitor created for briefing reports.",
-        "createdAndRunning": "Quick setup complete. Your first run has started.",
-        "testRunPending": "Quick setup complete. Test run started. Open Activity for progress and Reports for generated briefings.",
-        "error": "Failed to complete quick setup."
+        "created": "Initial collection added. Feeds and monitor are ready.",
+        "createdBriefing": "Initial collection added. Feeds and monitor are ready for briefing reports.",
+        "createdAndRunning": "Initial collection added. Your first run has started.",
+        "testRunPending": "Initial collection added. Test run started. Open Activity for progress and Reports for generated briefings.",
+        "error": "Failed to add initial collection."
       }
     },
     "setupComplete": {
       "title": "Setup complete",
-      "nextRunDescription": "Your next monitor run is {{time}}. New content will appear in Articles and Activity.",
-      "runNowDescription": "Run a monitor from Monitors to generate your first Articles and Activity entries.",
+      "nextRunDescription": "Your next monitor run is {{time}}. New content will appear in Updates and Activity.",
+      "runNowDescription": "Run a monitor from Monitors to generate your first Updates and Activity entries.",
       "openActivity": "Open Activity"
     },
     "cards": {
@@ -262,7 +346,7 @@
         "noNextRun": "No upcoming schedules"
       },
       "items": {
-        "title": "Articles",
+        "title": "Updates",
         "unread": "Unread"
       },
       "runs": {
@@ -289,9 +373,9 @@
     "finish": "Finish",
     "progress": "Step {{current}} of {{total}}",
     "completedTitle": "Guided tour complete",
-    "completedDescription": "Next: monitor Activity for monitor health, review Articles for captured content, and open Reports for generated briefings.",
+    "completedDescription": "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings.",
     "openActivity": "Open Activity",
-    "openArticles": "Open Articles",
+    "openArticles": "Open Updates",
     "steps": {
       "sources": {
         "title": "1. Add feeds",
@@ -306,8 +390,8 @@
         "description": "Activity shows monitor status, logs, and failures."
       },
       "items": {
-        "title": "4. Review articles",
-        "description": "Articles are captured content from successful monitor checks, ready for triage."
+        "title": "4. Review updates",
+        "description": "Updates are captured content from successful monitor checks, ready for triage."
       },
       "outputs": {
         "title": "5. Deliver reports",
@@ -386,7 +470,7 @@
     "hint": "Tip: Use Cmd+K to open this palette anytime",
     "commands": {
       "openFeeds": "Open Feeds",
-      "openArticles": "Open Articles",
+      "openArticles": "Open Updates",
       "openReports": "Open Reports",
       "openMonitors": "Open Monitors",
       "openActivity": "Open Activity",
@@ -422,8 +506,9 @@
       "primaryCta": "Set up a monitor"
     },
     "articles": {
-      "description": "Articles are captured content from successful monitor runs, ready for review.",
-      "primaryCta": "Set up a monitor to start capturing articles"
+      "title": "No updates yet",
+      "description": "Updates are captured content from successful monitor runs, ready for review.",
+      "primaryCta": "Set up a monitor to start capturing updates"
     },
     "reports": {
       "description": "Reports are generated briefings from monitor runs using your templates.",
@@ -432,6 +517,67 @@
     "templates": {
       "description": "Templates define the format and structure of your generated reports.",
       "primaryCta": "Create a template"
+    }
+  },
+  "alerts": {
+    "healthBoundary": "Run failures and source problems are health issues, not content alerts.",
+    "boundaryDescription": "Use content alert rules for newly collected items that match a descriptor, keyword, classification, entity, IOC, CVE, or source constraint.",
+    "rulesTitle": "Content alert rules",
+    "rulesDescription": "Create a rule to be notified when new Watchlist items match a descriptor, keyword, classification, entity, or source constraint.",
+    "inboxTitle": "Alert inbox",
+    "inboxDescription": "Review why a new item matched, then mark it read or dismiss it from the active queue.",
+    "createRule": "Create rule",
+    "saveRule": "Save rule",
+    "emptyRules": "No content alert rules yet.",
+    "emptyInbox": "No content alerts match these filters.",
+    "disabled": "Disabled",
+    "enabledTooltip": "Enable or pause this content alert rule",
+    "sourceLink": "Source",
+    "itemLink": "Item",
+    "untitled": "Untitled alert",
+    "noWatchlist": "Select a Watchlist to manage content alert rules and review matching items.",
+    "loadRulesError": "Failed to load content alert rules",
+    "loadAlertsError": "Failed to load content alerts",
+    "updateRuleSuccess": "Content alert rule updated.",
+    "updateRuleError": "Failed to update content alert rule.",
+    "deleteConfirmTitle": "Delete content alert rule?",
+    "deleteConfirmContent": "This removes the rule and keeps existing alert history.",
+    "deleteSuccess": "Content alert rule deleted.",
+    "deleteError": "Failed to delete content alert rule.",
+    "updateAlertSuccess": "Alert updated.",
+    "updateAlertError": "Failed to update alert.",
+    "totalItems": "{{total}} alerts",
+    "validation": {
+      "required": "Name and pattern are required",
+      "saveFailed": "Failed to save content alert rule"
+    },
+    "form": {
+      "name": "Rule name",
+      "kind": "Rule kind",
+      "matchMode": "Match mode",
+      "severity": "Severity",
+      "pattern": "Pattern",
+      "sourceTags": "Source tags",
+      "sourceTagsPlaceholder": "advisory, cti"
+    },
+    "filters": {
+      "status": "Alert status",
+      "severity": "Severity",
+      "rule": "Rule",
+      "sourceId": "Source ID",
+      "search": "Search alerts",
+      "allRules": "All rules",
+      "allSeverity": "All severity"
+    },
+    "actions": {
+      "markRead": "Mark read",
+      "markUnread": "Mark unread",
+      "dismiss": "Dismiss"
+    },
+    "ids": {
+      "item": "Item #{{id}}",
+      "run": "Run #{{id}}",
+      "job": "Monitor #{{id}}"
     }
   },
   "healthBar": {
@@ -444,7 +590,7 @@
     "nextRun": "Next run {{time}}",
     "lastChecked": "Checked {{time}}",
     "runningNow": "running now",
-    "articlesPending": "{{count}} articles pending",
+    "articlesPending": "{{count}} updates pending",
     "attentionTooltip": "{{count}} items need attention",
     "feedsDegraded": "{{count}} need review",
     "monitorsAttention": "{{count}} need fixes",
@@ -467,7 +613,8 @@
       "sources": "Feeds setup",
       "jobs": "Monitor scheduling",
       "runs": "Activity guidance",
-      "items": "Article review",
+      "items": "Updates review",
+      "alerts": "Alert guidance",
       "outputs": "Reports guidance",
       "templates": "Template authoring",
       "settings": "Workspace settings"
@@ -525,6 +672,7 @@
     "enabled": "Feed enabled",
     "disabled": "Feed disabled",
     "toggleActiveAria": "Toggle active for {{name}}",
+    "selectSourceAria": "Select {{name}}",
     "deleteConfirm": "Delete this feed?",
     "deleteConfirmDescription": "You can undo this deletion for {{seconds}} seconds.",
     "deleteConfirmForce": "Delete anyway",
@@ -610,6 +758,11 @@
     "staleCount": "Stale x{{count}}",
     "backoffUntil": "Backoff {{time}}",
     "seenInfo": "Source Health & Dedup Stats",
+    "checkNowForSourceAria": "Check now for {{name}}",
+    "seenInfoForSourceAria": "Source Health & Dedup Stats for {{name}}",
+    "editSourceAria": "Edit {{name}}",
+    "deleteSourceAria": "Delete {{name}}",
+    "groupCount": "{{count}} {{label}}",
     "columns": {
       "name": "Name",
       "url": "URL",
@@ -714,6 +867,10 @@
     "metricsHint": "Showing core columns. Use advanced mode for scope, filters, and run timing.",
     "compactSummary": "{{scope}} • {{filters}} filters",
     "audioEnabledChip": "Audio on",
+    "previewForMonitorAria": "Preview {{name}}",
+    "editMonitorAria": "Edit {{name}}",
+    "deleteMonitorAria": "Delete {{name}}",
+    "noFilters": "No filters",
     "never": "Never",
     "pending": "Pending",
     "notScheduled": "Not scheduled",
@@ -999,6 +1156,8 @@
       "duration": "Duration",
       "itemsFound": "Found",
       "itemsProcessed": "Processed",
+      "itemsFiltered": "Filtered",
+      "itemsErrored": "Errors",
       "actions": "Actions"
     },
     "detail": {
@@ -1023,10 +1182,16 @@
       },
       "logs": "Logs",
       "items": "Scraped Items",
+      "itemsTableAria": "Run items table",
+      "itemsTotal": "{{total}} items",
       "noLogs": "No logs available",
       "noItems": "No items found",
       "itemsError": "Failed to load items",
       "itemsUpdateError": "Failed to update item",
+      "toggleReviewedAria": "Toggle reviewed for {{title}}",
+      "reviewed": "Reviewed",
+      "needsReview": "Needs review",
+      "openSource": "Open source",
       "retryTriggered": "Retry started as run #{{id}}.",
       "retryError": "Failed to retry run",
       "remediationTitle": "Suggested recovery steps",
@@ -1093,15 +1258,16 @@
     }
   },
   "items": {
-    "description": "Browse scraped feed items and open the selected source content.",
+    "description": "Review collected updates, alert matches, and briefing candidates from this Watchlist.",
     "sourcesError": "Failed to load sources",
-    "fetchError": "Failed to load feed items",
+    "fetchError": "Failed to load updates",
     "smartFeeds": "Smart Feeds",
     "feeds": "Feeds",
     "unreadToday": "Unread today",
     "today": "Today",
     "unread": "All Unread",
     "reviewedOnly": "Reviewed",
+    "alertMatches": "Alert matches",
     "queuedForBriefing": "Queued for briefing",
     "unreadCount": "{{count}} unread",
     "sourceSearchPlaceholder": "Search feeds...",
@@ -1111,7 +1277,7 @@
     "allFeedsHint": "Browse items from every source",
     "noFeeds": "No feeds found",
     "sourceWindowHint": "Showing {{visible}} of {{total}} feeds. Scroll to load more.",
-    "searchPlaceholder": "Search feed items...",
+    "searchPlaceholder": "Search updates...",
     "filters": {
       "all": "All",
       "ingested": "Ingested",
@@ -1126,7 +1292,7 @@
         "reviewedFirst": "Reviewed first"
       }
     },
-    "empty": "No feed items found",
+    "empty": "No updates found",
     "unknownSource": "Unknown source",
     "untitled": "Untitled item",
     "noSummary": "No summary available",
@@ -1176,35 +1342,37 @@
       "selectedCount": "{{count}} selected",
       "markSelected": "Mark selected as reviewed",
       "markPage": "Mark page as reviewed",
-      "markAllFiltered": "Mark all filtered as reviewed",
+      "markAllFiltered": "Mark all filtered updates",
       "scopeSummary": "Selected: {{selected}} unread • This page: {{page}} unread • All filtered: {{allFiltered}} unread.",
       "scope": {
         "selected": "selected item{{plural}}",
-        "page": "items on this page",
-        "allFiltered": "all filtered items"
+        "page": "updates on this page",
+        "allFiltered": "all filtered updates"
       },
       "noSelected": "Select one or more items to review.",
-      "noPage": "All items on this page are already reviewed.",
-      "noFiltered": "No matching unread items to review.",
-      "confirmSelectedTitle": "Mark selected items as reviewed?",
-      "confirmPageTitle": "Mark this page as reviewed?",
-      "confirmAllFilteredTitle": "Mark all filtered items as reviewed?",
-      "confirmDescriptionScoped": "Scope: {{scope}}. This will mark {{count}} item{{plural}} as reviewed.",
-      "confirmDescription": "This will mark {{count}} item{{plural}} as reviewed.",
+      "noPage": "All updates on this page are already reviewed.",
+      "noFiltered": "No matching unread updates to review.",
+      "confirmSelectedTitle": "Mark selected updates as reviewed?",
+      "confirmPageTitle": "Mark this page of updates as reviewed?",
+      "confirmAllFilteredTitle": "Mark all filtered updates as reviewed?",
+      "confirmDescriptionScoped": "Scope: {{scope}}. This will mark {{count}} update{{plural}} as reviewed.",
+      "confirmDescription": "This will mark {{count}} update{{plural}} as reviewed.",
       "completedScoped": "Marked {{count}} {{scope}} as reviewed.",
+      "incompleteScoped": "Marked {{success}} {{scope}} as reviewed; more matching updates may remain.",
       "partialScoped": "Marked {{success}} {{scope}} as reviewed; {{failed}} failed.",
       "failedScoped": "Failed to mark {{scope}} as reviewed.",
-      "collectingAllFiltered": "Collecting unread items that match current filters...",
+      "collectingAllFiltered": "Preparing unread updates that match current filters...",
       "progressLabel": "Batch review progress",
       "progressRunning": "Processing {{processed}} of {{total}} items ({{succeeded}} succeeded, {{failed}} failed).",
       "progressComplete": "Batch review complete: {{succeeded}} succeeded, {{failed}} failed.",
+      "progressIncomplete": "Batch review partial: {{succeeded}} succeeded; more matching updates may remain.",
       "progressPartial": "Batch review complete: {{succeeded}} succeeded, {{failed}} failed.",
       "progressFailed": "Batch review failed: {{failed}} failed.",
       "retryFailed": "Retry {{count}} failed",
       "dismissProgress": "Dismiss",
       "completed": "Marked {{count}} item{{plural}} as reviewed.",
       "partial": "Marked {{success}} item{{successPlural}} as reviewed; {{failed}} failed.",
-      "failed": "Failed to mark items as reviewed.",
+      "failed": "Failed to mark updates as reviewed.",
       "progress": {
         "label": "Batch progress",
         "count": "{{processed}} / {{total}}",
@@ -1228,6 +1396,13 @@
       "created": "Saved view created.",
       "updated": "Saved view updated.",
       "deleted": "Saved view deleted.",
+      "loadError": "Failed to load saved views.",
+      "createError": "Failed to create saved view.",
+      "updateError": "Failed to update saved view.",
+      "importLocal": "Import local views",
+      "imported": "Imported {{count}} saved view{{plural}}.",
+      "importPartialError": "{{count}} saved view{{plural}} could not be imported and can be retried.",
+      "importError": "Failed to import saved views.",
       "deleteTitle": "Delete saved view?",
       "deleteDescription": "Delete saved view \"{{name}}\"?",
       "defaults": {
@@ -1240,20 +1415,97 @@
       "button": "Shortcuts",
       "title": "Keyboard shortcuts",
       "helpHint": "Keyboard shortcuts (?)",
-      "hintStrip": "Shortcuts: j/k navigate, space toggles reviewed, o opens original, ? shows help.",
+      "hintStrip": "Shortcuts: j/k navigate, space toggles reviewed, o opens original update, ? shows help.",
       "openPanel": "View all",
       "dismissHint": "Dismiss",
       "restoreHint": "Show shortcut hints",
-      "nextPrevious": "Move to next or previous article in the list.",
-      "toggleReviewed": "Toggle reviewed state for the selected article.",
-      "openOriginal": "Open the selected article in a new tab.",
-      "refresh": "Refresh feeds, article list, and smart counts.",
+      "nextPrevious": "Move to next or previous update in the list.",
+      "toggleReviewed": "Toggle reviewed state for the selected update.",
+      "openOriginal": "Open the selected update in a new tab.",
+      "refresh": "Refresh feeds, updates, and smart counts.",
       "newFlow": "Start a new feed flow by opening Add Source.",
       "help": "Open this shortcuts help panel."
     },
     "live": {
       "selectionChanged": "Selected {{title}} from {{source}} ({{state}}).",
-      "selectionCleared": "No article selected."
+      "selectionCleared": "No update selected."
+    },
+    "alertSummary": {
+      "total": "{{count}} {{label}}",
+      "openAlerts": "Open Alerts"
+    }
+  },
+  "reports": {
+    "builder": {
+      "title": "Create report",
+      "createReport": "Create report",
+      "preset": "Report preset",
+      "run": "Run",
+      "runRequired": "Select a run to generate a report.",
+      "reportTitle": "Report title",
+      "titlePlaceholder": "Optional title",
+      "format": "Format",
+      "template": "Template",
+      "includeEvidence": "Include evidence table",
+      "includeExcluded": "Include excluded trail",
+      "includedUpdates": "Included updates",
+      "readiness": "Report readiness",
+      "queuedCount": "{{count}} queued update{{plural}}",
+      "sourceCount": "{{count}} source{{plural}}",
+      "proceedWithWarnings": "Proceed with warnings",
+      "generate": "Generate defensible report",
+      "created": "Generated defensible report.",
+      "createError": "Failed to generate report.",
+      "loadingQueue": "Loading queued updates",
+      "emptyQueue": "No queued updates found for this run.",
+      "excludedTrail": "Excluded trail",
+      "excludedCount": "{{count}} update{{plural}} not queued",
+      "noExcluded": "No excluded updates in this run.",
+      "ready": "Ready"
+    },
+    "presets": {
+      "cti": "CTI / OSINT",
+      "news": "News briefing",
+      "general": "General research"
+    },
+    "readiness": {
+      "ready": "Ready",
+      "needsReview": "Needs review",
+      "blocked": "Blocked",
+      "legacyLiveOnly": "Live provenance only"
+    },
+    "table": {
+      "sourceCount": "{{count}} sources",
+      "alertCount": "{{count}} alerts",
+      "weakWarningCount": "{{count}} weak evidence warnings"
+    },
+    "evidence": {
+      "title": "Evidence snapshot",
+      "tableAria": "Evidence table",
+      "snapshotAvailable": "Immutable evidence snapshot is available",
+      "snapshotShort": "Evidence",
+      "capturedAt": "Immutable snapshot captured at {{time}}",
+      "uniqueSources": "Unique sources: {{count}}",
+      "alertCount": "Alerts: {{count}}",
+      "missingSources": "Missing provenance: {{count}}",
+      "legacyTitle": "Live provenance only",
+      "legacyDescription": "This older report was created before evidence snapshots were available.",
+      "errorTitle": "Evidence snapshot unavailable",
+      "empty": "No report evidence available",
+      "reviewed": "Reviewed",
+      "needsReview": "Needs review",
+      "queued": "Queued",
+      "excludedTrail": "Excluded trail",
+      "noExcluded": "No excluded updates captured.",
+      "openSource": "Open source",
+      "columns": {
+        "update": "Update",
+        "source": "Source",
+        "published": "Published",
+        "alerts": "Alert evidence",
+        "state": "Review/queue state",
+        "link": "Link"
+      }
     }
   },
   "outputs": {
@@ -1280,6 +1532,8 @@
     "deliveryIssuesShowFailed": "Show failed only",
     "deliveryIssuesOpenRuns": "Open failed runs",
     "tableAria": "Reports table",
+    "expired": "Expired",
+    "never": "Never",
     "live": {
       "loadError": "Reports refresh failed.",
       "downloaded": "Downloaded {{title}}.",
@@ -1298,6 +1552,19 @@
       "pending": "Pending",
       "sent": "Sent",
       "stored": "Stored"
+    },
+    "audioStatus": {
+      "completed": "Completed",
+      "ready": "Ready",
+      "fallback": "Fallback",
+      "partial": "Partial",
+      "queued": "Queued",
+      "pending": "Pending",
+      "running": "Running",
+      "inProgress": "In progress",
+      "failed": "Failed",
+      "error": "Error",
+      "unknown": "Unknown"
     },
     "noContent": "No content available",
     "openInNewTab": "Open in new tab",
@@ -1328,6 +1595,7 @@
       "format": "Format",
       "created": "Created",
       "delivery": "Delivery",
+      "readiness": "Readiness",
       "expires": "Expires",
       "actions": "Actions"
     }
@@ -1354,6 +1622,12 @@
     "deleteConfirmInUseDescription": "This template is referenced by {{count}} active monitor{{plural}}. Deleting it may affect scheduled reports.",
     "deleteConfirmInUseMore": "+{{count}} more active monitor{{plural}}",
     "empty": "No templates yet",
+    "tableAria": "Templates table",
+    "noDescription": "No description",
+    "versionLabel": "Version",
+    "latestVersion": "Latest",
+    "historyLabel": "History",
+    "versionCount": "{{count}} version{{plural}}",
     "createTitle": "Create Template",
     "editTitle": "Edit Template",
     "nameRequired": "Name is required",

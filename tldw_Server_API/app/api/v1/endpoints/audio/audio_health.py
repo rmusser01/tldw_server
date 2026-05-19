@@ -7,6 +7,7 @@ import os
 import platform
 import re
 import sys
+import time
 from ctypes.util import find_library as _ctypes_find_library
 from typing import Any, Optional
 
@@ -38,6 +39,35 @@ _SUSPICIOUS_PUBLIC_HEALTH_RE = re.compile(
     re.IGNORECASE,
 )
 _SANITIZED_PUBLIC_HEALTH_MESSAGE = "Internal health diagnostics were suppressed."
+_SENSITIVE_PROVIDER_DETAIL_KEYS_RAW = frozenset(
+    {
+        "api_key",
+        "apiKey",
+        "auth_token",
+        "authToken",
+        "authorization",
+        "base_url",
+        "baseURL",
+        "command",
+        "cwd",
+        "env",
+        "exception",
+        "host",
+        "local_path",
+        "path",
+        "port",
+        "repo_path",
+        "repoPath",
+        "stack",
+        "stack_trace",
+        "stackTrace",
+        "stderr",
+        "stdout",
+        "token",
+        "traceback",
+        "working_dir",
+    }
+)
 _PROVIDER_API_KEY_PLACEHOLDERS: dict[str, set[str]] = {
     "openai": {
         "",
@@ -100,22 +130,106 @@ def _serialize_tts_caps_for_health(tts_service: TTSServiceV2, caps: Any) -> Any:
     if callable(serializer):
         try:
             return serializer(caps)
-        except Exception as exc:
-            logger.debug(f"TTS health capabilities serialization failed via service helper: {exc}")
+        except Exception:
+            logger.debug("TTS health capabilities serialization failed via service helper")
     if isinstance(caps, dict):
         return dict(caps)
     try:
         dumped = model_dump_compat(caps)
         if isinstance(dumped, dict):
             return dumped
-    except Exception as dump_error:
-        logger.debug("TTS health capabilities model dump failed", exc_info=dump_error)
+    except Exception:
+        logger.debug("TTS health capabilities model dump failed")
     try:
         if is_dataclass(caps):
             return asdict(caps)
-    except Exception as dataclass_error:
-        logger.debug("TTS health capabilities dataclass conversion failed", exc_info=dataclass_error)
+    except Exception:
+        logger.debug("TTS health capabilities dataclass conversion failed")
     return None
+
+
+def _sanitize_public_provider_detail(value: Any) -> Any:
+    """Remove sensitive keys and suspicious runtime diagnostics from public TTS health details."""
+
+    if isinstance(value, str):
+        if _SUSPICIOUS_PUBLIC_HEALTH_RE.search(value):
+            return _SANITIZED_PUBLIC_HEALTH_MESSAGE
+        return value
+    if isinstance(value, list):
+        return [_sanitize_public_provider_detail(item) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = _normalize_public_health_key(key)
+            if normalized_key in _SENSITIVE_PROVIDER_DETAIL_KEYS:
+                continue
+            sanitized[key] = _sanitize_public_provider_detail(item)
+        return sanitized
+    return value
+
+
+def _normalize_public_health_key(value: Any) -> str:
+    """Normalize a provider-detail key before comparing it with the sensitive-key denylist."""
+
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+_SENSITIVE_PROVIDER_DETAIL_KEYS = frozenset(
+    _normalize_public_health_key(value) for value in _SENSITIVE_PROVIDER_DETAIL_KEYS_RAW
+)
+
+
+def _derive_omnivoice_supervisor_health(
+    tts_service: Any,
+    current_detail: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Summarize OmniVoice sidecar supervisor state without exposing process internals."""
+
+    current_detail = current_detail if isinstance(current_detail, dict) else {}
+    availability = str(current_detail.get("availability") or "").strip().lower()
+
+    state = "disabled" if availability == "disabled" else "idle_stopped"
+    last_error_code: str | None = None
+    supervisor = getattr(tts_service, "_omnivoice_supervisor", None)
+    if supervisor is None:
+        return {
+            "runtime": "sidecar",
+            "sidecar_state": state,
+        }
+
+    if bool(getattr(supervisor, "_closing", False)):
+        state = "shutting_down"
+    else:
+        process = getattr(supervisor, "_process", None)
+        process_returncode = getattr(process, "returncode", None) if process is not None else None
+        base_url = getattr(supervisor, "_base_url", None)
+        last_activity_at = getattr(supervisor, "_last_activity_at", None)
+        last_failure_at = getattr(supervisor, "last_failure_at", None)
+        startup_backoff_seconds = float(getattr(supervisor, "_startup_backoff_seconds", 0.0) or 0.0)
+
+        if process is not None and process_returncode is None and base_url and last_activity_at is not None:
+            state = "ready"
+        elif process is not None and process_returncode is None:
+            state = "starting"
+        elif last_failure_at is not None:
+            now = time.time()
+            if startup_backoff_seconds > 0 and (now - float(last_failure_at)) < startup_backoff_seconds:
+                state = "degraded"
+                last_error_code = "startup_backoff"
+            else:
+                state = "degraded"
+                last_error_code = "startup_failed"
+        elif process is not None and process_returncode is not None:
+            state = "degraded"
+            last_error_code = "startup_failed"
+
+    metadata = {
+        "runtime": "sidecar",
+        "sidecar_state": state,
+    }
+    if last_error_code is not None:
+        metadata["last_error_code"] = last_error_code
+    return metadata
 
 
 def _normalize_provider_api_key(provider_name: str, raw_key: Any) -> Optional[str]:
@@ -135,8 +249,8 @@ def _load_auth_provider_configs() -> tuple[bool, dict[str, Any]]:
             provider_name: config_manager.get_provider_config(provider_name)
             for provider_name in _AUTH_HEALTH_PROVIDERS
         }
-    except Exception as exc:
-        logger.debug(f"TTS health auth config lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health auth config lookup failed")
         return False, {}
 
 
@@ -147,8 +261,8 @@ def _load_detailed_circuit_breakers(tts_service: Any) -> dict[str, Any]:
     try:
         detailed = circuit_manager.get_all_status(detailed=True)
         return detailed if isinstance(detailed, dict) else {}
-    except Exception as exc:
-        logger.debug(f"TTS health detailed circuit-breaker lookup failed: {exc}")
+    except Exception:
+        logger.debug("TTS health detailed circuit-breaker lookup failed")
         return {}
 
 
@@ -339,8 +453,8 @@ def _discover_kokoro_espeak_library(adapter: Any) -> Optional[str]:
         discovered_name = _ctypes_find_library("espeak-ng") or _ctypes_find_library("espeak")
         if discovered_name and os.path.isabs(discovered_name) and os.path.exists(discovered_name):
             candidates.insert(0, discovered_name)
-    except Exception as exc:
-        logger.debug(f"Unable to discover eSpeak library via ctypes lookup: {exc}")
+    except Exception:
+        logger.debug("Unable to discover eSpeak library via ctypes lookup")
 
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
@@ -405,6 +519,11 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
         provider_details = status_map.get("providers", {})
         if not isinstance(provider_details, dict):
             provider_details = {}
+        else:
+            provider_details = {
+                provider_name: _sanitize_public_provider_detail(detail)
+                for provider_name, detail in provider_details.items()
+            }
         capability_envelopes: list[dict[str, Any]] = []
 
         available_providers = status_map.get("available", 0)
@@ -434,6 +553,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                         if isinstance(serialized_caps, dict):
                             metadata = dict(serialized_caps.get("metadata") or {})
                         runtime_name = metadata.get("runtime")
+                        if provider_name == "omnivoice" and not runtime_name:
+                            runtime_name = "sidecar"
                         breaker_key = provider_name
                         if provider_name == "qwen3_tts" and runtime_name:
                             breaker_key = build_qwen_runtime_breaker_key(provider_name, str(runtime_name))
@@ -464,8 +585,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                                 "initialized": False,
                                 "failed": availability == "failed",
                             }
-        except Exception as envelope_exc:
-            logger.debug(f"TTS health envelope enrichment failed: {envelope_exc}")
+        except Exception:
+            logger.debug("TTS health envelope enrichment failed")
 
         if capability_envelopes:
             if not total_providers:
@@ -497,6 +618,26 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
             tts_service,
         )
 
+        omnivoice_detail = provider_details.get("omnivoice")
+        if not isinstance(omnivoice_detail, dict):
+            omnivoice_detail = {}
+            provider_details["omnivoice"] = omnivoice_detail
+        omnivoice_runtime = _derive_omnivoice_supervisor_health(tts_service, omnivoice_detail)
+        if omnivoice_runtime:
+            omnivoice_detail.update(omnivoice_runtime)
+            sidecar_state = str(omnivoice_runtime.get("sidecar_state") or "").strip().lower()
+            if sidecar_state == "degraded" or omnivoice_runtime.get("last_error_code"):
+                omnivoice_detail["status"] = "degraded"
+                omnivoice_detail["availability"] = "degraded"
+                omnivoice_detail["failed"] = True
+                for entry in capability_envelopes:
+                    if str(entry.get("provider") or "").strip().lower() != "omnivoice":
+                        continue
+                    entry["status"] = "degraded"
+                    entry["availability"] = "degraded"
+                    entry["failed"] = True
+                _recompute_health_rollup(health, provider_details, capability_envelopes)
+
         try:
             from tldw_Server_API.app.core.TTS.adapter_registry import TTSProvider
 
@@ -521,8 +662,8 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
                     kokoro_info["espeak_lib_env"] = _sanitize_health_path_value(es_env)
                     kokoro_info["espeak_lib_path"] = runtime_diagnostics.get("espeak_lib_path")
                     kokoro_info["espeak_lib_exists"] = bool(runtime_diagnostics.get("espeak_lib_exists"))
-                except Exception as exc:
-                    logger.debug(f"Kokoro health: espeak library introspection failed: {exc}")
+                except Exception:
+                    logger.debug("Kokoro health eSpeak library introspection failed")
                 kokoro_detail = provider_details.get("kokoro")
                 if not isinstance(kokoro_detail, dict):
                     kokoro_detail = {}
@@ -544,12 +685,12 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
 
                 _recompute_health_rollup(health, provider_details, capability_envelopes)
                 health["providers"]["kokoro"] = kokoro_info
-        except Exception as e:
-            logger.debug(f"Kokoro health enrichment failed: {e}")
+        except Exception:
+            logger.debug("Kokoro health enrichment failed")
 
         return health
     except Exception as e:
-        logger.error(f"Error getting TTS health: {e}", exc_info=True)
+        logger.error("Error getting TTS health")
         request_id = ensure_request_id(request)
         payload = _http_error_detail("TTS health check failed", request_id, exc=e)
         return {"status": "error", **payload, "timestamp": datetime.utcnow().isoformat()}
@@ -669,7 +810,7 @@ async def get_stt_health(
             health["message"] = f"Model {resolved_model} is available and ready for use"
             health["estimated_size"] = None
         except Exception:
-            logger.exception(f"STT health warm-up failed for model={resolved_model}, device={device}")
+            logger.exception("STT health warm-up failed")
             warm_info = {
                 "ok": False,
                 "device": device,

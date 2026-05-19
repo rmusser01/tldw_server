@@ -12,6 +12,7 @@ class RuntimeType(str, Enum):
     vz_linux = "vz_linux"
     vz_macos = "vz_macos"
     seatbelt = "seatbelt"
+    worktree = "worktree"
 
 
 class TrustLevel(str, Enum):

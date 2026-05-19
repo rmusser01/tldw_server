@@ -18,6 +18,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+from tldw_Server_API.app.core.Usage.pricing_catalog import compute_token_cost
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +75,13 @@ class SessionRecord:
     needs_bootstrap: bool = False
     # Forking lineage
     forked_from: str | None = None
+    ancestry_chain: list[str] = field(default_factory=list)
+    # Model used for cost estimation
+    model: str | None = None
+    # Token budget fields
+    token_budget: int | None = None
+    auto_terminate_at_budget: bool = False
+    budget_exhausted: bool = False
 
     def to_info_dict(self, *, has_websocket: bool = False) -> dict[str, Any]:
         return {
@@ -99,6 +107,21 @@ class SessionRecord:
             "policy_provenance_summary": self.policy_provenance_summary,
             "policy_refresh_error": self.policy_refresh_error,
             "forked_from": self.forked_from,
+            "ancestry_chain": list(self.ancestry_chain),
+            "model": self.model,
+            "estimated_cost_usd": compute_token_cost(
+                model=self.model,
+                prompt_tokens=self.usage.prompt_tokens,
+                completion_tokens=self.usage.completion_tokens,
+            ),
+            "token_budget": self.token_budget,
+            "auto_terminate_at_budget": self.auto_terminate_at_budget,
+            "budget_exhausted": self.budget_exhausted,
+            "budget_remaining": (
+                max(0, self.token_budget - self.usage.total_tokens)
+                if self.token_budget is not None
+                else None
+            ),
         }
 
     def to_detail_dict(
@@ -202,6 +225,8 @@ class AgentConfig:
     enabled: bool = True
     created_at: str = ""
     updated_at: str | None = None
+    default_token_budget: int | None = None
+    default_auto_terminate_at_budget: bool = True
     max_token_budget: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -225,6 +250,8 @@ class AgentConfig:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "is_configured": is_configured,
+            "default_token_budget": self.default_token_budget,
+            "default_auto_terminate_at_budget": self.default_auto_terminate_at_budget,
             "max_token_budget": self.max_token_budget,
         }
 
@@ -249,9 +276,6 @@ class ACPSessionStore:
         # Agent configs — keyed by id (in-memory for now)
         self._agent_configs: dict[int, AgentConfig] = {}
         self._agent_config_seq = 0
-        # Permission policies — keyed by id (in-memory for now)
-        self._permission_policies: dict[int, PermissionPolicy] = {}
-        self._permission_policy_seq = 0
         # Session TTL cleanup task
         self._cleanup_task: asyncio.Task | None = None
         # Quotas (loaded from config on first use)
@@ -259,6 +283,12 @@ class ACPSessionStore:
         self._max_concurrent_per_user: int = 5
         self._max_tokens_per_session: int = 1_000_000
         self._max_session_duration_seconds: int = 14400
+        self._session_retention_days: int = 30
+        self._audit_retention_days: int = 30
+
+    def get_db(self) -> ACPSessionsDB:
+        """Return the underlying database instance."""
+        return self._db
 
     # ------------------------------------------------------------------
     # Internal helpers — convert DB dicts to public dataclasses
@@ -329,6 +359,11 @@ class ACPSessionStore:
             bootstrap_ready=d.get("bootstrap_ready", True),
             needs_bootstrap=d.get("needs_bootstrap", False),
             forked_from=d.get("forked_from"),
+            ancestry_chain=d.get("ancestry_chain_json") or [],
+            model=d.get("model"),
+            token_budget=d.get("token_budget"),
+            auto_terminate_at_budget=d.get("auto_terminate_at_budget", False),
+            budget_exhausted=d.get("budget_exhausted", False),
         )
 
     # ------------------------------------------------------------------
@@ -354,6 +389,16 @@ class ACPSessionStore:
             max_session_duration_seconds=max_session_duration_seconds,
         )
 
+    def configure_retention(
+        self,
+        *,
+        session_retention_days: int = 30,
+        audit_retention_days: int = 30,
+    ) -> None:
+        """Set ACP hard-delete retention windows."""
+        self._session_retention_days = int(session_retention_days)
+        self._audit_retention_days = max(0, int(audit_retention_days))
+
     def start_cleanup_task(self) -> None:
         """Start background task to evict expired sessions."""
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -366,11 +411,11 @@ class ACPSessionStore:
             self._cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
-        """Periodically evict expired sessions."""
+        """Periodically evict expired sessions and enforce retention."""
         while True:
             try:
                 await asyncio.sleep(300)  # Check every 5 minutes
-                await self._evict_expired_sessions()
+                await self.run_retention_maintenance()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -380,6 +425,24 @@ class ACPSessionStore:
     async def _evict_expired_sessions(self) -> int:
         """Evict sessions past TTL or max duration. Returns count evicted."""
         return self._db.evict_expired_sessions()
+
+    async def run_retention_maintenance(self, *, audit_db: Any | None = None) -> dict[str, int]:
+        """Enforce ACP TTL and hard-delete retention policies."""
+        sessions_evicted = self._db.evict_expired_sessions()
+        sessions_purged = self._db.purge_retained_sessions(
+            retention_days=self._session_retention_days,
+        )
+        if audit_db is None:
+            from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
+
+            audit_db = get_acp_audit_db(retention_days=self._audit_retention_days)
+        audit_db.flush()
+        audit_events_purged = audit_db.purge_old_events()
+        return {
+            "sessions_evicted": int(sessions_evicted),
+            "sessions_purged": int(sessions_purged),
+            "audit_events_purged": int(audit_events_purged),
+        }
 
     async def check_session_quota(self, user_id: int) -> dict[str, Any] | None:
         """Check if user can create a new session. Returns None if ok, or error dict."""
@@ -419,6 +482,9 @@ class ACPSessionStore:
         policy_provenance_summary: dict[str, Any] | None = None,
         policy_refresh_error: str | None = None,
         forked_from: str | None = None,
+        model: str | None = None,
+        token_budget: int | None = None,
+        auto_terminate_at_budget: bool = False,
     ) -> SessionRecord:
         d = self._db.register_session(
             session_id=session_id,
@@ -439,9 +505,33 @@ class ACPSessionStore:
             policy_provenance_summary=policy_provenance_summary,
             policy_refresh_error=policy_refresh_error,
             forked_from=forked_from,
+            model=model,
+            token_budget=token_budget,
+            auto_terminate_at_budget=auto_terminate_at_budget,
         )
         logger.debug("Registered ACP session {} for user {}", session_id, user_id)
         return self._dict_to_record(d)
+
+    async def update_session_budget(
+        self,
+        session_id: str,
+        token_budget: int | None,
+        auto_terminate_at_budget: bool,
+    ) -> SessionRecord | None:
+        """Update the token budget for a session. Returns updated record or None."""
+        updated = self._db.update_session_budget(
+            session_id, token_budget, auto_terminate_at_budget,
+        )
+        if not updated:
+            return None
+        return await self.get_session(session_id)
+
+    async def check_and_enforce_budget(self, session_id: str) -> bool:
+        """Check if session has exceeded its token budget.
+
+        Returns True if the session was terminated due to budget exhaustion.
+        """
+        return self._db.check_budget_and_terminate(session_id)
 
     async def update_policy_snapshot_state(
         self,
@@ -550,6 +640,63 @@ class ACPSessionStore:
         records = [self._dict_to_record(d) for d in rows]
         return records, total
 
+    async def list_sessions_with_messages_since(
+        self,
+        *,
+        since: datetime,
+        page_size: int = 1000,
+    ) -> list[SessionRecord]:
+        """List sessions in the lookback window with messages batch-loaded."""
+        return await asyncio.to_thread(
+            self._list_sessions_with_messages_since_sync,
+            since,
+            page_size,
+        )
+
+    def _list_sessions_with_messages_since_sync(
+        self,
+        since: datetime,
+        page_size: int,
+    ) -> list[SessionRecord]:
+        """Synchronously page filtered sessions and batch-load messages."""
+        from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+            session_within_range,
+        )
+
+        if since.tzinfo:
+            since_iso = since.astimezone(timezone.utc).isoformat()
+        else:
+            since_iso = since.replace(tzinfo=timezone.utc).isoformat()
+        safe_page_size = max(1, min(int(page_size), 1000))
+        offset = 0
+        rows_in_range: list[dict[str, Any]] = []
+
+        while True:
+            rows, total = self._db.list_sessions_since(
+                since_iso=since_iso,
+                limit=safe_page_size,
+                offset=offset,
+            )
+            if not rows:
+                break
+            rows_in_range.extend(row for row in rows if session_within_range(row, since=since))
+            offset += len(rows)
+            if offset >= total:
+                break
+
+        messages_by_id = self._db.get_messages_for_sessions([
+            str(row["session_id"]) for row in rows_in_range
+        ])
+        return [
+            self._dict_to_record(
+                row,
+                self._db_messages_to_record_messages(
+                    messages_by_id.get(str(row["session_id"]), []),
+                ),
+            )
+            for row in rows_in_range
+        ]
+
     async def get_agent_usage_stats(self, *, range_days: int = 7) -> list[dict[str, Any]]:
         """Return per-agent aggregated token usage for the last *range_days* days."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=range_days)).isoformat()
@@ -581,6 +728,111 @@ class ACPSessionStore:
 
             return self._dict_to_record(d, messages)
 
+    # -- Aggregation --------------------------------------------------------
+
+    async def get_agent_metrics(self) -> list[dict[str, Any]]:
+        """Aggregate session metrics per agent type.
+
+        Delegates to the SQLite backend for an efficient GROUP BY query,
+        then enriches each entry with ``total_estimated_cost_usd`` computed
+        from per-session model and token counts via the pricing catalog.
+        """
+        metrics = self._db.aggregate_metrics_by_agent()
+
+        # Compute per-session costs and aggregate by agent_type
+        cost_by_agent: dict[str, float] = {}
+        try:
+            for row in self._db.get_session_cost_data():
+                cost = compute_token_cost(
+                    model=row.get("model"),
+                    prompt_tokens=row.get("prompt_tokens", 0) or 0,
+                    completion_tokens=row.get("completion_tokens", 0) or 0,
+                )
+                if cost is not None:
+                    agent = row.get("agent_type", "custom")
+                    cost_by_agent[agent] = cost_by_agent.get(agent, 0.0) + cost
+        except Exception as exc:
+            logger.warning("Failed to compute agent cost metrics: {}", exc)
+
+        for m in metrics:
+            agent = m["agent_type"]
+            total_cost = cost_by_agent.get(agent)
+            m["total_estimated_cost_usd"] = round(total_cost, 6) if total_cost else None
+
+        return metrics
+
+    # -- Run history queries ------------------------------------------------
+
+    async def list_runs(
+        self,
+        *,
+        user_id: int | None = None,
+        status: str | None = None,
+        agent_type: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Query session records with filters. Returns paged results."""
+        rows, total = self._db.list_runs(
+            user_id=user_id,
+            status=status,
+            agent_type=agent_type,
+            from_date=from_date,
+            to_date=to_date,
+            limit=limit,
+            offset=offset,
+        )
+        records = [self._dict_to_record(d) for d in rows]
+        items = [rec.to_info_dict() for rec in records]
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    async def aggregate_runs(
+        self,
+        *,
+        user_id: int | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate token usage and costs across sessions."""
+        agg = self._db.aggregate_runs(
+            user_id=user_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
+
+        # Compute estimated total cost from per-session data using Decimal
+        # to avoid floating-point accumulation errors.
+        from decimal import Decimal
+
+        estimated_cost: float | None = None
+        cost_rows = agg.pop("_cost_rows", [])
+        try:
+            total_cost = Decimal("0")
+            has_any_cost = False
+            for row in cost_rows:
+                cost = compute_token_cost(
+                    model=row.get("model"),
+                    prompt_tokens=row.get("prompt_tokens", 0) or 0,
+                    completion_tokens=row.get("completion_tokens", 0) or 0,
+                )
+                if cost is not None:
+                    total_cost += Decimal(str(cost))
+                    has_any_cost = True
+            if has_any_cost:
+                estimated_cost = float(total_cost.quantize(Decimal("0.000001")))
+        except Exception as exc:
+            logger.warning("Failed to compute aggregate cost: {}", exc)
+
+        agg["estimated_cost_usd"] = estimated_cost
+        return agg
+
     # -- Agent Config CRUD --------------------------------------------------
 
     async def create_agent_config(self, data: dict[str, Any]) -> AgentConfig:
@@ -602,6 +854,8 @@ class ACPSessionStore:
                 enabled=data.get("enabled", True),
                 max_token_budget=data.get("max_token_budget"),
                 created_at=now,
+                default_token_budget=data.get("default_token_budget"),
+                default_auto_terminate_at_budget=data.get("default_auto_terminate_at_budget", True),
             )
             self._agent_configs[config.id] = config
         return config
@@ -613,7 +867,9 @@ class ACPSessionStore:
                 return None
             for key in ("name", "description", "system_prompt", "allowed_tools",
                         "denied_tools", "parameters", "requires_api_key",
-                        "org_id", "team_id", "enabled", "type", "max_token_budget"):
+                        "org_id", "team_id", "enabled", "type",
+                        "default_token_budget", "default_auto_terminate_at_budget",
+                        "max_token_budget"):
                 if key in data:
                     setattr(config, key, data[key])
             config.updated_at = datetime.now(timezone.utc).isoformat()
@@ -647,45 +903,43 @@ class ACPSessionStore:
     # -- Permission Policy CRUD --------------------------------------------
 
     async def create_permission_policy(self, data: dict[str, Any]) -> PermissionPolicy:
-        async with self._lock:
-            self._permission_policy_seq += 1
-            now = datetime.now(timezone.utc).isoformat()
-            rules = [
-                PermissionPolicyRule(tool_pattern=r["tool_pattern"], tier=r["tier"])
-                for r in data.get("rules", [])
-            ]
-            policy = PermissionPolicy(
-                id=self._permission_policy_seq,
-                name=data["name"],
-                description=data.get("description", ""),
-                rules=rules,
-                org_id=data.get("org_id"),
-                team_id=data.get("team_id"),
-                priority=data.get("priority", 0),
-                created_at=now,
-            )
-            self._permission_policies[policy.id] = policy
-        return policy
+        import json as _json
+        rules_raw = data.get("rules", [])
+        rules_json = _json.dumps(rules_raw)
+        policy_id = self._db.create_permission_policy(
+            name=data["name"],
+            rules_json=rules_json,
+            priority=data.get("priority", 0),
+            description=data.get("description", ""),
+            org_id=data.get("org_id"),
+            team_id=data.get("team_id"),
+        )
+        row = self._db.get_permission_policy(policy_id)
+        return self._db_row_to_permission_policy(row)  # type: ignore[arg-type]
 
     async def update_permission_policy(self, policy_id: int, data: dict[str, Any]) -> PermissionPolicy | None:
-        async with self._lock:
-            policy = self._permission_policies.get(policy_id)
-            if not policy:
+        import json as _json
+        kwargs: dict[str, Any] = {}
+        for key in ("name", "description", "org_id", "team_id", "priority"):
+            if key in data:
+                kwargs[key] = data[key]
+        if "rules" in data:
+            kwargs["rules_json"] = _json.dumps(data["rules"])
+        if not kwargs:
+            row = self._db.get_permission_policy(policy_id)
+            if row is None:
                 return None
-            for key in ("name", "description", "org_id", "team_id", "priority"):
-                if key in data:
-                    setattr(policy, key, data[key])
-            if "rules" in data:
-                policy.rules = [
-                    PermissionPolicyRule(tool_pattern=r["tool_pattern"], tier=r["tier"])
-                    for r in data["rules"]
-                ]
-            policy.updated_at = datetime.now(timezone.utc).isoformat()
-        return policy
+            return self._db_row_to_permission_policy(row)
+        updated = self._db.update_permission_policy(policy_id, **kwargs)
+        if not updated:
+            return None
+        row = self._db.get_permission_policy(policy_id)
+        if row is None:
+            return None
+        return self._db_row_to_permission_policy(row)
 
     async def delete_permission_policy(self, policy_id: int) -> bool:
-        async with self._lock:
-            return self._permission_policies.pop(policy_id, None) is not None
+        return self._db.delete_permission_policy(policy_id)
 
     async def list_permission_policies(
         self,
@@ -693,31 +947,49 @@ class ACPSessionStore:
         org_id: int | None = None,
         team_id: int | None = None,
     ) -> list[PermissionPolicy]:
-        results = []
-        for pol in self._permission_policies.values():
+        rows = self._db.list_permission_policies()
+        results: list[PermissionPolicy] = []
+        for row in rows:
+            pol = self._db_row_to_permission_policy(row)
             if org_id is not None and pol.org_id is not None and pol.org_id != org_id:
                 continue
             if team_id is not None and pol.team_id is not None and pol.team_id != team_id:
                 continue
             results.append(pol)
-        results.sort(key=lambda p: (-p.priority, p.name))
         return results
 
     def resolve_permission_tier(self, tool_name: str) -> str | None:
-        """Consult stored policies to determine a permission tier for a tool.
+        """Consult DB-backed policies to determine a permission tier for a tool.
 
         Returns None if no policy rule matches (caller should fall back to
         the default heuristic).
         """
-        best_priority = -1
-        best_tier: str | None = None
-        for pol in self._permission_policies.values():
-            for rule in pol.rules:
-                if fnmatch.fnmatch(tool_name.lower(), rule.tool_pattern.lower()):
-                    if pol.priority > best_priority:
-                        best_priority = pol.priority
-                        best_tier = rule.tier
-        return best_tier
+        return self._db.resolve_permission_tier(tool_name)
+
+    @staticmethod
+    def _db_row_to_permission_policy(row: dict[str, Any]) -> PermissionPolicy:
+        """Convert a DB dict row to a PermissionPolicy dataclass."""
+        import json as _json
+        raw = row.get("rules_json", "[]")
+        try:
+            rules_list = _json.loads(raw) if isinstance(raw, str) else raw
+        except (_json.JSONDecodeError, TypeError):
+            rules_list = []
+        rules = [
+            PermissionPolicyRule(tool_pattern=r.get("tool_pattern", ""), tier=r.get("tier", ""))
+            for r in (rules_list or [])
+        ]
+        return PermissionPolicy(
+            id=row["id"],
+            name=row["name"],
+            description=row.get("description", ""),
+            rules=rules,
+            org_id=row.get("org_id"),
+            team_id=row.get("team_id"),
+            priority=row.get("priority", 0),
+            created_at=row.get("created_at", ""),
+            updated_at=row.get("updated_at"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -744,6 +1016,10 @@ async def get_acp_session_store() -> ACPSessionStore:
                         max_tokens_per_session=cfg.max_tokens_per_session,
                         max_session_duration_seconds=cfg.max_session_duration_seconds,
                     )
+                    store.configure_retention(
+                        session_retention_days=cfg.session_retention_days,
+                        audit_retention_days=cfg.audit_retention_days,
+                    )
                 except Exception as exc:
                     logger.warning("Failed to load ACP quota config, using defaults: {}", exc)
 
@@ -765,5 +1041,9 @@ async def get_acp_session_store() -> ACPSessionStore:
                     logger.warning("Failed to wire agent registry/health monitor: {}", exc)
 
                 store.start_cleanup_task()
+                try:
+                    await store.run_retention_maintenance()
+                except Exception as exc:
+                    logger.warning("Failed to run ACP retention maintenance at startup: {}", exc)
                 _store = store
     return _store

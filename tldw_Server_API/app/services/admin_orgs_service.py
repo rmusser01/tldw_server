@@ -6,9 +6,12 @@ from typing import Any
 from fastapi import HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     OrganizationCreateRequest,
     OrganizationResponse,
+    OrganizationSTTSettingsResponse,
+    OrganizationSTTSettingsUpdate,
     OrganizationWatchlistsSettingsResponse,
     OrganizationWatchlistsSettingsUpdate,
     OrgMemberAddRequest,
@@ -26,6 +29,7 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
     TeamResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.config_sections.stt import _parse_bool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateOrganizationError,
     DuplicateTeamError,
@@ -71,6 +75,8 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     update_org_member_role as core_update_org_member_role,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo import AuthnzOrgSttSettingsRepo
+from tldw_Server_API.app.core.config import get_stt_config
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
@@ -161,8 +167,8 @@ async def list_teams_by_org(
             async with pool.acquire() as conn:
                 return await _list_teams_by_org_conn(conn, org_id, limit, offset)
         return await _list_teams_by_org_conn(db, org_id, limit, offset)
-    except Exception as e:
-        logger.error(f"admin_orgs_service.list_teams_by_org failed: {e}")
+    except Exception:
+        logger.error("Failed to list teams by organization")
         raise
 
 
@@ -239,7 +245,7 @@ async def create_org(
             detail=f"Organization with {dup.field} '{dup.value}' already exists",
         ) from dup
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to create organization: {exc}")
+        logger.error("Failed to create organization")
         raise HTTPException(status_code=500, detail="Failed to create organization") from exc
 
 
@@ -280,19 +286,26 @@ async def list_orgs(
         items = [OrganizationResponse(**r).model_dump() for r in rows]
 
         if wants_wrapper:
+            total_count = int(total or 0)
             has_more = (offset + len(items)) < int(total or 0)
             return {
                 "items": items,
-                "total": int(total or 0),
+                "total": total_count,
                 "limit": limit,
                 "offset": offset,
                 "has_more": has_more,
+                "pagination": build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(items),
+                ),
             }
         return items
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list organizations: {exc}")
+        logger.error("Failed to list organizations")
         raise HTTPException(status_code=500, detail="Failed to list organizations") from exc
 
 
@@ -316,7 +329,7 @@ async def create_team(
             detail=f"Team with {dup.field} '{dup.value}' already exists in org {org_id}",
         ) from dup
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to create team: {exc}")
+        logger.error("Failed to create team")
         raise HTTPException(status_code=500, detail="Failed to create team") from exc
 
 
@@ -333,7 +346,7 @@ async def list_teams(
         rows = await list_teams_by_org(org_id, limit=limit, offset=offset, db=db)
         return [TeamResponse(**r) for r in rows]
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list teams: {exc}")
+        logger.error("Failed to list teams")
         raise HTTPException(status_code=500, detail="Failed to list teams") from exc
 
 
@@ -347,8 +360,131 @@ async def get_team(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to fetch team {team_id}: {exc}")
+        logger.error("Failed to fetch team")
         raise HTTPException(status_code=500, detail="Failed to fetch team") from exc
+
+
+async def _ensure_org_exists(db: Any, org_id: int) -> None:
+    pg = _is_postgres_connection(db)
+    if pg:
+        row = await db.fetchrow("SELECT id FROM organizations WHERE id = $1", org_id)
+    else:
+        cur = await db.execute("SELECT id FROM organizations WHERE id = ?", (org_id,))
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="organization_not_found")
+
+
+def _default_org_stt_settings_payload(org_id: int) -> OrganizationSTTSettingsResponse:
+    config = get_stt_config()
+    if isinstance(config, dict):
+        delete_audio_after_success = _parse_bool(config.get("delete_audio_after_success", True), True)
+        audio_retention_hours = float(config.get("audio_retention_hours", 0.0))
+        redact_pii = _parse_bool(config.get("redact_pii", False), False)
+        allow_unredacted_partials = _parse_bool(config.get("allow_unredacted_partials", False), False)
+        raw_categories = config.get("redact_categories", [])
+    else:
+        delete_audio_after_success = _parse_bool(getattr(config, "delete_audio_after_success", True), True)
+        audio_retention_hours = float(getattr(config, "audio_retention_hours", 0.0))
+        redact_pii = _parse_bool(getattr(config, "redact_pii", False), False)
+        allow_unredacted_partials = _parse_bool(getattr(config, "allow_unredacted_partials", False), False)
+        raw_categories = getattr(config, "redact_categories", [])
+
+    if isinstance(raw_categories, str):
+        try:
+            parsed_categories = json.loads(raw_categories)
+        except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS:
+            parsed_categories = [part.strip() for part in raw_categories.split(",")]
+        raw_categories = parsed_categories
+
+    redact_categories: list[str] = []
+    seen_categories: set[str] = set()
+    for raw in raw_categories if isinstance(raw_categories, list) else []:
+        value = str(raw).strip().lower()
+        if not value or value in seen_categories:
+            continue
+        redact_categories.append(value)
+        seen_categories.add(value)
+
+    return OrganizationSTTSettingsResponse(
+        org_id=org_id,
+        delete_audio_after_success=delete_audio_after_success,
+        audio_retention_hours=audio_retention_hours,
+        redact_pii=redact_pii,
+        allow_unredacted_partials=allow_unredacted_partials,
+        redact_categories=redact_categories,
+    )
+
+
+async def update_org_stt_settings(
+    org_id: int,
+    payload: OrganizationSTTSettingsUpdate,
+    *,
+    principal: AuthPrincipal,
+    db,
+) -> OrganizationSTTSettingsResponse:
+    try:
+        await admin_scope_service.enforce_admin_org_access(principal, org_id, require_admin=True)
+        await _ensure_org_exists(db, org_id)
+        repo = AuthnzOrgSttSettingsRepo(db)
+        await repo.ensure_tables()
+        current = await repo.get_settings(org_id)
+        if current is None:
+            current = _default_org_stt_settings_payload(org_id).model_dump()
+
+        updated = await repo.upsert_settings(
+            org_id=org_id,
+            delete_audio_after_success=(
+                current["delete_audio_after_success"]
+                if payload.delete_audio_after_success is None
+                else bool(payload.delete_audio_after_success)
+            ),
+            audio_retention_hours=(
+                current["audio_retention_hours"]
+                if payload.audio_retention_hours is None
+                else float(payload.audio_retention_hours)
+            ),
+            redact_pii=current["redact_pii"] if payload.redact_pii is None else bool(payload.redact_pii),
+            allow_unredacted_partials=(
+                current["allow_unredacted_partials"]
+                if payload.allow_unredacted_partials is None
+                else bool(payload.allow_unredacted_partials)
+            ),
+            redact_categories=(
+                current["redact_categories"]
+                if payload.redact_categories is None
+                else payload.redact_categories
+            ),
+            updated_by=getattr(principal, "user_id", None),
+        )
+        return OrganizationSTTSettingsResponse(**updated)
+    except HTTPException:
+        raise
+    except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error("Failed to update org STT settings")
+        raise HTTPException(status_code=500, detail="failed_to_update_org_stt_settings") from exc
+
+
+async def get_org_stt_settings(
+    org_id: int,
+    *,
+    principal: AuthPrincipal,
+    db,
+) -> OrganizationSTTSettingsResponse:
+    try:
+        await admin_scope_service.enforce_admin_org_access(principal, org_id, require_admin=True)
+        await _ensure_org_exists(db, org_id)
+        repo = AuthnzOrgSttSettingsRepo(db)
+        await repo.ensure_tables()
+        current = await repo.get_settings(org_id)
+        if current is None:
+            return _default_org_stt_settings_payload(org_id)
+        return OrganizationSTTSettingsResponse(**current)
+    except HTTPException:
+        raise
+    except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error("Failed to fetch org STT settings")
+        raise HTTPException(status_code=500, detail="failed_to_fetch_org_stt_settings") from exc
 
 
 async def update_org_watchlists_settings(
@@ -402,7 +538,7 @@ async def update_org_watchlists_settings(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to update org watchlists settings for org {org_id}: {exc}")
+        logger.error("Failed to update org watchlists settings")
         raise HTTPException(status_code=500, detail="failed_to_update_org_watchlists_settings") from exc
 
 
@@ -440,7 +576,7 @@ async def get_org_watchlists_settings(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to fetch org watchlists settings for org {org_id}: {exc}")
+        logger.error("Failed to fetch org watchlists settings")
         raise HTTPException(status_code=500, detail="failed_to_fetch_org_watchlists_settings") from exc
 
 
@@ -469,7 +605,7 @@ async def add_team_member(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to add team member: {exc}")
+        logger.error("Failed to add team member")
         raise HTTPException(status_code=500, detail="Failed to add team member") from exc
 
 
@@ -492,7 +628,7 @@ async def list_team_members(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to list team members: {exc}")
+        logger.error("Failed to list team members")
         raise HTTPException(status_code=500, detail="Failed to list team members") from exc
     return items
 
@@ -531,7 +667,7 @@ async def remove_team_member(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to remove team member user_id={user_id} from team_id={team_id}: {exc}")
+        logger.error("Failed to remove team member")
         raise HTTPException(status_code=500, detail="Failed to remove team member") from exc
 
 
@@ -561,7 +697,7 @@ async def update_team_member_role(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to update team member role user_id={user_id} team_id={team_id}: {exc}")
+        logger.error("Failed to update team member role")
         raise HTTPException(status_code=500, detail="Failed to update team member role") from exc
 
 
@@ -590,7 +726,7 @@ async def add_org_member(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to add org member: {exc}")
+        logger.error("Failed to add org member")
         raise HTTPException(status_code=500, detail="Failed to add org member") from exc
 
 
@@ -620,7 +756,7 @@ async def list_org_members(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list org members: {exc}")
+        logger.error("Failed to list org members")
         raise HTTPException(status_code=500, detail="Failed to list org members") from exc
 
 
@@ -663,7 +799,7 @@ async def remove_org_member(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to remove org member user_id={user_id} from org_id={org_id}: {exc}")
+        logger.error("Failed to remove org member")
         raise HTTPException(status_code=500, detail="Failed to remove org member") from exc
 
 
@@ -696,7 +832,7 @@ async def update_org_member_role(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to update org member role user_id={user_id} org_id={org_id}: {exc}")
+        logger.error("Failed to update org member role")
         raise HTTPException(status_code=500, detail="Failed to update org member role") from exc
 
 
@@ -709,7 +845,7 @@ async def list_user_org_memberships(
         rows = await core_list_org_memberships_for_user(user_id)
         return [OrgMembershipItem(**r) for r in rows]
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list org memberships for user {user_id}: {exc}")
+        logger.error("Failed to list org memberships")
         raise HTTPException(status_code=500, detail="Failed to list org memberships") from exc
 
 
@@ -735,5 +871,5 @@ async def list_user_team_memberships(
     except HTTPException:
         raise
     except _ADMIN_ORGS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to list team memberships for user {user_id}: {exc}")
+        logger.error("Failed to list team memberships")
         raise HTTPException(status_code=500, detail="Failed to list team memberships") from exc

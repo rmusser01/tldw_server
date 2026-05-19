@@ -36,6 +36,9 @@ python Helper_Scripts/TTS_Installers/install_tts_dia.py
 python Helper_Scripts/TTS_Installers/install_tts_higgs.py
 python Helper_Scripts/TTS_Installers/install_tts_vibevoice.py --variant 1.5B
 
+# OmniVoice sidecar runtime
+python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py
+
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
 
@@ -49,6 +52,34 @@ python Helper_Scripts/TTS_Installers/install_tts_chatterbox.py [--with-lang]
 Flags:
 - `TLDW_SETUP_SKIP_PIP=1` to skip pip installs
 - `TLDW_SETUP_SKIP_DOWNLOADS=1` to skip HF downloads
+
+### OmniVoice Setup
+
+OmniVoice runs in a dedicated sidecar runtime rather than the main server interpreter.
+
+Preferred install path:
+
+```bash
+python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py
+```
+
+What the installer provisions:
+
+- `models/omnivoice_sidecar/.venv`
+- `models/omnivoice_sidecar/runtime`
+- `models/omnivoice_sidecar/logs`
+- an updated `providers.omnivoice` block in `tldw_Server_API/Config_Files/tts_providers_config.yaml`
+
+Source checkout behavior:
+
+- If `../OmniVoice` exists relative to the repo root, the installer prefers that checkout.
+- Otherwise it uses `external/OmniVoice` and can clone the upstream repo there.
+
+Runtime notes:
+
+- The sidecar supervisor reads the configured OmniVoice interpreter path from provider config, so the dedicated `.venv` created by the installer is the runtime that gets launched.
+- Public requests that target OmniVoice and omit `voice` normalize to `auto`.
+- Explicit voices still win over the provider default.
 
 ### Model Auto-Download Controls
 

@@ -40,6 +40,23 @@ const mockMessageApi = {
   error: vi.fn(),
   destroy: vi.fn()
 }
+const { workspaceStorage, workspaceStorageItems } = vi.hoisted(() => {
+  const storageItems = new Map<string, string>()
+  const storage = {
+    getItem: vi.fn((key: string) => storageItems.get(key) ?? null),
+    setItem: vi.fn(async (key: string, value: string) => {
+      storageItems.set(key, value)
+    }),
+    removeItem: vi.fn(async (key: string) => {
+      storageItems.delete(key)
+    })
+  }
+
+  return {
+    workspaceStorage: storage,
+    workspaceStorageItems: storageItems
+  }
+})
 
 const destinationWorkspaceId = "workspace-destination"
 const archivedWorkspaceId = "workspace-archived"
@@ -265,7 +282,8 @@ vi.mock("@/store/tutorials", () => ({
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState)
+    selector(testState),
+  createWorkspaceStorage: () => workspaceStorage
 }))
 
 vi.mock("@/utils/workspace-playground-prefill", () => ({
@@ -407,6 +425,7 @@ describe("WorkspacePlayground stage 13 source transfer", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    workspaceStorageItems.clear()
     clearWorkspaceUndoActionsForTests()
     testState.isMobile = false
     testState.storeHydrated = true

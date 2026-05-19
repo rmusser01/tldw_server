@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorldBooksManager } from "../Manager"
 
@@ -175,7 +175,9 @@ describe("WorldBooksManager stage-4 flows", () => {
   it("renders the manager action bar without throwing", () => {
     render(<WorldBooksManager />)
 
-    expect(screen.getByRole("button", { name: "Duplicate world book" })).toBeInTheDocument()
+    // New layout: Edit + More actions overflow buttons per row
+    expect(screen.getByRole("button", { name: "Edit Arcana" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "More actions for Arcana" })).toBeInTheDocument()
   })
 
   it("duplicates a world book and clones its entries", async () => {
@@ -211,7 +213,9 @@ describe("WorldBooksManager stage-4 flows", () => {
 
     render(<WorldBooksManager />)
 
-    await user.click(screen.getByRole("button", { name: "Duplicate world book" }))
+    // Open overflow menu and click Duplicate
+    await user.click(screen.getByRole("button", { name: "More actions for Arcana" }))
+    await user.click(await screen.findByText("Duplicate"))
 
     await waitFor(() => {
       expect(tldwClientMock.createWorldBook).toHaveBeenCalledWith(
@@ -297,7 +301,8 @@ describe("WorldBooksManager stage-4 flows", () => {
 
     render(<WorldBooksManager />)
 
-    expect(screen.getByText("No world books yet")).toBeInTheDocument()
+    // New empty state uses WorldBookEmptyState component with different text
+    expect(screen.getByText("World Books")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Create your first world book" }))
     expect(await screen.findByRole("combobox", { name: "Starter Template (optional)" })).toBeInTheDocument()
   })
@@ -340,12 +345,17 @@ describe("WorldBooksManager stage-4 flows", () => {
     )
   }, 20000)
 
-  it("renders expandable entry previews", async () => {
+  it("opens the detail panel entries view when a world book row is selected", async () => {
     const user = userEvent.setup()
-
     render(<WorldBooksManager />)
 
     await user.click(screen.getByText("Arcana"))
-    expect(await screen.findByText("Preview entry content")).toBeInTheDocument()
+
+    const detailPanel = await screen.findByRole("main", { name: "World book detail" })
+    expect(within(detailPanel).getByRole("tab", { name: "Entries" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    expect(detailPanel).toHaveTextContent("No entries yet")
   })
 })

@@ -1,0 +1,66 @@
+# Production Dockerfile for tldw Admin UI
+# - Builds as a standalone Next.js app
+# - Ships a minimal runtime image
+
+FROM oven/bun:1.3.2-debian AS builder
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# next.config.js sets outputFileTracingRoot to `${__dirname}/..`, so the
+# standalone output reproduces the directory tree relative to that root.
+# Working inside /build/admin-ui means the standalone artefact will contain
+# admin-ui/server.js (mirroring the real repo layout).
+WORKDIR /build/admin-ui
+
+COPY admin-ui/package.json admin-ui/bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY admin-ui/ ./
+# Ensure public/ exists even if the source tree has none, so the runtime
+# COPY stage always succeeds (Docker COPY fails on missing sources).
+RUN mkdir -p public
+
+# Build-time configuration baked into client bundle
+ARG NEXT_PUBLIC_API_URL=
+ARG NEXT_PUBLIC_API_VERSION=v1
+ARG NEXT_PUBLIC_DEFAULT_AUTH_MODE=multi_user
+ARG NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=false
+ARG NEXT_PUBLIC_BILLING_ENABLED=false
+
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_API_VERSION=${NEXT_PUBLIC_API_VERSION}
+ENV NEXT_PUBLIC_DEFAULT_AUTH_MODE=${NEXT_PUBLIC_DEFAULT_AUTH_MODE}
+ENV NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN=${NEXT_PUBLIC_ALLOW_ADMIN_API_KEY_LOGIN}
+ENV NEXT_PUBLIC_BILLING_ENABLED=${NEXT_PUBLIC_BILLING_ENABLED}
+
+RUN bun run build
+
+
+FROM node:20-bookworm-slim AS runtime
+
+ARG APP_VERSION=0.0.0
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    HOSTNAME=0.0.0.0 \
+    PORT=3001 \
+    APP_VERSION=${APP_VERSION}
+
+WORKDIR /app
+
+RUN useradd -m -u 10003 adminui
+
+# Standalone output mirrors builder tree: standalone/admin-ui/server.js
+COPY --from=builder --chown=adminui:adminui /build/admin-ui/.next/standalone /app
+COPY --from=builder --chown=adminui:adminui /build/admin-ui/.next/static /app/admin-ui/.next/static
+COPY --from=builder --chown=adminui:adminui /build/admin-ui/public/ /app/admin-ui/public/
+
+USER adminui
+
+WORKDIR /app/admin-ui
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
+  CMD node -e "fetch('http://localhost:3001/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "server.js"]

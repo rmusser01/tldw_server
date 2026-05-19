@@ -23,6 +23,11 @@ export type ChatSummary = {
   updatedAt?: string
 }
 
+export type ConversationContextSettings = {
+  world_book_ids?: number[]
+  chat_dictionary_ids?: number[]
+}
+
 export type DeepResearchAttachment = ChatResearchContext & {
   attached_at: string
   updatedAt: string
@@ -58,6 +63,11 @@ export type ChatSettingsRecord = {
   authorNotePosition?: AuthorNotePosition | null
   characterMemoryById?: Record<string, CharacterMemoryEntry>
   chatGenerationOverride?: ChatGenerationOverride | null
+  generationOverrides?: ChatGenerationOverride | null
+  turnTakingMode?: "single" | "round_robin"
+  participantCharacterIds?: string[]
+  conversationContext?: ConversationContextSettings
+  chat_dictionary_ids?: number[]
   summary?: ChatSummary | null
   imageEventSyncMode?: "off" | "on"
   deepResearchAttachment?: DeepResearchAttachment | null

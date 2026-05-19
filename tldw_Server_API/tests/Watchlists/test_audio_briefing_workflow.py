@@ -51,9 +51,7 @@ class TestAudioBriefingWorkflowDefinition:
         )
 
         compose_cfg = next(
-            step["config"]
-            for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"]
-            if step["id"] == "compose_script"
+            step["config"] for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"] if step["id"] == "compose_script"
         )
         assert compose_cfg["persona_summarize"] == "{{ inputs.persona_summarize }}"
         assert compose_cfg["persona_id"] == "{{ inputs.persona_id }}"
@@ -61,9 +59,7 @@ class TestAudioBriefingWorkflowDefinition:
         assert compose_cfg["persona_model"] == "{{ inputs.persona_model }}"
 
         audio_cfg = next(
-            step["config"]
-            for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"]
-            if step["id"] == "generate_audio"
+            step["config"] for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"] if step["id"] == "generate_audio"
         )
         assert audio_cfg["background_audio_uri"] == "{{ inputs.background_audio_uri }}"
         assert audio_cfg["background_volume"] == "{{ inputs.background_volume }}"
@@ -145,6 +141,87 @@ class TestBuildWorkflowInputs:
         assert inputs["background_delay_ms"] == 500
         assert inputs["background_fade_seconds"] == 3.0
 
+    def test_structured_audio_cast_inputs_preserve_voice_map_compatibility(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            _build_workflow_inputs,
+        )
+
+        items = [{"title": "News", "summary": "Story"}]
+        audio_cast = {
+            "speaker_count": 2,
+            "speakers": [
+                {
+                    "id": "host",
+                    "label": "Host",
+                    "role": "anchor",
+                    "voice": "af_bella",
+                    "persona": "calm",
+                },
+                {
+                    "id": "analyst",
+                    "label": "Analyst",
+                    "voice": "am_adam",
+                },
+            ],
+        }
+
+        inputs = _build_workflow_inputs(
+            items,
+            {
+                "generate_audio": True,
+                "audio_cast": audio_cast,
+                "voice_map": {"HOST": "af_heart"},
+            },
+        )
+
+        assert inputs["audio_cast"] == audio_cast
+        assert inputs["voice_map"] == {"HOST": "af_heart"}
+
+        derived_inputs = _build_workflow_inputs(
+            items,
+            {
+                "generate_audio": True,
+                "audio_cast": audio_cast,
+            },
+        )
+
+        assert derived_inputs["audio_cast"] == audio_cast
+        assert derived_inputs["voice_map"] == {
+            "HOST": "af_bella",
+            "ANALYST": "am_adam",
+        }
+
+    def test_audio_cast_requires_matching_speaker_count(self):
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import WatchlistAudioCast
+
+        with pytest.raises(ValidationError, match="speaker_count_must_match_speakers_length"):
+            WatchlistAudioCast(
+                speaker_count=2,
+                speakers=[
+                    {
+                        "id": "host",
+                        "label": "Host",
+                        "voice": "af_bella",
+                    }
+                ],
+            )
+
+    def test_audio_cast_requires_unique_speaker_ids(self):
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import WatchlistAudioCast
+
+        with pytest.raises(ValidationError, match="speaker_ids_must_be_unique"):
+            WatchlistAudioCast(
+                speaker_count=2,
+                speakers=[
+                    {"id": "host", "label": "Host", "voice": "af_bella"},
+                    {"id": "host", "label": "Second host", "voice": "am_adam"},
+                ],
+            )
+
 
 class TestTriggerAudioBriefing:
     """Tests for trigger_audio_briefing."""
@@ -200,10 +277,21 @@ class TestTriggerAudioBriefing:
         mock_scheduler = AsyncMock()
         mock_scheduler.enqueue.return_value = "task_abc123"
 
-        with patch(
-            "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
-            new_callable=AsyncMock,
-            return_value=mock_scheduler,
+        async def run_sync_in_test(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
+        with (
+            patch(
+                "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.run_in_threadpool",
+                new_callable=AsyncMock,
+                side_effect=run_sync_in_test,
+                create=True,
+            ) as mock_threadpool,
+            patch(
+                "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
+                new_callable=AsyncMock,
+                return_value=mock_scheduler,
+            ),
         ):
             result = await trigger_audio_briefing(
                 user_id=1,
@@ -237,6 +325,7 @@ class TestTriggerAudioBriefing:
         assert len(task.payload["inputs"]["items"]) == 2
         assert task.payload["metadata"]["watchlist_job_id"] == 42
         assert task.payload["metadata"]["watchlist_run_id"] == 7
+        mock_threadpool.assert_awaited_once()
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
 
     @pytest.mark.asyncio

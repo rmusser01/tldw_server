@@ -1,4 +1,5 @@
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
@@ -101,3 +102,39 @@ def test_update_claims_settings_ignores_unparseable_numeric_values(
     assert result["claims_alignment_threshold"] == pytest.approx(0.42)
     assert result["claims_context_window_chars"] == 2048
     assert result["claims_extraction_passes"] == 2
+
+
+def test_update_claims_settings_sanitizes_persist_failure(
+    admin_principal: AuthPrincipal,
+    restore_claims_settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_config_error(_payload):
+        raise RuntimeError("config write leaked /private/claims/config/token")
+
+    monkeypatch.setattr(claims_service.setup_manager, "update_config", raise_config_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.update_claims_settings(
+            payload={
+                "claims_prompt_validation_strict": False,
+                "persist": True,
+            },
+            principal=admin_principal,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to update claims settings"
+
+
+def test_claims_rebuild_status_sanitizes_service_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_service_error():
+        raise RuntimeError("rebuild worker leaked /private/claims/queue/token")
+
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", raise_service_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.claims_rebuild_status()
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to get claims rebuild status"

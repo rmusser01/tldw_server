@@ -102,6 +102,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         type={resolvedType}
         className={[
+          "tldw-btn",
           baseStyles,
           variantStyles[resolvedVariant],
           iconOnly ? iconOnlyStyles[resolvedSize] : sizeStyles[resolvedSize],

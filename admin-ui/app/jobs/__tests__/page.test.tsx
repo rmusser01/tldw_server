@@ -46,11 +46,13 @@ vi.mock('@/lib/api-client', () => ({
     getJobs: vi.fn(),
     getJobsStale: vi.fn(),
     getJobSlaPolicies: vi.fn(),
+    getJobSlaBreaches: vi.fn(),
     getMonitoringMetrics: vi.fn(),
     getMetricsText: vi.fn(),
     getJobDetail: vi.fn(),
     getJobAttachments: vi.fn(),
     createJobSlaPolicy: vi.fn(),
+    deleteJobSlaPolicy: vi.fn(),
     cancelJobs: vi.fn(),
     retryJobsNow: vi.fn(),
     requeueQuarantinedJobs: vi.fn(),
@@ -62,11 +64,13 @@ type ApiMock = {
   getJobs: ReturnType<typeof vi.fn>;
   getJobsStale: ReturnType<typeof vi.fn>;
   getJobSlaPolicies: ReturnType<typeof vi.fn>;
+  getJobSlaBreaches: ReturnType<typeof vi.fn>;
   getMonitoringMetrics: ReturnType<typeof vi.fn>;
   getMetricsText: ReturnType<typeof vi.fn>;
   getJobDetail: ReturnType<typeof vi.fn>;
   getJobAttachments: ReturnType<typeof vi.fn>;
   createJobSlaPolicy: ReturnType<typeof vi.fn>;
+  deleteJobSlaPolicy: ReturnType<typeof vi.fn>;
   cancelJobs: ReturnType<typeof vi.fn>;
   retryJobsNow: ReturnType<typeof vi.fn>;
   requeueQuarantinedJobs: ReturnType<typeof vi.fn>;
@@ -112,6 +116,7 @@ beforeEach(() => {
   apiMock.getJobs.mockResolvedValue(jobsResponse);
   apiMock.getJobsStale.mockResolvedValue([]);
   apiMock.getJobSlaPolicies.mockResolvedValue([]);
+  apiMock.getJobSlaBreaches.mockResolvedValue([]);
   apiMock.getMonitoringMetrics.mockResolvedValue([
     { timestamp: '2026-02-17T11:00:00Z', queue_depth: 4 },
     { timestamp: '2026-02-17T12:00:00Z', queue_depth: 7 },
@@ -134,6 +139,7 @@ beforeEach(() => {
     };
   });
   apiMock.createJobSlaPolicy.mockResolvedValue({});
+  apiMock.deleteJobSlaPolicy.mockResolvedValue({});
   apiMock.cancelJobs.mockResolvedValue({});
   apiMock.retryJobsNow.mockResolvedValue({});
   apiMock.requeueQuarantinedJobs.mockResolvedValue({});
@@ -194,6 +200,82 @@ describe('JobsPage', () => {
     expect(within(relatedJobsSection).getByRole('button', { name: /Job 102/i })).toBeInTheDocument();
   });
 
+  it('shows SLA breach badges on breaching jobs', async () => {
+    apiMock.getJobSlaBreaches.mockResolvedValue([
+      {
+        job_id: 101,
+        domain: 'exports',
+        queue: 'default',
+        job_type: 'root-task',
+        status: 'processing',
+        breach_kinds: ['duration'],
+        processing_seconds: 7200,
+        max_processing_seconds: 3600,
+      },
+    ]);
+
+    render(<JobsPage />);
+
+    const breachBadge = await screen.findByTestId('sla-breach-badge-101');
+    expect(breachBadge).toBeInTheDocument();
+    expect(breachBadge.textContent).toBe('SLA');
+  });
+
+  it('shows breach count in the SLA Policies card header', async () => {
+    apiMock.getJobSlaBreaches.mockResolvedValue([
+      {
+        job_id: 101,
+        domain: 'exports',
+        queue: 'default',
+        job_type: 'root-task',
+        status: 'processing',
+        breach_kinds: ['duration'],
+      },
+      {
+        job_id: 102,
+        domain: 'exports',
+        queue: 'default',
+        job_type: 'child-task',
+        status: 'queued',
+        breach_kinds: ['queue_latency'],
+      },
+    ]);
+
+    render(<JobsPage />);
+
+    const breachCount = await screen.findByTestId('sla-breach-count');
+    expect(breachCount).toBeInTheDocument();
+    expect(breachCount.textContent).toBe('2 breaches');
+  });
+
+  it('does not show breach badges when there are no breaches', async () => {
+    apiMock.getJobSlaBreaches.mockResolvedValue([]);
+
+    render(<JobsPage />);
+
+    await screen.findByText('SLA Policies');
+    expect(screen.queryByTestId('sla-breach-count')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sla-breach-badge-101')).not.toBeInTheDocument();
+  });
+
+  it('renders SLA policies with delete button', async () => {
+    apiMock.getJobSlaPolicies.mockResolvedValue([
+      {
+        domain: 'exports',
+        queue: 'default',
+        job_type: 'export',
+        max_queue_latency_seconds: 300,
+        max_duration_seconds: 3600,
+        enabled: true,
+      },
+    ]);
+
+    render(<JobsPage />);
+
+    await screen.findByText('export');
+    expect(screen.getByRole('button', { name: /delete policy/i })).toBeInTheDocument();
+  });
+
   it('prefers job-specific SLA policies over the generic fallback', async () => {
     apiMock.getJobs.mockResolvedValue([
       {
@@ -222,6 +304,32 @@ describe('JobsPage', () => {
       expect(apiMock.getJobs).toHaveBeenCalled();
       expect(apiMock.getJobSlaPolicies).toHaveBeenCalled();
       expect(screen.queryByText('SLA')).not.toBeInTheDocument();
+    });
+  });
+
+  it('requires an explicit job type and sends name separately when creating an SLA policy', async () => {
+    const user = userEvent.setup();
+    render(<JobsPage />);
+
+    await screen.findByText('SLA Policies');
+    await user.click(screen.getByRole('button', { name: 'New Policy' }));
+
+    await user.type(screen.getByLabelText('Policy Name'), 'Standard Export');
+    await user.click(screen.getByRole('button', { name: 'Create Policy' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith('Job type required', 'Please enter a backend job type');
+    });
+    expect(apiMock.createJobSlaPolicy).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('Job Type'), 'export_job');
+    await user.click(screen.getByRole('button', { name: 'Create Policy' }));
+
+    await waitFor(() => {
+      expect(apiMock.createJobSlaPolicy).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Standard Export',
+        job_type: 'export_job',
+      }));
     });
   });
 });

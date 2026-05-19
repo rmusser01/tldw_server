@@ -1,6 +1,7 @@
 import React from "react"
-import { Button, Collapse, Switch } from "antd"
+import { Button, Collapse, Switch, Tooltip } from "antd"
 import { useTranslation } from "react-i18next"
+import { LabelWithHelp } from "@/components/Common/LabelWithHelp"
 import { DictionaryValidationPanel } from "./DictionaryValidationPanel"
 import { DictionaryPreviewPanel } from "./DictionaryPreviewPanel"
 
@@ -77,6 +78,8 @@ export const DictionaryEntryToolsPanel: React.FC<DictionaryEntryToolsPanelProps>
   previewEntriesUsed,
 }) => {
   const { t } = useTranslation(["common", "option"])
+  const toggleOnLabel = t("common:on", "On")
+  const toggleOffLabel = t("common:off", "Off")
 
   const openToolsPanel = React.useCallback(
     (panelKey: "validate" | "preview") => {
@@ -101,30 +104,38 @@ export const DictionaryEntryToolsPanel: React.FC<DictionaryEntryToolsPanelProps>
               <Switch
                 checked={validationStrict}
                 onChange={onValidationStrictChange}
-                checkedChildren="On"
-                unCheckedChildren="Off"
+                checkedChildren={toggleOnLabel}
+                unCheckedChildren={toggleOffLabel}
                 aria-label={t(
                   "option:dictionariesTools.strictLabel",
                   "Strict validation"
                 )}
               />
-              <span className="text-xs text-text">
-                {t(
-                  "option:dictionariesTools.strictLabel",
-                  "Strict validation"
+              <LabelWithHelp
+                label={t("option:dictionariesTools.strictLabel", "Strict validation")}
+                help={t(
+                  "option:dictionariesTools.strictHelp",
+                  "When on, checks additional rules like regex safety and pattern conflicts. When off, only checks basic format."
                 )}
-              </span>
+              />
             </div>
-            <Button
-              size="small"
-              onClick={() => {
-                openToolsPanel("validate")
-                onRunValidation()
-              }}
-              loading={validating}
-              disabled={entriesCount === 0}>
-              {t("option:dictionariesTools.validateButton", "Run validation")}
-            </Button>
+            <Tooltip
+              title={t(
+                "option:dictionariesTools.validateShortcut",
+                "Ctrl+Shift+V"
+              )}
+            >
+              <Button
+                size="small"
+                onClick={() => {
+                  openToolsPanel("validate")
+                  onRunValidation()
+                }}
+                loading={validating}
+                disabled={entriesCount === 0}>
+                {t("option:dictionariesTools.validateButton", "Run validation")}
+              </Button>
+            </Tooltip>
             <Button
               size="small"
               type="primary"

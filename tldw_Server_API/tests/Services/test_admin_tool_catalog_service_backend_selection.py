@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -60,6 +61,36 @@ class _PostgresDbWithSqliteTraps:
         ]
 
 
+class _ExplodingSqliteDb:
+    _is_sqlite = True
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(self.message)
+
+
+async def _assert_tool_catalog_log_sanitized(
+    call: Callable[[], Awaitable[Any]],
+    *,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = svc.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        with pytest.raises(RuntimeError):
+            await call()
+    finally:
+        svc.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert expected_log in joined
+    assert raw_marker not in joined
+    assert "/private/" not in joined
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_list_tool_catalogs_sqlite_backend_selection_uses_execute() -> None:
@@ -84,3 +115,71 @@ async def test_list_tool_catalogs_postgres_backend_selection_uses_fetch() -> Non
     assert "$1" in query and "$2" in query
     assert params[-2:] == (10, 0)
     assert rows and rows[0]["name"] == "pg-cat"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("call_factory", "expected_log", "raw_marker"),
+    [
+        (
+            lambda db: svc.list_tool_catalogs(db, org_id=None, team_id=None, limit=10, offset=0),
+            "Failed to list tool catalogs",
+            "tool catalogs list failed",
+        ),
+        (
+            lambda db: svc.list_visible_tool_catalogs(db, scope_norm="global", admin_all=True),
+            "Failed to list visible tool catalogs",
+            "visible tool catalogs list failed",
+        ),
+        (
+            lambda db: svc.create_tool_catalog(
+                db,
+                name="new-cat",
+                description="desc",
+                org_id=None,
+                team_id=None,
+                is_active=True,
+            ),
+            "Failed to create tool catalog",
+            "tool catalog create failed",
+        ),
+        (
+            lambda db: svc.get_tool_catalog(db, 42),
+            "Failed to get tool catalog",
+            "tool catalog get failed",
+        ),
+        (
+            lambda db: svc.delete_tool_catalog(db, 42),
+            "Failed to delete tool catalog",
+            "tool catalog delete failed",
+        ),
+        (
+            lambda db: svc.list_tool_catalog_entries(db, 42),
+            "Failed to list tool catalog entries",
+            "tool catalog entries list failed",
+        ),
+        (
+            lambda db: svc.add_tool_catalog_entry(db, 42, "media.search", None),
+            "Failed to add tool catalog entry",
+            "tool catalog entry add failed",
+        ),
+        (
+            lambda db: svc.delete_tool_catalog_entry(db, 42, "media.search"),
+            "Failed to delete tool catalog entry",
+            "tool catalog entry delete failed",
+        ),
+    ],
+)
+async def test_tool_catalog_service_sanitizes_backend_failure_logs(
+    call_factory: Callable[[Any], Awaitable[Any]],
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    db = _ExplodingSqliteDb(f"{raw_marker} at /private/tool-catalogs.db")
+
+    await _assert_tool_catalog_log_sanitized(
+        lambda: call_factory(db),
+        expected_log=expected_log,
+        raw_marker=raw_marker,
+    )

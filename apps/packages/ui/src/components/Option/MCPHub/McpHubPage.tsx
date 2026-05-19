@@ -1,5 +1,7 @@
-import { useRef, useState } from "react"
-import { Tabs, Typography } from "antd"
+import { useMemo, useRef, useState, type ReactNode } from "react"
+import { useSearchParams } from "react-router-dom"
+import { Button, Tabs, Typography } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import { ApprovalPoliciesTab } from "./ApprovalPoliciesTab"
 import { CapabilityMappingsTab } from "./CapabilityMappingsTab"
@@ -11,18 +13,51 @@ import { PolicyAssignmentsTab } from "./PolicyAssignmentsTab"
 import { SharedWorkspacesTab } from "./SharedWorkspacesTab"
 import { ToolCatalogsTab } from "./ToolCatalogsTab"
 import { ExternalServersTab } from "./ExternalServersTab"
+import { DeploymentDiagnosticsPanel } from "./DeploymentDiagnosticsPanel"
 import { WorkspaceSetsTab } from "./WorkspaceSetsTab"
 import type {
   McpHubDrillAction,
   McpHubDrillTarget,
-  McpHubGovernanceAuditNavigateTarget,
-  McpHubGovernanceAuditTabKey
+  McpHubGovernanceAuditNavigateTarget
 } from "@/services/tldw/mcp-hub"
+import {
+  persistMcpHubExplainerDismissed,
+  readMcpHubExplainerDismissed
+} from "@/utils/ftux-storage"
+import {
+  MCP_HUB_VIEW_LABELS,
+  MCP_HUB_WORKFLOW_ORDER,
+  MCP_HUB_WORKFLOWS,
+  resolveMcpHubRouteState,
+  workflowForMcpHubView,
+  type McpHubRouteState,
+  type McpHubViewKey,
+  type McpHubWorkflowKey
+} from "./mcpHubWorkflowConfig"
 
 export const McpHubPage = () => {
-  const [activeTab, setActiveTab] = useState<McpHubGovernanceAuditTabKey>("profiles")
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [explainerDismissed, setExplainerDismissed] = useState(
+    () => readMcpHubExplainerDismissed()
+  )
   const [drillTarget, setDrillTarget] = useState<McpHubDrillTarget | null>(null)
   const requestIdRef = useRef(0)
+
+  const routeState = useMemo(
+    () =>
+      resolveMcpHubRouteState({
+        workflow: searchParams.get("workflow"),
+        view: searchParams.get("view")
+      }),
+    [searchParams]
+  )
+
+  const updateRouteState = (nextState: McpHubRouteState) => {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set("workflow", nextState.workflow)
+    nextParams.set("view", nextState.view)
+    setSearchParams(nextParams, { replace: true })
+  }
 
   const _deriveDrillAction = (
     target: McpHubGovernanceAuditNavigateTarget
@@ -45,100 +80,143 @@ export const McpHubPage = () => {
       action: _deriveDrillAction(target),
       request_id: requestIdRef.current
     })
-    setActiveTab(target.tab)
+    updateRouteState({
+      workflow: workflowForMcpHubView(target.tab),
+      view: target.tab
+    })
   }
 
   const handleDrillHandled = (requestId: number) => {
     setDrillTarget((current) => (current?.request_id === requestId ? null : current))
   }
 
+  const handleExplainerClose = () => {
+    setExplainerDismissed(true)
+    persistMcpHubExplainerDismissed()
+  }
+
+  const handleWorkflowChange = (workflow: McpHubWorkflowKey) => {
+    updateRouteState({
+      workflow,
+      view: MCP_HUB_WORKFLOWS[workflow].defaultView
+    })
+  }
+
+  const handleViewChange = (view: string) => {
+    const nextView = view as McpHubViewKey
+    updateRouteState({
+      workflow: workflowForMcpHubView(nextView),
+      view: nextView
+    })
+  }
+
+  const tabContentByView: Record<McpHubViewKey, ReactNode> = {
+    "tool-catalogs": (
+      <ToolCatalogsTab
+        onAddServer={() =>
+          updateRouteState({
+            workflow: "setup",
+            view: "credentials"
+          })
+        }
+      />
+    ),
+    credentials: (
+      <ExternalServersTab
+        drillTarget={drillTarget}
+        onDrillHandled={handleDrillHandled}
+      />
+    ),
+    profiles: <PermissionProfilesTab />,
+    assignments: (
+      <PolicyAssignmentsTab
+        drillTarget={drillTarget}
+        onDrillHandled={handleDrillHandled}
+      />
+    ),
+    approvals: <ApprovalPoliciesTab />,
+    "path-scopes": <PathScopesTab />,
+    "capability-mappings": <CapabilityMappingsTab />,
+    "workspace-sets": (
+      <WorkspaceSetsTab
+        drillTarget={drillTarget}
+        onDrillHandled={handleDrillHandled}
+      />
+    ),
+    "shared-workspaces": (
+      <SharedWorkspacesTab
+        drillTarget={drillTarget}
+        onDrillHandled={handleDrillHandled}
+      />
+    ),
+    "governance-packs": <GovernancePacksTab />,
+    audit: <GovernanceAuditTab onOpen={handleOpen} />
+  }
+
+  const activeWorkflow = MCP_HUB_WORKFLOWS[routeState.workflow]
+  const childTabItems = activeWorkflow.views.map((view) => ({
+    key: view,
+    label: (
+      <span data-testid={`mcp-hub-tab-${view}`}>
+        {MCP_HUB_VIEW_LABELS[view]}
+      </span>
+    ),
+    children: tabContentByView[view]
+  }))
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 p-4">
-      <Typography.Title level={3} style={{ margin: 0 }}>
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="mcp-hub-shell">
+      <Typography.Title level={1} className="!mb-0 !text-2xl">
         MCP Hub
       </Typography.Title>
+      <Typography.Text type="secondary">
+        Manage external tool servers and governance policies for the Model Context Protocol (MCP).
+      </Typography.Text>
+      {!explainerDismissed && (
+        <Alert
+          data-testid="mcp-hub-explainer"
+          type="info"
+          showIcon
+          closable
+          onClose={handleExplainerClose}
+          title="Getting Started with MCP Hub"
+          description="MCP Hub lets you connect external tool servers, manage permissions, and govern how AI models interact with outside services. Start by adding or checking Servers & Credentials, then use the Tool Catalog to verify available tools."
+        />
+      )}
+      <div
+        className="flex flex-wrap gap-2"
+        data-testid="mcp-hub-workflows"
+        role="group"
+        aria-label="MCP Hub workflows"
+      >
+        {MCP_HUB_WORKFLOW_ORDER.map((workflow) => {
+          const definition = MCP_HUB_WORKFLOWS[workflow]
+          const isActive = workflow === routeState.workflow
+          return (
+            <Button
+              key={workflow}
+              type={isActive ? "primary" : "default"}
+              aria-pressed={isActive}
+              data-testid={`mcp-hub-workflow-${workflow}`}
+              onClick={() => handleWorkflowChange(workflow)}
+            >
+              {definition.label}
+            </Button>
+          )
+        })}
+      </div>
+      <Typography.Text
+        type="secondary"
+        data-testid="mcp-hub-workflow-description"
+      >
+        {activeWorkflow.description}
+      </Typography.Text>
+      {routeState.workflow === "setup" ? <DeploymentDiagnosticsPanel /> : null}
       <Tabs
-        activeKey={activeTab}
-        onChange={(activeKey) =>
-          setActiveTab(activeKey as McpHubGovernanceAuditTabKey)
-        }
-        items={[
-          {
-            key: "profiles",
-            label: "Profiles",
-            children: <PermissionProfilesTab />
-          },
-          {
-            key: "assignments",
-            label: "Assignments",
-            children: (
-              <PolicyAssignmentsTab
-                drillTarget={drillTarget}
-                onDrillHandled={handleDrillHandled}
-              />
-            )
-          },
-          {
-            key: "path-scopes",
-            label: "Path Scopes",
-            children: <PathScopesTab />
-          },
-          {
-            key: "capability-mappings",
-            label: "Capability Mappings",
-            children: <CapabilityMappingsTab />
-          },
-          {
-            key: "workspace-sets",
-            label: "Workspace Sets",
-            children: (
-              <WorkspaceSetsTab
-                drillTarget={drillTarget}
-                onDrillHandled={handleDrillHandled}
-              />
-            )
-          },
-          {
-            key: "shared-workspaces",
-            label: "Shared Workspaces",
-            children: (
-              <SharedWorkspacesTab
-                drillTarget={drillTarget}
-                onDrillHandled={handleDrillHandled}
-              />
-            )
-          },
-          {
-            key: "audit",
-            label: "Audit",
-            children: <GovernanceAuditTab onOpen={handleOpen} />
-          },
-          {
-            key: "governance-packs",
-            label: "Governance Packs",
-            children: <GovernancePacksTab />
-          },
-          {
-            key: "approvals",
-            label: "Approvals",
-            children: <ApprovalPoliciesTab />
-          },
-          {
-            key: "tool-catalogs",
-            label: "Catalog",
-            children: <ToolCatalogsTab />
-          },
-          {
-            key: "credentials",
-            label: "Credentials",
-            children: (
-              <ExternalServersTab
-                drillTarget={drillTarget}
-                onDrillHandled={handleDrillHandled}
-              />
-            )
-          }
-        ]}
+        data-testid="mcp-hub-tabs"
+        activeKey={routeState.view}
+        onChange={handleViewChange}
+        items={childTabItems}
       />
     </div>
   )

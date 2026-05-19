@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { logger } from '@/lib/logger';
 import type { Watchlist, WatchlistDraft } from './types';
 
 type ConfirmVariant = 'danger' | 'warning' | 'default';
@@ -64,7 +65,7 @@ export const useWatchlistActions = ({
       setNewWatchlist(createDefaultWatchlistDraft());
       void onReloadRequested();
     } catch (err: unknown) {
-      console.error('Failed to create watchlist:', err);
+      logger.error('Failed to create watchlist', { component: 'useWatchlistActions', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to create watchlist');
     }
   }, [apiClient, newWatchlist, onReloadRequested, setError, setSuccess]);
@@ -89,7 +90,7 @@ export const useWatchlistActions = ({
       setSuccess('Watchlist deleted');
       void onReloadRequested();
     } catch (err: unknown) {
-      console.error('Failed to delete watchlist:', err);
+      logger.error('Failed to delete watchlist', { component: 'useWatchlistActions', error: err instanceof Error ? err.message : String(err) });
       setError(err instanceof Error && err.message ? err.message : 'Failed to delete watchlist');
     } finally {
       setDeletingWatchlistId((prev) => (prev === watchlistId ? null : prev));

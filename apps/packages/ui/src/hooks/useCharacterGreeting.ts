@@ -62,9 +62,13 @@ export const useCharacterGreeting = ({
   const greetingEnabled = settings?.greetingEnabled ?? true
   const greetingInjectedRef = React.useRef<string | null>(null)
   const greetingFetchRef = React.useRef<string | null>(null)
+  const greetingFetchedRef = React.useRef<string | null>(null)
   const greetingTemplateRef = React.useRef<{
     characterId: string
+    characterName: string
     greeting: string
+    rendered: string
+    avatarUrl: string | null
     selectionId: string | null
     checksum: string | null
   } | null>(null)
@@ -131,6 +135,7 @@ export const useCharacterGreeting = ({
 
   React.useEffect(() => {
     greetingFetchRef.current = null
+    greetingFetchedRef.current = null
     greetingTemplateRef.current = null
   }, [selectedCharacter?.id])
 
@@ -179,6 +184,23 @@ export const useCharacterGreeting = ({
       )
       const trimmed = rendered.trim()
       if (!trimmed) return
+      const selectionId = meta?.selectionId ?? null
+      const checksum = meta?.checksum ?? null
+      const normalizedAvatarUrl = avatarUrl ?? null
+      const cached = greetingTemplateRef.current
+      if (
+        messagesLength > 0 &&
+        greetingInjectedRef.current === characterId &&
+        cached?.characterId === characterId &&
+        cached.characterName === characterName &&
+        cached.greeting === greetingValue &&
+        cached.rendered === trimmed &&
+        cached.avatarUrl === normalizedAvatarUrl &&
+        cached.selectionId === selectionId &&
+        cached.checksum === checksum
+      ) {
+        return
+      }
 
       const createdAt = Date.now()
       const messageId = generateID()
@@ -233,9 +255,12 @@ export const useCharacterGreeting = ({
       greetingInjectedRef.current = characterId
       greetingTemplateRef.current = {
         characterId,
+        characterName,
         greeting: greetingValue,
-        selectionId: meta?.selectionId ?? null,
-        checksum: meta?.checksum ?? null
+        rendered: trimmed,
+        avatarUrl: normalizedAvatarUrl,
+        selectionId,
+        checksum
       }
 
       if (greetingSettingsRef.current.greetingEnabled) {
@@ -338,7 +363,10 @@ export const useCharacterGreeting = ({
     }
 
     const fallbackGreeting = greetingOptions[0]?.text?.trim() || ""
-    if (greetingFetchRef.current !== characterId) {
+    if (
+      greetingFetchRef.current !== characterId &&
+      greetingFetchedRef.current !== characterId
+    ) {
       greetingFetchRef.current = characterId
       void (async () => {
         try {
@@ -350,6 +378,7 @@ export const useCharacterGreeting = ({
             return
           }
           const full = await tldwClient.getCharacter(characterId)
+          greetingFetchedRef.current = characterId
           if (
             !isCurrentSelection() ||
             greetingFetchRef.current !== characterId
@@ -387,6 +416,7 @@ export const useCharacterGreeting = ({
               }
           setSelectedCharacter(mergedCharacter)
         } catch {
+          greetingFetchedRef.current = characterId
           if (fallbackGreeting) {
             resolveAndPersistGreeting(
               buildGreetingOptionsFromEntries([
@@ -414,6 +444,7 @@ export const useCharacterGreeting = ({
     setHistory,
     setMessages,
     setSelectedCharacter,
+    messagesLength,
     userDisplayName,
     greetingSelectionId,
     greetingsChecksum,

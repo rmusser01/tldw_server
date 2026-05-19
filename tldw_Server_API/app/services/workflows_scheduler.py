@@ -15,8 +15,9 @@ from __future__ import annotations
 import asyncio
 import builtins
 import contextlib
+import json
 import os
-import random
+import secrets
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -37,6 +38,9 @@ from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import (
 from tldw_Server_API.app.core.Scheduler import Scheduler, get_global_scheduler
 from tldw_Server_API.app.core.Scheduler.handlers import (
     watchlists as _ensure_watchlists,  # noqa: F401  # register watchlist_run
+)
+from tldw_Server_API.app.core.Scheduler.handlers import (
+    acp as _ensure_acp_handlers,  # noqa: F401  # register acp_run
 )
 from tldw_Server_API.app.core.Scheduler.handlers import (
     workflows as _ensure_handlers,  # noqa: F401  # register workflow_run
@@ -64,6 +68,46 @@ _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     BackendDatabaseError,
 )
+
+
+def build_schedule_payload(schedule: WorkflowSchedule) -> dict[str, Any]:
+    """Build the Scheduler payload for a recurring workflow schedule.
+
+    The returned payload preserves the workflow id, user/tenant routing fields,
+    execution mode, validation mode, and decoded inputs. Malformed persisted
+    ``inputs_json`` is treated as an empty dict so one corrupt schedule row does
+    not abort a scheduler fire.
+    """
+    try:
+        inputs = json.loads(schedule.inputs_json or "{}")
+    except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Workflows scheduler: malformed inputs_json for schedule {}: {}",
+            schedule.id,
+            exc,
+        )
+        inputs = {}
+    return {
+        "workflow_id": schedule.workflow_id,
+        "inputs": inputs,
+        "user_id": schedule.user_id,
+        "tenant_id": schedule.tenant_id,
+        "mode": schedule.run_mode,
+        "validation_mode": schedule.validation_mode,
+    }
+
+
+def resolve_schedule_submission_target(payload: dict[str, Any]) -> tuple[str, str]:
+    """Return the Scheduler handler and queue for a schedule payload.
+
+    Watchlist-backed schedules are identified by ``inputs.watchlist_job_id`` and
+    route to the watchlists queue; all other schedules route to the workflows
+    queue as standard workflow runs.
+    """
+    inputs = payload.get("inputs")
+    if isinstance(inputs, dict) and inputs.get("watchlist_job_id"):
+        return "watchlist_run", "watchlists"
+    return "workflow_run", "workflows"
 
 
 class _WFRecurringScheduler:
@@ -141,6 +185,7 @@ class _WFRecurringScheduler:
         """Scan all user directories and register their schedules."""
         loaded = 0
         try:
+            seen_schedule_ids: set[str] = set()
             user_ids: set[int] = set()
             try:
                 base = DatabasePaths.get_user_db_base_dir()
@@ -160,30 +205,76 @@ class _WFRecurringScheduler:
 
             for uid in sorted(user_ids):
                 try:
-                    db = self._get_db(uid)
-                    items = db.list_schedules(tenant_id="default", user_id=None, limit=1000, offset=0)
+                    items = self._list_registered_schedules(uid)
                 except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                     logger.debug(f"Workflows scheduler: list_schedules failed for user {uid}: {e}")
                     items = []
                 for s in items:
-                    if s.enabled:
-                        self._add_job(s, uid)
-                        loaded += 1
+                    if not s.enabled or s.id in seen_schedule_ids:
+                        continue
+                    seen_schedule_ids.add(s.id)
+                    effective_uid = self._resolve_schedule_owner_id(s, fallback_user_id=uid)
+                    acp_cfg = getattr(s, "acp_config_json", None)
+                    if acp_cfg:
+                        self._add_acp_job(s, effective_uid)
+                    else:
+                        self._add_job(s, effective_uid)
+                    loaded += 1
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Workflows scheduler load_all failed: {e}")
         if loaded:
             logger.info(f"Workflows scheduler: registered {loaded} schedule(s)")
 
     def _get_db(self, user_id: int) -> WorkflowsSchedulerDB:
+        """Return a cached scheduler DB handle for a user-specific database."""
         if user_id not in self._db_cache:
             self._db_cache[user_id] = WorkflowsSchedulerDB(user_id=user_id)
         return self._db_cache[user_id]
+
+    def _list_registered_schedules(self, user_id: int) -> list[WorkflowSchedule]:
+        """Return every persisted schedule visible in a user's scheduler DB.
+
+        Shared backends can expose schedules for more than one owner through a
+        single DB handle, so this intentionally uses ``user_id=None`` and pages
+        until the DB returns a short page.
+        """
+        db = self._get_db(user_id)
+        page_size = 1000
+        offset = 0
+        schedules: list[WorkflowSchedule] = []
+        while True:
+            if hasattr(db, "list_all_schedules"):
+                page = db.list_all_schedules(user_id=None, limit=page_size, offset=offset)
+            else:
+                page = db.list_schedules(
+                    tenant_id="default",
+                    user_id=None,
+                    limit=page_size,
+                    offset=offset,
+                )
+            schedules.extend(page)
+            if len(page) < page_size:
+                return schedules
+            offset += len(page)
+
+    @staticmethod
+    def _resolve_schedule_owner_id(schedule: WorkflowSchedule, *, fallback_user_id: int) -> int:
+        """Resolve the owner user id stored on a schedule.
+
+        Older rows can contain malformed owner values; in that case the caller's
+        enumerated user id is used so scheduling can continue.
+        """
+        try:
+            return int(schedule.user_id)
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+            return fallback_user_id
 
     async def _rescan_once(self) -> None:
         if not self._aps:
             return
         # Collect desired enabled schedule IDs from all users
         desired: set[str] = set()
+        seen_schedule_ids: set[str] = set()
         user_ids: set[int] = set()
         try:
             base = DatabasePaths.get_user_db_base_dir()
@@ -201,16 +292,21 @@ class _WFRecurringScheduler:
             logger.debug(f"Workflows scheduler: invalid SINGLE_USER_FIXED_ID: {e}")
         for uid in sorted(user_ids):
             try:
-                db = self._get_db(uid)
-                items = db.list_schedules(tenant_id="default", user_id=None, limit=1000, offset=0)
+                items = self._list_registered_schedules(uid)
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Workflows scheduler: list_schedules failed for user {uid}: {e}")
                 items = []
             for s in items:
-                if s.enabled:
-                    desired.add(s.id)
-                    # Ensure job exists/updated
-                    self._add_job(s, uid)
+                if not s.enabled or s.id in seen_schedule_ids:
+                    continue
+                seen_schedule_ids.add(s.id)
+                desired.add(s.id)
+                effective_uid = self._resolve_schedule_owner_id(s, fallback_user_id=uid)
+                acp_cfg = getattr(s, "acp_config_json", None)
+                if acp_cfg:
+                    self._add_acp_job(s, effective_uid)
+                else:
+                    self._add_job(s, effective_uid)
         # Remove jobs that no longer exist or are disabled
         try:
             current_ids = {j.id for j in (self._aps.get_jobs() or [])}
@@ -223,6 +319,7 @@ class _WFRecurringScheduler:
             logger.debug(f"Workflows scheduler: failed to reconcile jobs: {e}")
 
     def _add_job(self, schedule: WorkflowSchedule, user_id: int | None = None) -> None:
+        """Register an APScheduler job for a recurring workflow schedule."""
         if not self._aps:
             return
         try:
@@ -249,7 +346,7 @@ class _WFRecurringScheduler:
                 max_instances = 1
                 coalesce = True if schedule.coalesce is None else bool(schedule.coalesce)
 
-            misfire_grace_time = int(schedule.misfire_grace_sec or 300)
+            misfire_grace_time = 300 if schedule.misfire_grace_sec is None else int(schedule.misfire_grace_sec)
             # Pass user_id so run handler can pick correct per-user DB
             effective_uid = user_id if user_id is not None else int(schedule.user_id)
             # Determine jitter: prefer enabling for watchlist jobs to avoid the "on the hour" thundering herd
@@ -298,7 +395,7 @@ class _WFRecurringScheduler:
                     if jitter_sec > 0:
                         ui_jitter = int(os.getenv("WATCHLISTS_NEXT_RUN_UI_JITTER_SEC", "60") or 60)
                         if ui_jitter > 0 and next_dt is not None:
-                            delta = random.randint(-ui_jitter, ui_jitter)
+                            delta = secrets.randbelow(ui_jitter * 2 + 1) - ui_jitter
                             next_dt = next_dt + timedelta(seconds=delta)
                 except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                     logger.debug(f"Workflows scheduler: UI jitter calc failed for {schedule.id}: {e}")
@@ -308,6 +405,130 @@ class _WFRecurringScheduler:
                 logger.debug(f"Workflows scheduler: failed to set next_run_at for {schedule.id}: {e}")
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to add schedule job {schedule.id}: {e}")
+
+    def _add_acp_job(self, schedule: WorkflowSchedule, user_id: int | None = None) -> None:
+        """Register an APScheduler job for an ACP agent schedule.
+
+        Similar to ``_add_job`` but submits an ``acp_run`` task instead of
+        ``workflow_run``, using the ACP-specific configuration stored in
+        ``acp_config_json``.
+        """
+        import json as _json
+
+        if not self._aps:
+            return
+        try:
+            # Remove existing job with same id
+            try:
+                self._aps.remove_job(schedule.id)
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: remove_job failed for {schedule.id}: {e}")
+
+            tz = schedule.timezone or os.getenv("WORKFLOWS_SCHEDULER_TZ", "UTC")
+            try:
+                trigger = CronTrigger.from_crontab(schedule.cron, timezone=tz)
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.warning(f"Invalid cron for ACP schedule {schedule.id}: {e}")
+                return
+
+            # Concurrency settings -- ACP jobs default to skip
+            if (schedule.concurrency_mode or "skip").lower() == "queue":
+                max_instances = 3
+                coalesce = False if schedule.coalesce is None else bool(schedule.coalesce)
+            else:
+                max_instances = 1
+                coalesce = True if schedule.coalesce is None else bool(schedule.coalesce)
+
+            misfire_grace_time = 300 if schedule.misfire_grace_sec is None else int(schedule.misfire_grace_sec)
+            effective_uid = user_id if user_id is not None else int(schedule.user_id)
+
+            self._aps.add_job(
+                self._run_acp_schedule,
+                trigger=trigger,
+                id=schedule.id,
+                args=[schedule.id, effective_uid],
+                max_instances=max_instances,
+                coalesce=coalesce,
+                misfire_grace_time=misfire_grace_time,
+            )
+
+            # Compute and persist next run time
+            try:
+                now = datetime.now(trigger.timezone)
+                nxt = trigger.get_next_fire_time(None, now)
+                next_iso = nxt.isoformat() if nxt else None
+                self._get_db(effective_uid).set_history(schedule.id, next_run_at=next_iso)
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: failed to set next_run_at for ACP schedule {schedule.id}: {e}")
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+            logger.warning(f"Failed to add ACP schedule job {schedule.id}: {e}")
+
+    async def _run_acp_schedule(self, schedule_id: str, user_id: int) -> None:
+        """Execute an ACP schedule by submitting an ``acp_run`` task."""
+        import json as _json
+
+        db = self._get_db(user_id)
+        s = db.get_schedule(schedule_id)
+        if not s:
+            return
+        if not s.enabled:
+            try:
+                db.set_history(schedule_id, last_status="skipped_disabled")
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: failed to set skipped status for ACP schedule {schedule_id}: {e}")
+            return
+
+        # Record last_run_at and pending status
+        try:
+            from datetime import timezone as _tz
+            db.set_history(schedule_id, last_run_at=datetime.now(_tz.utc).isoformat(), last_status="pending")
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+            logger.debug(f"Workflows scheduler: failed to set pending status for ACP schedule {schedule_id}: {e}")
+
+        # Parse ACP config
+        try:
+            acp_config = _json.loads(s.acp_config_json) if isinstance(s.acp_config_json, str) else (s.acp_config_json or {})
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "Workflows scheduler: malformed acp_config_json for ACP schedule {}: {}",
+                s.id,
+                exc,
+            )
+            acp_config = {}
+
+        payload = {
+            "user_id": user_id,
+            "prompt": acp_config.get("prompt", ""),
+            "cwd": acp_config.get("cwd", "."),
+            "agent_type": acp_config.get("agent_type"),
+            "model": acp_config.get("model"),
+            "token_budget": acp_config.get("token_budget"),
+            "persona_id": acp_config.get("persona_id"),
+            "workspace_id": acp_config.get("workspace_id"),
+            "sandbox_enabled": acp_config.get("sandbox_enabled", False),
+        }
+
+        try:
+            if self._core_scheduler is None:
+                logger.warning("Core Scheduler not initialized; skipping ACP schedule run")
+                return
+            task_id = await self._core_scheduler.submit(
+                handler="acp_run",
+                payload=payload,
+                queue_name="acp",
+                metadata={"user_id": str(user_id)},
+            )
+            logger.info(f"Scheduled acp_run submitted: task_id={task_id} schedule_id={s.id}")
+            try:
+                db.set_history(schedule_id, last_status="queued")
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Workflows scheduler: failed to set queued status for ACP schedule {schedule_id}: {e}")
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
+            logger.warning(f"Failed to submit scheduled acp_run: {e}")
+            try:
+                db.set_history(schedule_id, last_status="error")
+            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e2:
+                logger.debug(f"Workflows scheduler: failed to set error status for ACP schedule {schedule_id}: {e2}")
 
     async def _run_schedule(self, schedule_id: str, user_id: int | None = None) -> None:
         # Fetch latest schedule in case it was modified
@@ -328,25 +549,28 @@ class _WFRecurringScheduler:
                 s = db.get_schedule(schedule_id)
         if not s or not s.enabled:
             return
+        try:
+            fallback_owner_id = (
+                int(user_id)
+                if user_id is not None
+                else int(core_settings.get("SINGLE_USER_FIXED_ID", 1))
+            )
+        except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS:
+            fallback_owner_id = 1
+        owner_user_id = self._resolve_schedule_owner_id(s, fallback_user_id=fallback_owner_id)
         # Record last_run_at and pending status
         try:
             from datetime import timezone
             db.set_history(schedule_id, last_run_at=datetime.now(timezone.utc).isoformat(), last_status="pending")
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"Workflows scheduler: failed to set pending status for {schedule_id}: {e}")
-        payload = {
-            "workflow_id": s.workflow_id,
-            "inputs": __import__("json").loads(s.inputs_json or "{}"),
-            "user_id": s.user_id,
-            "tenant_id": s.tenant_id,
-            "mode": s.run_mode,
-            "validation_mode": s.validation_mode,
-        }
+        payload = build_schedule_payload(s)
+        payload["user_id"] = str(owner_user_id)
         # Presence gating: optionally skip when user is offline
         try:
             if getattr(s, "require_online", False):
                 sm = await get_session_manager()
-                sessions = await sm.get_active_sessions(int(s.user_id))
+                sessions = await sm.get_active_sessions(owner_user_id)
                 if not sessions:
                     # mark skipped and compute next run time
                     try:
@@ -370,8 +594,8 @@ class _WFRecurringScheduler:
                 jwt_svc = JWTService(settings)
                 ttl = int(os.getenv("WORKFLOWS_VIRTUAL_KEY_TTL_MIN", "15") or 15)
                 token = jwt_svc.create_virtual_access_token(
-                    user_id=int(s.user_id),
-                    username=str(s.user_id),
+                    user_id=owner_user_id,
+                    username=str(owner_user_id),
                     role="user",
                     scope="workflows",
                     ttl_minutes=ttl,
@@ -384,32 +608,27 @@ class _WFRecurringScheduler:
             if self._core_scheduler is None:
                 logger.warning("Core Scheduler not initialized; skipping schedule run")
                 return
-            handler_name = "workflow_run"
-            try:
-                if isinstance(payload.get("inputs"), dict) and payload["inputs"].get("watchlist_job_id"):
-                    handler_name = "watchlist_run"
-            except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Workflows scheduler: handler selection failed for {schedule_id}: {e}")
+            handler_name, queue_name = resolve_schedule_submission_target(payload)
             task_id = await self._core_scheduler.submit(
                 handler=handler_name,
                 payload=payload,
-                queue_name="workflows" if handler_name == "workflow_run" else "watchlists",
-                metadata={"user_id": s.user_id},
+                queue_name=queue_name,
+                metadata={"user_id": str(owner_user_id)},
             )
-            logger.info(f"Scheduled workflow_run submitted: task_id={task_id} schedule_id={s.id}")
+            logger.info(f"Scheduled {handler_name} submitted: task_id={task_id} schedule_id={s.id}")
             try:
                 db.set_history(schedule_id, last_status="queued")
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Workflows scheduler: failed to set queued status for {schedule_id}: {e}")
         except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"Failed to submit scheduled workflow_run: {e}")
+            logger.warning(f"Failed to submit scheduled workflow: {e}")
             try:
                 db.set_history(schedule_id, last_status="error")
             except _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Workflows scheduler: failed to set error status for {schedule_id}: {e}")
 
     # CRUD wrappers
-    def create(self, *, tenant_id: str, user_id: str, workflow_id: int | None, name: str | None, cron: str, timezone: str | None, inputs: dict[str, Any], run_mode: str, validation_mode: str, enabled: bool, concurrency_mode: str = "skip", misfire_grace_sec: int = 300, coalesce: bool = True, require_online: bool = False) -> str:
+    def create(self, *, tenant_id: str, user_id: str, workflow_id: int | None, name: str | None, cron: str, timezone: str | None, inputs: dict[str, Any], run_mode: str, validation_mode: str, enabled: bool, concurrency_mode: str = "skip", misfire_grace_sec: int = 300, coalesce: bool = True, require_online: bool = False, acp_config_json: str | None = None) -> str:
         sid = __import__("uuid").uuid4().hex
         db = self._get_db(int(user_id))
         db.create_schedule(
@@ -428,10 +647,14 @@ class _WFRecurringScheduler:
             concurrency_mode=concurrency_mode,
             misfire_grace_sec=int(misfire_grace_sec),
             coalesce=bool(coalesce),
+            acp_config_json=acp_config_json,
         )
         s = db.get_schedule(sid)
         if s and s.enabled:
-            self._add_job(s, int(user_id))
+            if s.acp_config_json:
+                self._add_acp_job(s, int(user_id))
+            else:
+                self._add_job(s, int(user_id))
         return sid
 
     def update(self, schedule_id: str, update: dict[str, Any]) -> bool:
@@ -444,7 +667,10 @@ class _WFRecurringScheduler:
         s = db.get_schedule(schedule_id)
         if s:
             if s.enabled:
-                self._add_job(s, int(s.user_id))
+                if s.acp_config_json:
+                    self._add_acp_job(s, int(s.user_id))
+                else:
+                    self._add_job(s, int(s.user_id))
             else:
                 try:
                     if self._aps:

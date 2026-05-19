@@ -12,6 +12,8 @@ from datetime import datetime
 import asyncio
 from uuid import uuid4
 
+import yaml
+
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ChatbookManifest,
@@ -22,6 +24,21 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+def test_static_openapi_import_contract_uses_direct_form_fields():
+    openapi_path = Path(__file__).resolve().parents[3] / "Docs" / "API-related" / "chatbook_openapi.yaml"
+    spec = yaml.safe_load(openapi_path.read_text(encoding="utf-8"))
+
+    import_schema = spec["paths"]["/chatbooks/import"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+    import_properties = import_schema["properties"]
+    create_response = spec["components"]["schemas"]["CreateChatbookResponse"]["properties"]
+
+    assert "file" in import_properties
+    assert "options" not in import_properties
+    assert "conflict_resolution" in import_properties
+    assert "/chatbooks/export/continue" in spec["paths"]
+    assert "file_path" not in create_response
 
 
 def manifest_to_dict(manifest):
@@ -51,27 +68,6 @@ def test_db_path(tmp_path):
 def test_db(test_db_path):
     """Create a real test database."""
     db = CharactersRAGDB(db_path=test_db_path, client_id="test_client")
-
-    # The database initializes itself in __init__, no need to call initialize_db
-
-    # Add some test data - but we need to check what tables actually exist
-    try:
-        # Try to add conversation data if table exists
-        db.execute_query("""
-            INSERT INTO conversations (id, title, created_at, updated_at, user_id)
-            VALUES (?, ?, ?, ?, ?)
-        """, ("conv1", "Test Conversation", datetime.now().isoformat(), datetime.now().isoformat(), "test_user"))
-    except:
-        _ = None  # Table might not exist or have different schema
-
-    try:
-        # Try to add note data if table exists
-        db.execute_query("""
-            INSERT INTO Notes (id, title, content, created_at, updated_at, user_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, ("note1", "Test Note", "Note content", datetime.now().isoformat(), datetime.now().isoformat(), "test_user"))
-    except:
-        _ = None  # Table might not exist or have different schema
 
     yield db
 
@@ -110,15 +106,8 @@ def sample_chatbook_file(service):
     )
 
     with zipfile.ZipFile(chatbook_path, 'w') as zf:
-        # Add manifest with content_items
         manifest_dict = manifest_to_dict(manifest)
         manifest_dict['content_items'] = [
-            {
-                "id": "conv2",
-                "type": "conversation",
-                "title": "Imported Conversation",
-                "file_path": "content/conversations/conversation_conv2.json"
-            },
             {
                 "id": "note2",
                 "type": "note",
@@ -128,15 +117,6 @@ def sample_chatbook_file(service):
         ]
         zf.writestr('manifest.json', json.dumps(manifest_dict))
 
-        # Add sample content with correct paths
-        zf.writestr('content/conversations/conversation_conv2.json', json.dumps({
-            "id": "conv2",
-            "name": "Imported Conversation",
-            "character_id": 1,
-            "messages": []
-        }))
-
-        # Notes are stored as markdown with frontmatter
         zf.writestr('content/notes/note_note2.md', """---
 id: note2
 title: Imported Note
@@ -182,61 +162,60 @@ class TestChatbookIntegration:
     @pytest.mark.asyncio
     async def test_export_chatbook_full_cycle(self, service):
         """Test full export cycle with real database and file system."""
-        # Create export
+        note_id = service.db.add_note(
+            title="Integration Export Note",
+            content="Integration export content",
+        )
         result = await service.create_chatbook(
             name="Integration Test Export",
             description="Testing full export",
             content_selections={
-                ContentType.CONVERSATION: [],  # Export all conversations
-                ContentType.NOTE: []  # Export all notes
+                ContentType.NOTE: [str(note_id)],
             },
-            async_mode=False
+            async_mode=False,
         )
 
-        # Check result
         success, message, file_path = result
         assert success is True
+        assert message == "Chatbook created successfully"
         assert file_path is not None
         assert os.path.exists(file_path)
 
-        # Verify it's a valid chatbook file
         with zipfile.ZipFile(file_path, 'r') as zf:
             assert 'manifest.json' in zf.namelist()
-
-            # Check manifest
             manifest_data = json.loads(zf.read('manifest.json'))
             assert manifest_data['name'] == "Integration Test Export"
             assert manifest_data['description'] == "Testing full export"
+            assert len(manifest_data["content_items"]) == 1
+            assert manifest_data["content_items"][0]["type"] == "note"
 
     @pytest.mark.asyncio
     async def test_import_chatbook_full_cycle(self, service, sample_chatbook_file):
         """Test full import cycle with real database."""
-        # Import the chatbook
         result = await service.import_chatbook(
             file_path=sample_chatbook_file,
-            conflict_resolution="skip"
+            conflict_resolution="skip",
         )
 
-        # Check result
-        success, message, _ = result
+        success, message, details = result
         assert success is True
-        assert "imported" in message.lower() or "completed" in message.lower()
-
-        # Verify data was imported (check via database)
-        # Note: This would require actual database queries to verify
-        # For now, just check that no errors occurred
+        assert message == "Successfully imported 1/1 items"
+        assert details == {"imported_items": {"note": 1}, "warnings": []}
+        imported_notes = service.db.list_notes(limit=10, offset=0)
+        assert any(note["title"] == "Imported Note" for note in imported_notes)
 
     def test_preview_export(self, service):
         """Test preview export with real database data."""
+        service.db.add_note(
+            title="Preview Note",
+            content="Preview export content",
+        )
         result = service.preview_export(
-            content_types=["conversations", "notes"]
+            content_types=["notes"]
         )
 
-        # Should return counts based on actual database content
-        assert "conversations" in result
         assert "notes" in result
-        assert result["conversations"] >= 0  # At least the test data we inserted
-        assert result["notes"] >= 0
+        assert result["notes"] == 1
 
     def test_validate_chatbook_file(self, service, sample_chatbook_file):
         """Test validating a real chatbook file."""
@@ -343,72 +322,78 @@ class TestChatbookIntegration:
     @pytest.mark.asyncio
     async def test_export_import_roundtrip(self, service, tmp_path):
         """Test full export and import roundtrip with real components."""
-        # First, export current data
+        note_id = service.db.add_note(
+            title="Roundtrip Note",
+            content="Roundtrip content",
+        )
         export_result = await service.create_chatbook(
             name="Roundtrip Test",
             description="Testing roundtrip",
             content_selections={
-                ContentType.CONVERSATION: [],
-                ContentType.NOTE: []
+                ContentType.NOTE: [str(note_id)],
             },
-            async_mode=False
+            async_mode=False,
         )
 
         success, message, export_path = export_result
         assert success is True
+        assert message == "Chatbook created successfully"
         assert export_path is not None
 
-        # Now import it back (with rename to avoid conflicts)
         import_path = stage_export_for_import(service, export_path)
         import_result = await service.import_chatbook(
             file_path=import_path,
-            conflict_resolution="rename"
+            conflict_resolution="rename",
         )
 
-        import_success, import_message, _ = import_result
-        # Import might have no items if the database was empty, which is OK
-        assert import_success is True or "No items" in import_message
+        import_success, import_message, details = import_result
+        assert import_success is True
+        assert import_message == "Successfully imported 1/1 items"
+        assert details == {"imported_items": {"note": 1}, "warnings": []}
 
     @pytest.mark.asyncio
     async def test_async_export_job(self, service):
         """Test async export job processing."""
-        # Create async export
+        note_id = service.db.add_note(
+            title="Async Export Note",
+            content="Async export content",
+        )
         result = await service.create_chatbook(
             name="Async Export",
             description="Testing async",
-            content_selections={ContentType.CONVERSATION: []},
-            async_mode=True
+            content_selections={ContentType.NOTE: [str(note_id)]},
+            async_mode=True,
         )
 
         success, message, job_id = result
 
-        # For async mode, should return job_id instead of file path
         assert success is True
+        assert message == f"Export job started: {job_id}"
         assert job_id is not None
 
-        # Check job status
         status = service.get_export_job_status(job_id)
-        assert status["status"] in ["pending", "in_progress", "completed"]
+        assert status["job_id"] == job_id
+        assert status["status"] == "pending"
 
     @pytest.mark.asyncio
     async def test_import_with_conflicts(self, service, sample_chatbook_file):
         """Test import with conflict handling."""
-        # First import
         result1 = await service.import_chatbook(
             file_path=sample_chatbook_file,
-            conflict_resolution="skip"
+            conflict_resolution="skip",
         )
         assert result1[0] is True
+        assert result1[1] == "Successfully imported 1/1 items"
+        assert result1[2] == {"imported_items": {"note": 1}, "warnings": []}
 
-        # Second import with same file - should handle conflicts
         result2 = await service.import_chatbook(
             file_path=sample_chatbook_file,
-            conflict_resolution="skip"
+            conflict_resolution="skip",
         )
 
-        # Should still succeed but skip conflicting items
         assert result2[0] is True
-        assert "skip" in result2[1].lower() or "conflict" in result2[1].lower() or "imported" in result2[1].lower()
+        assert result2[1] == "Import completed: All 1 items were skipped"
+        assert result2[2] == {"imported_items": {}, "warnings": []}
 
     def test_cancel_export_job(self, service):
         """Test cancelling an export job."""

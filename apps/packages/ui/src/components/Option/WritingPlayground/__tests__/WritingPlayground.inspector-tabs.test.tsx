@@ -127,10 +127,20 @@ vi.mock("@/services/writing-playground", () => ({
   getWritingDefaults: vi.fn(),
   getWritingWordcloud: vi.fn(),
   getWritingSession: vi.fn(),
+  getManuscriptScene: vi.fn(),
   importWritingSnapshot: vi.fn(),
   listWritingSessions: vi.fn(),
   listWritingTemplates: vi.fn(),
   listWritingThemes: vi.fn(),
+  listManuscriptCharacters: vi.fn(),
+  listManuscriptWorldInfo: vi.fn(),
+  searchManuscriptResearch: vi.fn(),
+  createManuscriptCitation: vi.fn(),
+  analyzeScene: vi.fn(),
+  analyzeChapter: vi.fn(),
+  analyzeProjectPlotHoles: vi.fn(),
+  analyzeProjectConsistency: vi.fn(),
+  listManuscriptAnalyses: vi.fn(),
   tokenizeWritingText: vi.fn(),
   updateWritingSession: vi.fn(),
   updateWritingTemplate: vi.fn(),
@@ -185,20 +195,20 @@ describe("WritingPlayground inspector tabs", () => {
     renderWithInspectorOpen()
 
     const samplingTab = screen.getByRole("tab", { name: "Sampling" })
-    const analysisTab = screen.getByRole("tab", { name: "Analysis" })
+    const feedbackTab = screen.getByRole("tab", { name: "Feedback" })
 
     samplingTab.focus()
     fireEvent.keyDown(samplingTab, { key: "ArrowLeft" })
-    expect(analysisTab).toHaveAttribute("aria-selected", "true")
-    expect(analysisTab).toHaveFocus()
+    expect(feedbackTab).toHaveAttribute("aria-selected", "true")
+    expect(feedbackTab).toHaveFocus()
 
-    fireEvent.keyDown(analysisTab, { key: "Home" })
+    fireEvent.keyDown(feedbackTab, { key: "Home" })
     expect(samplingTab).toHaveAttribute("aria-selected", "true")
     expect(samplingTab).toHaveFocus()
 
     fireEvent.keyDown(samplingTab, { key: "End" })
-    expect(analysisTab).toHaveAttribute("aria-selected", "true")
-    expect(analysisTab).toHaveFocus()
+    expect(feedbackTab).toHaveAttribute("aria-selected", "true")
+    expect(feedbackTab).toHaveFocus()
   })
 
   it("shows template/theme management actions in Setup tab", () => {
@@ -259,13 +269,17 @@ describe("WritingPlayground inspector tabs", () => {
     }
   })
 
-  it("has four tabs: Sampling, Context, Setup, Analysis", () => {
+  it("has eight tabs: Sampling, Context, Setup, Analysis, Characters, Research, Agent, Feedback", () => {
     renderWithInspectorOpen()
 
     expect(screen.getByRole("tab", { name: "Sampling" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Context" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Setup" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Analysis" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Characters" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Research" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Agent" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Feedback" })).toBeInTheDocument()
   })
 
   it("renders an Analysis panel title that matches the tab label", () => {

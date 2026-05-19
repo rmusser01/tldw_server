@@ -1,9 +1,14 @@
 import os
+import re
 import tempfile
 
 import pytest
 
-from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService, ModerationPolicy
+from tldw_Server_API.app.core.Moderation.moderation_service import (
+    ModerationPolicy,
+    ModerationService,
+    PatternRule,
+)
 
 
 @pytest.mark.unit
@@ -39,3 +44,28 @@ def test_redact_text_respects_categories_enabled():
             os.unlink(path)
         except Exception:
             _ = None
+
+
+@pytest.mark.unit
+def test_input_only_rule_does_not_redact_output_phase():
+    svc = ModerationService()
+    rule = PatternRule(
+        regex=re.compile(r"danger", re.IGNORECASE),
+        action="redact",
+        replacement="[MASK]",
+        phase="input",
+    )
+    pol = ModerationPolicy(
+        enabled=True,
+        input_enabled=True,
+        output_enabled=True,
+        input_action="block",
+        output_action="redact",
+        redact_replacement="[REDACTED]",
+        per_user_overrides=False,
+        block_patterns=[rule],
+        categories_enabled=None,
+    )
+
+    assert svc.redact_text("danger", pol, phase="output") == "danger"
+    assert svc.redact_text_with_count("danger", pol, phase="output") == ("danger", 0)

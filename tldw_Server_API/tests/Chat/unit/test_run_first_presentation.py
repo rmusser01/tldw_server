@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.Chat.run_first_presentation import present_chat_tools
+from tldw_Server_API.tests.run_first_constants import PHASE2C_RUN_FIRST_COHORT
 
 
 RUN_TOOL = {
@@ -55,6 +56,39 @@ def test_present_chat_tools_orders_run_first_when_eligible() -> None:
     assert presented.prompt_fragment is not None
     assert "run(command)" in presented.prompt_fragment
     assert presented.tool_choice in (None, "auto")
+
+
+@pytest.mark.unit
+def test_present_chat_tools_orders_run_first_when_default_on_and_in_cohort() -> None:
+    presented = present_chat_tools(
+        tools=[RUN_TOOL, NOTES_TOOL],
+        allow_catalog=["run", "notes.*"],
+        rollout_mode="default_on",
+        provider_key="openai:gpt-4o",
+        provider_allowlist=PHASE2C_RUN_FIRST_COHORT,
+        streaming=False,
+    )
+
+    assert presented.eligible is True
+    assert [tool["function"]["name"] for tool in presented.llm_tools] == ["run", "notes.search"]
+    assert presented.prompt_fragment is not None
+
+
+@pytest.mark.unit
+def test_present_chat_tools_marks_google_gemini_flash_default_on_when_in_cohort() -> None:
+    presented = present_chat_tools(
+        tools=[RUN_TOOL, NOTES_TOOL],
+        allow_catalog=["run", "notes.*"],
+        rollout_mode="default_on",
+        provider_key="google:gemini-2.5-flash",
+        provider_allowlist=PHASE2C_RUN_FIRST_COHORT,
+        streaming=False,
+    )
+
+    assert presented.eligible is True
+    assert presented.ineligible_reason is None
+    assert [tool["function"]["name"] for tool in presented.llm_tools] == ["run", "notes.search"]
+    assert presented.prompt_fragment is not None
 
 
 @pytest.mark.unit
@@ -124,6 +158,39 @@ def test_present_chat_tools_is_eligible_when_provider_matches_rollout_allowlist(
     assert presented.ineligible_reason is None
     assert presented.prompt_fragment is not None
     assert [tool["function"]["name"] for tool in presented.llm_tools] == ["run", "notes.search"]
+
+
+@pytest.mark.unit
+def test_present_chat_tools_is_out_of_cohort_when_default_on_provider_mismatches() -> None:
+    presented = present_chat_tools(
+        tools=[RUN_TOOL, NOTES_TOOL],
+        allow_catalog=["run", "notes.*"],
+        rollout_mode="default_on",
+        provider_key="openai:gpt-4o-mini",
+        provider_allowlist=["anthropic:claude-3-7-sonnet"],
+        streaming=False,
+    )
+
+    assert presented.eligible is False
+    assert presented.ineligible_reason == "provider_not_in_rollout_allowlist"
+    assert presented.prompt_fragment is None
+    assert [tool["function"]["name"] for tool in presented.llm_tools] == ["run", "notes.search"]
+
+
+@pytest.mark.unit
+def test_present_chat_tools_fails_closed_for_default_on_when_allowlist_is_empty() -> None:
+    presented = present_chat_tools(
+        tools=[RUN_TOOL, NOTES_TOOL],
+        allow_catalog=["run", "notes.*"],
+        rollout_mode="default_on",
+        provider_key="openai:gpt-4o-mini",
+        provider_allowlist=[],
+        streaming=False,
+    )
+
+    assert presented.eligible is False
+    assert presented.ineligible_reason == "provider_not_in_rollout_allowlist"
+    assert presented.prompt_fragment is None
 
 
 @pytest.mark.unit

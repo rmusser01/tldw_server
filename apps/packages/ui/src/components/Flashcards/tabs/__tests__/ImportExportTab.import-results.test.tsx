@@ -8,11 +8,16 @@ import {
   useCreateFlashcardsBulkMutation,
   useDecksQuery,
   useGenerateFlashcardsMutation,
+  useGlobalFlashcardTagSuggestionsQuery,
   useImportFlashcardsMutation,
   useImportFlashcardsApkgMutation,
   useImportFlashcardsJsonMutation,
   useImportLimitsQuery,
-  usePreviewStructuredQaImportMutation
+  usePreviewStructuredQaImportMutation,
+  useStudyPackCreateMutation,
+  useStudyPackJobQuery,
+  useStudyPackQuery,
+  useStudyPackRegenerateMutation
 } from "../../hooks"
 import {
   deleteFlashcard,
@@ -87,11 +92,16 @@ vi.mock("../../hooks", () => ({
   useCreateFlashcardsBulkMutation: vi.fn(),
   useDecksQuery: vi.fn(),
   useGenerateFlashcardsMutation: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useImportFlashcardsMutation: vi.fn(),
   useImportFlashcardsApkgMutation: vi.fn(),
   useImportFlashcardsJsonMutation: vi.fn(),
   useImportLimitsQuery: vi.fn(),
-  usePreviewStructuredQaImportMutation: vi.fn()
+  usePreviewStructuredQaImportMutation: vi.fn(),
+  useStudyPackCreateMutation: vi.fn(),
+  useStudyPackJobQuery: vi.fn(),
+  useStudyPackQuery: vi.fn(),
+  useStudyPackRegenerateMutation: vi.fn()
 }))
 
 vi.mock("@/services/flashcards", async () => {
@@ -103,6 +113,15 @@ vi.mock("@/services/flashcards", async () => {
     listFlashcards: vi.fn(),
     exportFlashcards: vi.fn(),
     exportFlashcardsFile: vi.fn()
+  }
+})
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useInRouterContext: () => false
   }
 })
 
@@ -181,12 +200,33 @@ describe("ImportExportTab import result details", () => {
       mutateAsync: vi.fn(),
       isPending: false
     } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isFetching: false,
+      isError: false
+    } as any)
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [],
       isLoading: false
     } as any)
     vi.mocked(useImportLimitsQuery).mockReturnValue({
       data: null
+    } as any)
+    vi.mocked(useStudyPackCreateMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
+    vi.mocked(useStudyPackJobQuery).mockReturnValue({
+      data: null,
+      isLoading: false
+    } as any)
+    vi.mocked(useStudyPackQuery).mockReturnValue({
+      data: null,
+      isLoading: false
+    } as any)
+    vi.mocked(useStudyPackRegenerateMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
     } as any)
     vi.mocked(listFlashcards).mockResolvedValue({
       items: [],
@@ -352,6 +392,11 @@ describe("ImportExportTab import result details", () => {
     fireEvent.click(screen.getByTestId("flashcards-import-button"))
 
     expect(screen.getByText("Confirm large import")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Large imports may take a moment to process. You'll have 30 seconds to undo after import completes."
+      )
+    ).toBeInTheDocument()
     expect(mutateAsync).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByTestId("flashcards-import-confirm-large"))
@@ -720,7 +765,7 @@ describe("ImportExportTab import result details", () => {
     expect(screen.queryByText("Confirm large import")).not.toBeInTheDocument()
   })
 
-  it("maps export options and filters to export params", async () => {
+  it("maps export options and normalized tag filters to preview and export params", async () => {
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
         {
@@ -749,7 +794,7 @@ describe("ImportExportTab import result details", () => {
     fireEvent.click(biologyOptions[biologyOptions.length - 1])
 
     fireEvent.change(screen.getByTestId("flashcards-export-tag"), {
-      target: { value: "chapter-1" }
+      target: { value: "Chapter-1" }
     })
     fireEvent.change(screen.getByTestId("flashcards-export-query"), {
       target: { value: "mitosis" }
@@ -770,6 +815,16 @@ describe("ImportExportTab import result details", () => {
         "42 cards from Biology"
       )
     })
+    const exportPreviewQuery = useQueryMock.mock.calls
+      .map(([options]) => options as any)
+      .findLast((options) => options.queryKey?.[0] === "flashcards:export-preview-count")
+    expect(exportPreviewQuery.queryKey[2]).toBe("chapter-1")
+    await exportPreviewQuery.queryFn()
+    expect(listFlashcards).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tag: "chapter-1"
+      })
+    )
 
     fireEvent.click(screen.getByTestId("flashcards-export-button"))
 
@@ -788,6 +843,33 @@ describe("ImportExportTab import result details", () => {
     })
   })
 
+  it("serializes object payloads before creating JSON export blobs", async () => {
+    const jsonPayload = {
+      cards: [
+        {
+          front: "Question",
+          back: "Answer"
+        }
+      ]
+    }
+    vi.mocked(exportFlashcards).mockResolvedValue(jsonPayload as any)
+    const createObjectURLMock = vi.fn((_blob: Blob | MediaSource) => "blob:mock")
+    ;(URL as any).createObjectURL = createObjectURLMock
+
+    render(<ImportExportTab />)
+
+    const formatSelect = screen.getByTestId("flashcards-export-format")
+    fireEvent.mouseDown(formatSelect.querySelector(".ant-select-selector") ?? formatSelect)
+    fireEvent.click(screen.getByText("JSON"))
+    fireEvent.click(screen.getByTestId("flashcards-export-button"))
+
+    await waitFor(() => {
+      expect(createObjectURLMock).toHaveBeenCalledTimes(1)
+    })
+    const blob = createObjectURLMock.mock.calls[0][0] as Blob
+    await expect(blob.text()).resolves.toBe(JSON.stringify(jsonPayload, null, 2))
+  })
+
   it("renders transfer summary cards for formats, limits, and last action", () => {
     vi.mocked(useImportLimitsQuery).mockReturnValue({
       data: {
@@ -800,7 +882,7 @@ describe("ImportExportTab import result details", () => {
 
     expect(screen.getByTestId("flashcards-transfer-summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary-formats")).toHaveTextContent(
-      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, APKG"
+      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
     )
     expect(screen.getByTestId("flashcards-transfer-summary-limits")).toHaveTextContent(
       "500 cards · 1048576 bytes"

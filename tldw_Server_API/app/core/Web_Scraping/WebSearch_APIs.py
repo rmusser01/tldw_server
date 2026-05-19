@@ -38,6 +38,10 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
+    WebOutboundPolicyDecision,
+    decide_web_outbound_policy_sync,
+)
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
     build_browser_headers,
     pick_ua_profile,
@@ -93,6 +97,35 @@ def get_loaded_config() -> dict[str, Any]:
     return load_and_log_configs()
 
 
+def _provider_outbound_policy_decision(
+    url: str,
+    *,
+    source: str,
+    stage: str = "provider_request",
+) -> WebOutboundPolicyDecision:
+    """Return the shared outbound-policy decision for a websearch provider URL."""
+    try:
+        return decide_web_outbound_policy_sync(
+            url,
+            respect_robots=False,
+            source=source,
+            stage=stage,
+        )
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as exc:
+        raise ValueError(f"Outbound policy evaluation failed: {exc}") from exc
+
+
+def _enforce_provider_outbound_policy(
+    url: str,
+    *,
+    source: str,
+    stage: str = "provider_request",
+) -> None:
+    decision = _provider_outbound_policy_decision(url, source=source, stage=stage)
+    if not decision.allowed:
+        raise ValueError(f"Blocked by outbound policy: {decision.reason}")
+
+
 def _get_relevance_jitter_ms() -> int:
     """Optional jitter (ms) for LLM calls. Defaults to 0 (disabled)."""
     cfg = get_loaded_config()
@@ -120,7 +153,11 @@ def _get_llm_timeouts() -> dict[str, float]:
     return {"llm": llm_to, "scrape": scrape_to}
 
 
-def _get_websearch_circuit_breaker(fail_threshold: int = 3, reset_after_s: float = 30.0):
+def _get_websearch_circuit_breaker(
+    fail_threshold: int = 3,
+    reset_after_s: float = 30.0,
+    provider_key: str | None = None,
+):
     """Return the shared WebSearch circuit breaker (singleton via registry)."""
     from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
         CircuitBreakerConfig as _Cfg,
@@ -128,8 +165,13 @@ def _get_websearch_circuit_breaker(fail_threshold: int = 3, reset_after_s: float
     from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
         registry as _cb_registry,
     )
+    normalized_provider = normalize_provider(provider_key)
+    if not normalized_provider:
+        normalized_provider = str(provider_key or "default").strip().lower() or "default"
+    normalized_provider = re.sub(r"[^a-z0-9_.:-]+", "-", normalized_provider)
+
     return _cb_registry.get_or_create(
-        "websearch_llm",
+        f"websearch_llm:{normalized_provider}",
         config=_Cfg(
             failure_threshold=int(fail_threshold),
             recovery_timeout=float(reset_after_s),
@@ -153,6 +195,11 @@ def _truncate_text(value: str | None, max_len: int = 600) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1].rstrip() + "..."
+
+
+def _set_processing_error(output_dict: dict[str, Any], message: str) -> None:
+    output_dict["processing_error"] = message
+    logging.error(message)
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -237,6 +284,47 @@ def _sanitize_sub_questions(raw_values: Any) -> list[str]:
         seen.add(key)
         sanitized.append(text)
     return sanitized
+
+
+def _summarize_relevant_results_for_log(
+    relevant_results: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return compact debug metadata without logging result bodies."""
+    summaries: list[dict[str, Any]] = []
+    for result_id, result in relevant_results.items():
+        summaries.append(
+            {
+                "id": result_id,
+                "reasoning": _truncate_text(result.get("reasoning"), max_len=160),
+                "content_chars": len(str(result.get("content") or "")),
+                "original_content_chars": len(str(result.get("original_content") or "")),
+            }
+        )
+    return summaries
+
+
+def _build_result_fallback_content(result: dict[str, Any]) -> str:
+    """Construct a safe fallback text blob from the normalized result payload."""
+    metadata = result.get("metadata")
+    metadata_dict = metadata if isinstance(metadata, dict) else {}
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    def _append(label: str, value: Any) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        key = text.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        parts.append(f"{label}: {text}")
+
+    _append("Title", result.get("title"))
+    _append("Snippet", result.get("content"))
+    _append("Snippet", metadata_dict.get("snippet"))
+    _append("URL", result.get("url"))
+    return "\n".join(parts).strip()
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
 
@@ -560,15 +648,14 @@ async def analyze_and_aggregate(web_search_results_dict: dict, sub_query_dict: d
         search_params.get('relevance_analysis_llm'),
         cancel_event=cancel_event,
     )
-    # FIXME
     logging.debug("Relevant results returned by search_result_relevance:")
-    logging.debug(json.dumps(relevant_results, indent=2))
+    logging.debug(json.dumps(_summarize_relevant_results_for_log(relevant_results), indent=2))
 
     # 5. Allow user to review and select relevant results (if enabled)
     logging.info("Reviewing and selecting relevant results")
     if search_params.get("user_review", False):
         logging.info("User review enabled")
-        relevant_results = review_and_select_results({"results": list(relevant_results.values())})
+        relevant_results = review_and_select_results(relevant_results)
 
     # 6. Summarize/aggregate final answer
     final_answer = aggregate_results(
@@ -740,6 +827,7 @@ async def search_result_relevance(
     breaker = _get_websearch_circuit_breaker(
         fail_threshold=int(ws_section.get('llm_cb_fail_threshold', 3) or 3),
         reset_after_s=float(ws_section.get('llm_cb_reset_after_s', 30) or 30.0),
+        provider_key=api_endpoint,
     )
 
     timeouts = _get_llm_timeouts()
@@ -748,7 +836,7 @@ async def search_result_relevance(
     for idx, result in enumerate(search_results):
         if cancel_event and cancel_event.is_set():
             break
-        content = result.get("content", "")
+        content = _build_result_fallback_content(result)
         if not content:
             logging.error("No Content found in search results array!")
             continue
@@ -825,24 +913,39 @@ async def search_result_relevance(
                         logging.debug("Relevant result found.")
                         # Use the 'id' from the result if available, otherwise use idx
                         result_id = result.get("id", str(idx))
-                        # Scrape the content of the relevant result
-                        scraped_content = await asyncio.wait_for(
-                            scrape_article(result['url']), timeout=timeouts["scrape"]
-                        )
+                        source_content = content
+                        try:
+                            scraped_content = await asyncio.wait_for(
+                                scrape_article(result['url']), timeout=timeouts["scrape"]
+                            )
+                            scraped_text = ""
+                            if isinstance(scraped_content, dict):
+                                scraped_text = str(scraped_content.get('content') or "").strip()
+                            elif isinstance(scraped_content, str):
+                                scraped_text = scraped_content.strip()
+                            if scraped_text:
+                                source_content = scraped_text
+                        except asyncio.CancelledError:
+                            raise
+                        except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as scrape_error:
+                            logging.warning(
+                                f"Scrape failed for relevant result {result_id}; "
+                                f"falling back to search snippet/title/url: {scrape_error}"
+                            )
 
                         # Create Summarization prompt
                         logging.debug(f"Creating Summarization Prompt for result idx={idx}")
                         summary_prompt = summarization_prompt.format(
                             question=original_question,
-                            content=scraped_content['content']
+                            content=source_content
                         )
 
                         # Generate summary using the summarize function with timeout
                         logging.info(f"Summarizing relevant result: ID={result_id}")
-                        async def _summ_call(_scraped_content=scraped_content, _summary_prompt=summary_prompt):
+                        async def _summ_call(_source_content=source_content, _summary_prompt=summary_prompt):
                             return await asyncio.to_thread(
-                                lambda _sc=_scraped_content, _sp=_summary_prompt: summarize(
-                                    input_data=_sc['content'],
+                                lambda _sc=_source_content, _sp=_summary_prompt: summarize(
+                                    input_data=_sc,
                                     custom_prompt_arg=_sp,
                                     api_name=api_endpoint,
                                     api_key=None,
@@ -855,11 +958,11 @@ async def search_result_relevance(
                             summary = await asyncio.wait_for(_summ_call(), timeout=timeouts["llm"])
                         except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
                             logging.error(f"Summary generation failed: {e}")
-                            summary = "Summary generation failed"
+                            summary = _truncate_text(source_content, max_len=2000) or "Summary generation failed"
 
                         relevant_results[result_id] = {
                             "content": summary,  # Store the summary instead of full content
-                            "original_content": scraped_content['content'],  # Keep original content if needed
+                            "original_content": source_content,  # Keep original content if needed
                             "reasoning": reasoning
                         }
                         logging.info(f"Relevant result found and summarized: ID={result_id}; Reasoning={reasoning}")
@@ -892,15 +995,34 @@ def review_and_select_results(web_search_results_dict: dict, selector: callable 
     Returns:
         Dict: A dictionary containing only the user-selected relevant results.
     """
-    # If no selector provided, default to keeping all results as relevant
+    if not isinstance(web_search_results_dict, dict):
+        return {}
+
+    if "results" in web_search_results_dict and isinstance(web_search_results_dict.get("results"), list):
+        candidates = [
+            (
+                str(result.get("id", idx)) if isinstance(result, dict) else str(idx),
+                result,
+            )
+            for idx, result in enumerate(web_search_results_dict.get("results", []))
+            if isinstance(result, dict)
+        ]
+    else:
+        candidates = [
+            (str(result_id), result)
+            for result_id, result in web_search_results_dict.items()
+            if isinstance(result, dict)
+        ]
+
+    # If no selector provided, default to keeping all results as relevant while preserving IDs
     if selector is None:
-        return {str(idx): res for idx, res in enumerate(web_search_results_dict.get("results", []))}
+        return {result_id: result for result_id, result in candidates}
 
     relevant_results: dict[str, dict] = {}
-    for idx, result in enumerate(web_search_results_dict.get("results", [])):
+    for result_id, result in candidates:
         try:
             if selector(result):
-                relevant_results[str(idx)] = result
+                relevant_results[result_id] = result
         except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
             # If selector throws, skip selection for this item
             continue
@@ -1544,7 +1666,11 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
         return web_search_results_dict
 
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"processing_error": f"Error performing web search: {str(e)}"}
+        error_text = str(e)
+        if error_text.startswith("Blocked by outbound policy:"):
+            return {"processing_error": f"Error performing web search: {error_text}"}
+        logging.error("Error performing web search")
+        return {"processing_error": "Error performing web search"}
 
 
 def test_perform_websearch_google():
@@ -1557,8 +1683,8 @@ def test_perform_websearch_google():
         print(f"Test 2: {test_2}")
         test_3 = perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 3: {test_3}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing google searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing google searches")
     pass
 
 
@@ -1572,8 +1698,8 @@ def test_perform_websearch_brave():
     try:
         test_7 = perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 7: {test_7}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing brave searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing brave searches")
 
 
 def test_perform_websearch_ddg():
@@ -1583,8 +1709,8 @@ def test_perform_websearch_ddg():
         print(f"Test 6: {test_6}")
         test_7 = perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
         print(f"Test 7: {test_7}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing duckduckgo searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing duckduckgo searches")
 
 
 # FIXME
@@ -1593,8 +1719,8 @@ def test_perform_websearch_kagi():
     try:
         test_8 = perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 8: {test_8}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing kagi searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing kagi searches")
 
 # FIXME
 def test_perform_websearch_serper():
@@ -1602,8 +1728,8 @@ def test_perform_websearch_serper():
     try:
         test_9 = perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 9: {test_9}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing serper searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing serper searches")
 
 # FIXME
 def test_perform_websearch_tavily():
@@ -1611,8 +1737,8 @@ def test_perform_websearch_tavily():
     try:
         test_10 = perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 10: {test_10}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing tavily searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing tavily searches")
 
 
 # FIXME
@@ -1621,8 +1747,8 @@ def test_perform_websearch_searx():
     try:
         test_11 = perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 11: {test_11}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing searx searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing searx searches")
 
 
 # FIXME
@@ -1631,8 +1757,8 @@ def test_perform_websearch_yandex():
     try:
         test_12 = perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
         print(f"Test 12: {test_12}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        print(f"Error performing yandex searches: {str(e)}")
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        print("Error performing yandex searches")
     pass
 
 #
@@ -1747,8 +1873,11 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
             raise ValueError(f"Error: Invalid Search Engine Name {search_engine}")
 
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing search results: {str(e)}"
-        logging.error(f"Error in process_web_search_results: {str(e)}")
+        error_text = str(e)
+        if error_text.startswith("Error: Invalid Search Engine Name "):
+            _set_processing_error(web_search_results_dict, error_text)
+        else:
+            _set_processing_error(web_search_results_dict, "Error processing search results")
 
     return web_search_results_dict
 
@@ -1777,14 +1906,10 @@ def parse_html_search_results_generic(soup):
 # https://oxylabs.io/blog/how-to-scrape-baidu-search-results
 def search_web_baidu(arg1, arg2, arg3):
     """Baidu provider stub with egress policy check."""
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        # Use canonical host for policy; actual API endpoint TBD
-        pol = evaluate_url_policy("https://www.baidu.com")
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(
+        "https://www.baidu.com",
+        source="websearch_baidu",
+    )
     return {"error": "Baidu provider not implemented"}
 
 
@@ -1882,14 +2007,7 @@ def search_web_brave(
 
     filtered_params = {key: value for key, value in params.items() if value is not None}
 
-    # Enforce SSRF/egress policy
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(search_url)
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(search_url, source="websearch_brave")
 
     # Response: https://api.search.brave.com/app/documentation/web-search/responses#WebSearchApiResponse
     response = brave_http_get(search_url, headers=headers, params=filtered_params)
@@ -1973,9 +2091,8 @@ def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
         if "mixed" in raw_results:
             output_dict["family_friendly"] = raw_results.get("family_friendly", True)
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error processing Brave results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Brave results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Brave results")
 
 def test_parse_brave_results():
     pass
@@ -2019,12 +2136,10 @@ def search_web_duckduckgo(
     results: list[dict[str, str]] = []
 
     ddg_url = "https://html.duckduckgo.com/html"
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        if not evaluate_url_policy(ddg_url).allowed:
-            return results
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        return results
+    _enforce_provider_outbound_policy(
+        ddg_url,
+        source="websearch_duckduckgo_html",
+    )
 
     headers = _websearch_browser_headers(restrict_encodings_for_requests=True)
     for _ in range(5):
@@ -2157,9 +2272,8 @@ def parse_duckduckgo_results(raw_results: dict, output_dict: dict) -> None:
         # Update total results count
         output_dict["total_results_found"] = len(output_dict["results"])
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error processing DuckDuckGo results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing DuckDuckGo results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing DuckDuckGo results")
 
 
 def extract_domain(url: str) -> str:
@@ -2321,14 +2435,7 @@ def search_web_google(
 
         logging.info(f"Prepared parameters for Google Search: {params}")
 
-        # Enforce SSRF/egress policy
-        try:
-            from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-            pol = evaluate_url_policy(search_url)
-            if not getattr(pol, 'allowed', False):
-                raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-        except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-            raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+        _enforce_provider_outbound_policy(search_url, source="websearch_google")
 
         # Make the API call with centralized client
         from tldw_Server_API.app.core.http_client import fetch_json
@@ -2483,9 +2590,8 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
                                    .get("startIndex", 1)
         }
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error processing Google results: {str(e)}")
-        output_dict["processing_error"] = f"Error processing Google results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Google results")
 
 
 def test_parse_google_results():
@@ -2519,14 +2625,7 @@ def search_web_kagi(query: str, limit: int = 10) -> dict:
     endpoint = search_url
     params = {"q": query, "limit": limit}
 
-    # Enforce SSRF/egress policy
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(endpoint)
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(endpoint, source="websearch_kagi")
 
     from tldw_Server_API.app.core.http_client import fetch_json
     data = fetch_json(method="GET", url=endpoint, headers=headers, params=params, timeout=15.0)
@@ -2590,8 +2689,8 @@ def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
                 if item.get("t") == 0
             ])
 
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        output_dict["processing_error"] = f"Error processing Kagi results: {str(e)}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(output_dict, "Error processing Kagi results")
 
 
 def test_parse_kagi_results():
@@ -2651,19 +2750,13 @@ def search_web_searx(
             params['format'] = 'json'
         search_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}?{urlencode(params)}"
         logging.info(f"Search URL: {search_url}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"Invalid URL configuration: {str(e)}"}
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        logging.error("Invalid URL configuration for Searx search")
+        return {"error": "Invalid URL configuration."}
 
     # Perform the search request
     try:
-        # Enforce SSRF/egress policy for Searx endpoint
-        try:
-            from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-            pol = evaluate_url_policy(search_url)
-            if not getattr(pol, 'allowed', False):
-                raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-        except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-            raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+        _enforce_provider_outbound_policy(search_url, source="websearch_searx")
 
         # Mimic browser headers via centralized UA builder
         headers = _websearch_browser_headers(accept_lang="en-US,en;q=0.5", restrict_encodings_for_requests=True)
@@ -2712,7 +2805,7 @@ def search_web_searx(
 
     except (NetworkError, RetryExhaustedError) as e:
         logging.error(f"Error searching for content: {str(e)}")
-        return {"error": f"There was an error searching for content. {str(e)}"}
+        return {"error": "There was an error searching for content."}
 
 def test_search_searx():
     # Use a different Searx instance to avoid rate limiting
@@ -2748,8 +2841,8 @@ def parse_searx_results(searx_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Searx results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Searx results")
 
 def test_parse_searx_results():
     pass
@@ -2873,13 +2966,7 @@ def search_web_serper(
     if tbs:
         payload["tbs"] = tbs
 
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(serper_api_url)
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(serper_api_url, source="websearch_serper")
 
     headers = {
         "Content-Type": "application/json",
@@ -2939,8 +3026,8 @@ def parse_serper_results(serper_search_results, web_search_results_dict):
             _append_item(knowledge_graph)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Serper results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Serper results")
 
 
 
@@ -2967,15 +3054,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
     if site_blacklist:
         payload["exclude_domains"] = site_blacklist
 
-    # Enforce SSRF/egress policy
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(tavily_api_url)
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        # Surface policy evaluation failure in a consistent way
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(tavily_api_url, source="websearch_tavily")
 
     # Perform the search request
     try:
@@ -2988,7 +3067,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
         data = fetch_json(method="POST", url=tavily_api_url, headers=headers, json=payload, timeout=15.0)
         return data
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": f"There was an error searching for content. {str(e)}"}
+        return {"error": "There was an error searching for content."}
 
 
 def test_search_tavily():
@@ -3025,8 +3104,8 @@ def parse_tavily_results(tavily_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Tavily results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Tavily results")
 
 
 def test_parse_tavily_results():
@@ -3067,14 +3146,7 @@ def search_web_exa(
     if site_blacklist:
         payload["excludeDomains"] = site_blacklist
 
-    # Enforce SSRF/egress policy
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(exa_api_url)
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(exa_api_url, source="websearch_exa")
 
     headers = {"Content-Type": "application/json", "x-api-key": exa_api_key}
     from tldw_Server_API.app.core.http_client import fetch_json
@@ -3110,8 +3182,8 @@ def parse_exa_results(exa_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Exa results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Exa results")
 
 
 def test_parse_exa_results():
@@ -3145,14 +3217,10 @@ def search_web_firecrawl(
     if date_range:
         payload["tbs"] = date_range
 
-    # Enforce SSRF/egress policy
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy(firecrawl_api_url)
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(
+        firecrawl_api_url,
+        source="websearch_firecrawl",
+    )
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {firecrawl_api_key}"}
     from tldw_Server_API.app.core.http_client import fetch_json
@@ -3198,8 +3266,8 @@ def parse_firecrawl_results(firecrawl_search_results, web_search_results_dict):
             web_search_results_dict["results"].append(processed)
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing Firecrawl results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing Firecrawl results")
 
 
 def test_parse_firecrawl_results():
@@ -3560,10 +3628,11 @@ def search_web_4chan(
         catalog_url = f"https://a.4cdn.org/{board}/catalog.json"
 
         try:
-            from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-            pol = evaluate_url_policy(catalog_url)
-            if not getattr(pol, "allowed", False):
-                raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
+            _enforce_provider_outbound_policy(
+                catalog_url,
+                source="websearch_4chan_catalog",
+                stage="board_catalog_request",
+            )
             catalog_payload = fetch_json(method="GET", url=catalog_url, headers=headers, timeout=15.0)
             pages = catalog_payload if isinstance(catalog_payload, list) else []
             successful_boards.add(board)
@@ -3600,10 +3669,11 @@ def search_web_4chan(
         if include_archived:
             archive_url = f"https://a.4cdn.org/{board}/archive.json"
             try:
-                from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-                pol = evaluate_url_policy(archive_url)
-                if not getattr(pol, "allowed", False):
-                    raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
+                _enforce_provider_outbound_policy(
+                    archive_url,
+                    source="websearch_4chan_archive",
+                    stage="board_archive_request",
+                )
                 archive_payload = fetch_json(method="GET", url=archive_url, headers=headers, timeout=15.0)
                 archive_ids = archive_payload if isinstance(archive_payload, list) else []
                 successful_boards.add(board)
@@ -3616,9 +3686,12 @@ def search_web_4chan(
 
                     thread_api_url = f"https://a.4cdn.org/{board}/thread/{thread_id}.json"
                     try:
-                        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-                        pol = evaluate_url_policy(thread_api_url)
-                        if not getattr(pol, "allowed", False):
+                        decision = _provider_outbound_policy_decision(
+                            thread_api_url,
+                            source="websearch_4chan_thread",
+                            stage="thread_request",
+                        )
+                        if not decision.allowed:
                             continue
                     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
                         continue
@@ -3725,8 +3798,8 @@ def parse_4chan_results(fourchan_search_results, web_search_results_dict):
             web_search_results_dict["warnings"] = warnings
 
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
-        web_search_results_dict["processing_error"] = f"Error processing 4chan results: {e}"
+    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
+        _set_processing_error(web_search_results_dict, "Error processing 4chan results")
 
 
 
@@ -3739,13 +3812,10 @@ def parse_4chan_results(fourchan_search_results, web_search_results_dict):
 # https://github.com/yandex-cloud/cloudapi/blob/master/yandex/cloud/searchapi/v2/search_query.proto
 def search_web_yandex():
     """Yandex provider stub with egress policy check."""
-    try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        pol = evaluate_url_policy("https://yandex.cloud")
-        if not getattr(pol, 'allowed', False):
-            raise ValueError(f"Egress denied: {getattr(pol, 'reason', 'blocked')}")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as _e:
-        raise ValueError(f"Egress policy evaluation failed: {_e}") from _e
+    _enforce_provider_outbound_policy(
+        "https://yandex.cloud",
+        source="websearch_yandex",
+    )
     return {"error": "Yandex provider not implemented"}
 
 

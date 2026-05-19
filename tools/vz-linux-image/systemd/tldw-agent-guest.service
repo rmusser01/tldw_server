@@ -1,0 +1,14 @@
+[Unit]
+Description=tldw guest agent
+Requires=workspace.mount
+After=workspace.mount
+
+[Service]
+Type=simple
+Environment=TLDW_AGENT_GUEST_WORKSPACE_ROOT=/workspace
+PassEnvironment=TLDW_AGENT_GUEST_VM_ID TLDW_AGENT_GUEST_CONNECTION_TOKEN TLDW_AGENT_GUEST_HOST_VSOCK_PORT TLDW_AGENT_GUEST_WORKSPACE_ROOT
+ExecStart=/usr/local/bin/tldw-agent-guest-wrapper
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

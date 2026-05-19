@@ -26,6 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileUpdateRequest,
     UserProfileUpdateResponse,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.utils.profile_errors import classify_profile_update_skips
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -102,8 +103,21 @@ def _get_bulk_confirm_threshold() -> int:
                 if raw_cfg:
                     return max(1, int(raw_cfg))
     except Exception as threshold_error:
-        logger.debug("Failed to load bulk-update threshold from config; using default", exc_info=threshold_error)
+        logger.bind(error_type=type(threshold_error).__name__).debug(
+            "Failed to load bulk-update threshold from config; using default"
+        )
     return 1000
+
+
+def _coerce_bulk_candidate_user_id(user: Any) -> int | None:
+    """Return a candidate user id, or None when a malformed repo row should be skipped."""
+    try:
+        return int(user.get("id"))
+    except Exception as user_id_error:
+        logger.bind(error_type=type(user_id_error).__name__).debug(
+            "Skipping bulk user candidate with invalid id"
+        )
+        return None
 
 
 def _profile_error_response(
@@ -462,10 +476,10 @@ async def _load_bulk_user_candidates(
             org_ids=org_ids,
         )
         for user in users:
-            try:
-                target_ids.add(int(user.get("id")))
-            except Exception:
+            user_id = _coerce_bulk_candidate_user_id(user)
+            if user_id is None:
                 continue
+            target_ids.add(user_id)
         offset += limit
         if len(target_ids) >= total:
             break
@@ -553,6 +567,12 @@ async def list_user_profiles(
         page=page,
         limit=limit,
         pages=pages,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=limit,
+            total=total,
+            total_pages=pages,
+        ),
     )
 
     try:
@@ -592,7 +612,9 @@ async def list_user_profiles(
                     timeout_ms,
                 )
     except Exception as telemetry_error:
-        logger.debug("Bulk profile update telemetry failed; continuing", exc_info=telemetry_error)
+        logger.bind(error_type=type(telemetry_error).__name__).debug(
+            "Bulk profile update telemetry failed; continuing"
+        )
 
     audit_metadata = {
         "filters": {
@@ -691,7 +713,10 @@ async def get_user_profile(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to build profile for user {user_id}: {exc}")
+        logger.bind(error_type=type(exc).__name__).error(
+            "Failed to build profile for user {}",
+            user_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user profile",
@@ -963,7 +988,10 @@ async def bulk_update_user_profiles(
                 )
             )
         except Exception as exc:
-            logger.error("Bulk profile update failed for user {}: {}", user_id, exc)
+            logger.bind(error_type=type(exc).__name__).error(
+                "Bulk profile update failed for user {}",
+                user_id,
+            )
             failed_count += 1
             results.append(
                 UserProfileBulkUpdateUserResult(
@@ -981,7 +1009,9 @@ async def bulk_update_user_profiles(
                 labels={"dry_run": str(payload.dry_run).lower()},
             )
     except Exception as metrics_error:
-        logger.debug("Bulk profile update metrics emission failed; continuing", exc_info=metrics_error)
+        logger.bind(error_type=type(metrics_error).__name__).debug(
+            "Bulk profile update metrics emission failed; continuing"
+        )
 
     response = UserProfileBulkUpdateResponse(
         total_targets=total_targets,

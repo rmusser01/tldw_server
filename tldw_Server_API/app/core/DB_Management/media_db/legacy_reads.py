@@ -2,17 +2,156 @@
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import sqlite3
+import threading
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Metrics.stt_metrics import emit_stt_transcript_read_path_total
+from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     MediaDbLike,
     require_media_database_like,
 )
+
+_LATEST_RUN_FALLBACK_CACHE_LIMIT = 1024
+_latest_run_fallback_cache_lock = threading.Lock()
+_latest_run_fallback_cache: set[tuple[str, int, str, int | None]] = set()
+_latest_run_fallback_cache_order: deque[tuple[str, int, str, int | None]] = deque()
+
+
+def _ordered_transcripts_query() -> str:
+    return """
+        SELECT t.*
+        FROM Transcripts t
+        JOIN Media m ON t.media_id = m.id
+        WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0
+        ORDER BY
+            CASE
+                WHEN m.latest_transcription_run_id IS NOT NULL
+                 AND t.transcription_run_id = m.latest_transcription_run_id THEN 0
+                ELSE 1
+            END,
+            CASE WHEN t.transcription_run_id IS NULL THEN 1 ELSE 0 END,
+            t.transcription_run_id DESC,
+            t.created_at DESC,
+            t.id DESC
+    """
+
+
+def _fallback_reason_label(latest_run_id: int | None) -> str:
+    return "missing_pointer" if latest_run_id is None else "dangling_pointer"
+
+
+def _should_emit_latest_run_fallback(
+    *,
+    db_instance: MediaDbLike,
+    media_id: int,
+    reason: str,
+    latest_run_id: int | None,
+) -> bool:
+    cache_key = (
+        str(getattr(db_instance, "db_path_str", "")),
+        int(media_id),
+        str(reason),
+        int(latest_run_id) if latest_run_id is not None else None,
+    )
+    with _latest_run_fallback_cache_lock:
+        if cache_key in _latest_run_fallback_cache:
+            return False
+        if len(_latest_run_fallback_cache_order) >= _LATEST_RUN_FALLBACK_CACHE_LIMIT:
+            evicted = _latest_run_fallback_cache_order.popleft()
+            _latest_run_fallback_cache.discard(evicted)
+        _latest_run_fallback_cache_order.append(cache_key)
+        _latest_run_fallback_cache.add(cache_key)
+        return True
+
+
+def _emit_latest_run_fallback_telemetry(
+    db_instance: MediaDbLike,
+    *,
+    media_id: int,
+    latest_run_id: int | None,
+    selected_run_id: int | None,
+) -> None:
+    reason = _fallback_reason_label(latest_run_id)
+    if not _should_emit_latest_run_fallback(
+        db_instance=db_instance,
+        media_id=media_id,
+        reason=reason,
+        latest_run_id=latest_run_id,
+    ):
+        return
+    logger.warning(
+        "Fell back resolving latest transcript run: media_id={}, reason={}, requested_run_id={}, selected_run_id={}",
+        media_id,
+        reason,
+        latest_run_id,
+        selected_run_id,
+    )
+    increment_counter(
+        "app_warning_events_total",
+        labels={
+            "component": "media_db",
+            "event": "latest_transcript_run_fallback",
+            "reason": reason,
+        },
+    )
+
+
+def _resolve_latest_transcript_row(
+    db_instance: MediaDbLike,
+    conn: Any,
+    media_id: int,
+) -> dict[str, Any] | None:
+    media_row = db_instance._fetchone_with_connection(
+        conn,
+        """
+        SELECT latest_transcription_run_id
+        FROM Media
+        WHERE id = ? AND deleted = 0
+        """,
+        (media_id,),
+    )
+    if not media_row:
+        return None
+
+    latest_run_id = media_row.get("latest_transcription_run_id")
+    if latest_run_id is not None:
+        latest_row = db_instance._fetchone_with_connection(
+            conn,
+            """
+            SELECT t.*
+            FROM Transcripts t
+            JOIN Media m ON t.media_id = m.id
+            WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0 AND t.transcription_run_id = ?
+            ORDER BY t.created_at DESC
+            LIMIT 1
+            """,
+            (media_id, latest_run_id),
+        )
+        if latest_row:
+            emit_stt_transcript_read_path_total(path="latest_run")
+            return latest_row
+
+    fallback_row = db_instance._fetchone_with_connection(
+        conn,
+        f"{_ordered_transcripts_query()} LIMIT 1",  # nosec B608
+        (media_id,),
+    )
+    if fallback_row is not None:
+        emit_stt_transcript_read_path_total(path="legacy_fallback")
+        _emit_latest_run_fallback_telemetry(
+            db_instance,
+            media_id=media_id,
+            latest_run_id=latest_run_id,
+            selected_run_id=fallback_row.get("transcription_run_id"),
+        )
+    return fallback_row
 
 
 def get_media_transcripts(
@@ -25,14 +164,12 @@ def get_media_transcripts(
         error_message="db_instance required.",
     )
     try:
-        query = (
-            "SELECT t.* FROM Transcripts t "
-            "JOIN Media m ON t.media_id = m.id "
-            "WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0 "
-            "ORDER BY t.created_at DESC"
-        )
         with db_instance.transaction() as conn:
-            rows = db_instance._fetchall_with_connection(conn, query, (media_id,))
+            rows = db_instance._fetchall_with_connection(
+                conn,
+                _ordered_transcripts_query(),
+                (media_id,),
+            )
     except (DatabaseError, sqlite3.Error) as exc:
         logger.exception(
             f"Error getting transcripts media {media_id} '{db_instance.db_path_str}'"
@@ -52,14 +189,8 @@ def get_latest_transcription(
         error_message="db_instance required.",
     )
     try:
-        query = (
-            "SELECT t.transcription FROM Transcripts t "
-            "JOIN Media m ON t.media_id = m.id "
-            "WHERE t.media_id = ? AND t.deleted = 0 AND m.deleted = 0 "
-            "ORDER BY t.created_at DESC LIMIT 1"
-        )
         with db_instance.transaction() as conn:
-            result = db_instance._fetchone_with_connection(conn, query, (media_id,))
+            result = _resolve_latest_transcript_row(db_instance, conn, media_id)
         raw = (result or {}).get("transcription")
         if raw is None:
             return None

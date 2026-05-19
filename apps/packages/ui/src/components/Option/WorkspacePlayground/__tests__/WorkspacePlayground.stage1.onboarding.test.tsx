@@ -1,8 +1,20 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspacePlayground } from "../index"
 
 const ONBOARDING_KEY = "tldw:workspace-playground:onboarding-dismissed:v1"
+const {
+  onboardingStorageState,
+  mockWorkspaceStorageGetItem,
+  mockWorkspaceStorageSetItem,
+} = vi.hoisted(() => ({
+  onboardingStorageState: {
+    value: undefined as string | undefined,
+  },
+  mockWorkspaceStorageGetItem: vi.fn(async (_key: string) => null as string | null),
+  mockWorkspaceStorageSetItem: vi.fn(async (_key: string, _value: string) => undefined),
+}))
 
 const mockStartTutorial = vi.fn()
 
@@ -37,13 +49,13 @@ const testState = {
     title: "",
     content: "",
     keywords: [] as string[],
-    isDirty: false
+    isDirty: false,
   },
-  workspaceChatSessions: {} as Record<string, { messages: any[] }>,
+  workspaceChatSessions: {} as Record<string, { messages: unknown[] }>,
   focusSourceById: vi.fn(() => true),
   focusChatMessageById: vi.fn(() => true),
   focusWorkspaceNote: vi.fn(),
-  setSourceStatusByMediaId: vi.fn()
+  setSourceStatusByMediaId: vi.fn(),
 }
 
 vi.mock("react-i18next", () => ({
@@ -59,61 +71,76 @@ vi.mock("react-i18next", () => ({
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
-    }
-  })
+    },
+  }),
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => testState.isMobile
+  useMobile: () => testState.isMobile,
 }))
 
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState)
+    selector(testState),
+  createWorkspaceStorage: () => ({
+    getItem: (key: string) => {
+      mockWorkspaceStorageGetItem.mockImplementationOnce(async (requestedKey: string) =>
+        requestedKey === ONBOARDING_KEY ? onboardingStorageState.value ?? null : null
+      )
+      return mockWorkspaceStorageGetItem(key)
+    },
+    setItem: (key: string, value: string) => {
+      if (key === ONBOARDING_KEY) {
+        onboardingStorageState.value = value
+      }
+      return mockWorkspaceStorageSetItem(key, value)
+    },
+    removeItem: vi.fn(),
+  }),
 }))
 
 vi.mock("@/store/tutorials", () => ({
   useTutorialStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ startTutorial: mockStartTutorial })
+    selector({ startTutorial: mockStartTutorial }),
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    getMediaDetails: vi.fn().mockResolvedValue({})
-  }
+    getMediaDetails: vi.fn().mockResolvedValue({}),
+  },
 }))
 
 vi.mock("@/services/background-proxy", () => ({
-  bgRequest: vi.fn().mockResolvedValue([])
+  bgRequest: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock("@/utils/workspace-playground-prefill", () => ({
   consumeWorkspacePlaygroundPrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue(""),
 }))
 
 vi.mock("../WorkspaceHeader", () => ({
-  WorkspaceHeader: () => <div data-testid="workspace-header" />
+  WorkspaceHeader: () => <div data-testid="workspace-header" />,
 }))
 
 vi.mock("../SourcesPane", () => ({
-  SourcesPane: () => <div data-testid="workspace-sources-pane">Sources</div>
+  SourcesPane: () => <div data-testid="workspace-sources-pane">Sources</div>,
 }))
 
 vi.mock("../ChatPane", () => ({
-  ChatPane: () => <div data-testid="workspace-chat-pane">Chat</div>
+  ChatPane: () => <div data-testid="workspace-chat-pane">Chat</div>,
 }))
 
 vi.mock("../StudioPane", () => ({
-  StudioPane: () => <div data-testid="workspace-studio-pane">Studio</div>
+  StudioPane: () => <div data-testid="workspace-studio-pane">Studio</div>,
 }))
 
 vi.mock("../WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: () => <div data-testid="workspace-status-bar" />
+  WorkspaceStatusBar: () => <div data-testid="workspace-status-bar" />,
 }))
 
-if (!(globalThis as any).ResizeObserver) {
-  ;(globalThis as any).ResizeObserver = class ResizeObserver {
+if (!(globalThis as { ResizeObserver?: unknown }).ResizeObserver) {
+  ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = class ResizeObserver {
     observe() {}
     unobserve() {}
     disconnect() {}
@@ -123,7 +150,7 @@ if (!(globalThis as any).ResizeObserver) {
 describe("WorkspacePlayground stage 1 onboarding walkthrough", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    window.localStorage.removeItem(ONBOARDING_KEY)
+    onboardingStorageState.value = undefined
     testState.isMobile = false
     testState.storeHydrated = true
     testState.workspaceId = "workspace-1"
@@ -138,39 +165,56 @@ describe("WorkspacePlayground stage 1 onboarding walkthrough", () => {
       title: "",
       content: "",
       keywords: [],
-      isDirty: false
+      isDirty: false,
     }
     testState.workspaceChatSessions = {}
   })
 
-  it("auto-starts the Joyride guided tour for first-time users", async () => {
+  it("shows an opt-in tour prompt for first-time users instead of auto-starting", async () => {
     render(<WorkspacePlayground />)
 
     await waitFor(() => {
-      expect(mockStartTutorial).toHaveBeenCalledWith(
-        "workspace-playground-basics"
-      )
+      expect(screen.getByText("Start tour")).toBeInTheDocument()
     })
-    // Overlay is no longer shown — tour uses Joyride tooltips instead
-    expect(
-      screen.queryByTestId("workspace-onboarding-overlay")
-    ).not.toBeInTheDocument()
+    expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 
-  it("persists dismissal so the tour does not auto-start again", async () => {
+  it("starts the tour and persists dismissal when user clicks Start tour", async () => {
+    const user = userEvent.setup()
     render(<WorkspacePlayground />)
 
+    const startButton = await screen.findByText("Start tour")
+    await user.click(startButton)
+
+    expect(mockStartTutorial).toHaveBeenCalledWith("workspace-playground-basics")
     await waitFor(() => {
-      expect(mockStartTutorial).toHaveBeenCalled()
+      expect(mockWorkspaceStorageSetItem).toHaveBeenCalledWith(ONBOARDING_KEY, "1")
     })
-    expect(window.localStorage.getItem(ONBOARDING_KEY)).toBe("1")
+    expect(onboardingStorageState.value).toBe("1")
+    expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
   })
 
-  it("does not auto-start the tour when already dismissed", () => {
-    window.localStorage.setItem(ONBOARDING_KEY, "1")
+  it("persists dismissal without starting tour when user clicks Dismiss", async () => {
+    const user = userEvent.setup()
+    render(<WorkspacePlayground />)
+
+    const dismissButton = await screen.findByText("Dismiss")
+    await user.click(dismissButton)
+
+    expect(mockStartTutorial).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(mockWorkspaceStorageSetItem).toHaveBeenCalledWith(ONBOARDING_KEY, "1")
+    })
+    expect(onboardingStorageState.value).toBe("1")
+    expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
+  })
+
+  it("does not show tour prompt when already dismissed", () => {
+    onboardingStorageState.value = "1"
 
     render(<WorkspacePlayground />)
 
+    expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
     expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 

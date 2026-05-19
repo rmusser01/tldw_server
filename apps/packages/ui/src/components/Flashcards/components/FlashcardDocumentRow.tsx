@@ -5,6 +5,7 @@ import type { TextAreaRef } from "antd/es/input/TextArea"
 import type { Deck, Flashcard, FlashcardBulkUpdateItem, FlashcardBulkUpdateResponse } from "@/services/flashcards"
 import { getFlashcardSourceMeta } from "../utils/source-reference"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
+import { formatDeckDisplayName } from "../utils/deck-display"
 import { useFlashcardDocumentRowState } from "../hooks/useFlashcardDocumentRowState"
 import type { DocumentQueryFilterContext } from "../utils/document-cache-policy"
 import { FlashcardImageInsertButton } from "./FlashcardImageInsertButton"
@@ -81,7 +82,10 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
   })
   const deckLabel =
     savedCard.deck_id != null
-      ? decks.find((deck) => deck.id === savedCard.deck_id)?.name || `Deck ${savedCard.deck_id}`
+      ? formatDeckDisplayName(
+          decks.find((deck) => deck.id === savedCard.deck_id),
+          `Deck ${savedCard.deck_id}`
+        )
       : "No deck"
   const sourceMeta = getFlashcardSourceMeta(savedCard)
 
@@ -304,7 +308,7 @@ export const FlashcardDocumentRow: React.FC<FlashcardDocumentRowProps> = ({
               allowClear
               value={draft.deck_id ?? undefined}
               options={decks.map((deck) => ({
-                label: deck.name,
+                label: formatDeckDisplayName(deck, `Deck ${deck.id}`),
                 value: deck.id
               }))}
               placeholder="Select deck"

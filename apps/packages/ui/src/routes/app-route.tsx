@@ -29,6 +29,11 @@ import {
   normalizePendingCompanionCapture,
   writePendingCompanionCapture
 } from "@/services/companion-capture"
+import {
+  CLIPPER_CAPTURE_MESSAGE_TYPE,
+  normalizePendingClipDraft,
+  writePendingClipDraft
+} from "@/services/web-clipper/pending-draft"
 import { HEADER_SHORTCUTS_EXPANDED_SETTING } from "@/services/settings/ui-settings"
 import { setSetting } from "@/services/settings/registry"
 import OptionLayout from "~/components/Layouts/Layout"
@@ -388,22 +393,32 @@ export const RouteShell = ({
       payload?: unknown
     }) => {
       if (message?.from !== "background") return
-      if (message?.type !== COMPANION_CAPTURE_MESSAGE_TYPE) return
-      const payload =
-        normalizePendingCompanionCapture({
-          ...(typeof message?.payload === "object" && message.payload !== null
-            ? (message.payload as Record<string, unknown>)
-            : {}),
-          selectionText:
-            (message?.text || "").trim() ||
-            String(
-              (message?.payload as { selectionText?: string } | undefined)
-                ?.selectionText || ""
-            ).trim()
-        }) || null
-      if (!payload) return
-      writePendingCompanionCapture(payload)
-      navigate("/companion")
+      if (message?.type === COMPANION_CAPTURE_MESSAGE_TYPE) {
+        const payload =
+          normalizePendingCompanionCapture({
+            ...(typeof message?.payload === "object" && message.payload !== null
+              ? (message.payload as Record<string, unknown>)
+              : {}),
+            selectionText:
+              (message?.text || "").trim() ||
+              String(
+                (message?.payload as { selectionText?: string } | undefined)
+                  ?.selectionText || ""
+              ).trim()
+          }) || null
+        if (!payload) return
+        writePendingCompanionCapture(payload)
+        navigate("/companion")
+        return Promise.resolve({ handled: true })
+      }
+
+      if (message?.type === CLIPPER_CAPTURE_MESSAGE_TYPE) {
+        const payload = normalizePendingClipDraft(message?.payload) || null
+        if (!payload) return
+        writePendingClipDraft(payload)
+        navigate("/clipper")
+        return Promise.resolve({ handled: true })
+      }
     }
 
     onMessage.addListener(listener)

@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.config import (
     resolve_acp_run_first_presentation_variant,
     resolve_acp_run_first_provider_allowlist,
     resolve_acp_run_first_rollout_mode,
+    resolve_run_first_cohort_label,
 )
 
 
@@ -126,14 +127,13 @@ class MCPAdapter(ProtocolAdapter):
                     provider_allowlist=resolve_acp_run_first_provider_allowlist(),
                     presentation_variant=resolve_acp_run_first_presentation_variant(),
                 )
-                rollout_token = str(rollout_mode or "").strip().lower()
                 run_first_metrics_context = {
                     "agent_type": "mcp",
                     "presentation_variant": presented_tools.presentation_variant,
-                    "cohort": (
-                        "gated"
-                        if rollout_token == "gated"  # nosec B105 - rollout label, not a secret
-                        else "control"
+                    "cohort": resolve_run_first_cohort_label(
+                        rollout_mode,
+                        eligible=presented_tools.eligible,
+                        ineligible_reason=presented_tools.ineligible_reason,
                     ),
                     "provider": provider or "unknown",
                     "model": model or "unknown",

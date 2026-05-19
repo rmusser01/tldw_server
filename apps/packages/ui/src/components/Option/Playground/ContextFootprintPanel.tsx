@@ -1,5 +1,4 @@
 import React from "react"
-import type { TFunction } from "i18next"
 
 export type ContextFootprintRow = {
   id: string
@@ -8,7 +7,7 @@ export type ContextFootprintRow = {
 }
 
 type Props = {
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
   rows: ContextFootprintRow[]
   nonMessageContextPercent: number | null
   showNonMessageContextWarning: boolean

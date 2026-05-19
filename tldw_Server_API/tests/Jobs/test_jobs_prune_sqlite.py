@@ -132,3 +132,35 @@ def test_jobs_prune_filters_scope_sqlite(monkeypatch, tmp_path):
         r = client.post("/api/v1/jobs/prune", json=body)
         assert r.status_code == 200
         assert r.json()["deleted"] == 0
+
+
+def test_jobs_prune_sanitizes_generic_failure(monkeypatch, tmp_path):
+
+
+    monkeypatch.chdir(tmp_path)
+    _set_env(monkeypatch)
+
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    reset_settings()
+    from tldw_Server_API.app.main import app
+
+    def boom(self, **_kwargs):
+        raise RuntimeError("jobs prune backend exploded")
+
+    monkeypatch.setattr(JobManager, "prune_jobs", boom)
+
+    headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+    with TestClient(app, headers=headers) as client:
+        r = client.post(
+            "/api/v1/jobs/prune",
+            json={
+                "statuses": ["completed"],
+                "older_than_days": 1,
+                "domain": "chatbooks",
+                "queue": "default",
+                "job_type": "export",
+                "dry_run": True,
+            },
+        )
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Prune failed"

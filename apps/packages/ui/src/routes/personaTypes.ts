@@ -4,6 +4,7 @@ import type {
   SetupReviewSummary,
   SetupHandoffRecommendedAction
 } from "@/components/PersonaGarden/PersonaSetupHandoffCard"
+import type { PersonaBuddySummary } from "@/types/persona-buddy"
 import type { PersonaGardenTabKey } from "@/utils/persona-garden-route"
 import type { PersonaSetupState, PersonaSetupStep } from "@/hooks/usePersonaSetupWizard"
 import {
@@ -15,6 +16,12 @@ export type PersonaInfo = {
   name: string
   description?: string | null
   voice?: string | null
+  avatar_url?: string | null
+  system_prompt?: string | null
+  greeting?: string | null
+  extensions?: Record<string, unknown> | null
+  buddy_summary?: PersonaBuddySummary | null
+  metadata?: Record<string, unknown> | null
 }
 
 export type PersonaPlanStep = {
@@ -64,6 +71,7 @@ export type PersonaCompanionUsage = {
 export type PersonaProfileResponse = {
   id?: string
   version?: number
+  buddy_summary?: PersonaBuddySummary | null
   use_persona_state_context_default?: boolean
   voice_defaults?: PersonaVoiceDefaults | null
   setup?: PersonaSetupState | null
@@ -122,6 +130,11 @@ export type SetupCommandDetourState = {
 export type SetupLiveDetourState = {
   source: "live_unavailable" | "live_failure"
   lastText: string
+}
+
+export type SetupVisualDetourState = {
+  source: "wizard_optional_card"
+  returnStep: PersonaSetupStep
 }
 
 export const DEFAULT_SETUP_REVIEW_SUMMARY: SetupReviewSummary = {

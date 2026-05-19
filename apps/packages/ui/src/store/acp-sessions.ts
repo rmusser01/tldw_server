@@ -862,12 +862,18 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
             id,
             {
               ...session,
-              // Don't persist updates (they can be large)
-              updates: [],
+              // Keep the most recent 50 updates for context after refresh
+              updates: session.updates.slice(-50),
               // Don't persist pending permissions (they expire)
               pendingPermissions: [],
               // Reset state to disconnected (connection needs re-establishment)
               state: "disconnected" as const,
+              // Don't persist sensitive SSH connection details
+              sshWsUrl: null,
+              sshUser: null,
+              // Don't persist sandbox session IDs (they expire)
+              sandboxSessionId: null,
+              sandboxRunId: null,
             },
           ])
         ),

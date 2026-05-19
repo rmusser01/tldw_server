@@ -12,6 +12,7 @@ import { Check, X, LayoutGrid } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { isBillingEnabled } from '@/lib/billing';
 import type { FeatureRegistryEntry, Plan } from '@/types';
+import { logger } from '@/lib/logger';
 
 export default function FeatureRegistryPage() {
   const [features, setFeatures] = useState<FeatureRegistryEntry[]>([]);
@@ -34,7 +35,7 @@ export default function FeatureRegistryPage() {
       setPlans(Array.isArray(plansData) ? plansData : []);
       setDirty(false);
     } catch (err: unknown) {
-      console.error('Failed to load feature registry:', err);
+      logger.error('Failed to load feature registry', { component: 'FeatureRegistryPage', error: err instanceof Error ? err.message : String(err) });
       showError('Failed to load data', err instanceof Error ? err.message : 'Please try again.');
     } finally {
       setLoading(false);
@@ -84,7 +85,7 @@ export default function FeatureRegistryPage() {
       success('Changes Saved', 'Feature registry has been updated.');
       setDirty(false);
     } catch (err: unknown) {
-      console.error('Failed to save feature registry:', err);
+      logger.error('Failed to save feature registry', { component: 'FeatureRegistryPage', error: err instanceof Error ? err.message : String(err) });
       showError('Failed to save', err instanceof Error ? err.message : 'Please try again.');
     } finally {
       setSaving(false);

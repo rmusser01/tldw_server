@@ -2,6 +2,7 @@ import { chromium } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { resolveExtensionHeadlessMode } from './extension-common'
 import { resolveExtensionId } from './extension-id'
 import { prioritizeExtensionBuildCandidates } from './extension-paths'
 
@@ -250,10 +251,13 @@ export async function launchWithBuiltExtension(
     process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
   )
   const channel = resolvePlaywrightChannel()
+  const headless = resolveExtensionHeadlessMode()
   const context = await chromium.launchPersistentContext(userDataDir, {
     timeout: effectiveLaunchTimeoutMs,
-    headless: !!process.env.CI,
+    headless,
     channel,
+    acceptDownloads: true,
+    ignoreDefaultArgs: ['--disable-extensions'],
     env: {
       ...process.env,
       HOME: homeDir
@@ -262,6 +266,7 @@ export async function launchWithBuiltExtension(
     args: [
       `--disable-extensions-except=${extensionPath}`,
       `--load-extension=${extensionPath}`,
+      '--no-crashpad',
       '--disable-crash-reporter',
       '--crash-dumps-dir=/tmp'
     ]

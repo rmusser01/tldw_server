@@ -36,16 +36,16 @@ export function useTheme() {
     [isDark, themeDefinition]
   )
 
-  // Apply CSS custom properties when tokens change
+  // Apply CSS custom properties when tokens or any theme section changes
   useEffect(() => {
     if (themeDefinition.id === "default") {
       // For the default theme, remove inline overrides so the stylesheet values apply.
       // This ensures backward compatibility.
       clearThemeTokens()
     } else {
-      applyThemeTokens(tokens)
+      applyThemeTokens(tokens, themeDefinition)
     }
-  }, [tokens, themeDefinition.id])
+  }, [tokens, themeDefinition])
 
   // Clean up inline styles if component unmounts (e.g., during HMR)
   useEffect(() => {
@@ -56,8 +56,8 @@ export function useTheme() {
 
   // Build Ant Design theme config
   const antdTheme: ThemeConfig = useMemo(
-    () => buildAntdThemeConfig(tokens, isDark),
-    [tokens, isDark]
+    () => buildAntdThemeConfig(tokens, isDark, themeDefinition.typography, themeDefinition.shape, themeDefinition.layout),
+    [tokens, isDark, themeDefinition.typography, themeDefinition.shape, themeDefinition.layout]
   )
 
   const setThemePresetId = useCallback(

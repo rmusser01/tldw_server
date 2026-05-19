@@ -13,6 +13,8 @@ from pydantic import ValidationError
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -24,7 +26,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -391,18 +393,16 @@ async def send_message(
     except ConflictError as e:
         # Optimistic lock or state conflict during creation
         logger.warning(f"Conflict sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except InputError as e:
-        # Map DB validation errors to appropriate HTTP codes
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum size" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
-        logger.warning(f"Input error sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except InputError as exc:
+        logger.warning(f"Input error sending message to chat {chat_id}: {exc}")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to send message",
+            payload_too_large_substrings=("exceeds maximum size",),
+        ) from exc
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to send message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error sending message to chat {chat_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -621,12 +621,23 @@ async def get_chat_messages(
                         # No tools: append base message as-is
                         formatted_messages.append(base_message)
 
+                pagination = build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(paginated),
+                )
                 resp_obj: dict[str, Any] = {
                     "character_name": character.get('name') if character else None,
                     "character_id": character_id,
                     "chat_id": chat_id,
                     "messages": formatted_messages,
                     "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "pagination": pagination.model_dump(mode="json"),
+                    "has_more": pagination.has_more,
+                    "next_offset": pagination.next_offset,
                     "usage_instructions": "Use these messages with POST /api/v1/chat/completions"
                 }
                 if include_metadata and metadata_extra_map:
@@ -660,7 +671,13 @@ async def get_chat_messages(
                 messages=built_messages,
                 total=total_count,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                pagination=build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(built_messages),
+                ),
             )
 
             # Add character context as additional field
@@ -723,7 +740,13 @@ async def get_chat_messages(
             messages=built_messages,
             total=total_count,
             limit=limit,
-            offset=offset
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(built_messages),
+            ),
         )
 
     except HTTPException:
@@ -910,10 +933,9 @@ async def edit_message(
         raise
     except ConflictError as e:
         logger.warning(f"Conflict editing message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error editing message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to edit message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error editing message {message_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -994,10 +1016,9 @@ async def delete_message(
         raise
     except ConflictError as e:
         logger.warning(f"Conflict deleting message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error deleting message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error deleting message {message_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -1016,6 +1037,7 @@ async def search_messages(
     chat_id: str = Path(..., description="Chat session ID"),
     query: str = Query(..., description="Search query", min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Offset for search pagination"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1028,6 +1050,7 @@ async def search_messages(
         chat_id: Chat session ID
         query: Search query string
         limit: Maximum number of results
+        offset: Offset for search pagination
         db: Database instance
         current_user: Authenticated user
 
@@ -1058,17 +1081,27 @@ async def search_messages(
             query,
             character_name_for_placeholders=character_name,
             user_name_for_placeholders=user_name,
-            limit=limit,
+            limit=limit + 1,
+            offset=offset,
         )
 
         if not results:
             results = []
+        has_more = len(results) > limit
+        page_results = results[:limit]
 
         return MessageListResponse(
-            messages=[_convert_db_message_to_response(msg) for msg in results],
-            total=len(results),
+            messages=[_convert_db_message_to_response(msg) for msg in page_results],
+            total=len(page_results),
             limit=limit,
-            offset=0
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=None,
+                limit=limit,
+                offset=offset,
+                count=len(page_results),
+                has_more=has_more,
+            ),
         )
 
     except HTTPException:

@@ -18,11 +18,13 @@ type NoteQuickSaveModalProps = {
   helperText?: string
   titleRequiredText?: string
   generateFlashcardsText?: string
+  createStudyPackText?: string
   onTitleChange: (value: string) => void
   onContentChange: (value: string) => void
   onCancel: () => void
   onSave: () => void
   onGenerateFlashcards?: () => void
+  onCreateStudyPack?: () => void
 }
 
 const NoteQuickSaveModal: React.FC<NoteQuickSaveModalProps> = ({
@@ -42,11 +44,13 @@ const NoteQuickSaveModal: React.FC<NoteQuickSaveModalProps> = ({
   helperText,
   titleRequiredText,
   generateFlashcardsText,
+  createStudyPackText,
   onTitleChange,
   onContentChange,
   onCancel,
   onSave,
-  onGenerateFlashcards
+  onGenerateFlashcards,
+  onCreateStudyPack
 }) => {
   return (
     <Modal
@@ -67,6 +71,18 @@ const NoteQuickSaveModal: React.FC<NoteQuickSaveModalProps> = ({
                 data-testid="note-quick-save-generate-flashcards"
               >
                 {generateFlashcardsText || "Generate flashcards"}
+              </Button>
+            ]
+          : []),
+        ...(onCreateStudyPack
+          ? [
+              <Button
+                key="create-study-pack"
+                onClick={onCreateStudyPack}
+                disabled={loading || !content.trim()}
+                data-testid="note-quick-save-create-study-pack"
+              >
+                {createStudyPackText || "Create study pack"}
               </Button>
             ]
           : []),

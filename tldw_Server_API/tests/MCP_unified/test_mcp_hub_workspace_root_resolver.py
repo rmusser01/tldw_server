@@ -58,9 +58,9 @@ async def test_workspace_root_resolver_prefers_session_root() -> None:
 
     resolver = McpHubWorkspaceRootResolver(
         sandbox_service=_FakeSandboxService(
-            session_roots={"sess-1": "/tmp/mcp-hub-workspace/session-root"},
+            session_roots={"sess-1": "/tmp/mcp-hub-workspace/session-root"},  # nosec B108
             session_owners={"sess-1": "7"},
-            workspace_paths={("7", "workspace-direct"): ["/tmp/mcp-hub-workspace/direct-root"]},
+            workspace_paths={("7", "workspace-direct"): ["/tmp/mcp-hub-workspace/direct-root"]},  # nosec B108
         )
     )
 
@@ -70,20 +70,20 @@ async def test_workspace_root_resolver_prefers_session_root() -> None:
         workspace_id="workspace-direct",
     )
 
-    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/session-root").resolve())
-    assert result["source"] == "sandbox_session"
-    assert result["reason"] is None
+    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/session-root").resolve())  # nosec
+    assert result["source"] == "sandbox_session"  # nosec B101
+    assert result["reason"] is None  # nosec B101
 
 
 @pytest.mark.asyncio
-async def test_workspace_root_resolver_uses_session_root_without_user_context() -> None:
+async def test_workspace_root_resolver_fails_closed_without_user_context() -> None:
     from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
         McpHubWorkspaceRootResolver,
     )
 
     resolver = McpHubWorkspaceRootResolver(
         sandbox_service=_FakeSandboxService(
-            session_roots={"sess-1": "/tmp/mcp-hub-workspace/session-root"},
+            session_roots={"sess-1": "/tmp/mcp-hub-workspace/session-root"},  # nosec B108
             session_owners={"sess-1": "7"},
         )
     )
@@ -94,9 +94,9 @@ async def test_workspace_root_resolver_uses_session_root_without_user_context() 
         workspace_id=None,
     )
 
-    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/session-root").resolve())
-    assert result["source"] == "sandbox_session"
-    assert result["reason"] is None
+    assert result["workspace_root"] is None  # nosec B101
+    assert result["source"] is None  # nosec B101
+    assert result["reason"] == "workspace_root_unavailable"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -107,9 +107,9 @@ async def test_workspace_root_resolver_ignores_session_root_owned_by_other_user(
 
     resolver = McpHubWorkspaceRootResolver(
         sandbox_service=_FakeSandboxService(
-            session_roots={"sess-1": "/tmp/mcp-hub-workspace/session-root"},
+            session_roots={"sess-1": "/tmp/mcp-hub-workspace/session-root"},  # nosec B108
             session_owners={"sess-1": "99"},
-            workspace_paths={("7", "workspace-direct"): ["/tmp/mcp-hub-workspace/direct-root"]},
+            workspace_paths={("7", "workspace-direct"): ["/tmp/mcp-hub-workspace/direct-root"]},  # nosec B108
         )
     )
 
@@ -119,9 +119,9 @@ async def test_workspace_root_resolver_ignores_session_root_owned_by_other_user(
         workspace_id="workspace-direct",
     )
 
-    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/direct-root").resolve())
-    assert result["source"] == "sandbox_workspace_lookup"
-    assert result["reason"] is None
+    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/direct-root").resolve())  # nosec
+    assert result["source"] == "sandbox_workspace_lookup"  # nosec B101
+    assert result["reason"] is None  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -132,7 +132,7 @@ async def test_workspace_root_resolver_resolves_direct_workspace_id_for_user() -
 
     resolver = McpHubWorkspaceRootResolver(
         sandbox_service=_FakeSandboxService(
-            workspace_paths={("7", "workspace-direct"): ["/tmp/mcp-hub-workspace/direct-root"]}
+            workspace_paths={("7", "workspace-direct"): ["/tmp/mcp-hub-workspace/direct-root"]}  # nosec B108
         )
     )
 
@@ -142,9 +142,9 @@ async def test_workspace_root_resolver_resolves_direct_workspace_id_for_user() -
         workspace_id="workspace-direct",
     )
 
-    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/direct-root").resolve())
-    assert result["source"] == "sandbox_workspace_lookup"
-    assert result["reason"] is None
+    assert result["workspace_root"] == str(Path("/tmp/mcp-hub-workspace/direct-root").resolve())  # nosec
+    assert result["source"] == "sandbox_workspace_lookup"  # nosec B101
+    assert result["reason"] is None  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -157,8 +157,8 @@ async def test_workspace_root_resolver_fails_closed_for_ambiguous_workspace_id()
         sandbox_service=_FakeSandboxService(
             workspace_paths={
                 ("7", "workspace-direct"): [
-                    "/tmp/mcp-hub-workspace/direct-root-a",
-                    "/tmp/mcp-hub-workspace/direct-root-b",
+                    "/tmp/mcp-hub-workspace/direct-root-a",  # nosec B108
+                    "/tmp/mcp-hub-workspace/direct-root-b",  # nosec B108
                 ]
             }
         )
@@ -170,8 +170,8 @@ async def test_workspace_root_resolver_fails_closed_for_ambiguous_workspace_id()
         workspace_id="workspace-direct",
     )
 
-    assert result["workspace_root"] is None
-    assert result["reason"] == "workspace_root_ambiguous"
+    assert result["workspace_root"] is None  # nosec B101
+    assert result["reason"] == "workspace_root_ambiguous"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -211,9 +211,9 @@ async def test_workspace_root_resolver_uses_shared_registry_same_scope_first() -
         owner_scope_id=21,
     )
 
-    assert result["workspace_root"] == str(Path("/srv/shared/docs-team").resolve())
-    assert result["source"] == "shared_registry"
-    assert result["reason"] is None
+    assert result["workspace_root"] == str(Path("/srv/shared/docs-team").resolve())  # nosec B101
+    assert result["source"] == "shared_registry"  # nosec B101
+    assert result["reason"] is None  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -246,6 +246,6 @@ async def test_workspace_root_resolver_falls_back_to_global_shared_registry_entr
         owner_scope_id=21,
     )
 
-    assert result["workspace_root"] == str(Path("/srv/shared/docs-global").resolve())
-    assert result["source"] == "shared_registry"
-    assert result["reason"] is None
+    assert result["workspace_root"] == str(Path("/srv/shared/docs-global").resolve())  # nosec B101
+    assert result["source"] == "shared_registry"  # nosec B101
+    assert result["reason"] is None  # nosec B101

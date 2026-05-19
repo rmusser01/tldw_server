@@ -1,4 +1,5 @@
 import asyncio
+import configparser
 import importlib
 from pathlib import Path
 
@@ -158,6 +159,30 @@ def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(
     assert safe_config["supported_features"] == safe_config["capabilities"]
 
 
+def test_docs_info_exposes_bulk_conference_ingest_capabilities(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("ROUTES_DISABLE", raising=False)
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.delenv("MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED", raising=False)
+    config_mod._route_toggle_policy.cache_clear()
+
+    safe_config = config_info.load_safe_config()
+    caps = safe_config["capabilities"]
+
+    assert caps["hasMediaPlaylistPreflight"] is True
+    assert caps["hasMediaIngestJobs"] is True
+    assert caps["hasMediaIngestJobEvents"] is True
+    assert caps["hasMediaIngestWorker"] is False
+    assert caps["hasDurableMediaCollections"] is True
+    assert caps["hasKnowledgeQaMediaScope"] is True
+    assert safe_config["supported_features"] == caps
+
+
 def test_docs_info_disables_voice_transport_when_audio_websocket_route_disabled(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -192,6 +217,19 @@ def test_docs_info_endpoint_returns_placeholder_api_key(monkeypatch, tmp_path: P
     assert "test-key" not in payload["examples"]["python"]
     assert "test-key" not in payload["examples"]["curl"]
     assert "test-key" not in payload["examples"]["javascript"]
+
+
+def test_quickstart_redirect_reads_configured_ui_url(monkeypatch) -> None:
+    parser = configparser.ConfigParser()
+    parser.read_string("[UI]\nquickstart_url = /docs-static/Getting_Started/README.md\n")
+
+    monkeypatch.delenv("QUICKSTART_URL", raising=False)
+    monkeypatch.setattr(config_info.config_mod, "load_comprehensive_config", lambda: parser)
+
+    response = asyncio.run(config_info.get_quickstart_redirect())
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs-static/Getting_Started/README.md"
 
 
 def test_docs_info_persona_capability_stable_across_config_module_reload(

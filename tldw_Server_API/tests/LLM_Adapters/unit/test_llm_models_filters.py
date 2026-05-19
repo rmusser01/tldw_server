@@ -147,6 +147,42 @@ def test_llm_models_metadata_includes_curated_qwen_models(monkeypatch, client_us
     assert ("qwen", "qwen-turbo") in provider_and_name
 
 
+def test_llm_models_metadata_marks_unconfigured_provider_catalog_models(
+    monkeypatch, client_user_only
+):
+    import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
+
+    _patch_llm_providers(monkeypatch)
+    monkeypatch.setattr(
+        llm_providers,
+        "list_provider_models",
+        lambda provider: (
+            ["qwen-max"]
+            if provider == "qwen"
+            else ["gpt-4o-mini"]
+            if provider == "openai"
+            else []
+        ),
+    )
+
+    client = client_user_only
+    response = client.get("/api/v1/llm/models/metadata")
+
+    assert response.status_code == 200
+    payload = response.json()
+    models = {
+        (str(model.get("provider")), str(model.get("name"))): model
+        for model in payload.get("models", [])
+    }
+
+    assert models[("openai", "gpt-4o-mini")]["is_configured"] is True
+    assert models[("openai", "gpt-4o-mini")]["provider_is_configured"] is True
+    assert models[("openai", "gpt-4o-mini")]["catalog_only"] is False
+    assert models[("qwen", "qwen-max")]["is_configured"] is False
+    assert models[("qwen", "qwen-max")]["provider_is_configured"] is False
+    assert models[("qwen", "qwen-max")]["catalog_only"] is True
+
+
 def test_llm_models_filter_type_openrouter_image_hints(monkeypatch, client_user_only):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
 

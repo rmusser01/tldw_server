@@ -2,7 +2,8 @@ import React from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import {
   ANNOTATION_COLOR_OPTIONS,
-  DOCUMENT_INTELLIGENCE_TABS
+  DOCUMENT_INTELLIGENCE_TABS,
+  type MediaAnnotationColor
 } from './hooks/useContentViewerModals'
 
 type DocumentIntelligenceTab =
@@ -29,8 +30,8 @@ type DocumentIntelligenceModals = {
   setAnnotationManualText: (value: string) => void
   annotationDraftNote: string
   setAnnotationDraftNote: (value: string) => void
-  annotationDraftColor: string
-  setAnnotationDraftColor: (value: string) => void
+  annotationDraftColor: MediaAnnotationColor
+  setAnnotationDraftColor: React.Dispatch<React.SetStateAction<MediaAnnotationColor>>
   handleCreateAnnotation: () => Promise<void>
   annotationCreating: boolean
   handleSyncAnnotations: () => Promise<void>
@@ -228,7 +229,9 @@ export function ContentViewerDocumentIntelligenceSection({
             <select
               value={modals.annotationDraftColor}
               onChange={(event) =>
-                modals.setAnnotationDraftColor(event.target.value as any)
+                modals.setAnnotationDraftColor(
+                  event.target.value as MediaAnnotationColor
+                )
               }
               className="h-8 rounded border border-border bg-surface px-2 text-xs text-text"
               data-testid="media-annotation-color"

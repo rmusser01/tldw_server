@@ -99,8 +99,8 @@ export const mapFlashcardsUiError = (
   if (status === 409 || VERSION_CONFLICT_PATTERN.test(normalized)) {
     return {
       code: "FLASHCARDS_VERSION_CONFLICT",
-      message: "This card was modified elsewhere. Reload it and retry your change.",
-      actionLabel: "Reload card",
+      message: "This card was modified since you opened it. Refresh and try again.",
+      actionLabel: "Refresh",
       status,
       rawMessage
     }

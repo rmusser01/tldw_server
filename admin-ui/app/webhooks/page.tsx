@@ -1,10 +1,17 @@
 'use client';
 
-import { Suspense, useState, useCallback, useMemo } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { PermissionGuard } from '@/components/PermissionGuard';
 import { ResponsiveLayout } from '@/components/ResponsiveLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Dialog,
   DialogContent,
@@ -12,492 +19,530 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Pagination } from '@/components/ui/pagination';
-import { useConfirm } from '@/components/ui/confirm-dialog';
+import { usePrivilegedActionDialog } from '@/components/ui/privileged-action-dialog';
 import { useToast } from '@/components/ui/toast';
-import { usePagedResource } from '@/lib/use-paged-resource';
-import { useUrlPagination } from '@/lib/use-url-state';
-import api from '@/lib/api-client';
-import type {
-  AdminWebhook,
-  AdminWebhookDeliveryLogEntry,
-  AdminWebhookDeliveryLogResponse,
-} from '@/types';
-import { PlugZap, Plus, Trash2, TestTube, Eye, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { api } from '@/lib/api-client';
+import { formatDateTime } from '@/lib/format';
+import type { AdminWebhook, AdminWebhookDeliveryLogEntry } from '@/types';
+import { Activity, ChevronDown, ChevronRight, Copy, Play, Plus, RefreshCw, Trash2, Webhook } from 'lucide-react';
 
-// ---------------------------------------------------------------------------
-// Webhook Form Dialog
-// ---------------------------------------------------------------------------
 
-function WebhookFormDialog({
-  webhook,
-  open,
-  onOpenChange,
-  onSaved,
+const AVAILABLE_EVENTS = [
+  'user.created',
+  'user.deleted',
+  'incident.created',
+  'incident.updated',
+  'incident.resolved',
+] as const;
+
+type DeliveryHistoryItem = {
+  id: number;
+  event_type: string;
+  status_code: number | null;
+  response_time_ms: number | null;
+  success: boolean;
+  error: string | null;
+  attempted_at: string | null;
+};
+
+const toDeliveryHistoryItem = (delivery: AdminWebhookDeliveryLogEntry): DeliveryHistoryItem => ({
+  id: delivery.id,
+  event_type: delivery.event_type,
+  status_code: delivery.status_code,
+  response_time_ms: delivery.latency_ms,
+  success: typeof delivery.status_code === 'number' && delivery.status_code >= 200 && delivery.status_code < 300,
+  error: delivery.error_message,
+  attempted_at: delivery.delivered_at ?? delivery.created_at,
+});
+
+function DeliveryStatusBadge({ success }: { success: boolean }) {
+  return (
+    <Badge variant={success ? 'default' : 'destructive'} className="text-xs">
+      {success ? 'Success' : 'Failed'}
+    </Badge>
+  );
+}
+
+function DeliveryHistory({
+  webhookId,
+  visible,
+  refreshKey,
 }: {
-  webhook?: AdminWebhook;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
+  webhookId: number;
+  visible: boolean;
+  refreshKey?: number;
 }) {
-  const isEdit = !!webhook;
-  const { success, error: showError } = useToast();
-  const [saving, setSaving] = useState(false);
-  const [url, setUrl] = useState(webhook?.url ?? '');
-  const [description, setDescription] = useState(webhook?.description ?? '');
-  const [eventTypes, setEventTypes] = useState(webhook?.event_types?.join(', ') ?? '*');
-  const [retryCount, setRetryCount] = useState(String(webhook?.retry_count ?? 3));
-  const [timeoutSec, setTimeoutSec] = useState(String(webhook?.timeout_seconds ?? 10));
+  const [deliveries, setDeliveries] = useState<DeliveryHistoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = async () => {
-    if (!url.trim()) return;
-    setSaving(true);
+  const fetchDeliveries = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      const events = eventTypes.split(',').map((s) => s.trim()).filter(Boolean);
-      if (isEdit && webhook) {
-        await api.updateWebhook(webhook.id, {
-          url: url.trim(),
-          description: description.trim(),
-          event_types: events,
-          retry_count: Number(retryCount),
-          timeout_seconds: Number(timeoutSec),
-        });
-        success('Webhook updated');
-      } else {
-        await api.createWebhook({
-          url: url.trim(),
-          description: description.trim(),
-          event_types: events,
-          retry_count: Number(retryCount),
-          timeout_seconds: Number(timeoutSec),
-        });
-        success('Webhook created');
-      }
-      onOpenChange(false);
-      onSaved();
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : 'Failed to save webhook');
+      const response = await api.getWebhookDeliveries(webhookId, { limit: 50 });
+      setDeliveries((response.items ?? []).map(toDeliveryHistoryItem));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load deliveries';
+      setError(message);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
-  };
+  }, [webhookId]);
+
+  useEffect(() => {
+    if (visible) {
+      fetchDeliveries();
+    }
+  }, [visible, fetchDeliveries, refreshKey]);
+
+  if (!visible) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{isEdit ? 'Edit Webhook' : 'Register Webhook'}</DialogTitle>
-          <DialogDescription>
-            {isEdit ? 'Update webhook configuration.' : 'Register a new endpoint to receive event notifications.'}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid gap-2">
-            <Label htmlFor="wh-url">URL</Label>
-            <Input id="wh-url" placeholder="https://example.com/webhook" value={url} onChange={(e) => setUrl(e.target.value)} />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="wh-desc">Description</Label>
-            <Input id="wh-desc" placeholder="Optional description" value={description} onChange={(e) => setDescription(e.target.value)} />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="wh-events">Event Types (comma-separated, * for all)</Label>
-            <Input id="wh-events" placeholder="*, incident.created, alert.fired" value={eventTypes} onChange={(e) => setEventTypes(e.target.value)} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="wh-retry">Retry Count</Label>
-              <Input id="wh-retry" type="number" min={0} max={10} value={retryCount} onChange={(e) => setRetryCount(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="wh-timeout">Timeout (seconds)</Label>
-              <Input id="wh-timeout" type="number" min={1} max={60} value={timeoutSec} onChange={(e) => setTimeoutSec(e.target.value)} />
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={saving || !url.trim()}>
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isEdit ? 'Update' : 'Create'}
+    <div className="px-4 pb-4">
+      <div className="rounded-md border bg-muted/30 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-sm font-medium flex items-center gap-1">
+            <Activity className="h-3.5 w-3.5" />
+            Delivery History
+          </h4>
+          <Button variant="ghost" size="sm" onClick={fetchDeliveries} disabled={loading} aria-label="Refresh delivery history">
+            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Delivery Log Panel
-// ---------------------------------------------------------------------------
-
-function DeliveryLogPanel({ webhookId }: { webhookId: number }) {
-  const [dlPage, setDlPage] = useState(1);
-  const dlPageSize = 20;
-  const offset = (dlPage - 1) * dlPageSize;
-
-  const loadDeliveries = useCallback(
-    ({ signal }: { signal?: AbortSignal } = {}) =>
-      api.getWebhookDeliveries(webhookId, { limit: String(dlPageSize), offset: String(offset) }),
-    [webhookId, dlPageSize, offset],
-  );
-
-  const { items: deliveries, total, loading } = usePagedResource<AdminWebhookDeliveryLogEntry>({
-    load: loadDeliveries,
-    defaultError: 'Failed to load deliveries',
-  });
-
-  const dlTotalPages = Math.max(1, Math.ceil(total / dlPageSize));
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Delivery Log</CardTitle>
-        <CardDescription>{total} deliveries</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : deliveries.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">No deliveries yet.</p>
-        ) : (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Latency</TableHead>
-                  <TableHead>Retries</TableHead>
-                  <TableHead>Error</TableHead>
-                  <TableHead>Time</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deliveries.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell className="font-mono text-xs">{d.event_type}</TableCell>
-                    <TableCell>
-                      {d.status_code != null ? (
-                        <span className={d.status_code >= 200 && d.status_code < 300 ? 'text-green-600' : 'text-red-600'}>
-                          {d.status_code}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell>{d.latency_ms != null ? `${d.latency_ms}ms` : '-'}</TableCell>
-                    <TableCell>{d.retry_attempt}</TableCell>
-                    <TableCell className="max-w-[200px] truncate text-xs text-red-600">
-                      {d.error_message || '-'}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {d.created_at ? new Date(d.created_at).toLocaleString() : '-'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {dlTotalPages > 1 && (
-              <div className="mt-4">
-                <Pagination currentPage={dlPage} totalPages={dlTotalPages} totalItems={total} pageSize={dlPageSize} onPageChange={setDlPage} />
-              </div>
-            )}
-          </>
+        </div>
+        {error && (
+          <Alert variant="destructive" className="mb-2">
+            <AlertDescription className="text-xs">{error}</AlertDescription>
+          </Alert>
         )}
-      </CardContent>
-    </Card>
+        {!loading && deliveries.length === 0 && !error && (
+          <p className="text-xs text-muted-foreground py-2">No deliveries recorded yet.</p>
+        )}
+        {deliveries.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">Event</TableHead>
+                <TableHead className="text-xs">Status</TableHead>
+                <TableHead className="text-xs">HTTP Code</TableHead>
+                <TableHead className="text-xs">Response Time</TableHead>
+                <TableHead className="text-xs">Time</TableHead>
+                <TableHead className="text-xs">Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {deliveries.map((delivery) => (
+                <TableRow key={delivery.id}>
+                  <TableCell className="text-xs font-mono">{delivery.event_type}</TableCell>
+                  <TableCell>
+                    <DeliveryStatusBadge success={delivery.success} />
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {delivery.status_code ?? '\u2014'}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {delivery.response_time_ms != null ? `${delivery.response_time_ms}ms` : '\u2014'}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatDateTime(delivery.attempted_at, { fallback: '\u2014' })}
+                  </TableCell>
+                  <TableCell className="text-xs text-destructive max-w-[200px] truncate">
+                    {delivery.error ?? ''}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Main Page
-// ---------------------------------------------------------------------------
 
 function WebhooksPageContent() {
-  const { page, pageSize, setPage } = useUrlPagination();
-  const offset = (page - 1) * pageSize;
+  const promptPrivileged = usePrivilegedActionDialog();
   const { success, error: showError } = useToast();
-  const confirm = useConfirm();
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editWebhook, setEditWebhook] = useState<AdminWebhook | undefined>();
-  const [editOpen, setEditOpen] = useState(false);
-  const [selectedWebhookId, setSelectedWebhookId] = useState<number | null>(null);
-  const [testingId, setTestingId] = useState<number | null>(null);
+  const [webhooks, setWebhooks] = useState<AdminWebhook[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const params = useMemo(() => ({
-    limit: String(pageSize),
-    offset: String(offset),
-  }), [pageSize, offset]);
+  // Track which webhook's deliveries are expanded
+  const [expandedWebhookId, setExpandedWebhookId] = useState<number | null>(null);
 
-  const loadWebhooks = useCallback(
-    ({ signal }: { signal?: AbortSignal } = {}) =>
-      api.getWebhooks(params, signal ? { signal } : undefined),
-    [params],
-  );
+  // Track which webhooks have a test in-flight
+  const [testingWebhookIds, setTestingWebhookIds] = useState<Set<number>>(new Set());
+  // Bump to refresh delivery history after a test webhook
+  const [deliveryRefreshKey, setDeliveryRefreshKey] = useState(0);
 
-  const {
-    items: webhooks,
-    total,
-    loading,
-    reload,
-  } = usePagedResource<AdminWebhook>({
-    load: loadWebhooks,
-    defaultError: 'Failed to load webhooks',
-  });
+  // Create dialog state
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [createUrl, setCreateUrl] = useState('');
+  const [createEvents, setCreateEvents] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Secret display state (shown once after creation)
+  const [showSecretDialog, setShowSecretDialog] = useState(false);
+  const [createdSecret, setCreatedSecret] = useState('');
+  const [secretCopied, setSecretCopied] = useState(false);
 
-  const handleDelete = async (wh: AdminWebhook) => {
-    const confirmed = await confirm({
-      title: 'Delete webhook?',
-      message: `This will permanently remove the webhook to ${wh.url} and all its delivery logs.`,
-      confirmText: 'Delete',
-      cancelText: 'Cancel',
-      variant: 'danger',
-      icon: 'delete',
-    });
-    if (!confirmed) return;
+  const fetchWebhooks = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      await api.deleteWebhook(wh.id);
-      success('Webhook deleted');
-      reload();
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : 'Failed to delete webhook');
-    }
-  };
-
-  const handleTest = async (wh: AdminWebhook) => {
-    setTestingId(wh.id);
-    try {
-      const result = await api.testWebhook(wh.id);
-      if (result.success) {
-        success(`Test ping succeeded (${result.status_code}, ${result.latency_ms}ms)`);
-      } else {
-        showError(`Test ping failed: ${result.error || 'Unknown error'}`);
-      }
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : 'Failed to test webhook');
+      const response = await api.getWebhooks();
+      setWebhooks(response.items ?? []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load webhooks';
+      setError(message);
     } finally {
-      setTestingId(null);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWebhooks();
+  }, [fetchWebhooks]);
+
+  const handleCreate = async () => {
+    if (!createUrl.trim()) return;
+    if (createEvents.length === 0) return;
+    setCreating(true);
+    try {
+      const result = await api.createWebhook({
+        url: createUrl.trim(),
+        event_types: createEvents,
+        active: true,
+      });
+      const returnedSecret =
+        'secret' in result && typeof result.secret === 'string' ? result.secret : '';
+      success('Webhook created');
+      setShowCreateDialog(false);
+      setCreateUrl('');
+      setCreateEvents([]);
+      if (returnedSecret) {
+        setCreatedSecret(returnedSecret);
+        setSecretCopied(false);
+        setShowSecretDialog(true);
+      }
+      await fetchWebhooks();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create webhook';
+      showError(message);
+    } finally {
+      setCreating(false);
     }
   };
 
-  const handleToggleActive = async (wh: AdminWebhook) => {
+  const handleToggleEnabled = async (webhook: AdminWebhook) => {
     try {
-      await api.updateWebhook(wh.id, { active: !wh.active });
-      success(wh.active ? 'Webhook disabled' : 'Webhook enabled');
-      reload();
-    } catch (err: unknown) {
-      showError(err instanceof Error ? err.message : 'Failed to update webhook');
+      await api.updateWebhook(webhook.id, { active: !webhook.active });
+      success(webhook.active ? 'Webhook disabled' : 'Webhook enabled');
+      await fetchWebhooks();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update webhook';
+      showError(message);
     }
+  };
+
+  const handleDelete = async (webhook: AdminWebhook) => {
+    const result = await promptPrivileged({
+      title: 'Delete Webhook',
+      message: `Delete the webhook for ${webhook.url}? This cannot be undone.`,
+      confirmText: 'Delete Webhook',
+    });
+    if (!result) return;
+    try {
+      await api.deleteWebhook(webhook.id);
+      success('Webhook deleted');
+      if (expandedWebhookId === webhook.id) {
+        setExpandedWebhookId(null);
+      }
+      await fetchWebhooks();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete webhook';
+      showError(message);
+    }
+  };
+
+  const handleTestWebhook = async (webhook: AdminWebhook) => {
+    setTestingWebhookIds((prev) => new Set(prev).add(webhook.id));
+    try {
+      const delivery = await api.testWebhook(webhook.id);
+      if (delivery.success) {
+        success(`Test delivery succeeded (HTTP ${delivery.status_code})`);
+      } else {
+        showError(`Test delivery failed: ${delivery.error || `HTTP ${delivery.status_code}`}`);
+      }
+      // Expand deliveries and refresh to show the new test result
+      setExpandedWebhookId(webhook.id);
+      setDeliveryRefreshKey((k) => k + 1);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send test';
+      showError(message);
+    } finally {
+      setTestingWebhookIds((prev) => {
+        const next = new Set(prev);
+        next.delete(webhook.id);
+        return next;
+      });
+    }
+  };
+
+  const handleCopySecret = async () => {
+    try {
+      await navigator.clipboard.writeText(createdSecret);
+      setSecretCopied(true);
+    } catch {
+      // Fallback: select input text
+    }
+  };
+
+  const toggleCreateEvent = (event: string) => {
+    setCreateEvents((prev) =>
+      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event]
+    );
+  };
+
+  const toggleDeliveries = (webhookId: number) => {
+    setExpandedWebhookId((prev) => (prev === webhookId ? null : webhookId));
   };
 
   return (
-    <PermissionGuard variant="route" requireAuth role="admin">
-      <ResponsiveLayout>
-        <div className="p-4 lg:p-8">
-          {/* Header */}
-          <div className="mb-8 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <PlugZap className="h-8 w-8" />
-              <h1 className="text-3xl font-bold">Webhooks</h1>
+    <ResponsiveLayout>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Webhooks</CardTitle>
+              <CardDescription>
+                Configure outgoing webhooks for event notifications
+              </CardDescription>
             </div>
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Register Webhook
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={fetchWebhooks} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Webhook
+              </Button>
+            </div>
           </div>
-
-          {/* Summary cards */}
-          <div className="grid gap-4 md:grid-cols-3 mb-6">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-2xl font-bold">{total}</div>
-                <p className="text-sm text-muted-foreground">Total Webhooks</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-2xl font-bold text-green-600">
-                  {webhooks.filter((w) => w.active).length}
-                </div>
-                <p className="text-sm text-muted-foreground">Active</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-2xl font-bold text-muted-foreground">
-                  {webhooks.filter((w) => !w.active).length}
-                </div>
-                <p className="text-sm text-muted-foreground">Disabled</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Webhooks list */}
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Registered Webhooks</CardTitle>
-              <CardDescription>{total} webhook{total !== 1 ? 's' : ''} configured</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : webhooks.length === 0 ? (
-                <div className="text-center py-8">
-                  <PlugZap className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No webhooks registered yet.</p>
-                  <Button className="mt-4" onClick={() => setCreateOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" /> Register your first webhook
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>URL</TableHead>
-                        <TableHead>Events</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Retries</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {webhooks.map((wh) => (
-                        <TableRow key={wh.id}>
-                          <TableCell className="font-mono text-xs max-w-[300px] truncate">
-                            {wh.url}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {wh.event_types.join(', ')}
-                          </TableCell>
-                          <TableCell>
-                            <button
-                              onClick={() => handleToggleActive(wh)}
-                              className="inline-flex items-center gap-1 text-xs cursor-pointer hover:opacity-80"
-                            >
-                              {wh.active ? (
-                                <><CheckCircle2 className="h-4 w-4 text-green-600" /> Active</>
-                              ) : (
-                                <><XCircle className="h-4 w-4 text-muted-foreground" /> Disabled</>
-                              )}
-                            </button>
-                          </TableCell>
-                          <TableCell>{wh.retry_count}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
-                            {wh.description || '-'}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedWebhookId(selectedWebhookId === wh.id ? null : wh.id)}
-                                title="View deliveries"
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleTest(wh)}
-                                disabled={testingId === wh.id}
-                                title="Send test ping"
-                              >
-                                {testingId === wh.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <TestTube className="h-4 w-4" />
-                                )}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setEditWebhook(wh);
-                                  setEditOpen(true);
-                                }}
-                                title="Edit"
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(wh)}
-                                title="Delete"
-                              >
-                                <Trash2 className="h-4 w-4 text-red-500" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  {totalPages > 1 && (
-                    <div className="mt-4">
-                      <Pagination currentPage={page} totalPages={totalPages} totalItems={total} pageSize={pageSize} onPageChange={setPage} />
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Delivery log for selected webhook */}
-          {selectedWebhookId !== null && (
-            <DeliveryLogPanel webhookId={selectedWebhookId} />
+        </CardHeader>
+        <CardContent>
+          {error && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
 
-          {/* Create dialog */}
-          <WebhookFormDialog
-            open={createOpen}
-            onOpenChange={setCreateOpen}
-            onSaved={reload}
-          />
-
-          {/* Edit dialog */}
-          {editWebhook && (
-            <WebhookFormDialog
-              webhook={editWebhook}
-              open={editOpen}
-              onOpenChange={(open) => {
-                setEditOpen(open);
-                if (!open) setEditWebhook(undefined);
-              }}
-              onSaved={reload}
+          {!loading && webhooks.length === 0 && !error && (
+            <EmptyState
+              icon={Webhook}
+              title="No webhooks configured"
+              description="Add a webhook to receive event notifications at your URL."
             />
           )}
-        </div>
-      </ResponsiveLayout>
-    </PermissionGuard>
+
+          {webhooks.length > 0 && (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8"></TableHead>
+                    <TableHead>URL</TableHead>
+                    <TableHead>Events</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {webhooks.map((webhook) => (
+                    <>
+                      <TableRow key={webhook.id}>
+                        <TableCell className="w-8 pr-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => toggleDeliveries(webhook.id)}
+                            aria-label="Toggle deliveries"
+                          >
+                            {expandedWebhookId === webhook.id ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm max-w-[300px] truncate">
+                          {webhook.url}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {webhook.event_types.map((event) => (
+                              <Badge key={event} variant="secondary" className="text-xs">
+                                {event}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={webhook.active ? 'default' : 'outline'}>
+                            {webhook.active ? 'Enabled' : 'Disabled'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDateTime(webhook.created_at, { fallback: '\u2014' })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleTestWebhook(webhook)}
+                              disabled={testingWebhookIds.has(webhook.id)}
+                              title="Send test delivery"
+                            >
+                              <Play className={`h-4 w-4 mr-1 ${testingWebhookIds.has(webhook.id) ? 'animate-pulse' : ''}`} />
+                              {testingWebhookIds.has(webhook.id) ? 'Testing...' : 'Test'}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleToggleEnabled(webhook)}
+                            >
+                              {webhook.active ? 'Disable' : 'Enable'}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(webhook)}
+                              aria-label="Delete webhook"
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {expandedWebhookId === webhook.id && (
+                        <TableRow key={`${webhook.id}-deliveries`}>
+                          <TableCell colSpan={6} className="p-0">
+                            <DeliveryHistory
+                              webhookId={webhook.id}
+                              visible={expandedWebhookId === webhook.id}
+                              refreshKey={deliveryRefreshKey}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Create Webhook Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Webhook</DialogTitle>
+            <DialogDescription>
+              Configure a URL to receive event notifications. A signing secret will be generated automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="webhook-url">Endpoint URL</Label>
+              <Input
+                id="webhook-url"
+                type="url"
+                placeholder="https://example.com/webhook"
+                value={createUrl}
+                onChange={(e) => setCreateUrl(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Events</Label>
+              <div className="space-y-2">
+                {AVAILABLE_EVENTS.map((event) => (
+                  <label key={event} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={createEvents.includes(event)}
+                      onCheckedChange={() => toggleCreateEvent(event)}
+                    />
+                    {event}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={creating || !createUrl.trim() || createEvents.length === 0}
+            >
+              {creating ? 'Creating...' : 'Create Webhook'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Secret Display Dialog (shown once) */}
+      <Dialog open={showSecretDialog} onOpenChange={setShowSecretDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Webhook Secret</DialogTitle>
+            <DialogDescription>
+              Copy your webhook signing secret now. It will not be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={createdSecret}
+                className="font-mono text-sm"
+                data-testid="webhook-secret-value"
+              />
+              <Button variant="outline" size="sm" onClick={handleCopySecret} aria-label="Copy webhook secret">
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
+            {secretCopied && (
+              <p className="text-sm text-green-600">Copied to clipboard</p>
+            )}
+            <Alert>
+              <AlertDescription>
+                Use this secret to verify webhook signatures using HMAC-SHA256.
+              </AlertDescription>
+            </Alert>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowSecretDialog(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </ResponsiveLayout>
   );
 }
 
 export default function WebhooksPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+    <PermissionGuard role={['admin', 'super_admin', 'owner']}>
       <WebhooksPageContent />
-    </Suspense>
+    </PermissionGuard>
   );
 }

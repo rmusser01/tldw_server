@@ -186,7 +186,7 @@ const normalizeAnswerQualityExamples = (
   evaluationMode: EvaluationMode
 ): Record<string, any>[] =>
   dataset
-    .map((sample, index) => {
+    .map((sample, index): Record<string, any> | null => {
       const record = sample && typeof sample === "object" ? (sample as Record<string, any>) : {}
       const query = String(record.query ?? "").trim()
       const referenceAnswer = String(record.reference_answer ?? "").trim()

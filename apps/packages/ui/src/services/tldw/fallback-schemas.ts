@@ -3,7 +3,10 @@
 //   - tldw_server2 OpenAPI: /openapi.json
 //   - Notes/media ingestion section: /docs-static/Design/Media_Ingestion.md (if available)
 // Last synchronized: 2025-12-13 from tldw_server v0.1.0 (Body_add_media_api_v1_media_add_post)
-// Run `bun verify:openapi` to check for field-name drift against media ingest submit schemas
+// Run `bun run verify:openapi` from `apps/packages/ui` to check for field-name drift
+// against media ingest submit schemas. The verifier prefers
+// `apps/extension/openapi.json`; if that snapshot is absent, it derives the
+// spec from the checked-out backend using the project Python environment.
 // (`/api/v1/media/ingest/jobs` primary, `/api/v1/media/add` legacy).
 
 export const MEDIA_ADD_SCHEMA_FALLBACK_VERSION = "0.1.0"
@@ -74,6 +77,21 @@ export const MEDIA_ADD_SCHEMA_FALLBACK: Array<{
   { name: 'pdf_parsing_engine', type: 'string', description: 'PDF parsing engine', title: 'Pdf Parsing Engine' },
   { name: 'perform_analysis', type: 'boolean', description: 'Perform analysis', title: 'Perform Analysis' },
   { name: 'perform_chunking', type: 'boolean', description: 'Enable chunking', title: 'Perform Chunking' },
+  {
+    name: 'chunking_mode',
+    type: 'string',
+    description: 'Use automatic or manual chunking settings',
+    title: 'Chunking Mode',
+    enum: ['auto', 'manual']
+  },
+  {
+    name: 'auto_chunking_goal',
+    type: 'string',
+    description: 'Optimization goal when chunking mode is automatic',
+    title: 'Auto Chunking Goal',
+    enum: ['balanced', 'qa_search', 'navigation_summary']
+  },
+  { name: 'auto_chunking_use_llm', type: 'boolean', description: 'Allow LLM-assisted automatic chunk planning when available', title: 'Auto Chunking Use Llm' },
   { name: 'perform_claims_extraction', type: 'string', description: 'Extract factual claims', title: 'Perform Claims Extraction' },
   { name: 'perform_confabulation_check_of_analysis', type: 'boolean', description: 'Enable confabulation check', title: 'Confabulation Check' },
   { name: 'perform_rolling_summarization', type: 'boolean', description: 'Rolling summarization', title: 'Rolling Summarization' },
@@ -178,6 +196,27 @@ export const WEB_SCRAPING_SCHEMA_FALLBACK: Array<{
     description: 'Persist results or keep them ephemeral.',
     title: 'Mode',
     enum: ['persist', 'ephemeral']
+  },
+  { name: 'perform_chunking', type: 'boolean', description: 'Enable chunking.', title: 'Perform Chunking' },
+  {
+    name: 'chunking_mode',
+    type: 'string',
+    description: 'Use automatic or manual chunking settings.',
+    title: 'Chunking Mode',
+    enum: ['auto', 'manual']
+  },
+  {
+    name: 'auto_chunking_goal',
+    type: 'string',
+    description: 'Optimization goal when chunking mode is automatic.',
+    title: 'Auto Chunking Goal',
+    enum: ['balanced', 'qa_search', 'navigation_summary']
+  },
+  {
+    name: 'auto_chunking_use_llm',
+    type: 'boolean',
+    description: 'Allow LLM-assisted automatic chunk planning when available.',
+    title: 'Auto Chunking Use Llm'
   }
 ]
 

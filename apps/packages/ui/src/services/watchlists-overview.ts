@@ -1,5 +1,6 @@
 import {
   fetchScrapedItems,
+  fetchWatchlistContentAlerts,
   fetchWatchlistJobs,
   fetchWatchlistOutputs,
   fetchWatchlistRuns,
@@ -86,6 +87,9 @@ export interface WatchlistsOverviewData {
   items: {
     unread: number
   }
+  alerts: {
+    unread: number
+  }
   runs: {
     running: number
     pending: number
@@ -100,6 +104,10 @@ export interface WatchlistsOverviewData {
   }
   health: WatchlistsOverviewHealthModel
   systemHealth: "healthy" | "degraded"
+}
+
+export interface FetchWatchlistsOverviewParams {
+  watchlist_id?: number
 }
 
 const normalizeStatus = (value: string | null | undefined): string =>
@@ -340,23 +348,33 @@ export const getOverviewTabBadges = (
   return model.tabBadges
 }
 
-export const fetchWatchlistsOverviewData = async (): Promise<WatchlistsOverviewData> => {
+export const fetchWatchlistsOverviewData = async (
+  params: FetchWatchlistsOverviewParams = {}
+): Promise<WatchlistsOverviewData> => {
+  const scopedParams = params.watchlist_id != null
+    ? { watchlist_id: params.watchlist_id }
+    : {}
+  const unreadAlertsRequest = params.watchlist_id != null
+    ? fetchWatchlistContentAlerts(params.watchlist_id, { status: "unread", page: 1, size: 1 })
+    : Promise.resolve({ items: [], total: 0 })
   const [
     sourcesResult,
     jobsResult,
     unreadResult,
+    unreadAlertsResult,
     runningResult,
     pendingResult,
     failedResult,
     outputsResult
   ] = await Promise.all([
-    fetchAllPages((params) => fetchWatchlistSources(params)),
-    fetchAllPages((params) => fetchWatchlistJobs(params)),
-    fetchScrapedItems({ reviewed: false, page: 1, size: 1 }),
-    fetchWatchlistRuns({ q: "running", page: 1, size: 1 }),
-    fetchWatchlistRuns({ q: "pending", page: 1, size: 1 }),
-    fetchWatchlistRuns({ q: "failed", page: 1, size: 5 }),
-    fetchWatchlistOutputs({ page: 1, size: 100 })
+    fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
+    fetchAllPages((pageParams) => fetchWatchlistJobs({ ...scopedParams, ...pageParams })),
+    fetchScrapedItems({ ...scopedParams, reviewed: false, page: 1, size: 1 }),
+    unreadAlertsRequest,
+    fetchWatchlistRuns({ ...scopedParams, q: "running", page: 1, size: 1 }),
+    fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
+    fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
+    fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 })
   ])
 
   let healthy = 0
@@ -388,6 +406,7 @@ export const fetchWatchlistsOverviewData = async (): Promise<WatchlistsOverviewD
     }))
 
   const unreadTotal = asFiniteNumber(unreadResult.total, 0)
+  const unreadAlertsTotal = asFiniteNumber(unreadAlertsResult.total, 0)
   const runningTotal = asFiniteNumber(runningResult.total, 0)
   const pendingTotal = asFiniteNumber(pendingResult.total, 0)
   const failedTotal = asFiniteNumber(failedResult.total, recentFailed.length)
@@ -437,6 +456,9 @@ export const fetchWatchlistsOverviewData = async (): Promise<WatchlistsOverviewD
     },
     items: {
       unread: unreadTotal
+    },
+    alerts: {
+      unread: unreadAlertsTotal
     },
     runs: {
       running: runningTotal,

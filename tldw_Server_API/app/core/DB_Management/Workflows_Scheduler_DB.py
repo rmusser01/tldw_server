@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS workflow_schedules (
     misfire_grace_sec INTEGER DEFAULT 300,
     coalesce BOOLEAN NOT NULL DEFAULT TRUE,
     jitter_sec INTEGER NOT NULL DEFAULT 0,
+    -- ACP schedule config (when set, schedule fires acp_run instead of workflow_run)
+    acp_config_json TEXT,
     -- History
     last_run_at TIMESTAMPTZ,
     next_run_at TIMESTAMPTZ,
@@ -81,6 +83,8 @@ CREATE TABLE IF NOT EXISTS workflow_schedules (
     misfire_grace_sec INTEGER DEFAULT 300,
     coalesce INTEGER NOT NULL DEFAULT 1,
     jitter_sec INTEGER NOT NULL DEFAULT 0,
+    -- ACP schedule config (when set, schedule fires acp_run instead of workflow_run)
+    acp_config_json TEXT,
     -- History
     last_run_at TEXT,
     next_run_at TEXT,
@@ -111,6 +115,7 @@ class WorkflowSchedule:
     misfire_grace_sec: int
     coalesce: bool
     jitter_sec: int
+    acp_config_json: str | None
     last_run_at: str | None
     next_run_at: str | None
     last_status: str | None
@@ -197,19 +202,22 @@ class WorkflowsSchedulerDB:
                     logger.error(f"WorkflowsSchedulerDB: failed to create directory {sqlite_path.parent}: {e}")
                     raise
                 cfg.sqlite_path = str(sqlite_path)
-                logger.info(f"WorkflowsSchedulerDB using SQLite path: {cfg.sqlite_path}")
 
             self.backend = DatabaseBackendFactory.create_backend(cfg)
         self._ensure_schema()
+        sqlite_target = self._sqlite_target_for_logging()
+        if sqlite_target is not None:
+            logger.info("WorkflowsSchedulerDB using SQLite path: {}", sqlite_target)
+
+    def _sqlite_target_for_logging(self) -> str | None:
+        cfg = getattr(self.backend, "config", None)
+        backend_type = getattr(cfg, "backend_type", None)
+        sqlite_path = getattr(cfg, "sqlite_path", None)
+        if backend_type != BackendType.SQLITE or not sqlite_path:
+            return None
+        return str(Path(sqlite_path).resolve())
 
     def _ensure_schema(self) -> None:
-        try:
-            cfg = getattr(self.backend, "config", None)
-            spath = getattr(cfg, "sqlite_path", None)
-            if spath:
-                logger.info(f"WorkflowsSchedulerDB using SQLite path: {spath}")
-        except Exception as sqlite_path_log_error:
-            logger.debug("Failed to log workflows scheduler sqlite path", exc_info=sqlite_path_log_error)
         with self.backend.transaction() as conn:
             backend_type = getattr(getattr(self.backend, "config", None), "backend_type", None)
             schema = SCHED_POSTGRES_SCHEMA if backend_type == BackendType.POSTGRESQL else SCHED_SQLITE_SCHEMA
@@ -231,6 +239,7 @@ class WorkflowsSchedulerDB:
                     "next_run_at": "ALTER TABLE workflow_schedules ADD COLUMN next_run_at TIMESTAMPTZ",
                     "last_status": "ALTER TABLE workflow_schedules ADD COLUMN last_status TEXT",
                     "jitter_sec": "ALTER TABLE workflow_schedules ADD COLUMN jitter_sec INTEGER NOT NULL DEFAULT 0",
+                    "acp_config_json": "ALTER TABLE workflow_schedules ADD COLUMN acp_config_json TEXT",
                 }
             else:
                 column_sql = {
@@ -242,6 +251,7 @@ class WorkflowsSchedulerDB:
                     "next_run_at": "ALTER TABLE workflow_schedules ADD COLUMN next_run_at TEXT",
                     "last_status": "ALTER TABLE workflow_schedules ADD COLUMN last_status TEXT",
                     "jitter_sec": "ALTER TABLE workflow_schedules ADD COLUMN jitter_sec INTEGER NOT NULL DEFAULT 0",
+                    "acp_config_json": "ALTER TABLE workflow_schedules ADD COLUMN acp_config_json TEXT",
                 }
 
             for column, statement in column_sql.items():
@@ -288,6 +298,7 @@ class WorkflowsSchedulerDB:
         concurrency_mode: str = "skip",
         misfire_grace_sec: int = 300,
         coalesce: bool = True,
+        acp_config_json: str | None = None,
     ) -> None:
         now = _utcnow_iso()
         params = (
@@ -307,6 +318,7 @@ class WorkflowsSchedulerDB:
             int(misfire_grace_sec),
             1 if coalesce else 0,
             0,
+            acp_config_json,
             None,
             None,
             None,
@@ -316,8 +328,8 @@ class WorkflowsSchedulerDB:
         sql = (
             "INSERT INTO workflow_schedules("
             "id,tenant_id,user_id,workflow_id,name,cron,timezone,inputs_json,run_mode,validation_mode,enabled,require_online,"
-            "concurrency_mode,misfire_grace_sec,coalesce,jitter_sec,last_run_at,next_run_at,last_status,created_at,updated_at"
-            ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "concurrency_mode,misfire_grace_sec,coalesce,jitter_sec,acp_config_json,last_run_at,next_run_at,last_status,created_at,updated_at"
+            ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         with self.backend.transaction() as conn:
             self.backend.execute(sql, params, connection=conn)
@@ -340,6 +352,13 @@ class WorkflowsSchedulerDB:
             elif k == "coalesce":
                 fields.append("coalesce = ?")
                 params.append(1 if bool(v) else 0)
+            elif k == "acp_config_json":
+                fields.append("acp_config_json = ?")
+                # Accept dict (serialize) or str/None (store as-is)
+                if isinstance(v, dict):
+                    params.append(json.dumps(v))
+                else:
+                    params.append(v)
             else:
                 fields.append(f"{k} = ?")
                 params.append(v)
@@ -371,7 +390,9 @@ class WorkflowsSchedulerDB:
             validation_mode=r.get("validation_mode") or "block", enabled=bool(r.get("enabled") in (1, True, "1")),
             require_online=bool(r.get("require_online") in (1, True, "1")),
             concurrency_mode=(r.get("concurrency_mode") or "skip"), misfire_grace_sec=int(r.get("misfire_grace_sec") or 300),
-            coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
+            coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0),
+            acp_config_json=r.get("acp_config_json"),
+            last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
             last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
         )
 
@@ -401,7 +422,41 @@ class WorkflowsSchedulerDB:
                     validation_mode=r.get("validation_mode") or "block", enabled=bool(r.get("enabled") in (1, True, "1")),
                     require_online=bool(r.get("require_online") in (1, True, "1")),
                     concurrency_mode=(r.get("concurrency_mode") or "skip"), misfire_grace_sec=int(r.get("misfire_grace_sec") or 300),
-                    coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
+                    coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0),
+                    acp_config_json=r.get("acp_config_json"),
+                    last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
+                    last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
+                )
+            )
+        return out
+
+    def list_all_schedules(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[WorkflowSchedule]:
+        params: list[Any] = []
+        sql = "SELECT * FROM workflow_schedules"
+        if user_id:
+            sql += " WHERE user_id = ?"
+            params.append(user_id)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self.backend.transaction() as conn:
+            res = self.backend.execute(sql, tuple(params), connection=conn)
+        out: list[WorkflowSchedule] = []
+        for r in self._rows(res):
+            out.append(
+                WorkflowSchedule(
+                    id=r["id"], tenant_id=r["tenant_id"], user_id=r["user_id"], workflow_id=r.get("workflow_id"), name=r.get("name"),
+                    cron=r["cron"], timezone=r.get("timezone"), inputs_json=r["inputs_json"], run_mode=r.get("run_mode") or "async",
+                    validation_mode=r.get("validation_mode") or "block", enabled=bool(r.get("enabled") in (1, True, "1")),
+                    require_online=bool(r.get("require_online") in (1, True, "1")),
+                    concurrency_mode=(r.get("concurrency_mode") or "skip"), misfire_grace_sec=int(r.get("misfire_grace_sec") or 300),
+                    coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), acp_config_json=r.get("acp_config_json"),
+                    last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
                     last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
                 )
             )
