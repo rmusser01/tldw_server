@@ -3502,6 +3502,418 @@ def test_restart_drill_cli_passes_paths_and_prints_json(
     CASE.assertEqual(captured_paths["entitlements"], entitlements)
 
 
+def test_stale_socket_drill_recovers_controlled_stale_socket() -> None:
+    helperctl = load_helperctl()
+    with tempfile.TemporaryDirectory(prefix="vzsock-") as temp_dir:
+        root = Path(temp_dir)
+        root.chmod(0o700)
+        helper = root / "macos-vz-helper"
+        socket_path = root / "runtime" / "helper.sock"
+        pid_file = root / "runtime" / "helper.pid"
+        log_dir = root / "logs"
+        helper.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper.chmod(0o700)
+        created: list[Path] = []
+        starts: list[tuple[Path, Path, Path, Path, bool]] = []
+
+        def fake_socket_creator(path: Path) -> None:
+            created.append(path)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                try:
+                    server.bind(str(path))
+                except PermissionError:
+                    pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+
+        def fake_starter(
+            helper_path: Path,
+            received_socket_path: Path,
+            received_pid_file: Path,
+            received_log_dir: Path,
+            *,
+            dry_run: bool = False,
+        ) -> Any:
+            CASE.assertTrue(received_socket_path.exists())
+            starts.append((helper_path, received_socket_path, received_pid_file, received_log_dir, dry_run))
+            received_socket_path.unlink()
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                try:
+                    server.bind(str(received_socket_path))
+                except PermissionError:
+                    pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+            received_pid_file.write_text("1234\n", encoding="utf-8")
+            return helperctl.CheckResult(ok=True)
+
+        def fake_status_collector(*args: Any, **kwargs: Any) -> list[tuple[str, Any]]:
+            return [
+                ("process", helperctl.CheckResult(ok=True, reason="helper_pid_running")),
+                ("ping", helperctl.CheckResult(ok=True)),
+            ]
+
+        results = helperctl.stale_socket_drill(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            socket_creator=fake_socket_creator,
+            starter=fake_starter,
+            status_collector=fake_status_collector,
+        )
+
+        CASE.assertEqual(created, [socket_path])
+        CASE.assertEqual(starts, [(helper, socket_path, pid_file, log_dir, False)])
+        CASE.assertIn(("stale_socket", helperctl.CheckResult(ok=True)), results)
+        CASE.assertIn(("after_process", helperctl.CheckResult(ok=True, reason="helper_pid_running")), results)
+        CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(ok=True)))
+
+
+def test_stale_socket_drill_recovers_existing_inactive_socket_without_recreate() -> None:
+    helperctl = load_helperctl()
+    with tempfile.TemporaryDirectory(prefix="vzsock-") as temp_dir:
+        root = Path(temp_dir)
+        root.chmod(0o700)
+        helper = root / "macos-vz-helper"
+        socket_path = root / "runtime" / "helper.sock"
+        pid_file = root / "runtime" / "helper.pid"
+        log_dir = root / "logs"
+        helper.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper.chmod(0o700)
+        socket_path.parent.mkdir(mode=0o700)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            try:
+                server.bind(str(socket_path))
+            except PermissionError:
+                pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+        starts: list[tuple[Path, Path, Path, Path, bool]] = []
+
+        def fake_starter(
+            helper_path: Path,
+            received_socket_path: Path,
+            received_pid_file: Path,
+            received_log_dir: Path,
+            *,
+            dry_run: bool = False,
+        ) -> Any:
+            CASE.assertTrue(received_socket_path.exists())
+            starts.append((helper_path, received_socket_path, received_pid_file, received_log_dir, dry_run))
+            received_pid_file.write_text("1234\n", encoding="utf-8")
+            return helperctl.CheckResult(ok=True)
+
+        results = helperctl.stale_socket_drill(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            socket_creator=lambda path: pytest.fail("existing inactive socket should not be re-created"),
+            starter=fake_starter,
+            status_collector=lambda *args, **kwargs: [
+                ("process", helperctl.CheckResult(ok=True, reason="helper_pid_running")),
+                ("ping", helperctl.CheckResult(ok=True)),
+            ],
+        )
+
+        CASE.assertEqual(starts, [(helper, socket_path, pid_file, log_dir, False)])
+        CASE.assertIn(("stale_socket", helperctl.CheckResult(ok=True, reason="helper_socket_present")), results)
+        CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(ok=True)))
+
+
+def test_stale_socket_drill_removes_created_socket_on_start_failure() -> None:
+    helperctl = load_helperctl()
+    with tempfile.TemporaryDirectory(prefix="vzsock-") as temp_dir:
+        root = Path(temp_dir)
+        root.chmod(0o700)
+        helper = root / "macos-vz-helper"
+        socket_path = root / "runtime" / "helper.sock"
+        pid_file = root / "runtime" / "helper.pid"
+        log_dir = root / "logs"
+        helper.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper.chmod(0o700)
+
+        def fake_socket_creator(path: Path) -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                try:
+                    server.bind(str(path))
+                except PermissionError:
+                    pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+
+        results = helperctl.stale_socket_drill(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            socket_creator=fake_socket_creator,
+            starter=lambda *args, **kwargs: helperctl.CheckResult(False, "helper_already_running"),
+            status_collector=lambda *args, **kwargs: pytest.fail("failed start should not collect status"),
+        )
+
+        CASE.assertIn(("stale_socket", helperctl.CheckResult(ok=True)), results)
+        CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(False, "helper_already_running")))
+        CASE.assertFalse(socket_path.exists())
+
+
+def test_stale_socket_drill_removes_created_socket_when_starter_raises() -> None:
+    helperctl = load_helperctl()
+    with tempfile.TemporaryDirectory(prefix="vzsock-") as temp_dir:
+        root = Path(temp_dir)
+        root.chmod(0o700)
+        helper = root / "macos-vz-helper"
+        socket_path = root / "runtime" / "helper.sock"
+        pid_file = root / "runtime" / "helper.pid"
+        log_dir = root / "logs"
+        helper.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper.chmod(0o700)
+
+        def fake_socket_creator(path: Path) -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                try:
+                    server.bind(str(path))
+                except PermissionError:
+                    pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+
+        def raising_starter(*args: Any, **kwargs: Any) -> Any:
+            raise OSError("popen failed")
+
+        results = helperctl.stale_socket_drill(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            socket_creator=fake_socket_creator,
+            starter=raising_starter,
+            status_collector=lambda *args, **kwargs: pytest.fail("failed start should not collect status"),
+        )
+
+        CASE.assertIn(
+            ("start", helperctl.CheckResult(False, "helper_start_failed", "popen failed")),
+            results,
+        )
+        CASE.assertEqual(
+            results[-1],
+            ("stale_socket_drill", helperctl.CheckResult(False, "helper_start_failed", "popen failed")),
+        )
+        CASE.assertFalse(socket_path.exists())
+
+
+def test_stale_socket_drill_preserves_existing_inactive_socket_on_start_failure() -> None:
+    helperctl = load_helperctl()
+    with tempfile.TemporaryDirectory(prefix="vzsock-") as temp_dir:
+        root = Path(temp_dir)
+        root.chmod(0o700)
+        helper = root / "macos-vz-helper"
+        socket_path = root / "runtime" / "helper.sock"
+        pid_file = root / "runtime" / "helper.pid"
+        log_dir = root / "logs"
+        helper.write_text("#!/bin/sh\n", encoding="utf-8")
+        helper.chmod(0o700)
+        socket_path.parent.mkdir(mode=0o700)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+            try:
+                server.bind(str(socket_path))
+            except PermissionError:
+                pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+
+        results = helperctl.stale_socket_drill(
+            helper,
+            socket_path,
+            pid_file,
+            log_dir,
+            socket_creator=lambda path: pytest.fail("existing inactive socket should not be re-created"),
+            starter=lambda *args, **kwargs: helperctl.CheckResult(False, "helper_already_running"),
+            status_collector=lambda *args, **kwargs: pytest.fail("failed start should not collect status"),
+        )
+
+        CASE.assertIn(("stale_socket", helperctl.CheckResult(ok=True, reason="helper_socket_present")), results)
+        CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(False, "helper_already_running")))
+        CASE.assertTrue(socket_path.exists())
+
+
+def test_stale_socket_drill_fails_when_post_status_is_not_running(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    tmp_path.chmod(0o700)
+
+    results = helperctl.stale_socket_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        socket_creator=lambda path: None,
+        starter=lambda *args, **kwargs: helperctl.CheckResult(ok=True),
+        status_collector=lambda *args, **kwargs: [
+            ("process", helperctl.CheckResult(ok=True, reason="helper_not_running")),
+            ("ping", helperctl.CheckResult(ok=True, reason="helper_not_running")),
+        ],
+    )
+
+    CASE.assertIn(("after_process", helperctl.CheckResult(ok=True, reason="helper_not_running")), results)
+    CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(False, "helper_not_running")))
+
+
+@pytest.mark.parametrize("shape", ["symlink", "regular_file", "directory"])
+def test_stale_socket_drill_refuses_unsafe_socket_shapes(tmp_path: Path, shape: str) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    socket_path.parent.mkdir(mode=0o700)
+    pid_file.parent.mkdir(mode=0o700, exist_ok=True)
+    log_dir.mkdir(mode=0o700)
+    (log_dir / "serial").mkdir(mode=0o700)
+    if shape == "symlink":
+        target = tmp_path / "target.sock"
+        socket_path.symlink_to(target)
+    elif shape == "regular_file":
+        socket_path.write_text("not a socket", encoding="utf-8")
+    else:
+        socket_path.mkdir(mode=0o700)
+
+    results = helperctl.stale_socket_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        socket_creator=lambda path: pytest.fail("unsafe drill should not create a socket"),
+        starter=lambda *args, **kwargs: pytest.fail("unsafe drill should not start helper"),
+        status_collector=lambda *args, **kwargs: pytest.fail("unsafe drill should not collect status"),
+    )
+
+    CASE.assertEqual(dict(results)["socket_path"].reason, "helper_socket_unsafe")
+    CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(False, "helper_socket_unsafe")))
+    if shape == "symlink":
+        CASE.assertTrue(socket_path.is_symlink())
+    elif shape == "regular_file":
+        CASE.assertEqual(socket_path.read_text(encoding="utf-8"), "not a socket")
+    else:
+        CASE.assertTrue(socket_path.is_dir())
+
+
+def test_stale_socket_drill_refuses_unsafe_parent_without_starting(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_dir = tmp_path / "runtime"
+    socket_path = socket_dir / "helper.sock"
+    pid_file = tmp_path / "pid" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    socket_dir.mkdir(mode=0o755)
+    socket_dir.chmod(0o755)
+    pid_file.parent.mkdir(mode=0o700)
+    log_dir.mkdir(mode=0o700)
+    (log_dir / "serial").mkdir(mode=0o700)
+
+    results = helperctl.stale_socket_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        socket_creator=lambda path: pytest.fail("unsafe drill should not create a socket"),
+        starter=lambda *args, **kwargs: pytest.fail("unsafe drill should not start helper"),
+        status_collector=lambda *args, **kwargs: pytest.fail("unsafe drill should not collect status"),
+    )
+
+    CASE.assertEqual(dict(results)["socket_directory"].reason, "helper_directory_not_private")
+    CASE.assertEqual(
+        results[-1],
+        ("stale_socket_drill", helperctl.CheckResult(False, "helper_directory_not_private")),
+    )
+    CASE.assertFalse(socket_path.exists())
+    CASE.assertEqual(socket_dir.stat().st_mode & 0o777, 0o755)
+
+
+def test_stale_socket_drill_dry_run_is_non_mutating(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o700)
+    tmp_path.chmod(0o700)
+
+    results = helperctl.stale_socket_drill(
+        helper,
+        socket_path,
+        pid_file,
+        log_dir,
+        dry_run=True,
+        socket_creator=lambda path: pytest.fail("dry-run should not create a socket"),
+        starter=lambda *args, **kwargs: pytest.fail("dry-run should not start helper"),
+        status_collector=lambda *args, **kwargs: pytest.fail("dry-run should not collect status"),
+    )
+
+    CASE.assertEqual(results[-1], ("stale_socket_drill", helperctl.CheckResult(ok=True, reason="dry_run")))
+    CASE.assertFalse(socket_path.parent.exists())
+    CASE.assertFalse(pid_file.parent.exists())
+    CASE.assertFalse(log_dir.exists())
+
+
+def test_stale_socket_drill_cli_passes_paths_and_prints_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    helper = tmp_path / "macos-vz-helper"
+    socket_path = tmp_path / "runtime" / "helper.sock"
+    pid_file = tmp_path / "runtime" / "helper.pid"
+    log_dir = tmp_path / "logs"
+    captured_paths: dict[str, Any] = {}
+
+    def fake_stale_socket_drill(
+        helper_path: Path,
+        received_socket_path: Path,
+        received_pid_file: Path,
+        received_log_dir: Path,
+        *,
+        dry_run: bool = False,
+    ) -> list[tuple[str, Any]]:
+        captured_paths.update(
+            {
+                "helper": helper_path,
+                "socket": received_socket_path,
+                "pid_file": received_pid_file,
+                "log_dir": received_log_dir,
+                "dry_run": dry_run,
+            }
+        )
+        return [("stale_socket_drill", helperctl.CheckResult(ok=True))]
+
+    monkeypatch.setattr(helperctl, "stale_socket_drill", fake_stale_socket_drill)
+
+    code = helperctl.main(
+        [
+            "stale-socket-drill",
+            "--helper-path",
+            str(helper),
+            "--socket-path",
+            str(socket_path),
+            "--pid-file",
+            str(pid_file),
+            "--log-dir",
+            str(log_dir),
+            "--dry-run",
+            "--json",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(output[0]["name"], "stale_socket_drill")
+    CASE.assertEqual(captured_paths["helper"], helper)
+    CASE.assertEqual(captured_paths["socket"], socket_path)
+    CASE.assertEqual(captured_paths["pid_file"], pid_file)
+    CASE.assertEqual(captured_paths["log_dir"], log_dir)
+    CASE.assertIs(captured_paths["dry_run"], True)
+
+
 def test_smoke_dry_run_delegates_to_host_smoke_script(tmp_path, capsys):
     helperctl = load_helperctl()
     bundle = tmp_path / "bundle"

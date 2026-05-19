@@ -153,6 +153,11 @@ def socket_accepts_connection(path: Path, *, timeout_sec: float = 0.1) -> bool:
         return False
 
 
+def create_stale_unix_socket(path: Path) -> None:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        server.bind(str(path))
+
+
 def remove_socket_if_identity(path: Path, identity: SocketIdentity | None) -> None:
     if identity is None:
         return
@@ -1620,6 +1625,72 @@ def status_helper(
     return CheckResult(ok=True, reason="helper_not_running")
 
 
+def stale_socket_drill(
+    helper_path: Path,
+    socket_path: Path,
+    pid_file: Path,
+    log_dir: Path,
+    *,
+    dry_run: bool = False,
+    socket_creator: Callable[[Path], None] = create_stale_unix_socket,
+    starter: Callable[..., CheckResult] = start_helper,
+    status_collector: Callable[..., list[tuple[str, CheckResult]]] = collect_status_results,
+) -> list[tuple[str, CheckResult]]:
+    """Create a controlled stale socket, then recover through the normal start path."""
+    results: list[tuple[str, CheckResult]] = []
+    for name, result in (
+        ("helper_binary", validate_helper_binary(helper_path)),
+        ("socket_path", validate_socket_path(socket_path)),
+        ("socket_directory", ensure_private_dir(socket_path.parent, dry_run=dry_run)),
+        ("pid_directory", ensure_private_dir(pid_file.parent, dry_run=dry_run)),
+        ("log_directory", ensure_private_dir(log_dir, dry_run=dry_run)),
+        ("serial_log_directory", ensure_private_dir(log_dir / "serial", dry_run=dry_run)),
+    ):
+        results.append((name, result))
+        if not result.ok:
+            results.append(("stale_socket_drill", result))
+            return results
+
+    if socket_accepts_connection(socket_path):
+        active = CheckResult(ok=False, reason="helper_already_running")
+        results.append(("socket", active))
+        results.append(("stale_socket_drill", active))
+        return results
+
+    if dry_run:
+        results.append(("stale_socket_drill", CheckResult(ok=True, reason="dry_run")))
+        return results
+
+    created_socket_identity: SocketIdentity | None = None
+    if socket_path.exists():
+        results.append(("stale_socket", CheckResult(ok=True, reason="helper_socket_present")))
+    else:
+        try:
+            socket_creator(socket_path)
+        except OSError as exc:
+            failed_create = CheckResult(ok=False, reason="helper_socket_create_failed", message=str(exc))
+            results.append(("stale_socket", failed_create))
+            results.append(("stale_socket_drill", failed_create))
+            return results
+        created_socket_identity = socket_identity(socket_path)
+        results.append(("stale_socket", CheckResult(ok=True)))
+
+    try:
+        start_result = starter(helper_path, socket_path, pid_file, log_dir, dry_run=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        start_result = CheckResult(ok=False, reason="helper_start_failed", message=str(exc))
+    results.append(("start", start_result))
+    if not start_result.ok:
+        remove_socket_if_identity(socket_path, created_socket_identity)
+        results.append(("stale_socket_drill", start_result))
+        return results
+
+    status_results = status_collector(helper_path, socket_path, pid_file, log_dir)
+    results.extend(_prefixed_results("after", status_results))
+    results.append(("stale_socket_drill", _managed_helper_running_result(status_results)))
+    return results
+
+
 def _prefixed_results(
     prefix: str,
     results: Iterable[tuple[str, CheckResult]],
@@ -1929,6 +2000,19 @@ def _restart_drill_command(args: argparse.Namespace) -> int:
     return 0 if all(result.ok for _, result in results) else 1
 
 
+def _stale_socket_drill_command(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    results = stale_socket_drill(
+        Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        Path(args.socket_path) if args.socket_path else paths.socket_path,
+        Path(args.pid_file) if args.pid_file else paths.pid_file,
+        Path(args.log_dir) if args.log_dir else paths.log_dir,
+        dry_run=args.dry_run,
+    )
+    _print_results(results, as_json=args.json)
+    return 0 if all(result.ok for _, result in results) else 1
+
+
 def _launchd_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = run_launchd_action(
@@ -2087,6 +2171,18 @@ def build_parser() -> argparse.ArgumentParser:
     restart_drill.add_argument("--dry-run", action="store_true")
     restart_drill.add_argument("--json", action="store_true")
     restart_drill.set_defaults(func=_restart_drill_command)
+
+    stale_socket_drill_parser = subparsers.add_parser(
+        "stale-socket-drill",
+        help="create and recover a controlled stale helper socket",
+    )
+    stale_socket_drill_parser.add_argument("--helper", "--helper-path", dest="helper_path")
+    stale_socket_drill_parser.add_argument("--socket", "--socket-path", dest="socket_path")
+    stale_socket_drill_parser.add_argument("--pid-file")
+    stale_socket_drill_parser.add_argument("--log-dir")
+    stale_socket_drill_parser.add_argument("--dry-run", action="store_true")
+    stale_socket_drill_parser.add_argument("--json", action="store_true")
+    stale_socket_drill_parser.set_defaults(func=_stale_socket_drill_command)
 
     launchd = subparsers.add_parser("launchd", help="run explicit launchctl helper lifecycle actions")
     launchd.add_argument("action", choices=sorted(LAUNCHD_ACTIONS))
