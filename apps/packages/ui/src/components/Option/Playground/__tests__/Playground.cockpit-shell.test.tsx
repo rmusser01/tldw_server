@@ -84,7 +84,17 @@ const tldwClientState = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string) => defaultValue || key,
+    t: (
+      key: string,
+      fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown },
+    ) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
+      const template = fallbackOrOptions?.defaultValue || key;
+      return template.replace(/\{\{(\w+)\}\}/g, (_, token: string) => {
+        const value = fallbackOrOptions?.[token];
+        return value == null ? `{{${token}}}` : String(value);
+      });
+    },
   }),
 }));
 

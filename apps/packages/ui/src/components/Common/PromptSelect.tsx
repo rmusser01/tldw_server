@@ -509,13 +509,7 @@ export const PromptSelect: React.FC<Props> = ({
             className={className}>
             <BookIcon className={iconClassName} />
             <span className="ml-1 hidden max-w-[120px] truncate text-xs font-medium text-text sm:inline">
-              {promptsLoading ? (
-                <span role="status" aria-label={promptLoadingLabel}>
-                  {promptLoadingLabel}
-                </span>
-              ) : (
-                triggerLabel
-              )}
+              {triggerLabel}
             </span>
           </IconButton>
         </Tooltip>

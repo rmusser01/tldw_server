@@ -12,6 +12,11 @@ vi.mock("react-i18next", () => ({
       _key: string,
       fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown },
     ) => {
+      if (_key === "characterChatReadiness.missingRestoredCharacter.title") {
+        return typeof fallbackOrOptions === "string"
+          ? fallbackOrOptions
+          : `Translated restored character ${fallbackOrOptions?.id}`;
+      }
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
       const template = fallbackOrOptions?.defaultValue || _key;
       return template.replace(/\{\{(\w+)\}\}/g, (_, token: string) => {
@@ -101,7 +106,7 @@ describe("CharacterChatReadinessPanel", () => {
       name: "Character Chat setup status",
     });
     expect(panel).toHaveTextContent(
-      "Character missing-character could not be loaded",
+      "Translated restored character missing-character",
     );
     expect(panel).toHaveTextContent("Choose another character or retry loading it.");
 

@@ -41,11 +41,13 @@ export const CharacterChatReadinessPanel = ({
   );
 
   if (missingCharacter) {
-    const titleTemplate = t(
+    const title = t(
       "characterChatReadiness.missingRestoredCharacter.title",
-      "Character {{id}} could not be loaded",
+      {
+        id: missingCharacter.id,
+        defaultValue: "Character {{id}} could not be loaded",
+      },
     ) as string;
-    const title = titleTemplate.replace("{{id}}", missingCharacter.id);
     const description = t(
       "characterChatReadiness.missingRestoredCharacter.description",
       "Choose another character or retry loading it.",

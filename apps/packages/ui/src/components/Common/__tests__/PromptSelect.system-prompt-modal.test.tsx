@@ -206,9 +206,10 @@ describe("PromptSelect system prompt modal", () => {
     expect(
       await screen.findByRole("button", { name: /loading prompts/i })
     ).toBeInTheDocument()
-    expect(screen.getByRole("status", { name: /loading prompts/i })).toHaveTextContent(
-      "Loading prompts"
-    )
+    expect(screen.getByText("Loading prompts")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("status", { name: /loading prompts/i })
+    ).not.toBeInTheDocument()
   })
 
   it("shows prompt library errors with a retry action", async () => {
