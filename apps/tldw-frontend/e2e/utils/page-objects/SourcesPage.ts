@@ -69,7 +69,7 @@ export class SourcesPage extends BasePage {
 
   /** Loading spinner */
   get loadingSpinner(): Locator {
-    return this.page.locator("[data-testid='sources-loading-state'], .ant-spin-spinning, .ant-spin-dot, .ant-spin").first()
+    return this.page.locator("[data-testid='sources-loading-state']").first()
   }
 
   /** Error alert */
