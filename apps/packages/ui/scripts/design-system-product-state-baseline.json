@@ -3641,17 +3641,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "canonical-state-label:src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx:Ready",
-    "path": "src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx",
-    "rule": "canonical-state-label",
-    "subject": "Ready",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing canonical state label \"Ready\" in src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx before the stable duplicate-id guard.",
-    "replacement": "design-system state registry",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx:Alert",
     "path": "src/components/Option/Watchlists/OutputsTab/ReportBuilderDrawer.tsx",
     "rule": "antd-product-state-import",

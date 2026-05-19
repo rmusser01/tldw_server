@@ -15,6 +15,7 @@ import type {
   WatchlistRun,
   WatchlistTemplate
 } from "@/types/watchlists"
+import { READY_STATE_LABEL } from "@/design-system/states"
 
 interface ReportBuilderDrawerProps {
   open: boolean
@@ -457,7 +458,7 @@ export const ReportBuilderDrawer: React.FC<ReportBuilderDrawerProps> = ({
                 ))}
               </div>
             ) : (
-              <Tag color="green">{t("watchlists:reports.builder.ready", "Ready")}</Tag>
+              <Tag color="green">{t("watchlists:reports.builder.ready", READY_STATE_LABEL)}</Tag>
             )}
           </div>
 
