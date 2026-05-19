@@ -346,22 +346,92 @@ If the helper is restarted directly or by a future launchd-managed workflow:
 After a host reboot, assume helper process identity, helper in-memory VM state,
 virtiofs state, and guest-agent readiness were lost until proven otherwise.
 Durable image-store manifests and persisted session-control rows may still
-exist, but they are provenance, not live VM proof. The recommended manual
-procedure is:
+exist, but they are provenance, not live VM proof.
 
-1. Start or verify the helper through the managed operator workflow.
-2. Run `vz-helperctl.py status` and confirm protocol-compatible helper ping.
-3. Run `/api/v1/sandbox/admin/macos-diagnostics`.
-4. Inspect stale, unhealthy, skipped-active, and orphan classifications.
-5. Run reconciliation repair in dry-run mode if stale inactive rows are
+Use `host-reboot-drill` when an operator needs a durable pre-reboot and
+post-reboot helper proof. The evidence directory is part of the acceptance
+record: it must survive reboot, must be private to the operator, and must not
+live under `/tmp`, `$TMPDIR`, or another volatile root. Prefer a run-specific
+directory under `~/Library/Logs/tldw/vz-host-reboot-drill/`.
+The drill records the host boot marker before and after reboot. Post validation
+fails if the marker is missing or unchanged, which prevents a no-reboot same
+helper process from passing as a reboot proof. The pre phase also records
+non-mutating lifecycle readiness checks and bundle dry-run validation.
+
+Direct helper mode:
+
+```bash
+evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+socket_path="$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.sock"
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
+  --evidence-dir "$evidence_dir" \
+  --socket "$socket_path" \
+  --pid-file "$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.pid" \
+  --bundle /path/to/canonical/bundle \
+  --create-evidence-dir
+
+# Manually reboot the host. Do not run this from scheduled CI.
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
+  --evidence-dir "$evidence_dir" \
+  --socket "$socket_path" \
+  --pid-file "$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.pid" \
+  --bundle /path/to/canonical/bundle \
+  --run-smoke
+```
+
+Launchd helper mode requires explicit LaunchAgent metadata in both phases:
+
+```bash
+label="org.tldw.macos-vz-helper.manual-reboot"
+plist="$HOME/Library/LaunchAgents/${label}.plist"
+evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
+  --helper-mode launchd \
+  --label "$label" \
+  --plist-output "$plist" \
+  --evidence-dir "$evidence_dir" \
+  --bundle /path/to/canonical/bundle \
+  --create-evidence-dir
+
+# Manually reboot the host. After login, verify launchd restored the helper.
+
+tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
+  --helper-mode launchd \
+  --label "$label" \
+  --plist-output "$plist" \
+  --evidence-dir "$evidence_dir" \
+  --bundle /path/to/canonical/bundle \
+  --run-smoke
+```
+
+`post --run-smoke` must prove the restored helper socket through the host smoke
+path. It must not start a new helper process, because that would validate a
+fresh helper rather than reboot recovery. Expected blocking failures for an
+explicit manual drill include a missing, unsafe, or volatile evidence
+directory; unavailable or unchanged host boot marker; invalid or mismatched
+pre/post metadata; failed lifecycle readiness; helper ping or protocol failure;
+and post-reboot smoke failure when `--run-smoke` is requested.
+
+The broader manual recovery procedure remains:
+
+1. Run the `host-reboot-drill pre` command into a durable evidence directory.
+2. Manually reboot the host.
+3. Restore or verify the intended direct or launchd helper socket.
+4. Run `host-reboot-drill post` against the same evidence directory.
+5. Run `/api/v1/sandbox/admin/macos-diagnostics`.
+6. Inspect stale, unhealthy, skipped-active, and orphan classifications.
+7. Run reconciliation repair in dry-run mode if stale inactive rows are
    reported.
-6. Apply mutating repair only after reviewing the dry-run plan.
-7. Run the real host smoke to verify fresh ephemeral execution and same-session
-   behavior.
+8. Apply mutating repair only after reviewing the dry-run plan.
 
 Diagnostics, startup warnings, and host smoke must not delete session-control
 rows or terminate VMs automatically. Host reboot is an operator procedure today,
-not a scheduled CI action or hidden startup repair path.
+not a scheduled CI action or hidden startup repair path. Scheduled and nightly
+CI must skip reboot validation; a prepared-host reboot drill is blocking only
+when an operator explicitly invokes it.
 
 Startup now also records bounded reconciliation/helper warnings during process
 boot through the shared startup warning framework. That startup path is

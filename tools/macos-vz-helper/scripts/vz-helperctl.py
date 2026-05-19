@@ -20,7 +20,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -33,9 +33,10 @@ if sys.version_info < (3, 10):
     EXPECTED_HELPER_PROTOCOL_VERSION = "1"
 else:
     try:
-        from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
-            EXPECTED_HELPER_PROTOCOL_VERSION,
-        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+                EXPECTED_HELPER_PROTOCOL_VERSION,
+            )
     except ModuleNotFoundError as exc:
         missing_name = str(exc.name or "")
         if missing_name != "tldw_Server_API" and not missing_name.startswith("tldw_Server_API."):
@@ -46,6 +47,41 @@ else:
 INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
 DEFAULT_LAUNCHD_LABEL = "org.tldw.macos-vz-helper"
 LAUNCHD_ACTIONS = {"bootstrap", "bootout", "kickstart", "status"}
+HOST_REBOOT_PRE_MANIFEST = "host-reboot-pre.json"
+HOST_REBOOT_POST_MANIFEST = "host-reboot-post.json"
+HOST_REBOOT_PRE_MANIFEST_MAX_BYTES = 64 * 1024
+HOST_REBOOT_HELPER_DETAIL_KEYS = frozenset({"helper_instance_id", "helper_started_at"})
+HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH = 256
+HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH = 512
+HOST_REBOOT_METADATA_MATCH_KEYS = (
+    "helper_mode",
+    "launchd_label",
+    "launchd_plist_path",
+    "socket_path",
+    "helper_path",
+    "bundle_path",
+)
+
+
+def _resolve_operational_path(path: Path) -> Path | None:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _volatile_evidence_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for path in (Path(os.sep) / "tmp", Path(os.sep) / "private" / "tmp", os.getenv("TMPDIR") or ""):
+        if not path:
+            continue
+        resolved = _resolve_operational_path(Path(path))
+        if resolved is not None:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+VOLATILE_EVIDENCE_ROOTS = _volatile_evidence_roots()
 
 
 @dataclass(frozen=True)
@@ -101,6 +137,7 @@ class PingState:
     result: CheckResult
     protocol_version: str = ""
     helper_version: str = ""
+    details: dict[str, str] | None = None
 
 
 def default_paths() -> HelperPaths:
@@ -176,6 +213,121 @@ def validate_helper_binary(path: Path) -> CheckResult:
     if not os.access(path, os.X_OK):
         return CheckResult(ok=False, reason="helper_binary_not_executable", message=str(path))
     return CheckResult(ok=True, message=str(path))
+
+
+def _is_under_path(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    except RuntimeError:
+        return False
+    return True
+
+
+def ensure_host_reboot_evidence_dir(
+    evidence_dir: Path,
+    *,
+    create: bool = False,
+    dry_run: bool = False,
+    allow_volatile: bool = False,
+) -> CheckResult:
+    """Validate and optionally create the durable host-reboot evidence directory.
+
+    The directory is the trust boundary for pre/post reboot manifests, so it
+    must not live under a volatile root unless explicitly allowed and must pass
+    the same owner-only directory checks used by helper runtime paths.
+    """
+    try:
+        if not allow_volatile:
+            for root in VOLATILE_EVIDENCE_ROOTS:
+                if _is_under_path(evidence_dir, root):
+                    return CheckResult(False, "host_reboot_evidence_dir_volatile", str(evidence_dir))
+        if evidence_dir.is_symlink():
+            return CheckResult(False, "host_reboot_evidence_dir_not_private", str(evidence_dir))
+        if not evidence_dir.exists() and not create:
+            return CheckResult(False, "host_reboot_evidence_dir_missing", str(evidence_dir))
+        result = ensure_private_dir(evidence_dir, dry_run=dry_run or not create)
+    except (FileExistsError, NotADirectoryError, PermissionError, OSError, RuntimeError, ValueError) as exc:
+        return CheckResult(False, "host_reboot_evidence_dir_not_private", str(exc))
+    if not result.ok:
+        return CheckResult(False, "host_reboot_evidence_dir_not_private", result.message or str(evidence_dir))
+    return CheckResult(True, "host_reboot_evidence_dir_ok", str(evidence_dir))
+
+
+def write_json_private(path: Path, payload: Mapping[str, Any]) -> CheckResult:
+    """Atomically write a private JSON manifest without exposing partial data.
+
+    Existing regular manifests are hardened to owner-only permissions before the
+    write. The new payload is written to a private temp file in the same
+    directory, flushed, fsynced, and atomically replaced into place so an
+    interrupted write does not leave truncated final evidence.
+    """
+    try:
+        existing_stat = os.lstat(path)
+        if stat.S_ISLNK(existing_stat.st_mode) or not stat.S_ISREG(existing_stat.st_mode):
+            raise OSError(f"manifest target is not a regular file: {path}")
+        harden_flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            harden_flags |= os.O_NOFOLLOW
+        if hasattr(os, "O_NONBLOCK"):
+            harden_flags |= os.O_NONBLOCK
+        harden_fd: int | None = None
+        try:
+            harden_fd = os.open(path, harden_flags, 0o600)
+            harden_stat = os.fstat(harden_fd)
+            if not stat.S_ISREG(harden_stat.st_mode):
+                raise OSError(f"manifest target is not a regular file: {path}")
+            os.fchmod(harden_fd, 0o600)
+        finally:
+            if harden_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(harden_fd)
+    except FileNotFoundError:
+        pass
+    except (OSError, TypeError, ValueError) as exc:
+        return CheckResult(False, "host_reboot_manifest_write_failed", str(exc))
+
+    flags = os.O_WRONLY | os.O_CREAT
+    if hasattr(os, "O_EXCL"):
+        flags |= os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    fd: int | None = None
+    temp_path: Path | None = path.with_name(f".{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
+    try:
+        fd = os.open(temp_path, flags, 0o600)
+        path_stat = os.fstat(fd)
+        if not stat.S_ISREG(path_stat.st_mode):
+            raise OSError(f"manifest temp target is not a regular file: {temp_path}")
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = None
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+        dir_fd: int | None = None
+        with contextlib.suppress(OSError):
+            try:
+                dir_fd = os.open(path.parent, os.O_RDONLY, 0o700)
+                os.fsync(dir_fd)
+            finally:
+                if dir_fd is not None:
+                    os.close(dir_fd)
+    except (OSError, TypeError, ValueError) as exc:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+        return CheckResult(False, "host_reboot_manifest_write_failed", str(exc))
+    return CheckResult(True, "host_reboot_manifest_written", str(path))
 
 
 def ensure_private_dir(path: Path, dry_run: bool = False) -> CheckResult:
@@ -787,16 +939,28 @@ def _request_helper_ping(socket_path: Path, *, timeout_sec: float = 5.0) -> dict
     return response
 
 
+def _string_details(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    output: dict[str, str] = {}
+    for key, item in value.items():
+        if isinstance(key, str) and isinstance(item, str):
+            output[key] = item
+    return output
+
+
 def ping_helper_state(
     socket_path: Path,
     *,
     client_factory: Callable[[Path], object] | None = None,
 ) -> PingState:
+    details: dict[str, str] = {}
     try:
         if client_factory is not None:
             reply = client_factory(socket_path).ping()
             protocol_version = str(getattr(reply, "protocol_version", "") or "")
             helper_version = str(getattr(reply, "helper_version", "") or "")
+            details = _string_details(getattr(reply, "details", None))
         else:
             payload = _request_helper_ping(socket_path)
             error_code = str(payload.get("error_code") or "").strip()
@@ -805,6 +969,7 @@ def ping_helper_state(
                 raise RuntimeError(f"{error_code}: {message}")
             protocol_version = str(payload.get("protocol_version") or "")
             helper_version = str(payload.get("helper_version") or "")
+            details = _string_details(payload.get("details"))
     except Exception as exc:
         if (
             exc.__class__.__name__ == "MacOSVirtualizationHelperProtocolError"
@@ -812,23 +977,496 @@ def ping_helper_state(
         ):
             return PingState(
                 result=CheckResult(ok=False, reason="helper_protocol_mismatch", message=str(exc)),
+                details=details,
             )
-        return PingState(result=CheckResult(ok=False, reason="helper_ping_failed", message=str(exc)))
+        return PingState(result=CheckResult(ok=False, reason="helper_ping_failed", message=str(exc)), details=details)
     if protocol_version != str(EXPECTED_HELPER_PROTOCOL_VERSION):
         return PingState(
             result=CheckResult(ok=False, reason="helper_protocol_mismatch"),
             protocol_version=protocol_version,
             helper_version=helper_version,
+            details=details,
         )
     return PingState(
         result=CheckResult(ok=True),
         protocol_version=protocol_version,
         helper_version=helper_version,
+        details=details,
     )
 
 
 def _ping_helper(socket_path: Path) -> CheckResult:
     return ping_helper_state(socket_path).result
+
+
+def ping_state_payload(state: PingState) -> dict[str, Any]:
+    return {
+        "helper_ping_ok": state.result.ok,
+        "helper_ping_reason": state.result.reason,
+        "helper_protocol_version": state.protocol_version,
+        "helper_version": state.helper_version,
+        "helper_details": state.details or {},
+    }
+
+
+def _host_reboot_helper_details(details: Mapping[str, Any] | None) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    if not details:
+        return sanitized
+    for key in HOST_REBOOT_HELPER_DETAIL_KEYS:
+        value = details.get(key)
+        if not isinstance(value, str):
+            continue
+        sanitized[key] = value[:HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH]
+    return sanitized
+
+
+def _host_reboot_ping_state_payload(state: PingState) -> dict[str, Any]:
+    payload = ping_state_payload(state)
+    payload["helper_details"] = _host_reboot_helper_details(state.details)
+    return payload
+
+
+def _host_reboot_result_payload(name: str, result: CheckResult) -> dict[str, object]:
+    return {
+        "name": name[:HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH],
+        "ok": result.ok,
+        "reason": result.reason[:HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH],
+        "message": result.message[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH],
+    }
+
+
+def _host_reboot_results_payload(results: Iterable[tuple[str, CheckResult]]) -> list[dict[str, object]]:
+    return [_host_reboot_result_payload(name, result) for name, result in results]
+
+
+def _host_reboot_created_at() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def host_boot_marker() -> CheckResult:
+    """Return a stable host boot marker for proving a reboot occurred."""
+    sysctl_path = Path("/usr/sbin/sysctl")
+    if sysctl_path.exists():
+        try:
+            completed = subprocess.run(  # nosec B603
+                [str(sysctl_path), "-n", "kern.boottime"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, PermissionError, OSError):
+            completed = None
+        if completed is not None and completed.returncode == 0:
+            marker = " ".join((completed.stdout or "").split())
+            if marker:
+                return CheckResult(True, "host_boot_marker", marker[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH])
+
+    linux_boot_id = Path("/proc/sys/kernel/random/boot_id")
+    try:
+        marker = linux_boot_id.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, PermissionError, OSError):
+        marker = ""
+    if marker:
+        return CheckResult(True, "host_boot_marker", marker[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH])
+    return CheckResult(False, "host_boot_marker_unavailable")
+
+
+def _host_reboot_boot_marker_payload(result: CheckResult) -> dict[str, Any]:
+    return {
+        "host_boot_marker_ok": result.ok,
+        "host_boot_marker_reason": result.reason,
+        "host_boot_marker": result.message[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH],
+    }
+
+
+def host_reboot_bundle_dry_run_validation(
+    *,
+    bundle_path: Path,
+    socket_path: Path,
+    python_path: Path | None = None,
+    command_runner: Callable[..., int] = run_command_captured,
+) -> CheckResult:
+    if not str(bundle_path) or str(bundle_path) == ".":
+        return CheckResult(False, "host_reboot_bundle_missing")
+    argv = [
+        str(host_smoke_script_path()),
+        "--bundle",
+        str(bundle_path),
+        "--socket",
+        str(socket_path),
+        "--dry-run",
+    ]
+    if python_path is not None:
+        argv.extend(["--python", str(python_path)])
+    code = command_runner(argv, dry_run=False)
+    if code != 0:
+        return CheckResult(False, "host_reboot_bundle_validation_failed", str(code))
+    return CheckResult(True, "dry_run")
+
+
+def _host_reboot_bundle_payload(result: CheckResult) -> dict[str, Any]:
+    return {
+        "bundle_validation_ok": result.ok,
+        "bundle_validation_reason": result.reason,
+    }
+
+
+def _host_reboot_readiness_result(results: Iterable[tuple[str, CheckResult]]) -> CheckResult:
+    collected = list(results)
+    for name, result in collected:
+        if name == "helper_readiness":
+            return result
+    for name, result in collected:
+        if not result.ok:
+            return CheckResult(False, "host_reboot_lifecycle_check_failed", f"{name}:{result.reason}")
+    return CheckResult(False, "host_reboot_helper_not_ready")
+
+
+def _host_reboot_marker_result(pre_manifest: Mapping[str, Any], post_boot_marker: CheckResult) -> CheckResult:
+    if not bool(pre_manifest.get("host_boot_marker_ok")):
+        return CheckResult(False, "host_boot_marker_missing")
+    pre_marker = str(pre_manifest.get("host_boot_marker", ""))
+    if not pre_marker:
+        return CheckResult(False, "host_boot_marker_missing")
+    if not post_boot_marker.ok:
+        return post_boot_marker
+    if not post_boot_marker.message:
+        return CheckResult(False, "host_boot_marker_unavailable")
+    if pre_marker == post_boot_marker.message:
+        return CheckResult(False, "host_reboot_not_detected")
+    return CheckResult(True, "host_reboot_detected")
+
+
+def run_host_reboot_pre(
+    *,
+    evidence_dir: Path,
+    bundle_path: Path,
+    helper_mode: str,
+    socket_path: Path,
+    log_dir: Path,
+    helper_path: Path = DEFAULT_HELPER,
+    pid_file: Path | None = None,
+    entitlements_path: Path | None = None,
+    serial_log_dir: Path | None = None,
+    launchd_label: str = "",
+    launchd_plist_path: Path | None = None,
+    create_evidence_dir: bool = False,
+    allow_volatile_evidence_dir: bool = False,
+    dry_run: bool = False,
+    readiness_checker: Callable[..., list[tuple[str, CheckResult]]] | None = None,
+    bundle_validator: Callable[..., CheckResult] = host_reboot_bundle_dry_run_validation,
+    boot_marker_provider: Callable[[], CheckResult] = host_boot_marker,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    created_at_factory: Callable[[], str] = _host_reboot_created_at,
+    hostname_provider: Callable[[], str] = socket.gethostname,
+) -> CheckResult:
+    evidence_result = ensure_host_reboot_evidence_dir(
+        evidence_dir,
+        create=create_evidence_dir,
+        dry_run=dry_run,
+        allow_volatile=allow_volatile_evidence_dir,
+    )
+    if not evidence_result.ok:
+        return evidence_result
+    if dry_run:
+        return CheckResult(True, "host_reboot_pre_dry_run", str(evidence_dir))
+
+    resolved_pid_file = pid_file or default_paths().pid_file
+    checker = readiness_checker or host_reboot_lifecycle_readiness_results
+    lifecycle_results = checker(
+        helper_mode=helper_mode,
+        helper_path=helper_path,
+        socket_path=socket_path,
+        pid_file=resolved_pid_file,
+        log_dir=log_dir,
+        launchd_label=launchd_label,
+        launchd_plist_path=launchd_plist_path,
+        entitlements_path=entitlements_path,
+        ping_checker=ping_checker,
+    )
+    readiness_result = _host_reboot_readiness_result(lifecycle_results)
+    boot_marker_result = boot_marker_provider()
+    bundle_result = bundle_validator(bundle_path=bundle_path, socket_path=socket_path)
+
+    try:
+        ping_state = _coerce_ping_state(ping_checker(socket_path))
+    except Exception as exc:
+        ping_state = PingState(CheckResult(False, "helper_ping_failed", str(exc)))
+    payload: dict[str, Any] = {
+        "phase": "pre",
+        "created_at": created_at_factory(),
+        "hostname": hostname_provider(),
+        "log_dir": str(log_dir),
+        "serial_log_dir": str(serial_log_dir if serial_log_dir is not None else log_dir / "serial"),
+    }
+    payload.update(
+        _host_reboot_metadata_payload(
+            bundle_path=bundle_path,
+            helper_path=helper_path,
+            helper_mode=helper_mode,
+            socket_path=socket_path,
+            launchd_label=launchd_label,
+            launchd_plist_path=launchd_plist_path,
+        )
+    )
+    payload.update(_host_reboot_ping_state_payload(ping_state))
+    payload.update(_host_reboot_boot_marker_payload(boot_marker_result))
+    payload["lifecycle_results"] = _host_reboot_results_payload(lifecycle_results)
+    payload.update(_host_reboot_bundle_payload(bundle_result))
+
+    manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
+    write_result = write_json_private(manifest_path, payload)
+    if not write_result.ok:
+        return write_result
+    if not boot_marker_result.ok:
+        return boot_marker_result
+    if not readiness_result.ok:
+        return readiness_result
+    if not bundle_result.ok:
+        return bundle_result
+    if not ping_state.result.ok:
+        return CheckResult(
+            False,
+            ping_state.result.reason,
+            ping_state.result.message or str(manifest_path),
+        )
+    return CheckResult(True, "host_reboot_pre_manifest_written", str(manifest_path))
+
+
+def _read_host_reboot_pre_manifest(evidence_dir: Path) -> tuple[CheckResult, dict[str, Any] | None]:
+    manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
+    flags = os.O_RDONLY
+    nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+    nonblock_flag = getattr(os, "O_NONBLOCK", 0)
+    flags |= nofollow_flag | nonblock_flag
+    if not nofollow_flag or not nonblock_flag:
+        try:
+            pre_open_stat = os.lstat(manifest_path)
+        except FileNotFoundError:
+            return CheckResult(False, "host_reboot_pre_manifest_missing", str(manifest_path)), None
+        except OSError as exc:
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(exc)), None
+        if stat.S_ISLNK(pre_open_stat.st_mode) or (not nonblock_flag and not stat.S_ISREG(pre_open_stat.st_mode)):
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+    fd: int | None = None
+    try:
+        fd = os.open(manifest_path, flags)
+        fd_stat = os.fstat(fd)
+        if not stat.S_ISREG(fd_stat.st_mode):
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+        if fd_stat.st_size > HOST_REBOOT_PRE_MANIFEST_MAX_BYTES:
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+        chunks: list[bytes] = []
+        bytes_read = 0
+        while True:
+            chunk = os.read(fd, min(8192, HOST_REBOOT_PRE_MANIFEST_MAX_BYTES + 1 - bytes_read))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            bytes_read += len(chunk)
+            if bytes_read > HOST_REBOOT_PRE_MANIFEST_MAX_BYTES:
+                return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+        raw_bytes = b"".join(chunks)
+        raw_payload = json.loads(raw_bytes.decode("utf-8"))
+    except FileNotFoundError:
+        return CheckResult(False, "host_reboot_pre_manifest_missing", str(manifest_path)), None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return CheckResult(False, "host_reboot_pre_manifest_invalid", str(exc)), None
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+    if not isinstance(raw_payload, dict):
+        return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+    if raw_payload.get("phase") != "pre":
+        return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+    return CheckResult(True, "host_reboot_pre_manifest_loaded", str(manifest_path)), raw_payload
+
+
+def _manifest_helper_instance_id(manifest: Mapping[str, Any]) -> str:
+    details = _string_details(manifest.get("helper_details"))
+    return details.get("helper_instance_id", "")
+
+
+def _helper_generation_result(pre_instance_id: str, post_instance_id: str) -> CheckResult:
+    if not pre_instance_id or not post_instance_id:
+        return CheckResult(True, "helper_generation_unavailable")
+    if pre_instance_id == post_instance_id:
+        return CheckResult(True, "helper_generation_match")
+    return CheckResult(True, "helper_generation_changed")
+
+
+def _host_reboot_metadata_payload(
+    *,
+    bundle_path: Path,
+    helper_path: Path,
+    helper_mode: str,
+    socket_path: Path,
+    launchd_label: str,
+    launchd_plist_path: Path | None,
+) -> dict[str, str]:
+    return {
+        "helper_mode": helper_mode,
+        "launchd_label": launchd_label,
+        "launchd_plist_path": _host_reboot_metadata_path(launchd_plist_path),
+        "socket_path": _host_reboot_metadata_path(socket_path),
+        "helper_path": _host_reboot_metadata_path(helper_path),
+        "bundle_path": _host_reboot_metadata_path(bundle_path),
+    }
+
+
+def _host_reboot_metadata_path(path: Path | None) -> str:
+    if path is None:
+        return ""
+    if not str(path) or str(path) == ".":
+        return ""
+    try:
+        return str(path.expanduser().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return str(path.expanduser())
+
+
+def _host_reboot_metadata_match_result(
+    pre_manifest: Mapping[str, Any],
+    current_metadata: Mapping[str, str],
+) -> CheckResult:
+    mismatched_keys = [
+        key
+        for key in HOST_REBOOT_METADATA_MATCH_KEYS
+        if str(pre_manifest.get(key, "")) != current_metadata[key]
+    ]
+    if mismatched_keys:
+        return CheckResult(False, "host_reboot_metadata_mismatch", ",".join(mismatched_keys))
+    return CheckResult(True, "host_reboot_metadata_match")
+
+
+def run_host_reboot_post(
+    *,
+    evidence_dir: Path,
+    bundle_path: Path,
+    helper_mode: str,
+    socket_path: Path,
+    log_dir: Path,
+    helper_path: Path = DEFAULT_HELPER,
+    pid_file: Path | None = None,
+    entitlements_path: Path | None = None,
+    serial_log_dir: Path | None = None,
+    launchd_label: str = "",
+    launchd_plist_path: Path | None = None,
+    allow_volatile_evidence_dir: bool = False,
+    dry_run: bool = False,
+    readiness_checker: Callable[..., list[tuple[str, CheckResult]]] | None = None,
+    boot_marker_provider: Callable[[], CheckResult] = host_boot_marker,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    created_at_factory: Callable[[], str] = _host_reboot_created_at,
+    hostname_provider: Callable[[], str] = socket.gethostname,
+) -> list[tuple[str, CheckResult]]:
+    results: list[tuple[str, CheckResult]] = []
+
+    evidence_result = ensure_host_reboot_evidence_dir(
+        evidence_dir,
+        create=False,
+        dry_run=dry_run,
+        allow_volatile=allow_volatile_evidence_dir,
+    )
+    results.append(("evidence_directory", evidence_result))
+    if not evidence_result.ok:
+        results.append(("host_reboot_post", evidence_result))
+        return results
+
+    pre_result, pre_manifest = _read_host_reboot_pre_manifest(evidence_dir)
+    results.append(("pre_manifest", pre_result))
+    if not pre_result.ok or pre_manifest is None:
+        results.append(("host_reboot_post", pre_result))
+        return results
+
+    current_metadata = _host_reboot_metadata_payload(
+        bundle_path=bundle_path,
+        helper_path=helper_path,
+        helper_mode=helper_mode,
+        socket_path=socket_path,
+        launchd_label=launchd_label,
+        launchd_plist_path=launchd_plist_path,
+    )
+    metadata_result = _host_reboot_metadata_match_result(pre_manifest, current_metadata)
+    results.append(("metadata_match", metadata_result))
+    if not metadata_result.ok:
+        results.append(("host_reboot_post", metadata_result))
+        return results
+
+    resolved_pid_file = pid_file or default_paths().pid_file
+    checker = readiness_checker or host_reboot_lifecycle_readiness_results
+    lifecycle_results = checker(
+        helper_mode=helper_mode,
+        helper_path=helper_path,
+        socket_path=socket_path,
+        pid_file=resolved_pid_file,
+        log_dir=log_dir,
+        launchd_label=launchd_label,
+        launchd_plist_path=launchd_plist_path,
+        entitlements_path=entitlements_path,
+        ping_checker=ping_checker,
+    )
+    results.extend((f"lifecycle_{name}", result) for name, result in lifecycle_results)
+    readiness_result = _host_reboot_readiness_result(lifecycle_results)
+    results.append(("helper_readiness", readiness_result))
+
+    boot_marker_result = boot_marker_provider()
+    results.append(("host_boot_marker", boot_marker_result))
+    reboot_marker_result = _host_reboot_marker_result(pre_manifest, boot_marker_result)
+    results.append(("host_reboot_marker", reboot_marker_result))
+
+    try:
+        ping_state = _coerce_ping_state(ping_checker(socket_path))
+    except Exception as exc:
+        ping_state = PingState(CheckResult(False, "helper_ping_failed", str(exc)))
+    results.append(("helper_status", ping_state.result))
+
+    pre_instance_id = _manifest_helper_instance_id(pre_manifest)
+    post_instance_id = _host_reboot_helper_details(ping_state.details).get("helper_instance_id", "")
+    generation_result = _helper_generation_result(pre_instance_id, post_instance_id)
+    results.append(("helper_generation", generation_result))
+
+    payload: dict[str, Any] = {
+        "phase": "post",
+        "created_at": created_at_factory(),
+        "hostname": hostname_provider(),
+        "log_dir": str(log_dir),
+        "serial_log_dir": str(serial_log_dir if serial_log_dir is not None else log_dir / "serial"),
+        "pre_helper_instance_id": pre_instance_id,
+        "post_helper_instance_id": post_instance_id,
+        "helper_generation_reason": generation_result.reason,
+        "host_reboot_marker_reason": reboot_marker_result.reason,
+    }
+    payload.update(current_metadata)
+    payload.update(_host_reboot_ping_state_payload(ping_state))
+    payload.update(_host_reboot_boot_marker_payload(boot_marker_result))
+    payload["lifecycle_results"] = _host_reboot_results_payload(lifecycle_results)
+
+    manifest_path = evidence_dir / HOST_REBOOT_POST_MANIFEST
+    if dry_run:
+        write_result = CheckResult(True, "host_reboot_post_dry_run", str(manifest_path))
+    else:
+        write_result = write_json_private(manifest_path, payload)
+    if write_result.ok and not dry_run:
+        write_result = CheckResult(True, "host_reboot_post_manifest_written", write_result.message)
+    results.append(("post_manifest", write_result))
+
+    if not boot_marker_result.ok:
+        final_result = boot_marker_result
+    elif not reboot_marker_result.ok:
+        final_result = reboot_marker_result
+    elif not readiness_result.ok:
+        final_result = readiness_result
+    elif not ping_state.result.ok:
+        final_result = ping_state.result
+    elif not write_result.ok:
+        final_result = write_result
+    else:
+        final_result = CheckResult(True)
+    results.append(("host_reboot_post", final_result))
+    return results
 
 
 def wait_for_ping(
@@ -1591,6 +2229,64 @@ def collect_check_results(
     return results
 
 
+def host_reboot_lifecycle_readiness_results(
+    *,
+    helper_mode: str,
+    helper_path: Path,
+    socket_path: Path,
+    pid_file: Path,
+    log_dir: Path,
+    launchd_label: str = "",
+    launchd_plist_path: Path | None = None,
+    entitlements_path: Path | None = None,
+    dry_run: bool = False,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    check_collector: Callable[..., list[tuple[str, CheckResult]]] = collect_check_results,
+    launchd_status_checker: Callable[..., CheckResult] = run_launchd_action,
+) -> list[tuple[str, CheckResult]]:
+    results: list[tuple[str, CheckResult]] = []
+    if helper_mode == "launchd":
+        launchd_result = launchd_status_checker(
+            "status",
+            label=launchd_label,
+            plist_path=launchd_plist_path,
+            helper_path=helper_path,
+            socket_path=socket_path,
+            log_dir=log_dir,
+            dry_run=dry_run,
+        )
+        results.append(("launchd_status", launchd_result))
+
+    check_results = check_collector(
+        helper_path,
+        socket_path,
+        pid_file,
+        log_dir,
+        entitlements_path=entitlements_path,
+        dry_run=True,
+        ping_checker=ping_checker,
+    )
+    results.extend(check_results)
+
+    for name, result in results:
+        if not result.ok:
+            results.append(
+                (
+                    "helper_readiness",
+                    CheckResult(False, "host_reboot_lifecycle_check_failed", f"{name}:{result.reason}"),
+                )
+            )
+            return results
+
+    ping_result = next((result for name, result in results if name == "ping"), None)
+    if ping_result is None or ping_result.reason == "helper_not_running":
+        results.append(("helper_readiness", CheckResult(False, "host_reboot_helper_not_ready")))
+        return results
+
+    results.append(("helper_readiness", CheckResult(True, "host_reboot_helper_ready")))
+    return results
+
+
 def status_helper(
     helper_path: Path,
     socket_path: Path,
@@ -2079,6 +2775,105 @@ def _launchd_drill_command(args: argparse.Namespace) -> int:
     return 0 if all(result.ok for _, result in results) else 1
 
 
+def _host_reboot_drill_launchd_metadata_result(args: argparse.Namespace) -> CheckResult | None:
+    if args.helper_mode != "launchd":
+        return None
+    missing: list[str] = []
+    if not args.label:
+        missing.append("--label")
+    if not args.plist_output:
+        missing.append("--plist-output")
+    if not missing:
+        return None
+    return CheckResult(
+        False,
+        "host_reboot_launchd_metadata_missing",
+        f"launchd host reboot drill requires explicit {', '.join(missing)}",
+    )
+
+
+def _host_reboot_drill_common_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    paths = default_paths()
+    log_dir = Path(args.log_dir) if args.log_dir else paths.log_dir
+    return {
+        "evidence_dir": Path(args.evidence_dir),
+        "bundle_path": Path(args.bundle) if args.bundle else Path(""),
+        "helper_path": Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        "pid_file": Path(args.pid_file) if args.pid_file else paths.pid_file,
+        "entitlements_path": Path(args.entitlements) if args.entitlements else None,
+        "helper_mode": args.helper_mode,
+        "socket_path": Path(args.socket_path) if args.socket_path else paths.socket_path,
+        "log_dir": log_dir,
+        "serial_log_dir": Path(args.serial_log_dir) if args.serial_log_dir else log_dir / "serial",
+        "launchd_label": args.label or "",
+        "launchd_plist_path": Path(args.plist_output) if args.plist_output else None,
+        "allow_volatile_evidence_dir": args.allow_volatile_evidence_dir,
+    }
+
+
+def _host_reboot_drill_command(args: argparse.Namespace) -> int:
+    metadata_result = _host_reboot_drill_launchd_metadata_result(args)
+    if metadata_result is not None:
+        results = [("host_reboot_launchd_metadata", metadata_result)]
+        _print_results(results, as_json=args.json)
+        return 1
+
+    common_kwargs = _host_reboot_drill_common_kwargs(args)
+    common_kwargs["dry_run"] = args.dry_run
+    if args.phase == "pre":
+        pre_kwargs = dict(common_kwargs)
+        pre_kwargs["create_evidence_dir"] = args.create_evidence_dir
+        if args.json:
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = run_host_reboot_pre(**pre_kwargs)
+        else:
+            result = run_host_reboot_pre(**pre_kwargs)
+        results = [("host_reboot_pre", result)]
+        _print_results(results, as_json=args.json)
+        return 0 if result.ok else 1
+
+    post_kwargs = dict(common_kwargs)
+    if args.json:
+        with contextlib.redirect_stdout(io.StringIO()):
+            results = run_host_reboot_post(**post_kwargs)
+    else:
+        results = run_host_reboot_post(**post_kwargs)
+
+    if args.run_smoke:
+        post_result = results[-1][1] if results else CheckResult(False, "host_reboot_post_missing")
+        if not post_result.ok:
+            results.append(
+                (
+                    "vz_linux_smoke",
+                    CheckResult(False, "host_reboot_smoke_skipped", post_result.reason),
+                )
+            )
+        elif not args.bundle:
+            results.append(
+                (
+                    "vz_linux_smoke",
+                    CheckResult(False, "host_reboot_smoke_bundle_missing", "--bundle is required with --run-smoke"),
+                )
+            )
+        else:
+            smoke_kwargs = {
+                "bundle_path": Path(args.bundle),
+                "socket_path": post_kwargs["socket_path"],
+                "python_path": Path(args.python) if args.python else None,
+                "dry_run": args.dry_run,
+            }
+            if args.json:
+                smoke_kwargs["command_runner"] = run_command_captured
+                with contextlib.redirect_stdout(io.StringIO()):
+                    smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
+            else:
+                smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
+            results.append(("vz_linux_smoke", smoke_result))
+
+    _print_results(results, as_json=args.json)
+    return 0 if all(result.ok for _, result in results) else 1
+
+
 def _start_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = start_helper(
@@ -2228,6 +3023,42 @@ def build_parser() -> argparse.ArgumentParser:
     launchd_drill.add_argument("--dry-run", action="store_true")
     launchd_drill.add_argument("--json", action="store_true")
     launchd_drill.set_defaults(func=_launchd_drill_command)
+
+    host_reboot_drill = subparsers.add_parser(
+        "host-reboot-drill",
+        help="record and validate manual host reboot helper evidence",
+    )
+    host_reboot_subparsers = host_reboot_drill.add_subparsers(dest="phase", required=True)
+    host_reboot_parent = argparse.ArgumentParser(add_help=False)
+    host_reboot_parent.add_argument("--evidence-dir", required=True)
+    host_reboot_parent.add_argument("--bundle")
+    host_reboot_parent.add_argument("--helper-mode", choices=("direct", "launchd"), default="direct")
+    host_reboot_parent.add_argument("--helper", "--helper-path", dest="helper_path")
+    host_reboot_parent.add_argument("--socket", "--socket-path", dest="socket_path")
+    host_reboot_parent.add_argument("--pid-file")
+    host_reboot_parent.add_argument("--log-dir")
+    host_reboot_parent.add_argument("--serial-log-dir")
+    host_reboot_parent.add_argument("--label")
+    host_reboot_parent.add_argument("--plist-output")
+    host_reboot_parent.add_argument("--entitlements")
+    host_reboot_parent.add_argument("--allow-volatile-evidence-dir", action="store_true")
+    host_reboot_parent.add_argument("--dry-run", action="store_true")
+    host_reboot_parent.add_argument("--json", action="store_true")
+    host_reboot_pre = host_reboot_subparsers.add_parser(
+        "pre",
+        parents=[host_reboot_parent],
+        help="record bounded pre-reboot helper evidence",
+    )
+    host_reboot_pre.add_argument("--create-evidence-dir", action="store_true")
+    host_reboot_pre.set_defaults(func=_host_reboot_drill_command)
+    host_reboot_post = host_reboot_subparsers.add_parser(
+        "post",
+        parents=[host_reboot_parent],
+        help="validate helper state after a manual host reboot",
+    )
+    host_reboot_post.add_argument("--run-smoke", action="store_true")
+    host_reboot_post.add_argument("--python")
+    host_reboot_post.set_defaults(func=_host_reboot_drill_command)
 
     start = subparsers.add_parser("start", help="start the helper")
     start.add_argument("--helper", "--helper-path", dest="helper_path")
