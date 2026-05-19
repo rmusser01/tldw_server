@@ -438,7 +438,7 @@ script path and can start a separate helper.
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tools/macos-vz-helper/scripts/vz-helperctl.py tools/macos-vz-helper/Tests/test_vz_helperctl.py
