@@ -239,6 +239,8 @@ def write_json_private(path: Path, payload: Mapping[str, Any]) -> CheckResult:
     flags = os.O_WRONLY | os.O_CREAT
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
     fd: int | None = None
     try:
         fd = os.open(path, flags, 0o600)

@@ -645,6 +645,42 @@ def test_write_json_private_refuses_final_symlink_without_touching_target(tmp_pa
     CASE.assertEqual(target.read_text(encoding="utf-8"), '{"target": true}\n')
 
 
+@pytest.mark.skipif(not hasattr(os, "O_NONBLOCK"), reason="requires nonblocking open support")
+def test_write_json_private_uses_nonblocking_open_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+
+    def fake_open(path: Path, flags: int, mode: int) -> int:
+        CASE.assertTrue(flags & os.O_NONBLOCK)
+        raise OSError("stop after flag check")
+
+    monkeypatch.setattr(helperctl.os, "open", fake_open)
+
+    result = helperctl.write_json_private(tmp_path / "manifest.json", {"phase": "pre"})
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_manifest_write_failed")
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo") or not hasattr(os, "O_NONBLOCK"),
+    reason="requires fifo and nonblocking open support",
+)
+def test_write_json_private_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    manifest = tmp_path / "manifest.json"
+    os.mkfifo(manifest, 0o600)
+
+    started_at = time.monotonic()
+    result = helperctl.write_json_private(manifest, {"phase": "pre"})
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_manifest_write_failed")
+    CASE.assertLess(time.monotonic() - started_at, 1.0)
+
+
 def test_ping_state_payload_maps_helper_manifest_fields() -> None:
     helperctl = load_helperctl()
     state = helperctl.PingState(

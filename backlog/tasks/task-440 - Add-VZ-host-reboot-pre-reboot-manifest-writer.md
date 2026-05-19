@@ -1,7 +1,7 @@
 ---
 id: TASK-440
 title: Add VZ host reboot pre-reboot manifest writer
-status: In Progress
+status: Done
 documentation:
 - Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-validation.md
 modified_files:
