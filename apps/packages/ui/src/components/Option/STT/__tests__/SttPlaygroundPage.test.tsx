@@ -29,7 +29,8 @@ const {
   notificationErrorMock,
   notificationSuccessMock,
   isTimeoutLikeErrorMock,
-  tMock
+  tMock,
+  audioPresetControlPropsRef
 } = vi.hoisted(() => ({
   getTranscriptionModelsMock: vi.fn(),
   getTranscriptionModelHealthMock: vi.fn(),
@@ -38,7 +39,14 @@ const {
   notificationErrorMock: vi.fn(),
   notificationSuccessMock: vi.fn(),
   isTimeoutLikeErrorMock: vi.fn(),
-  tMock: vi.fn((_key: string, fallback?: string) => fallback || _key)
+  tMock: vi.fn((_key: string, fallback?: string) => fallback || _key),
+  audioPresetControlPropsRef: {
+    current: null as null | {
+      kind: string
+      currentConfig: Record<string, unknown>
+      onApply: (config: Record<string, unknown>, preset: any) => void
+    }
+  }
 }))
 
 // Mock all dependencies before importing the component
@@ -111,6 +119,38 @@ vi.mock("../HistoryPanel", () => ({
   )
 }))
 
+vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
+  AudioPresetControls: (props: {
+    kind: string
+    currentConfig: Record<string, unknown>
+    onApply: (config: Record<string, unknown>, preset: any) => void
+  }) => {
+    audioPresetControlPropsRef.current = props
+    return (
+      <button
+        type="button"
+        data-testid={`${props.kind}-preset-controls`}
+        onClick={() =>
+          props.onApply(
+            {
+              models: ["distil-v3"],
+              language: "es",
+              task: "transcribe",
+              response_format: "verbose_json",
+              temperature: 0.1,
+              segment: true,
+              seg_K: 9
+            },
+            { id: "preset-1", name: "Spanish verbose" }
+          )
+        }
+      >
+        Apply mock {props.kind} preset
+      </button>
+    )
+  }
+}))
+
 vi.mock("@/db/dexie/stt-recordings", () => ({
   saveSttRecording: vi.fn().mockResolvedValue("rec-1"),
   getSttRecording: vi.fn(),
@@ -161,6 +201,7 @@ describe("SttPlaygroundPage", () => {
     isTimeoutLikeErrorMock.mockReset()
     isTimeoutLikeErrorMock.mockReturnValue(false)
     tMock.mockClear()
+    audioPresetControlPropsRef.current = null
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
   })
 
@@ -225,6 +266,34 @@ describe("SttPlaygroundPage", () => {
       seg_embeddings_provider: "openai",
       seg_embeddings_model: "text-embedding-3-small"
     })
+  })
+
+  it("renders STT preset controls and applies saved preset config to comparison settings", async () => {
+    render(<SttPlaygroundPage />)
+
+    expect(screen.getByTestId("stt-preset-controls")).toBeTruthy()
+    expect(audioPresetControlPropsRef.current?.currentConfig).toEqual(
+      expect.objectContaining({
+        language: "fr",
+        response_format: "verbose_json"
+      })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply mock stt preset" }))
+
+    await waitFor(() => {
+      expect(comparisonPanelProps?.selectedModels).toEqual(["distil-v3"])
+      expect(comparisonPanelProps?.sttOptions).toEqual(
+        expect.objectContaining({
+          language: "es",
+          response_format: "verbose_json",
+          temperature: 0.1,
+          segment: true,
+          seg_K: 9
+        })
+      )
+    })
+    expect(screen.getByTestId("settings-panel")).toBeTruthy()
   })
 
   it("shows an inline retry control when model loading times out", async () => {

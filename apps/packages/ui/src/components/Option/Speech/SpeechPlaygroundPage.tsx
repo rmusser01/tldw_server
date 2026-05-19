@@ -74,6 +74,7 @@ import { TtsAdvancedTab } from "@/components/Option/Speech/TtsAdvancedTab"
 import { VoiceCloningManager } from "@/components/Option/TTS/VoiceCloningManager"
 import { RenderStrip } from "@/components/Option/Speech/RenderStrip"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
+import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
 import { buildTtsReadinessItems } from "@/components/Option/Audio/audio-readiness"
 import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 import { VoicePickerModal, type VoiceSelection } from "@/components/Option/Speech/VoicePickerModal"
@@ -1155,6 +1156,206 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       tldwNormalizeEmails,
       tldwNormalizePhones,
       tldwNormalizePlurals
+    ]
+  )
+  const currentTtsPresetConfig = React.useMemo(() => {
+    const config: Record<string, unknown> = {
+      provider: currentTtsSelection.provider,
+      response_format: currentTtsSelection.format,
+      speed: currentTtsSelection.speed,
+      streaming: tldwStreaming,
+      response_splitting: responseSplitting,
+      normalization_options: normalizationOptions
+    }
+    if (currentTtsSelection.model) config.model = currentTtsSelection.model
+    if (currentTtsSelection.voice) config.voice = currentTtsSelection.voice
+    if (tldwLanguage) config.lang_code = tldwLanguage
+    if (tldwEmotion) config.emotion = tldwEmotion
+    if (typeof tldwEmotionIntensity === "number") {
+      config.emotion_intensity = tldwEmotionIntensity
+    }
+    if (currentTtsSelection.provider === "browser") {
+      config.browser_local = true
+      config.requires_browser_revalidation = true
+    }
+    return config
+  }, [
+    currentTtsSelection,
+    normalizationOptions,
+    responseSplitting,
+    tldwEmotion,
+    tldwEmotionIntensity,
+    tldwLanguage,
+    tldwStreaming
+  ])
+
+  const handleApplyServerTtsPreset = React.useCallback(
+    async (config: Record<string, unknown>) => {
+      const nextProvider =
+        typeof config.provider === "string" && config.provider.trim()
+          ? config.provider
+          : provider
+      const nextModel = typeof config.model === "string" ? config.model : undefined
+      const nextVoice = typeof config.voice === "string" ? config.voice : undefined
+      const nextFormat =
+        typeof config.response_format === "string"
+          ? config.response_format
+          : typeof config.format === "string"
+            ? config.format
+            : undefined
+      const nextSpeed =
+        typeof config.speed === "number" && Number.isFinite(config.speed)
+          ? config.speed
+          : undefined
+      const nextStreaming =
+        typeof config.streaming === "boolean" ? config.streaming : undefined
+      const nextSplitting =
+        typeof config.response_splitting === "string"
+          ? config.response_splitting
+          : undefined
+      const nextLanguage =
+        typeof config.lang_code === "string"
+          ? config.lang_code
+          : typeof config.language === "string"
+            ? config.language
+            : undefined
+      const nextEmotion = typeof config.emotion === "string" ? config.emotion : undefined
+      const nextEmotionIntensity =
+        typeof config.emotion_intensity === "number" &&
+        Number.isFinite(config.emotion_intensity)
+          ? config.emotion_intensity
+          : undefined
+      const normalizers =
+        config.normalization_options &&
+        typeof config.normalization_options === "object" &&
+        !Array.isArray(config.normalization_options)
+          ? (config.normalization_options as Record<string, unknown>)
+          : {}
+      const boolOr = (value: unknown, fallback: boolean) =>
+        typeof value === "boolean" ? value : fallback
+
+      if (nextProvider === "openai") {
+        if (nextModel) setOpenAiModel(nextModel)
+        if (nextVoice) setOpenAiVoice(nextVoice)
+      } else if (nextProvider === "elevenlabs") {
+        if (nextModel) setElevenModelId(nextModel)
+        if (nextVoice) setElevenVoiceId(nextVoice)
+      } else if (nextProvider !== "browser") {
+        if (nextModel) setTldwModel(nextModel)
+        if (nextVoice) setTldwVoice(nextVoice)
+      }
+      if (nextFormat) setTldwFormat(nextFormat)
+      if (nextSplitting) setResponseSplitting(nextSplitting)
+      if (nextLanguage) setTldwLanguage(nextLanguage)
+      if (typeof nextStreaming === "boolean") setTldwStreaming(nextStreaming)
+      if (nextEmotion) setTldwEmotion(nextEmotion)
+      if (typeof nextEmotionIntensity === "number") {
+        setTldwEmotionIntensity(nextEmotionIntensity)
+      }
+      setTldwNormalize(boolOr(normalizers.normalize, tldwNormalize))
+      setTldwNormalizeUnits(
+        boolOr(normalizers.unit_normalization, tldwNormalizeUnits)
+      )
+      setTldwNormalizeUrls(boolOr(normalizers.url_normalization, tldwNormalizeUrls))
+      setTldwNormalizeEmails(
+        boolOr(normalizers.email_normalization, tldwNormalizeEmails)
+      )
+      setTldwNormalizePhones(
+        boolOr(normalizers.phone_normalization, tldwNormalizePhones)
+      )
+      setTldwNormalizePlurals(
+        boolOr(
+          normalizers.optional_pluralization_normalization,
+          tldwNormalizePlurals
+        )
+      )
+
+      try {
+        const currentSettings = await getTTSSettings()
+        await setTTSSettings({
+          ...currentSettings,
+          ttsProvider: nextProvider,
+          responseSplitting: nextSplitting ?? currentSettings.responseSplitting,
+          openAITTSModel:
+            nextProvider === "openai" && nextModel
+              ? nextModel
+              : currentSettings.openAITTSModel,
+          openAITTSVoice:
+            nextProvider === "openai" && nextVoice
+              ? nextVoice
+              : currentSettings.openAITTSVoice,
+          elevenLabsModel:
+            nextProvider === "elevenlabs" && nextModel
+              ? nextModel
+              : currentSettings.elevenLabsModel,
+          elevenLabsVoiceId:
+            nextProvider === "elevenlabs" && nextVoice
+              ? nextVoice
+              : currentSettings.elevenLabsVoiceId,
+          tldwTtsModel:
+            nextProvider !== "openai" && nextProvider !== "elevenlabs" && nextProvider !== "browser" && nextModel
+              ? nextModel
+              : currentSettings.tldwTtsModel,
+          tldwTtsVoice:
+            nextProvider !== "openai" && nextProvider !== "elevenlabs" && nextProvider !== "browser" && nextVoice
+              ? nextVoice
+              : currentSettings.tldwTtsVoice,
+          tldwTtsResponseFormat: nextFormat ?? currentSettings.tldwTtsResponseFormat,
+          tldwTtsSpeed: nextSpeed ?? currentSettings.tldwTtsSpeed,
+          tldwTtsLanguage: nextLanguage ?? currentSettings.tldwTtsLanguage,
+          tldwTtsStreaming: nextStreaming ?? currentSettings.tldwTtsStreaming,
+          tldwTtsEmotion: nextEmotion ?? currentSettings.tldwTtsEmotion,
+          tldwTtsEmotionIntensity:
+            nextEmotionIntensity ?? currentSettings.tldwTtsEmotionIntensity,
+          tldwTtsNormalize: boolOr(
+            normalizers.normalize,
+            currentSettings.tldwTtsNormalize
+          ),
+          tldwTtsNormalizeUnits: boolOr(
+            normalizers.unit_normalization,
+            currentSettings.tldwTtsNormalizeUnits
+          ),
+          tldwTtsNormalizeUrls: boolOr(
+            normalizers.url_normalization,
+            currentSettings.tldwTtsNormalizeUrls
+          ),
+          tldwTtsNormalizeEmails: boolOr(
+            normalizers.email_normalization,
+            currentSettings.tldwTtsNormalizeEmails
+          ),
+          tldwTtsNormalizePhones: boolOr(
+            normalizers.phone_normalization,
+            currentSettings.tldwTtsNormalizePhones
+          ),
+          tldwTtsNormalizePlurals: boolOr(
+            normalizers.optional_pluralization_normalization,
+            currentSettings.tldwTtsNormalizePlurals
+          )
+        })
+        await queryClient.invalidateQueries({ queryKey: ["fetchTTSSettings"] })
+      } catch (error: unknown) {
+        notification.error({
+          message: t("playground:tts.presetApplyFailedTitle", "Preset apply failed"),
+          description:
+            error instanceof Error
+              ? error.message
+              : t(
+                  "playground:tts.presetApplyFailedBody",
+                  "Unable to apply this preset. Check settings and try again."
+                )
+        })
+      }
+    },
+    [
+      provider,
+      queryClient,
+      t,
+      tldwNormalize,
+      tldwNormalizeEmails,
+      tldwNormalizePhones,
+      tldwNormalizePlurals,
+      tldwNormalizeUnits,
+      tldwNormalizeUrls
     ]
   )
   const voiceRoleError = React.useMemo(() => {
@@ -2650,6 +2851,19 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       onPresetChange={(preset) => void applyTtsPreset(preset)}
                       onLabelClick={openInspectorAt}
                       onGearClick={() => setInspectorOpen((prev) => !prev)}
+                    />
+                    <AudioPresetControls
+                      kind="tts"
+                      currentConfig={currentTtsPresetConfig}
+                      capabilityAssumptions={{
+                        provider,
+                        model: currentTtsSelection.model,
+                        voice: currentTtsSelection.voice,
+                        browser_local: provider === "browser"
+                      }}
+                      onApply={(config) => {
+                        void handleApplyServerTtsPreset(config)
+                      }}
                     />
 
                     {/* Error banners */}

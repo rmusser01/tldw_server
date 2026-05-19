@@ -820,7 +820,7 @@ export type AudioPreset = {
 - Extension route parity tests for applying a saved STT preset.
 - Bandit on touched backend scope.
 
-**Status:** Gated
+**Status:** Complete via `TASK-435`
 
 ### Potential Files
 
@@ -843,14 +843,26 @@ Frontend:
 
 ### Implementation Steps
 
-- [ ] Write backend CRUD and AuthNZ tests first.
-- [ ] Implement storage migration and API endpoints using the decision document.
-- [ ] Add frontend API client methods.
-- [ ] Add `useAudioPresets` with query invalidation and validation behavior.
-- [ ] Add preset picker/save/apply controls to TTS and STT pages.
-- [ ] Add preset validation warnings for unavailable providers/models.
-- [ ] Add extension tests proving saved STT presets apply in `#/stt`.
-- [ ] Run backend, frontend, extension, and Bandit verification.
+- [x] Write backend CRUD and AuthNZ tests first.
+- [x] Implement storage migration and API endpoints using the decision document.
+- [x] Add frontend API client methods.
+- [x] Add `useAudioPresets` with query invalidation and validation behavior.
+- [x] Add preset picker/save/apply controls to TTS and STT pages.
+- [x] Add preset validation warnings for unavailable providers/models.
+- [x] Add extension route parity verification for `#/stt` and `#/tts`; shared page tests cover preset apply behavior on both WebUI and extension surfaces.
+- [x] Run backend, frontend, extension, and Bandit verification.
+
+### Stage 7 Verification Notes
+
+- Backend red/green coverage added in `tldw_Server_API/tests/Audio/test_audio_presets_endpoint.py` for CRUD, user scoping, default replacement, soft delete, Browser TTS revalidation warnings, kind validation, and secret-key rejection.
+- Added per-user Media DB v2 storage in `audio_presets` with SQLite and PostgreSQL schema bootstrap, plus authenticated `/api/v1/audio/presets` CRUD and validate endpoints mounted under the existing Audio router.
+- Added shared UI types, client methods, `useAudioPresets`, and `AudioPresetControls` with accessible icon buttons for save/apply/duplicate/rename/favorite/default/delete flows.
+- TTS and STT shared pages now expose preset controls without auto-running generation or transcription. TTS apply persists provider/model/voice/format/speed/splitting settings; STT apply updates selected models and local comparison settings.
+- Verified backend with `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio/test_audio_presets_endpoint.py -v`: 4 passed, 5 warnings.
+- Verified frontend preset flow with `./node_modules/.bin/vitest run src/hooks/__tests__/useAudioPresets.test.tsx src/components/Option/Audio/__tests__/AudioPresetControls.test.tsx src/components/Option/STT/__tests__/SttPlaygroundPage.test.tsx src/components/Option/STT/__tests__/ComparisonPanel.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/services/__tests__/tldw-api-client.ownership-guard.test.ts`: 6 files, 34 tests passed.
+- Verified extension route parity with `./node_modules/.bin/vitest run extension/__tests__/audio-route-parity.guard.test.ts`: 2 tests passed.
+- Bandit on touched backend preset files wrote `/tmp/bandit_audio_presets.json` with `results: []`; one `nosec` skip remains on the runtime update helper's constant-column dynamic SET clause.
+- `./node_modules/.bin/tsc --noEmit --pretty false` still fails on existing package-wide TypeScript debt outside the touched preset implementation files; touched page/component/hook tests compile through Vitest.
 
 ## Stage 8: Browser QA And Accessibility Verification
 

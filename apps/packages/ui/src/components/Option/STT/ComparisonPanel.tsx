@@ -23,6 +23,7 @@ export interface ComparisonPanelProps {
   availableModels: string[]
   availableModelOptions?: SttModelOption[]
   selectedModels?: string[]
+  onSelectedModelsChange?: (models: string[]) => void
   sttOptions: Record<string, any>
   onSaveToNotes: (text: string, model: string) => void
   onComparisonComplete?: (results: ComparisonResult[]) => void
@@ -211,6 +212,7 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
   availableModels,
   availableModelOptions,
   selectedModels: selectedModelsProp,
+  onSelectedModelsChange,
   sttOptions,
   onSaveToNotes,
   onComparisonComplete,
@@ -234,6 +236,14 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
       setModels(selectedModelsProp)
     }
   }, [selectedModelsProp])
+
+  const handleModelsChange = useCallback(
+    (nextModels: string[]) => {
+      setModels(nextModels)
+      onSelectedModelsChange?.(nextModels)
+    },
+    [onSelectedModelsChange]
+  )
 
   const handleTranscribeAll = useCallback(async () => {
     if (!blob || models.length === 0) return
@@ -315,7 +325,7 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
             "Select models to compare"
           )}
           value={models}
-          onChange={setModels}
+          onChange={handleModelsChange}
           style={{ minWidth: 280, flex: 1 }}
           options={modelSelectOptions}
         />

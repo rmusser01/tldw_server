@@ -17,7 +17,9 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
   "workspace-api": [],
   presentations: [],
   "models-audio": [
+    "createAudioPreset",
     "createTtsJob",
+    "deleteAudioPreset",
     "generateImage",
     "getEmbeddingModelsList",
     "getEmbeddingProvidersConfig",
@@ -37,6 +39,7 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "getTranscriptionModelHealth",
     "getTranscriptionModels",
     "getTtsJobArtifacts",
+    "listAudioPresets",
     "listLlamacppModels",
     "loadMlxModel",
     "registerLlamacppModelPath",
@@ -47,8 +50,10 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "tailLlamacppLogs",
     "transcribeAudio",
     "unloadMlxModel",
+    "updateAudioPreset",
     "updateLlamacppConfig",
     "useLlamacppInChat",
+    "validateAudioPreset",
     "validateLlamacpp"
   ],
   characters: [

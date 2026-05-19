@@ -55,6 +55,14 @@ import {
 } from "@/services/tldw/data-tables"
 import type { DataTableColumn } from "@/types/data-tables"
 import type {
+  AudioPreset,
+  AudioPresetCreatePayload,
+  AudioPresetKind,
+  AudioPresetListResponse,
+  AudioPresetUpdatePayload,
+  AudioPresetValidationResponse
+} from "@/types/audio-presets"
+import type {
   CreateReadingSavedSearchRequest,
   CreateReadingDigestScheduleRequest,
   ImportSource,
@@ -5982,6 +5990,70 @@ export class TldwApiClientBase {
       path: "/api/v1/audio/transcriptions/capabilities",
       method: "GET",
       timeoutMs: options?.timeoutMs
+    })
+  }
+
+  async listAudioPresets(options?: {
+    kind?: AudioPresetKind
+    favorite?: boolean
+    is_default?: boolean
+    limit?: number
+    offset?: number
+    timeoutMs?: number
+  }): Promise<AudioPresetListResponse> {
+    await this.ensureConfigForRequest(true)
+    const query = this.buildQuery({
+      kind: options?.kind,
+      favorite: options?.favorite,
+      is_default: options?.is_default,
+      limit: options?.limit,
+      offset: options?.offset
+    })
+    return await bgRequest<AudioPresetListResponse>({
+      path: `/api/v1/audio/presets${query}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  }
+
+  async createAudioPreset(payload: AudioPresetCreatePayload): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<AudioPreset>({
+      path: "/api/v1/audio/presets",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async updateAudioPreset(
+    presetId: string,
+    payload: AudioPresetUpdatePayload
+  ): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<AudioPreset>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  }
+
+  async deleteAudioPreset(presetId: string): Promise<void> {
+    await this.ensureConfigForRequest(true)
+    await bgRequest<void>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "DELETE"
+    })
+  }
+
+  async validateAudioPreset(
+    presetId: string
+  ): Promise<AudioPresetValidationResponse> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<AudioPresetValidationResponse>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}/validate`,
+      method: "POST"
     })
   }
 

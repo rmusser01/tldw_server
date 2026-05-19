@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
 from . import (
     audio_health,
     audio_history,
+    audio_presets,
     audio_tokenizer,
     audio_transcriptions,
     audio_tts,
@@ -45,6 +46,7 @@ router = APIRouter(
 # Include HTTP routers
 router.include_router(audio_tts.router)
 router.include_router(audio_history.router)
+router.include_router(audio_presets.router)
 router.include_router(audio_tokenizer.router)
 router.include_router(audio_transcriptions.router)
 router.include_router(audio_health.router)

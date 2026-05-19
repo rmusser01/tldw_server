@@ -15,6 +15,7 @@ import { HistoryPanel } from "./HistoryPanel"
 import type { SttHistoryEntry, SttHistoryResult } from "./HistoryPanel"
 import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
+import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
 import { buildSttReadinessItems } from "@/components/Option/Audio/audio-readiness"
 import {
   saveSttRecording,
@@ -105,6 +106,7 @@ export const SttPlaygroundPage: React.FC = () => {
     defaultSttSettings
   )
   const [showSettings, setShowSettings] = useState(false)
+  const [selectedSttModels, setSelectedSttModels] = useState<string[]>([])
 
   useEffect(() => {
     if (!showSettings) {
@@ -142,6 +144,55 @@ export const SttPlaygroundPage: React.FC = () => {
     }
     return opts
   }, [sttSettings])
+
+  const sttPresetConfig = useMemo(
+    () => ({
+      models: selectedSttModels,
+      ...sttOptions
+    }),
+    [selectedSttModels, sttOptions]
+  )
+
+  const handleApplySttPreset = useCallback(
+    (config: Record<string, unknown>) => {
+      const nextSettings: SttLocalSettings = { ...sttSettings }
+      if (typeof config.language === "string") nextSettings.language = config.language
+      if (typeof config.task === "string") nextSettings.task = config.task
+      if (typeof config.response_format === "string") {
+        nextSettings.responseFormat = config.response_format
+      }
+      if (typeof config.temperature === "number") {
+        nextSettings.temperature = config.temperature
+      }
+      if (typeof config.prompt === "string") nextSettings.prompt = config.prompt
+      if (typeof config.segment === "boolean") nextSettings.useSegmentation = config.segment
+      if (typeof config.seg_K === "number") nextSettings.segK = config.seg_K
+      if (typeof config.seg_min_segment_size === "number") {
+        nextSettings.segMinSegmentSize = config.seg_min_segment_size
+      }
+      if (typeof config.seg_lambda_balance === "number") {
+        nextSettings.segLambdaBalance = config.seg_lambda_balance
+      }
+      if (typeof config.seg_utterance_expansion_width === "number") {
+        nextSettings.segUtteranceExpansionWidth = config.seg_utterance_expansion_width
+      }
+      if (typeof config.seg_embeddings_provider === "string") {
+        nextSettings.segEmbeddingsProvider = config.seg_embeddings_provider
+      }
+      if (typeof config.seg_embeddings_model === "string") {
+        nextSettings.segEmbeddingsModel = config.seg_embeddings_model
+      }
+      const models = Array.isArray(config.models)
+        ? config.models.filter((model): model is string => typeof model === "string")
+        : typeof config.model === "string"
+          ? [config.model]
+          : []
+      if (models.length > 0) setSelectedSttModels(models)
+      setSttSettings(nextSettings)
+      setShowSettings(true)
+    },
+    [sttSettings]
+  )
 
   const readinessItems = useMemo(
     () =>
@@ -363,6 +414,21 @@ export const SttPlaygroundPage: React.FC = () => {
 
       <div className="mt-4 space-y-4">
         <AudioReadinessStrip items={readinessItems} label="STT readiness" />
+        <AudioPresetControls
+          kind="stt"
+          currentConfig={sttPresetConfig}
+          capabilityAssumptions={{
+            models: modelOptions
+              .filter((model) => selectedSttModels.includes(model.id))
+              .map((model) => ({
+                id: model.id,
+                availability: model.availability,
+                capabilities: model.capabilities,
+                sources: model.sources
+              }))
+          }}
+          onApply={handleApplySttPreset}
+        />
         {!currentBlob && (
           <p className="text-center text-sm text-text-muted mb-4">
             {t("playground:stt.firstUseHint", "Press the record button or upload an audio file to get started with transcription.")}
@@ -415,6 +481,8 @@ export const SttPlaygroundPage: React.FC = () => {
             blob={currentBlob}
             availableModels={serverModels}
             availableModelOptions={modelOptions}
+            selectedModels={selectedSttModels}
+            onSelectedModelsChange={setSelectedSttModels}
             sttOptions={sttOptions}
             onSaveToNotes={handleSaveToNotes}
             onComparisonComplete={handleComparisonComplete}
