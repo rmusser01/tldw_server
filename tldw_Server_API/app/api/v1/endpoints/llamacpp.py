@@ -1019,7 +1019,7 @@ async def tail_llamacpp_logs_endpoint(
     supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
     if supervisor is not None:
         try:
-            return await run_in_threadpool(supervisor.tail_logs, DEFAULT_PROFILE_ID, lines)
+            return await supervisor.tail_logs_if_running(DEFAULT_PROFILE_ID, lines)
         except LlamaCppProfileNotFoundError as e:
             raise HTTPException(status_code=409, detail="Managed llama.cpp server is not running.") from e
         except Exception as e:

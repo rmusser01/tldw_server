@@ -305,6 +305,22 @@ class LlamaCppSupervisor:
             return {"lines": [], "truncated": False, "warnings": ["No active managed llama.cpp log file is available."]}
         return runner.tail_logs(lines)
 
+    async def tail_logs_if_running(self, profile_id: str, lines: int) -> dict[str, object]:
+        """Tail logs only when the supervised runtime is still running.
+
+        The check and tail are protected by the same profile lock used by
+        lifecycle mutations so a stop cannot race between the state check and
+        the log read. The file read itself runs off the event loop.
+        """
+        async with self._lock_for(profile_id):
+            runner = self._runners.get(profile_id)
+            if runner is None:
+                raise LlamaCppProfileConflictError("Managed llama.cpp server is not running.")
+            runtime = runner.status()
+            if runtime.state != LlamaCppRuntimeState.RUNNING:
+                raise LlamaCppProfileConflictError("Managed llama.cpp server is not running.")
+            return await asyncio.to_thread(runner.tail_logs, lines)
+
     async def shutdown(self) -> None:
         failures: list[tuple[str, BaseException]] = []
         for profile_id in list(self._runners):

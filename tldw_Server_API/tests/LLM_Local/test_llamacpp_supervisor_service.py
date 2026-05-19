@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import threading
 from configparser import ConfigParser
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,7 @@ class FakeRunner:
         self.starts: list[LlamaCppProfile] = []
         self.cleaned = False
         self.stop_calls = 0
+        self.tail_requests: list[int] = []
 
     async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
         self.calls[self.profile_id] = self.calls.get(self.profile_id, 0) + 1
@@ -144,6 +146,10 @@ class FakeRunner:
     def status(self) -> LlamaCppRuntime:
         return self.runtime
 
+    def tail_logs(self, lines: int) -> dict[str, object]:
+        self.tail_requests.append(lines)
+        return {"lines": [f"{self.profile_id}:{lines}"], "truncated": False, "warnings": []}
+
     def cleanup_sync(self) -> None:
         self.cleaned = True
         self.runtime = self.runtime.model_copy(update={"state": LlamaCppRuntimeState.STOPPED, "pid": None})
@@ -172,6 +178,36 @@ class StopFailingRunnerFactory(FakeRunnerFactory):
             runner = StopFailingRunner(profile_id, self.calls)
         else:
             runner = FakeRunner(profile_id, self.calls)
+        self.runners[profile_id] = runner
+        return runner
+
+
+class BlockingTailRunner(FakeRunner):
+    def __init__(
+        self,
+        profile_id: str,
+        calls: dict[str, int],
+        tail_started: threading.Event,
+        release_tail: threading.Event,
+    ):
+        super().__init__(profile_id, calls)
+        self.tail_started = tail_started
+        self.release_tail = release_tail
+
+    def tail_logs(self, lines: int) -> dict[str, object]:
+        self.tail_started.set()
+        assert self.release_tail.wait(timeout=2), "tail release timed out"
+        return super().tail_logs(lines)
+
+
+class BlockingTailRunnerFactory(FakeRunnerFactory):
+    def __init__(self):
+        super().__init__()
+        self.tail_started = threading.Event()
+        self.release_tail = threading.Event()
+
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> BlockingTailRunner:
+        runner = BlockingTailRunner(profile_id, self.calls, self.tail_started, self.release_tail)
         self.runners[profile_id] = runner
         return runner
 
@@ -885,6 +921,70 @@ async def test_supervisor_default_start_swaps_running_model(monkeypatch: pytest.
     assert second_runtime.model_id == "gguf:second"
     assert second_runtime.port == 8182
     assert factory.calls == {"default": 2}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_tail_logs_if_running_uses_runner_without_store_lookup(tmp_path: Path, monkeypatch):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+
+    def fail_store_get(_profile_id: str) -> None:
+        raise AssertionError("tail_logs_if_running should not read the profile store")
+
+    monkeypatch.setattr(supervisor.store, "get", fail_store_get)
+
+    result = await supervisor.tail_logs_if_running("one", 7)
+
+    assert result == {"lines": ["one:7"], "truncated": False, "warnings": []}
+    assert factory.runners["one"].tail_requests == [7]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_tail_logs_if_running_rejects_stopped_runner(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+    await supervisor.stop_profile("one")
+
+    with pytest.raises(LlamaCppProfileConflictError, match="not running"):
+        await supervisor.tail_logs_if_running("one", 7)
+
+    assert factory.runners["one"].tail_requests == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_tail_logs_if_running_serializes_stop_until_tail_finishes(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingTailRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+
+    tail_task = asyncio.create_task(supervisor.tail_logs_if_running("one", 7))
+    assert await asyncio.to_thread(factory.tail_started.wait, 2)
+    stop_task = asyncio.create_task(supervisor.stop_profile("one"))
+    await asyncio.sleep(0)
+
+    assert factory.runners["one"].stop_calls == 0
+
+    factory.release_tail.set()
+    tail_result = await tail_task
+    stop_result = await stop_task
+
+    assert tail_result == {"lines": ["one:7"], "truncated": False, "warnings": []}
+    assert stop_result.state == LlamaCppRuntimeState.STOPPED
+    assert factory.runners["one"].stop_calls == 1
 
 
 def test_manager_attaches_supervisor_and_uses_it_for_cleanup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
