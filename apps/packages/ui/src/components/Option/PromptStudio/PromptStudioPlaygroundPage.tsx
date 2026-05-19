@@ -1,7 +1,6 @@
 import React from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -24,6 +23,7 @@ import { BugOutlined, HistoryOutlined, PlayCircleOutlined, SyncOutlined } from "
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives/Alert"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import {
@@ -584,62 +584,81 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
 
   if (uxState === "error_auth" || uxState === "configuring_auth") {
     return (
-      <Alert
-        type="warning"
-        title="Add your credentials to use Prompt Studio"
-        description="Prompt Studio needs a reachable tldw server plus valid credentials before projects, prompts, and evaluations can load."
-        action={
-          <Button type="primary" onClick={() => navigate("/settings/tldw")}>
-            Open Settings
-          </Button>
-        }
-      />
+      <DesignSystemAlert
+        variant="warning"
+        title={t(
+          "option:promptStudio.addCredentialsTitle",
+          "Add your credentials to use Prompt Studio"
+        )}
+        action={{
+          label: t("option:promptStudio.openSettings", "Open Settings"),
+          onClick: () => navigate("/settings/tldw"),
+          variant: "primary"
+        }}>
+        {t(
+          "option:promptStudio.addCredentialsDesc",
+          "Prompt Studio needs a reachable tldw server plus valid credentials before projects, prompts, and evaluations can load."
+        )}
+      </DesignSystemAlert>
     )
   }
 
   if (uxState === "unconfigured" || uxState === "configuring_url") {
     return (
-      <Alert
-        type="warning"
-        title="Finish setup to use Prompt Studio"
-        description="Prompt Studio depends on a configured tldw server before projects, prompts, and evaluations can load."
-        action={
-          <Button
-            type="primary"
-            onClick={() =>
-              navigate(hasCompletedFirstRun ? "/settings/tldw" : "/")
-            }>
-            {hasCompletedFirstRun ? "Open Settings" : "Finish Setup"}
-          </Button>
-        }
-      />
+      <DesignSystemAlert
+        variant="warning"
+        title={t(
+          "option:promptStudio.finishSetupTitle",
+          "Finish setup to use Prompt Studio"
+        )}
+        action={{
+          label: hasCompletedFirstRun
+            ? t("option:promptStudio.openSettings", "Open Settings")
+            : t("option:promptStudio.finishSetupAction", "Finish Setup"),
+          onClick: () =>
+            navigate(hasCompletedFirstRun ? "/settings/tldw" : "/"),
+          variant: "primary"
+        }}>
+        {t(
+          "option:promptStudio.finishSetupDesc",
+          "Prompt Studio depends on a configured tldw server before projects, prompts, and evaluations can load."
+        )}
+      </DesignSystemAlert>
     )
   }
 
   if (uxState === "error_unreachable") {
     return (
-      <Alert
-        type="warning"
-        title="Can't reach your tldw server right now"
-        description="Prompt Studio depends on a reachable tldw server. Review your server status and URL before trying again."
-        action={
-          <Space>
-            <Button type="primary" onClick={() => navigate("/settings/health")}>
-              Health & diagnostics
-            </Button>
-            <Button onClick={() => navigate("/settings/tldw")}>
-              Open Settings
-            </Button>
-          </Space>
-        }
-      />
+      <DesignSystemAlert
+        variant="warning"
+        title={t(
+          "option:promptStudio.unreachableTitle",
+          "Can't reach your tldw server right now"
+        )}
+        action={{
+          label: t(
+            "option:promptStudio.healthDiagnostics",
+            "Health & diagnostics"
+          ),
+          onClick: () => navigate("/settings/health"),
+          variant: "primary"
+        }}
+        secondaryAction={{
+          label: t("option:promptStudio.openSettings", "Open Settings"),
+          onClick: () => navigate("/settings/tldw")
+        }}>
+        {t(
+          "option:promptStudio.unreachableDesc",
+          "Prompt Studio depends on a reachable tldw server. Review your server status and URL before trying again."
+        )}
+      </DesignSystemAlert>
     )
   }
 
   if (!online && uxState !== "testing") {
     return (
-      <Alert
-        type="warning"
+      <DesignSystemAlert
+        variant="warning"
         title={t("option:promptStudio.offline", "Connect to your server to use Prompt Studio")}
       />
     )
@@ -651,14 +670,14 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
 
   if (capabilityQuery.data === false) {
     return (
-      <Alert
-        type="info"
-        title={t("option:promptStudio.unavailable", "Prompt Studio is not enabled on this server.")}
-        description={t(
+      <DesignSystemAlert
+        variant="info"
+        title={t("option:promptStudio.unavailable", "Prompt Studio is not enabled on this server.")}>
+        {t(
           "option:promptStudio.unavailableBody",
           "When available, you will see projects, prompt history, execute flows, and evaluations here."
         )}
-      />
+      </DesignSystemAlert>
     )
   }
 
@@ -711,8 +730,8 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
             </Space>
           }>
           {projectsQuery.isError && (
-            <Alert
-              type="error"
+            <DesignSystemAlert
+              variant="error"
               title={t("option:promptStudio.projectsError", "Could not load projects")}
             />
           )}
@@ -965,17 +984,17 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
                         </Text>
                       }>
                       {lastDebugTestCase && (
-                        <Alert
-                          type="info"
+                        <DesignSystemAlert
+                          variant="info"
                           className="mb-3"
                           title={t("option:promptStudio.debugging", "Debugging {{name}}", {
                             name: lastDebugTestCase.name || lastDebugTestCase.id
-                          })}
-                          description={t(
+                          })}>
+                          {t(
                             "option:promptStudio.debuggingDesc",
                             "Inputs pre-filled from this test case. Adjust and run to iterate quickly."
                           )}
-                        />
+                        </DesignSystemAlert>
                       )}
                       <Form
                         layout="vertical"
@@ -1011,7 +1030,11 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
                         </Space>
                       </Form>
                       {executionError && (
-                        <Alert className="mt-3" type="error" title={executionError} />
+                        <DesignSystemAlert
+                          className="mt-3"
+                          variant="error"
+                          title={executionError}
+                        />
                       )}
                       {executionResult && (
                         <Card className="mt-3" size="small" title={t("common:result", "Result")}>
@@ -1171,7 +1194,12 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
                                   )
                                 }
                                 if (run.status === "error") {
-                                  return <Alert type="error" title={run.error} />
+                                  return (
+                                    <DesignSystemAlert
+                                      variant="error"
+                                      title={run.error}
+                                    />
+                                  )
                                 }
                                 return (
                                   <div>
