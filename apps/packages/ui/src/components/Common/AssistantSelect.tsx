@@ -579,21 +579,20 @@ export const AssistantSelect: React.FC<Props> = ({
       placement="topLeft"
       trigger={["click"]}
     >
-      <Tooltip title={buttonLabel}>
-        <button
-          ref={triggerButtonRef}
-          type="button"
-          data-testid="character-select"
-          className={`inline-flex items-center gap-2 ${className}`.trim()}
-          aria-label={buttonLabel}
-          aria-expanded={open}
-        >
-          <UserCircle2 className={iconClassName} />
-          {showLabel ? (
-            <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
-          ) : null}
-        </button>
-      </Tooltip>
+      <button
+        ref={triggerButtonRef}
+        type="button"
+        data-testid="character-select"
+        className={`inline-flex items-center gap-2 ${className}`.trim()}
+        aria-label={buttonLabel}
+        aria-expanded={open}
+        title={buttonLabel}
+      >
+        <UserCircle2 className={iconClassName} />
+        {showLabel ? (
+          <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
+        ) : null}
+      </button>
     </Dropdown>
   )
 }

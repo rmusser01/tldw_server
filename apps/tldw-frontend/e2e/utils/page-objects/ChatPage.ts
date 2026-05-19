@@ -280,8 +280,9 @@ export class ChatPage {
 
   async selectCharacter(name: string): Promise<void> {
     const triggerCandidates = [
+      this.page.getByTestId("character-select").first(),
       this.page.getByTestId("character-selector").first(),
-      this.page.getByRole("button", { name: /character/i }).first(),
+      this.page.getByRole("button", { name: /select character or persona/i }).first(),
       this.page.locator(".character-select").first(),
     ]
 
@@ -305,27 +306,54 @@ export class ChatPage {
       throw new Error("Character selector trigger not found")
     }
 
-    await trigger.click()
-
     const pickerSurfaceCandidates = [
+      this.page.getByTestId("assistant-select-panel").first(),
+      this.page.getByTestId("assistant-select-menu").first(),
+      this.page.locator(".ant-dropdown:not(.ant-dropdown-hidden) .character-select-menu").first(),
+      this.page.locator(".character-select-menu").first(),
       this.page.getByTestId("character-selector-menu").first(),
       this.page.getByRole("listbox").first(),
-      this.page.getByRole("menu").first(),
+      this.page.locator("[role='menu'].character-select-menu").first(),
       this.page.locator(".character-select__menu").first(),
     ]
 
     let pickerSurface: Locator | null = null
+    const resolvePickerSurface = async () => {
+      for (const candidate of pickerSurfaceCandidates) {
+        if (await candidate.isVisible().catch(() => false)) {
+          pickerSurface = candidate
+          return true
+        }
+      }
+      return false
+    }
+
+    await trigger.click()
+
+    const openedFromTrigger = await expect
+      .poll(resolvePickerSurface, { timeout: 1_500 })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false)
+
+    if (!openedFromTrigger) {
+      const entryCandidates = [
+        this.page
+          .getByRole("button", { name: /character chat\s*\/\s*role-play/i })
+          .first(),
+        this.page.getByRole("button", { name: /^character chat$/i }).first(),
+      ]
+      for (const entry of entryCandidates) {
+        if (await entry.isVisible().catch(() => false)) {
+          await entry.click()
+          break
+        }
+      }
+    }
+
     await expect
       .poll(
-        async () => {
-          for (const candidate of pickerSurfaceCandidates) {
-            if (await candidate.isVisible().catch(() => false)) {
-              pickerSurface = candidate
-              return true
-            }
-          }
-          return false
-        },
+        resolvePickerSurface,
         { timeout: 10_000, message: "Timed out waiting for character picker surface" }
       )
       .toBe(true)
@@ -335,6 +363,7 @@ export class ChatPage {
     }
 
     const optionCandidates = [
+      pickerSurface.getByRole("button", { name }).first(),
       pickerSurface.getByRole("option", { name }).first(),
       pickerSurface.getByRole("menuitem", { name }).first(),
       pickerSurface.getByText(name, { exact: true }).first(),
@@ -365,8 +394,21 @@ export class ChatPage {
     await expect
       .poll(
         async () => {
-          const selectedDisplay = this.page.getByTestId("character-selector").first()
-          return (await selectedDisplay.textContent())?.includes(name) ?? false
+          const selectedDisplays = [
+            this.page.getByTestId("character-select").first(),
+            this.page.getByTestId("character-selector").first(),
+          ]
+          for (const selectedDisplay of selectedDisplays) {
+            const visible = await selectedDisplay.isVisible().catch(() => false)
+            if (!visible) continue
+            const label =
+              (await selectedDisplay.getAttribute("aria-label").catch(() => null)) ||
+              (await selectedDisplay.getAttribute("title").catch(() => null)) ||
+              (await selectedDisplay.textContent().catch(() => null)) ||
+              ""
+            if (label.includes(name)) return true
+          }
+          return false
         },
         {
           timeout: 5_000,

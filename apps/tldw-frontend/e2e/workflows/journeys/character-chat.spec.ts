@@ -3,12 +3,27 @@
  *
  * End-to-end workflow that creates a character, navigates to chat,
  * selects the character, and sends a message through the real character
- * chat complete-v2 backend path.
+ * chat complete-v2 backend path. When the real backend lacks provider
+ * credentials, the journey verifies the visible recovery state instead of
+ * treating catalog-only model inventory as a successful stream.
  */
-import { test, expect, skipIfServerUnavailable, skipIfNoModels } from "../../utils/fixtures"
+import { test, expect, skipIfServerUnavailable } from "../../utils/fixtures"
 import { captureAllApiCalls } from "../../utils/api-assertions"
 import { CharactersPage, ChatPage } from "../../utils/page-objects"
 import { waitForStreamComplete } from "../../utils/journey-helpers"
+
+const getErrorCode = (body: unknown): string | null => {
+  if (!body || typeof body !== "object") return null
+  const record = body as Record<string, any>
+  return (
+    record.error_code ??
+    record.code ??
+    record.detail?.error_code ??
+    record.detail?.code ??
+    record.detail?.error?.code ??
+    null
+  )
+}
 
 test.describe("Create Character -> Chat journey", () => {
   const characterName = `E2E-TestBot-${Date.now()}`
@@ -19,7 +34,6 @@ test.describe("Create Character -> Chat journey", () => {
     serverInfo,
   }) => {
     skipIfServerUnavailable(serverInfo)
-    skipIfNoModels(serverInfo)
 
     await test.step("Create a new character", async () => {
       const charactersPage = new CharactersPage(page)
@@ -92,14 +106,28 @@ test.describe("Create Character -> Chat journey", () => {
       )
 
       expect(characterCompleteCall).toBeTruthy()
-      expect(characterCompleteCall?.status).toBeGreaterThanOrEqual(200)
-      expect(characterCompleteCall?.status).toBeLessThan(300)
       expect(characterCompleteCall?.requestBody).toMatchObject(
         expect.objectContaining({
           include_character_context: true,
           stream: true,
         })
       )
+
+      const completeStatus = characterCompleteCall?.status ?? 0
+      expect(completeStatus).toBeGreaterThanOrEqual(200)
+
+      if (completeStatus >= 300) {
+        expect(getErrorCode(characterCompleteCall?.responseBody)).toBe(
+          "missing_provider_credentials"
+        )
+        await expect(
+          page.getByText(/something went wrong while talking to your tldw server/i)
+        ).toBeVisible()
+        await expect(page.getByRole("button", { name: /retry same model/i })).toBeVisible()
+        await expect(page.getByRole("button", { name: /switch model/i })).toBeVisible()
+      } else {
+        expect(completeStatus).toBeLessThan(300)
+      }
     })
   })
 })
