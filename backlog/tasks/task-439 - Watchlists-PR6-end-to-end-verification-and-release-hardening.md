@@ -32,12 +32,13 @@ Verification notes:
 - Browser QA used an isolated backend on `127.0.0.1:18002` and WebUI on `127.0.0.1:8082`. `/watchlists` rendered the Watchlists page with `Imported Watchlist`; observed Watchlists API calls returned 200; no console errors, request failures, or page errors in the final page-load pass. Create Watchlist opened the guided setup modal without errors. Overview shortcuts opened Feeds and Monitors content; telemetry/notification stream requests aborted only during scripted navigation/teardown.
 - `git diff --check` passed before browser QA and again before commit.
 - Pull request: https://github.com/rmusser01/tldw_server/pull/1867
+- Review follow-up: added `_gather_outlines()` documentation and replaced the broad `Any` annotation with a local protocol because `defusedxml.ElementTree` does not expose an `Element` attribute at runtime.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed PR6 release-hardening verification for Watchlists in PR #1867. The only code change required was removing remaining stdlib XML imports from Watchlists RSS, OPML, and WebSub parsing paths so Bandit no longer reports B405 while existing defusedxml parsing remains intact. Focused frontend, backend, parser-adjacent, Bandit, and browser-observed `/watchlists` checks passed.
+Completed PR6 release-hardening verification for Watchlists in PR #1867. The release-hardening changes remove remaining stdlib XML imports from Watchlists RSS, OPML, and WebSub parsing paths so Bandit no longer reports B405 while existing defusedxml parsing remains intact. Review follow-up tightened OPML helper typing and documentation. Focused frontend, backend, parser-adjacent, Bandit, and browser-observed `/watchlists` checks passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

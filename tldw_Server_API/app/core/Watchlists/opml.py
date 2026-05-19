@@ -9,9 +9,18 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from defusedxml import ElementTree as ET
+
+
+class _OutlineElement(Protocol):
+    attrib: dict[str, str]
+
+    def findall(self, match: str) -> list["_OutlineElement"]:
+        """Return matching child outline elements."""
+        ...
+
 
 @dataclass
 class OPMLSource:
@@ -20,7 +29,8 @@ class OPMLSource:
     html_url: str | None = None
 
 
-def _gather_outlines(elem: Any, out: list[OPMLSource]) -> None:
+def _gather_outlines(elem: _OutlineElement, out: list[OPMLSource]) -> None:
+    """Recursively collect feed outlines from an OPML subtree into ``out``."""
     for child in elem.findall("outline"):
         xml_url = child.attrib.get("xmlUrl") or child.attrib.get("xmlurl")
         title = child.attrib.get("title") or child.attrib.get("text")
