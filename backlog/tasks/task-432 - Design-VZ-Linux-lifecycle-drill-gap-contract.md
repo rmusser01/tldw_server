@@ -46,6 +46,11 @@ Implemented approved design/spec slice:
 - Linked the drill contract from the prepared-host evidence tracker and sandbox roadmap.
 - Added focused doc-contract tests for drill anchors and manual-only boundaries.
 - No runtime behavior or workflow triggers changed.
+
+PR review follow-up:
+- Added roadmap and lifecycle drill spec path constants to the doc-contract tests.
+- Added targeted doc existence assertions before normalized text reads.
+- Wrapped long lifecycle drill spec assertions for PEP 8/readability.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
