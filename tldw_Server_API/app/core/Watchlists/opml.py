@@ -7,12 +7,11 @@ attributes xmlUrl (feed URL), optional htmlUrl, and title/text for the name.
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from defusedxml import ElementTree as DET
+from defusedxml import ElementTree as ET
 
 @dataclass
 class OPMLSource:
@@ -21,7 +20,7 @@ class OPMLSource:
     html_url: str | None = None
 
 
-def _gather_outlines(elem: ET.Element, out: list[OPMLSource]) -> None:
+def _gather_outlines(elem: Any, out: list[OPMLSource]) -> None:
     for child in elem.findall("outline"):
         xml_url = child.attrib.get("xmlUrl") or child.attrib.get("xmlurl")
         title = child.attrib.get("title") or child.attrib.get("text")
@@ -36,7 +35,7 @@ def parse_opml(opml_bytes: bytes) -> list[OPMLSource]:
     """Parse OPML content and return a flat list of OPMLSource entries."""
     sources: list[OPMLSource] = []
     try:
-        root = DET.fromstring(opml_bytes)
+        root = ET.fromstring(opml_bytes)
     except Exception:
         return sources
     # Standard path: opml -> body
