@@ -69,6 +69,13 @@ const ttsSelection = (lane: SetupReadinessLane): string | null => {
   return value ? String(value) : null
 }
 
+const installPlanHasWork = (value: unknown): boolean => {
+  if (!value) return false
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === "object") return Object.values(value).some(installPlanHasWork)
+  return Boolean(value)
+}
+
 const renderList = (items: string[]) => {
   if (items.length === 0) return null
   return (
@@ -157,9 +164,16 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
     [profileOptions, selectedProfileId]
   )
 
+  const previewLanes = React.useMemo(
+    () =>
+      Object.values(preview?.lanes || {}).filter(
+        (lane): lane is SetupReadinessLane => Boolean(lane && typeof lane === "object")
+      ),
+    [preview]
+  )
   const lanes = React.useMemo(
-    () => status?.lanes || profiles?.lanes || [],
-    [profiles, status]
+    () => (previewLanes.length > 0 ? previewLanes : status?.lanes || profiles?.lanes || []),
+    [previewLanes, profiles, status]
   )
   const consequences = React.useMemo(
     () =>
@@ -334,7 +348,7 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 <div>
                   <Text strong>Install plan</Text>
                   <Paragraph type="secondary" className="mb-0">
-                    {Object.keys(preview.install_plan || {}).length > 0 ? "Provisioning work planned" : "No downloads needed"}
+                    {installPlanHasWork(preview.install_plan) ? "Provisioning work planned" : "No downloads needed"}
                   </Paragraph>
                 </div>
                 <div>

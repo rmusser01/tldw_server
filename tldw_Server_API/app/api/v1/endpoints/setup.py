@@ -420,6 +420,43 @@ def _new_setup_readiness_operation_id() -> str:
     return f"setup-readiness-{uuid.uuid4().hex}"
 
 
+def _resolve_setup_readiness_profile_selection(
+    selection: Any,
+    *,
+    allow_completed_when_disabled: bool = False,
+) -> dict[str, Any]:
+    """Expand a curated profile-only selection into concrete lane inputs."""
+
+    payload = model_dump_compat(selection, exclude_none=True)
+    if payload.get("lanes"):
+        return payload
+
+    profile_id = str(payload.get("profile_id") or "").strip()
+    if not profile_id:
+        return payload
+
+    profiles_payload = _build_setup_readiness_profiles_payload(
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
+    profile = next(
+        (
+            item
+            for item in profiles_payload.get("profiles", [])
+            if isinstance(item, dict) and item.get("profile_id") == profile_id
+        ),
+        None,
+    )
+    if not profile:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown setup readiness profile: {profile_id}",
+        )
+
+    resolved = dict(payload)
+    resolved["lanes"] = profile.get("lanes") or {}
+    return resolved
+
+
 def _preview_lanes_as_list(preview: dict[str, Any]) -> list[dict[str, Any]]:
     lanes = preview.get("lanes") or {}
     return [lane for lane in lanes.values() if isinstance(lane, dict)]
@@ -450,11 +487,17 @@ def _readiness_status_after_provision(preview: dict[str, Any], *, install_plan_s
 def _resolve_setup_readiness_preview(
     payload: SetupReadinessProvisionRequest,
     store: readiness_store.SetupReadinessStore,
+    *,
+    allow_completed_when_disabled: bool = False,
 ) -> dict[str, Any]:
     """Return the preview payload selected for provisioning."""
 
     if payload.selection:
-        preview = preview_readiness_selection(payload.selection)
+        selection = _resolve_setup_readiness_profile_selection(
+            payload.selection,
+            allow_completed_when_disabled=allow_completed_when_disabled,
+        )
+        preview = preview_readiness_selection(selection)
         preview["preview_id"] = _new_setup_readiness_preview_id()
         return preview
 
@@ -475,11 +518,16 @@ def _resolve_setup_readiness_preview(
 def _resolve_setup_readiness_verification_selection(
     payload: SetupReadinessVerifyRequest,
     store: readiness_store.SetupReadinessStore,
+    *,
+    allow_completed_when_disabled: bool = False,
 ) -> dict[str, Any]:
     """Return an inline or stored readiness selection for explicit verification."""
 
     if payload.selection:
-        return payload.selection
+        return _resolve_setup_readiness_profile_selection(
+            payload.selection,
+            allow_completed_when_disabled=allow_completed_when_disabled,
+        )
 
     stored_preview = store.load().get("last_preview")
     preview_id = (payload.preview_id or "").strip()
@@ -552,7 +600,11 @@ def _preview_setup_readiness(
         status_snapshot,
         allow_completed_when_disabled=allow_completed_when_disabled,
     )
-    preview = preview_readiness_selection(payload)
+    selection = _resolve_setup_readiness_profile_selection(
+        payload,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
+    preview = preview_readiness_selection(selection)
     preview["preview_id"] = _new_setup_readiness_preview_id()
     readiness_store.get_setup_readiness_store().save(
         {
@@ -599,7 +651,11 @@ def _provision_setup_readiness(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Provisioning requires explicit confirmation.")
 
     store = readiness_store.get_setup_readiness_store()
-    preview = _resolve_setup_readiness_preview(payload, store)
+    preview = _resolve_setup_readiness_preview(
+        payload,
+        store,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
     if _preview_has_blockers(preview):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -647,10 +703,15 @@ def _provision_setup_readiness(
         }
     )
 
+    status_url = (
+        "/api/v1/setup/admin/readiness/status"
+        if allow_completed_when_disabled
+        else "/api/v1/setup/readiness/status"
+    )
     response = {
         "operation_id": operation_id,
         "operation_status": operation_status,
-        "status_url": "/api/v1/setup/readiness/status",
+        "status_url": status_url,
         "status": saved["status"],
         "lanes": saved["lanes"],
         "overlays": saved["overlays"],
@@ -689,7 +750,11 @@ async def _verify_setup_readiness(
     )
 
     store = readiness_store.get_setup_readiness_store()
-    selection = _resolve_setup_readiness_verification_selection(payload, store)
+    selection = _resolve_setup_readiness_verification_selection(
+        payload,
+        store,
+        allow_completed_when_disabled=allow_completed_when_disabled,
+    )
     verification = _sanitize_setup_payload(await verify_readiness_lanes(selection))
     store.update(
         status=verification["status"],

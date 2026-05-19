@@ -47,6 +47,31 @@ _PROFILE_RESOURCE_HINTS = {
     "advanced_custom": None,
 }
 
+_CHAT_MODEL_KEYS = {
+    "anthropic": ("API", "anthropic_model"),
+    "cohere": ("API", "cohere_model"),
+    "deepseek": ("API", "deepseek_model"),
+    "google": ("API", "google_model"),
+    "groq": ("API", "groq_model"),
+    "huggingface": ("API", "huggingface_model"),
+    "mistral": ("API", "mistral_model"),
+    "openai": ("API", "openai_model"),
+    "openrouter": ("API", "openrouter_model"),
+    "qwen": ("API", "qwen_model"),
+}
+
+_LOCAL_PROVIDER_MODEL_KEYS = {
+    "custom_openai": ("API", "custom_openai_api_model"),
+}
+
+_LOCAL_PROVIDER_ENDPOINT_KEYS = {
+    "custom_openai": ("API", "custom_openai_api_ip"),
+    "kobold": ("Local-API", "kobold_openai_api_IP"),
+    "llama": ("Local-API", "llama_api_IP"),
+    "ooba": ("Local-API", "ooba_api_IP"),
+    "tabby": ("Local-API", "tabby_api_IP"),
+}
+
 
 def _field_lookup(config_snapshot: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
     lookup: dict[tuple[str, str], dict[str, Any]] = {}
@@ -164,21 +189,64 @@ def _speech_lane(audio_recommendations: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _build_profile(profile_id: str, speech_selection: dict[str, Any]) -> dict[str, Any]:
+def _chat_profile_lane(profile_id: str, fields: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    if profile_id.startswith("local_"):
+        return {"mode": "skip"}
+
+    default_api = _field_value(fields, "API", "default_api")
+    if not default_api:
+        return {"mode": "skip"}
+
+    if default_api in _LOCAL_PROVIDER_MODEL_KEYS or default_api in _LOCAL_PROVIDER_ENDPOINT_KEYS:
+        lane = {"mode": "local", "provider": default_api}
+        model_key = _LOCAL_PROVIDER_MODEL_KEYS.get(default_api)
+        endpoint_key = _LOCAL_PROVIDER_ENDPOINT_KEYS.get(default_api)
+        if model_key:
+            lane["model"] = _field_value(fields, model_key[0], model_key[1])
+        if endpoint_key:
+            lane["endpoint"] = _field_value(fields, endpoint_key[0], endpoint_key[1])
+        return lane
+
+    lane = {"mode": "hosted", "provider": default_api}
+    model_key = _CHAT_MODEL_KEYS.get(default_api)
+    if model_key:
+        lane["model"] = _field_value(fields, model_key[0], model_key[1])
+    return lane
+
+
+def _embeddings_profile_lane(
+    fields: dict[tuple[str, str], dict[str, Any]],
+    *,
+    local_first: bool,
+) -> dict[str, Any]:
+    provider = _field_value(fields, "Embeddings", "embedding_provider")
+    model = _field_value(fields, "Embeddings", "embedding_model")
+    lane = {"mode": "local" if local_first else "hosted_or_local"}
+    if provider:
+        lane["provider"] = provider
+    if model:
+        lane["model"] = model
+    return lane
+
+
+def _build_profile(
+    profile_id: str,
+    fields: dict[tuple[str, str], dict[str, Any]],
+    speech_selection: dict[str, Any],
+) -> dict[str, Any]:
     resource_hint = _PROFILE_RESOURCE_HINTS[profile_id]
     profile_speech_selection = dict(speech_selection)
     if resource_hint and profile_speech_selection:
         profile_speech_selection["resource_profile"] = resource_hint
+    local_first = profile_id.startswith("local_")
 
     return {
         "profile_id": profile_id,
         "label": _PROFILE_LABELS[profile_id],
         "description": _PROFILE_DESCRIPTIONS[profile_id],
         "lanes": {
-            LANE_CHAT: {"mode": "skip" if profile_id.startswith("local_") else "hosted_or_local"},
-            LANE_EMBEDDINGS_RAG: {
-                "mode": "local" if profile_id.startswith("local_") else "hosted_or_local",
-            },
+            LANE_CHAT: _chat_profile_lane(profile_id, fields),
+            LANE_EMBEDDINGS_RAG: _embeddings_profile_lane(fields, local_first=local_first),
             LANE_SPEECH: profile_speech_selection,
         },
         "advanced": profile_id == "advanced_custom",
@@ -238,7 +306,7 @@ def build_readiness_profiles(
             _embeddings_lane(fields),
             _speech_lane(audio_recommendations),
         ],
-        "profiles": [_build_profile(profile_id, speech_selection) for profile_id in PROFILE_IDS],
+        "profiles": [_build_profile(profile_id, fields, speech_selection) for profile_id in PROFILE_IDS],
         "recommended_profile_id": _recommended_profile_id(audio_recommendations),
     }
 

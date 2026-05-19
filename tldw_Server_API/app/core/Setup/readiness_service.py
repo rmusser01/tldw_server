@@ -445,7 +445,7 @@ async def _verify_speech_lane(lane: dict[str, Any]) -> dict[str, Any]:
 
     verification = await install_manager.verify_audio_bundle_async(
         bundle_id,
-        resource_profile,
+        resource_profile=resource_profile,
         tts_choice=tts_choice,
     )
     stt_ready = _health_ready(verification.get("stt_health"))

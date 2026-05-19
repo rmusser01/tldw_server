@@ -220,6 +220,39 @@ def test_readiness_preview_route_does_not_write_or_echo_secret(monkeypatch, _rea
     assert payload["secret_fields"][0]["state"] == "submitted"
 
 
+def test_readiness_preview_expands_curated_profile_selection(_readiness_api_setup):
+    client = _make_client()
+    response = client.post(
+        "/api/v1/setup/readiness/preview",
+        headers={"host": "localhost"},
+        json={"profile_id": "local_performance"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["profile_id"] == "local_performance"
+    assert payload["lanes"]["chat"]["status"] == "skipped"
+    assert payload["lanes"]["embeddings_rag"]["status"] == "previewed"
+    assert payload["lanes"]["embeddings_rag"]["selection"] == {
+        "provider": "huggingface",
+        "model": "Qwen/Qwen3-Embedding-0.6B",
+    }
+    assert payload["install_plan"]["embeddings"]["huggingface"] == ["Qwen/Qwen3-Embedding-0.6B"]
+    assert payload["operation_required"] is True
+
+
+def test_readiness_preview_rejects_unknown_curated_profile(_readiness_api_setup):
+    client = _make_client()
+    response = client.post(
+        "/api/v1/setup/readiness/preview",
+        headers={"host": "localhost"},
+        json={"profile_id": "balanced"},
+    )
+
+    assert response.status_code == 400
+    assert "Unknown setup readiness profile" in response.json()["detail"]
+
+
 def test_readiness_provision_returns_pollable_status_without_waiting_for_download(
     monkeypatch,
     _readiness_api_setup,
@@ -291,7 +324,7 @@ def test_readiness_provision_requires_explicit_confirmation(_readiness_api_setup
 
 
 def test_readiness_verify_route_persists_speech_warnings(monkeypatch, _readiness_api_setup):
-    async def fake_verify(bundle_id, resource_profile, tts_choice=None):
+    async def fake_verify(bundle_id, *, resource_profile, tts_choice=None):
         return {
             "status": "ready",
             "stt_health": {"status": "ready"},
@@ -369,3 +402,27 @@ def test_admin_readiness_profiles_available_after_setup_completed(monkeypatch, _
     payload = response.json()
     assert payload["setup_access"]["mode"] == "admin"
     assert [lane["lane_id"] for lane in payload["lanes"]] == ["chat", "embeddings_rag", "speech"]
+
+
+def test_admin_readiness_provision_returns_admin_status_url(monkeypatch, _admin_readiness_api_setup):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal",
+        _admin_principal,
+    )
+    monkeypatch.setattr(setup_endpoint.setup_manager, "update_config", lambda updates: None)
+    monkeypatch.setattr(setup_endpoint, "execute_install_plan", lambda plan: None)
+
+    client = _make_client()
+    preview_response = client.post(
+        "/api/v1/setup/admin/readiness/preview",
+        json={"profile_id": "local_performance"},
+    )
+    assert preview_response.status_code == 200
+
+    response = client.post(
+        "/api/v1/setup/admin/readiness/provision",
+        json={"preview_id": preview_response.json()["preview_id"], "confirmed": True},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status_url"] == "/api/v1/setup/admin/readiness/status"

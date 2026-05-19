@@ -143,7 +143,7 @@ async def test_verify_skip_does_not_call_hosted_provider():
 async def test_verify_speech_reuses_audio_bundle_verification(monkeypatch):
     calls: list[tuple[str, str, str | None]] = []
 
-    async def fake_verify(bundle_id, resource_profile, tts_choice=None):
+    async def fake_verify(bundle_id, *, resource_profile, tts_choice=None):
         calls.append((bundle_id, resource_profile, tts_choice))
         return {
             "status": "ready",

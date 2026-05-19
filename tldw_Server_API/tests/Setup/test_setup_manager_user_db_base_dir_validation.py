@@ -68,6 +68,38 @@ def test_user_db_base_dir_update_allows_env_allowlist(monkeypatch, tmp_path):
     assert f"USER_DB_BASE_DIR = {allowed}" in updated
 
 
+def test_update_config_preserves_line_breaks_for_adjacent_updates(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_path = config_dir / "config.txt"
+    config_path.write_text(
+        "[Embeddings]\n"
+        "embedding_provider = old-provider\n"
+        "embedding_model = old-model\n"
+        "onnx_model_path = ./models\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TLDW_CONFIG_DIR", str(config_dir))
+    _patch_project_root(monkeypatch, tmp_path / "project")
+
+    setup_manager.update_config(
+        {
+            "Embeddings": {
+                "embedding_provider": "huggingface",
+                "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+            }
+        },
+        create_backup=False,
+    )
+
+    assert config_path.read_text(encoding="utf-8").splitlines() == [
+        "[Embeddings]",
+        "embedding_provider = huggingface",
+        "embedding_model = Qwen/Qwen3-Embedding-0.6B",
+        "onnx_model_path = ./models",
+    ]
+
+
 def test_user_db_base_dir_update_rejects_relative_escape(monkeypatch, tmp_path):
     config_dir = _write_config(tmp_path, "Databases/user_databases")
     monkeypatch.setenv("TLDW_CONFIG_DIR", str(config_dir))

@@ -627,12 +627,13 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
                     leading_ws_len = len(left) - len(left.lstrip(" \t"))
                     leading_ws = left[:leading_ws_len]
                     new_value = items.pop(key)
+                    line_ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
                     # Build normalized key/value token; keep one space around '='
                     new_code = f"{leading_ws}{key} = {new_value}"
                     # Ensure a space before inline comment if it exists and doesn't already start with whitespace
                     if comment_part and not comment_part.startswith((" ", "\t")):
                         comment_part = " " + comment_part
-                    out_lines.append(new_code + comment_part)
+                    out_lines.append(new_code + comment_part + ("" if comment_part else line_ending))
                     continue
 
         out_lines.append(line)

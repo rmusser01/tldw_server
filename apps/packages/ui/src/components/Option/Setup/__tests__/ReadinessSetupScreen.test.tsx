@@ -170,6 +170,47 @@ describe("ReadinessSetupScreen", () => {
     expect(mocks.provision).toHaveBeenCalledTimes(1)
   })
 
+  it("shows previewed lanes immediately and treats empty install plans as no work", async () => {
+    mocks.useSetupReadiness.mockReturnValue({
+      ...baseHookState,
+      preview: {
+        preview_id: "preview-1",
+        profile_id: "local_balanced",
+        lane_ids: ["chat", "embeddings_rag", "speech"],
+        lanes: {
+          chat: {
+            lane_id: "chat",
+            label: "Chat",
+            status: "skipped",
+            consequences: ["Chat can be configured later."]
+          },
+          embeddings_rag: {
+            lane_id: "embeddings_rag",
+            label: "Embeddings/RAG",
+            status: "previewed",
+            selection: { provider: "huggingface", model: "Qwen/Qwen3-Embedding-0.6B" }
+          },
+          speech: {
+            lane_id: "speech",
+            label: "Speech",
+            status: "not_configured"
+          }
+        },
+        overlays: [],
+        config_updates: {},
+        secret_fields: [],
+        install_plan: { stt: [], tts: [], embeddings: { huggingface: [], custom: [], onnx: [] } },
+        operation_required: false
+      }
+    })
+
+    render(<ReadinessSetupScreen />)
+
+    expect(await screen.findByText("previewed")).toBeInTheDocument()
+    expect(screen.getByText("Qwen/Qwen3-Embedding-0.6B")).toBeInTheDocument()
+    expect(screen.getByText("No downloads needed")).toBeInTheDocument()
+  })
+
   it("shows remote setup guard failures with the backend setup fallback", async () => {
     mocks.useSetupReadiness.mockReturnValue({
       ...baseHookState,

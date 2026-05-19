@@ -2,11 +2,15 @@
 id: TASK-435
 title: Add native WebUI first-run readiness screen
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-05-19 01:39
 labels:
 - implementation
 - setup
 - frontend
 - webui
+dependencies: []
 documentation:
 - Docs/superpowers/specs/2026-05-18-first-time-model-readiness-setup-design.md
 - Docs/superpowers/plans/2026-05-18-first-time-readiness-setup-implementation-plan.md
@@ -15,6 +19,13 @@ modified_files:
 - apps/packages/ui/src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx
 - apps/packages/ui/src/routes/option-setup.tsx
 - apps/packages/ui/src/routes/__tests__/option-setup-readiness.test.tsx
+- tldw_Server_API/app/api/v1/endpoints/setup.py
+- tldw_Server_API/app/core/Setup/readiness_profiles.py
+- tldw_Server_API/app/core/Setup/readiness_service.py
+- tldw_Server_API/app/core/Setup/setup_manager.py
+- tldw_Server_API/tests/Setup/test_setup_manager_user_db_base_dir_validation.py
+- tldw_Server_API/tests/Setup/test_setup_readiness_api.py
+- tldw_Server_API/tests/Setup/test_setup_readiness_preview.py
 ---
 
 ## Description
@@ -25,12 +36,12 @@ Implement Task 7 from Docs/superpowers/plans/2026-05-18-first-time-readiness-set
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] Native `/setup` readiness screen renders readiness profiles, Chat, Embeddings/RAG, and Speech lanes.
-- [x] TTS remains visible but secondary inside the Speech lane.
-- [x] `Provision now` remains a separate secondary action and is not called by profile selection.
-- [x] Backend `/setup` fallback link remains visible, including remote first-run guard states.
-- [x] `/setup` keeps connection onboarding when server configuration is still missing or invalid.
-- [x] `/setup` switches the same readiness screen to admin mode after first-run completion.
+- [x] #1 Native `/setup` readiness screen renders readiness profiles, Chat, Embeddings/RAG, and Speech lanes.
+- [x] #2 TTS remains visible but secondary inside the Speech lane.
+- [x] #3 `Provision now` remains a separate secondary action and is not called by profile selection.
+- [x] #4 Backend `/setup` fallback link remains visible, including remote first-run guard states.
+- [x] #5 `/setup` keeps connection onboarding when server configuration is still missing or invalid.
+- [x] #6 `/setup` switches the same readiness screen to admin mode after first-run completion.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -45,19 +56,14 @@ Implement Task 7 from Docs/superpowers/plans/2026-05-18-first-time-readiness-set
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Added `ReadinessSetupScreen` backed by `useSetupReadiness`, with profile selection, lane status cards, preview/provision/verify actions, skipped-lane consequences, and backend setup fallback.
-- Added screen tests for lane rendering, secondary TTS copy, explicit provisioning, guard fallback, and admin mode pass-through.
-- Updated `option-setup.tsx` to render onboarding only while connection setup still needs attention; configured backends now render the readiness screen.
-- Added route tests for configured first-run mode, post-first-run admin mode, missing server URL fallback, and connection setup fallback.
-- Verification: `bunx vitest run src/components/Option/Setup/__tests__/ReadinessSetupScreen.test.tsx src/routes/__tests__/option-setup-readiness.test.tsx` -> 8 passed.
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Live walkthrough follow-up completed. First-run WebUI testing exposed and this branch fixes: profile-only readiness payloads now expand through the backend profile contract instead of previewing/provisioning as a no-op, speech verification uses the install manager keyword-only resource_profile argument, setup config rewriting preserves line breaks for adjacent key updates, and the WebUI immediately reflects preview lane state with empty install plans shown as no work.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Native WebUI setup readiness screen is implemented and wired into /setup. It keeps onboarding for missing/invalid connection setup, uses first-run readiness endpoints before first-run completion, switches to admin mode after completion, keeps the backend /setup fallback visible, and keeps provisioning behind an explicit Provision now action.
+Native WebUI setup readiness screen is implemented and walkthrough-tested against a live backend/WebUI pair. Verified profile selection, explicit Preview selection, separate Provision now, Verify readiness, visible backend /setup fallback, and profile-only API behavior. Fresh verification: setup pytest slice 33 passed; WebUI Vitest slice 2 files/9 tests passed; git diff --check passed; Bandit on touched backend production files returned 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
