@@ -1,9 +1,10 @@
 import React from "react"
-import { Alert, Button, Empty, Spin, Tag, Typography } from "antd"
+import { Button, Empty, Spin, Tag, Typography } from "antd"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
 import { PageShell } from "@/components/Common/PageShell"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useIngestionSourcesQuery } from "@/hooks/use-ingestion-sources"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SourcesAvailabilityGate } from "./SourcesAvailabilityGate"
@@ -24,6 +25,15 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
       !capabilityState.loading &&
       capabilityState.capabilities?.hasIngestionSources !== false
   })
+  const loadErrorState = sourcesQuery.error
+    ? buildCapabilityState({
+        featureName: t("sources:title", "Sources"),
+        capabilityName: "ingestion source management",
+        endpoint: "/api/v1/ingestion-sources",
+        method: "GET",
+        error: sourcesQuery.error
+      })
+    : null
 
   return (
     <SourcesAvailabilityGate capabilityState={capabilityState}>
@@ -59,12 +69,26 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
         ) : null}
 
         {!sourcesQuery.isLoading && sourcesQuery.error ? (
-          <Alert
-            type="error"
-            message={String(
-              (sourcesQuery.error as { message?: string } | undefined)
-                ?.message || "Failed to load sources"
-            )}
+          <RecoveryCallout
+            state={loadErrorState?.state ?? "error"}
+            title={loadErrorState?.title ?? "Unable to load sources"}
+            message={
+              loadErrorState?.message ??
+              "The ingestion source overview could not be loaded."
+            }
+            diagnostics={loadErrorState?.diagnostics}
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void sourcesQuery.refetch()
+              }
+            }}
+            secondaryActions={[
+              {
+                label: t("option:healthDiagnostics", "Health & diagnostics"),
+                onClick: () => navigate("/settings/health")
+              }
+            ]}
           />
         ) : null}
 

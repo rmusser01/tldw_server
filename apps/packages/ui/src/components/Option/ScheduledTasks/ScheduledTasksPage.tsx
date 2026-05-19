@@ -1,6 +1,8 @@
 import React, { useState } from "react"
-import { Alert, Spin, Typography, message } from "antd"
+import { Spin, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "react-router-dom"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import {
   createScheduledTaskReminder,
@@ -17,6 +19,7 @@ import { ReminderTaskEditor } from "./ReminderTaskEditor"
 const SCHEDULED_TASKS_PATH = "/api/v1/scheduled-tasks"
 
 export const ScheduledTasksPage: React.FC = () => {
+  const navigate = useNavigate()
   const { config: connectionConfig, loading: connectionConfigLoading } =
     useCanonicalConnectionConfig()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -129,6 +132,37 @@ export const ScheduledTasksPage: React.FC = () => {
   }
 
   const partialErrors = tasksQuery.data?.errors ?? []
+  const unsupportedState = scheduledTasksSupported === false
+    ? buildCapabilityState({
+        featureName: "Scheduled tasks",
+        capabilityName: "scheduled task management",
+        endpoint: SCHEDULED_TASKS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        reason: "unsupported"
+      })
+    : null
+  const loadErrorState = tasksQuery.isError
+    ? buildCapabilityState({
+        featureName: "Scheduled tasks",
+        capabilityName: "scheduled task management",
+        endpoint: SCHEDULED_TASKS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        error: tasksQuery.error
+      })
+    : null
+  const partialState = tasksQuery.data?.partial
+    ? buildCapabilityState({
+        featureName: "Scheduled tasks",
+        capabilityName: "scheduled task management",
+        endpoint: SCHEDULED_TASKS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        reason: "partial",
+        partialErrors
+      })
+    : null
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -143,28 +177,59 @@ export const ScheduledTasksPage: React.FC = () => {
 
       {connectionConfigLoading || scheduledTasksSupported === null ? <Spin /> : null}
       {scheduledTasksSupported === false ? (
-        <Alert
-          type="info"
-          showIcon
-          title="Scheduled tasks unavailable"
-          description="Scheduled tasks endpoints are not available on this server."
+        <RecoveryCallout
+          state={unsupportedState?.state ?? "unavailable"}
+          title={unsupportedState?.title ?? "Scheduled tasks are unavailable on this server"}
+          message={
+            unsupportedState?.message ??
+            "The connected server does not advertise scheduled task management."
+          }
+          diagnostics={unsupportedState?.diagnostics}
+          primaryAction={{
+            label: "Health & diagnostics",
+            onClick: () => navigate("/settings/health")
+          }}
         />
       ) : null}
       {tasksQuery.isLoading ? <Spin /> : null}
       {tasksQuery.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          title="Unable to load scheduled tasks"
-          description={tasksQuery.error instanceof Error ? tasksQuery.error.message : "The scheduled tasks overview could not be loaded."}
+        <RecoveryCallout
+          state={loadErrorState?.state ?? "error"}
+          title={loadErrorState?.title ?? "Unable to load scheduled tasks"}
+          message={
+            loadErrorState?.message ??
+            "The scheduled tasks overview could not be loaded."
+          }
+          diagnostics={loadErrorState?.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => {
+              void tasksQuery.refetch()
+            }
+          }}
+          secondaryActions={[
+            {
+              label: "Health & diagnostics",
+              onClick: () => navigate("/settings/health")
+            }
+          ]}
         />
       ) : null}
       {tasksQuery.data?.partial ? (
-        <Alert
-          type="warning"
-          showIcon
-          title="Some scheduled tasks could not be loaded"
-          description={partialErrors.length ? partialErrors.join(", ") : "The overview is partially available."}
+        <RecoveryCallout
+          state={partialState?.state ?? "degraded"}
+          title={partialState?.title ?? "Scheduled tasks are partially available"}
+          message={
+            partialState?.message ??
+            "Some scheduled task data loaded, but one dependency could not be reached."
+          }
+          diagnostics={partialState?.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => {
+              void tasksQuery.refetch()
+            }
+          }}
         />
       ) : null}
 

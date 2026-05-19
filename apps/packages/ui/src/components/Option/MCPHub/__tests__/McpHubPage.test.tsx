@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, useLocation } from "react-router-dom"
 
@@ -67,6 +67,39 @@ const renderMcpHubPage = (initialEntry = "/mcp-hub") =>
   )
 
 describe("McpHubPage", () => {
+  it("renders a compact status summary before workflow detail", () => {
+    renderMcpHubPage()
+
+    const summary = screen.getByTestId("mcp-hub-status-summary")
+    const workflows = screen.getByTestId("mcp-hub-workflows")
+
+    expect(summary.compareDocumentPosition(workflows)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(within(summary).getByText("Servers & Credentials")).toBeTruthy()
+    expect(within(summary).getByText("Policy Assignments")).toBeTruthy()
+    expect(within(summary).getByText("Approvals")).toBeTruthy()
+    expect(within(summary).getByText("Workspace Boundaries")).toBeTruthy()
+    expect(within(summary).getByText("Audit Findings")).toBeTruthy()
+    expect(screen.getByTestId("mcp-hub-workflow-setup")).toBeTruthy()
+  })
+
+  it("opens existing workflow views from status summary actions", async () => {
+    const user = userEvent.setup()
+    renderMcpHubPage()
+
+    await user.click(screen.getByRole("button", { name: "Open Policy Assignments" }))
+
+    expect(screen.getByText("assignments tab")).toBeTruthy()
+    expect(screen.getByTestId("mcp-hub-workflow-access")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/mcp-hub?workflow=access&view=assignments"
+    )
+  })
+
   it("renders workflow navigation with the current MCP Hub child views grouped inside it", async () => {
     renderMcpHubPage()
 
@@ -76,8 +109,12 @@ describe("McpHubPage", () => {
     expect(screen.getByText("Workspaces")).toBeTruthy()
     expect(screen.getByText("Governance")).toBeTruthy()
     expect(screen.getByText("Audit")).toBeTruthy()
-    expect(screen.getByText("Servers & Credentials")).toBeTruthy()
-    expect(screen.getByText("Tool Catalog")).toBeTruthy()
+    expect(screen.getByTestId("mcp-hub-tab-credentials")).toHaveTextContent(
+      "Servers & Credentials"
+    )
+    expect(screen.getByTestId("mcp-hub-tab-tool-catalogs")).toHaveTextContent(
+      "Tool Catalog"
+    )
   })
 
   it("defaults to Setup / Servers & Credentials", () => {

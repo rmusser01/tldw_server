@@ -1,5 +1,6 @@
 import React, { useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
+import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
 import OptionLayout from "@/components/Layouts/Layout"
 import { WatchlistsPlaygroundPage } from "@/components/Option/Watchlists/WatchlistsPlaygroundPage"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -144,9 +145,11 @@ const OptionWatchlists = () => {
   ])
 
   return (
-    <OptionLayout>
-      <WatchlistsPlaygroundPage />
-    </OptionLayout>
+    <RouteErrorBoundary routeId="watchlists" routeLabel="Watchlists">
+      <OptionLayout>
+        <WatchlistsPlaygroundPage />
+      </OptionLayout>
+    </RouteErrorBoundary>
   )
 }
 

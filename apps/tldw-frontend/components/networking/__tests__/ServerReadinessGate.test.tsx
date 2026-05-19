@@ -9,6 +9,12 @@ describe("ServerReadinessGate", () => {
   }
 
   afterEach(() => {
+    try {
+      localStorage.removeItem("__tldw_allow_offline")
+      localStorage.removeItem("__tldw_test_bypass")
+    } catch {
+      // ignore test storage availability
+    }
     vi.restoreAllMocks()
     vi.useRealTimers()
     vi.unstubAllEnvs()
@@ -97,6 +103,21 @@ describe("ServerReadinessGate", () => {
     )
 
     expect(screen.getByText("Settings ready")).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("bypasses health checks when the offline E2E flag is enabled", async () => {
+    localStorage.setItem("__tldw_allow_offline", "true")
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const { ServerReadinessGate } = await import("../ServerReadinessGate")
+
+    render(
+      <ServerReadinessGate>
+        <div>App ready offline</div>
+      </ServerReadinessGate>
+    )
+
+    expect(screen.getByText("App ready offline")).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

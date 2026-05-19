@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test, expect, seedAuth } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
+import {
+  getRoutesForSmokeInventory,
+  ROUTE_METADATA
+} from '../../../packages/ui/src/routes/route-metadata';
+import { PAGES } from './page-inventory';
 
 const LOAD_TIMEOUT = 30_000;
 const OUTPUT_DATE = process.env.TLDW_STAGE2_OUTPUT_DATE;
@@ -50,25 +55,25 @@ const ROUTE_CONTRACTS: RouteContract[] = [
   },
   {
     route: '/connectors',
-    expectedTitle: 'Connectors Hub Is Coming Soon',
+    expectedTitle: 'Connectors',
     disallowedFinalPaths: ['/settings'],
     expectedUi: 'placeholder',
   },
   {
     route: '/connectors/sources',
-    expectedTitle: 'Connector Sources Is Coming Soon',
+    expectedTitle: 'Connector Sources',
     disallowedFinalPaths: ['/settings'],
     expectedUi: 'placeholder',
   },
   {
     route: '/connectors/jobs',
-    expectedTitle: 'Connector Jobs Is Coming Soon',
+    expectedTitle: 'Connector Jobs',
     disallowedFinalPaths: ['/settings'],
     expectedUi: 'placeholder',
   },
   {
     route: '/connectors/browse',
-    expectedTitle: 'Connector Browse Is Coming Soon',
+    expectedTitle: 'Connector Catalog',
     disallowedFinalPaths: ['/settings'],
     expectedUi: 'placeholder',
   },
@@ -99,6 +104,32 @@ const ROUTE_CONTRACTS: RouteContract[] = [
 ];
 
 test.describe('Stage 2 route contracts', () => {
+  test('route metadata smoke policy is represented in the page inventory', async () => {
+    const pagePaths = new Set(PAGES.map((pageEntry) => pageEntry.path));
+    const duplicatePagePaths = PAGES.map((pageEntry) => pageEntry.path).filter(
+      (routePath, index, paths) => paths.indexOf(routePath) !== index
+    );
+    const missingSmokeRoutes = getRoutesForSmokeInventory().filter(
+      (routePath) => !pagePaths.has(routePath)
+    );
+    const manualRoutesWithoutReason = ROUTE_METADATA.filter(
+      (metadata) => metadata.smoke === 'manual' && !metadata.rationale.trim()
+    ).map((metadata) => metadata.path);
+    const internalRoutesInSmoke = ROUTE_METADATA.filter(
+      (metadata) =>
+        metadata.surface === 'internal_qa_debug' && metadata.smoke !== 'exclude'
+    ).map((metadata) => metadata.path);
+    const excludedRoutesInInventory = ROUTE_METADATA.filter(
+      (metadata) => metadata.smoke === 'exclude' && pagePaths.has(metadata.path)
+    ).map((metadata) => metadata.path);
+
+    expect(duplicatePagePaths).toEqual([]);
+    expect(missingSmokeRoutes).toEqual([]);
+    expect(manualRoutesWithoutReason).toEqual([]);
+    expect(internalRoutesInSmoke).toEqual([]);
+    expect(excludedRoutesInInventory).toEqual([]);
+  });
+
   test('routes render their intended surface and do not misroute', async ({ page }, testInfo) => {
     await seedAuth(page);
     const results: RouteContractResult[] = [];

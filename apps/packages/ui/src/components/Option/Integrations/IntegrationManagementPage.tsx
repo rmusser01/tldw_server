@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from "react"
-import { Alert, Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
+import { Button, Card, Col, Row, Skeleton, Space, Tag, Typography, message } from "antd"
 import { useQuery } from "@tanstack/react-query"
+import {
+  RecoveryCallout,
+  buildCapabilityState,
+  getCapabilityErrorStatus
+} from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
@@ -50,6 +55,12 @@ const PERSONAL_INTEGRATIONS_UNSUPPORTED_TITLE = "Personal integrations unavailab
 const PERSONAL_INTEGRATIONS_UNSUPPORTED_DESCRIPTION =
   "This server does not expose the personal integrations control-plane yet."
 const PERSONAL_INTEGRATIONS_PATH = "/api/v1/integrations/personal"
+const WORKSPACE_INTEGRATIONS_PATH = "/api/v1/integrations/workspace"
+const WORKSPACE_SLACK_POLICY_PATH = "/api/v1/integrations/workspace/slack/policy"
+const WORKSPACE_DISCORD_POLICY_PATH = "/api/v1/integrations/workspace/discord/policy"
+const WORKSPACE_TELEGRAM_BOT_PATH = "/api/v1/integrations/workspace/telegram/bot"
+const WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH =
+  "/api/v1/integrations/workspace/telegram/linked-actors"
 
 const isUnsupportedOverviewError = (scope: IntegrationScope, error: unknown): boolean => {
   if (scope !== "personal" || !error || typeof error !== "object") {
@@ -59,10 +70,15 @@ const isUnsupportedOverviewError = (scope: IntegrationScope, error: unknown): bo
     status?: number
     message?: string
   }
-  if (maybeError.status === 404) {
+  const status = getCapabilityErrorStatus(error)
+  if (status === 404 || status === 405 || status === 422) {
     return true
   }
-  return typeof maybeError.message === "string" && maybeError.message.includes("/api/v1/integrations/personal")
+  return (
+    typeof maybeError.message === "string" &&
+    maybeError.message.includes("/api/v1/integrations/personal") &&
+    /\b(404|405|422|not found|unsupported|not expose)/i.test(maybeError.message)
+  )
 }
 
 export const buildIntegrationQueryKey = (
@@ -182,8 +198,13 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     queryKey: buildIntegrationQueryKey(scope, activeOrgId, "overview"),
     queryFn: scope === "workspace" ? listWorkspaceIntegrations : listPersonalIntegrations,
     enabled: scope === "workspace" || personalIntegrationsSupported === true,
-    retry: (failureCount, error) =>
-      !isUnsupportedOverviewError(scope, error) && failureCount < 3
+    retry: (failureCount, error) => {
+      const status = getCapabilityErrorStatus(error)
+      if (status === 401 || status === 403) {
+        return false
+      }
+      return !isUnsupportedOverviewError(scope, error) && failureCount < 3
+    }
   })
 
   const slackPolicyQuery = useQuery({
@@ -234,35 +255,85 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
   }
 
   const isWorkspace = scope === "workspace"
-  const slackPolicyError =
-    slackPolicyQuery.isError && slackPolicyQuery.error instanceof Error
-      ? slackPolicyQuery.error.message
-      : slackPolicyQuery.isError
-        ? "Slack policy could not be loaded."
-        : null
-  const discordPolicyError =
-    discordPolicyQuery.isError && discordPolicyQuery.error instanceof Error
-      ? discordPolicyQuery.error.message
-      : discordPolicyQuery.isError
-        ? "Discord policy could not be loaded."
-        : null
-  const telegramBotError =
-    telegramBotQuery.isError && telegramBotQuery.error instanceof Error
-      ? telegramBotQuery.error.message
-      : telegramBotQuery.isError
-        ? "Telegram bot settings could not be loaded."
-        : null
-  const telegramActorsError =
-    telegramActorsQuery.isError && telegramActorsQuery.error instanceof Error
-      ? telegramActorsQuery.error.message
-      : telegramActorsQuery.isError
-        ? "Telegram linked actors could not be loaded."
-        : null
   const personalIntegrationsUnsupported =
     scope === "personal" &&
     (personalIntegrationsSupported === false || isUnsupportedOverviewError(scope, overviewQuery.error))
   const personalIntegrationsCheckingSupport =
     scope === "personal" && (connectionConfigLoading || personalIntegrationsSupported === null)
+  const overviewEndpoint = scope === "workspace" ? WORKSPACE_INTEGRATIONS_PATH : PERSONAL_INTEGRATIONS_PATH
+  const overviewCapabilityName = scope === "workspace"
+    ? "workspace integration management"
+    : "personal integration management"
+  const personalUnsupportedState = personalIntegrationsUnsupported
+    ? buildCapabilityState({
+        featureName: "Personal integrations",
+        capabilityName: "personal integration management",
+        endpoint: PERSONAL_INTEGRATIONS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        reason: "unsupported",
+        title: "Personal integrations are unavailable on this server"
+      })
+    : null
+  const overviewErrorState =
+    overviewQuery.isError && !overviewQuery.data && !personalIntegrationsUnsupported
+      ? buildCapabilityState({
+          featureName: isWorkspace ? "Workspace integrations" : "Personal integrations",
+          capabilityName: overviewCapabilityName,
+          endpoint: overviewEndpoint,
+          method: "GET",
+          serverUrl: connectionConfig?.serverUrl,
+          error: overviewQuery.error
+        })
+      : null
+  const slackPolicyState = slackPolicyQuery.isError
+    ? buildCapabilityState({
+        featureName: "Slack policy",
+        capabilityName: "workspace Slack policy",
+        endpoint: WORKSPACE_SLACK_POLICY_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        error: slackPolicyQuery.error,
+        title: "Unable to load Slack policy",
+        message: "The workspace Slack policy could not be loaded."
+      })
+    : null
+  const discordPolicyState = discordPolicyQuery.isError
+    ? buildCapabilityState({
+        featureName: "Discord policy",
+        capabilityName: "workspace Discord policy",
+        endpoint: WORKSPACE_DISCORD_POLICY_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        error: discordPolicyQuery.error,
+        title: "Unable to load Discord policy",
+        message: "The workspace Discord policy could not be loaded."
+      })
+    : null
+  const telegramBotState = telegramBotQuery.isError
+    ? buildCapabilityState({
+        featureName: "Telegram bot settings",
+        capabilityName: "workspace Telegram bot settings",
+        endpoint: WORKSPACE_TELEGRAM_BOT_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        error: telegramBotQuery.error,
+        title: "Unable to load Telegram bot settings",
+        message: "The workspace Telegram bot settings could not be loaded."
+      })
+    : null
+  const telegramActorsState = telegramActorsQuery.isError
+    ? buildCapabilityState({
+        featureName: "Telegram linked actors",
+        capabilityName: "workspace Telegram linked actors",
+        endpoint: WORKSPACE_TELEGRAM_LINKED_ACTORS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        error: telegramActorsQuery.error,
+        title: "Unable to load Telegram linked actors",
+        message: "Telegram linked actors could not be loaded."
+      })
+    : null
 
   const handlePersonalAction = async (connection: IntegrationConnection, action: string) => {
     if (scope !== "personal" || !isPersonalProvider(connection.provider)) {
@@ -332,19 +403,33 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
         <Skeleton active paragraph={{ rows: 6 }} />
       ) : null}
       {personalIntegrationsUnsupported ? (
-        <Alert
-          type="info"
-          showIcon
-          title={PERSONAL_INTEGRATIONS_UNSUPPORTED_TITLE}
-          description={PERSONAL_INTEGRATIONS_UNSUPPORTED_DESCRIPTION}
+        <RecoveryCallout
+          state={personalUnsupportedState?.state ?? "unavailable"}
+          title={personalUnsupportedState?.title ?? PERSONAL_INTEGRATIONS_UNSUPPORTED_TITLE}
+          message={
+            personalUnsupportedState?.message ??
+            PERSONAL_INTEGRATIONS_UNSUPPORTED_DESCRIPTION
+          }
+          diagnostics={personalUnsupportedState?.diagnostics}
+          primaryAction={{
+            label: "Refresh all",
+            onClick: () => void refreshAll()
+          }}
         />
       ) : null}
       {overviewQuery.isError && !overviewQuery.data && !personalIntegrationsUnsupported ? (
-        <Alert
-          type="error"
-          showIcon
-          title="Unable to load integrations"
-          description={overviewQuery.error instanceof Error ? overviewQuery.error.message : "The integrations overview could not be loaded."}
+        <RecoveryCallout
+          state={overviewErrorState?.state ?? "error"}
+          title={overviewErrorState?.title ?? "Unable to load integrations"}
+          message={
+            overviewErrorState?.message ??
+            "The integrations overview could not be loaded."
+          }
+          diagnostics={overviewErrorState?.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => void overviewQuery.refetch()
+          }}
         />
       ) : null}
 
@@ -366,12 +451,16 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
 
       {isWorkspace ? (
         <>
-          {telegramActorsError ? (
-            <Alert
-              type="warning"
-              showIcon
-              title="Unable to load Telegram linked actors"
-              description={telegramActorsError}
+          {telegramActorsState ? (
+            <RecoveryCallout
+              state={telegramActorsState.state}
+              title={telegramActorsState.title}
+              message={telegramActorsState.message}
+              diagnostics={telegramActorsState.diagnostics}
+              primaryAction={{
+                label: "Try again",
+                onClick: () => void telegramActorsQuery.refetch()
+              }}
             />
           ) : null}
 
@@ -383,7 +472,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
               <IntegrationPolicyPanel
                 provider="slack"
                 policy={slackPolicyQuery.data}
-                errorMessage={slackPolicyError ? "Unable to load Slack policy" : undefined}
+                errorState={slackPolicyState ?? undefined}
                 loading={slackPolicyQuery.isLoading}
                 onSave={updateWorkspaceSlackPolicy}
                 onRefresh={() => void slackPolicyQuery.refetch()}
@@ -393,7 +482,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
               <IntegrationPolicyPanel
                 provider="discord"
                 policy={discordPolicyQuery.data}
-                errorMessage={discordPolicyError ? "Unable to load Discord policy" : undefined}
+                errorState={discordPolicyState ?? undefined}
                 loading={discordPolicyQuery.isLoading}
                 onSave={updateWorkspaceDiscordPolicy}
                 onRefresh={() => void discordPolicyQuery.refetch()}
@@ -408,7 +497,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
             provider="telegram"
             bot={telegramBotQuery.data}
             linkedActors={telegramActorsQuery.data?.items ?? []}
-            errorMessage={telegramBotError ? "Unable to load Telegram bot settings" : undefined}
+            errorState={telegramBotState ?? undefined}
             loading={telegramBotQuery.isLoading || telegramActorsQuery.isLoading}
             onSave={updateWorkspaceTelegramBot}
             onGeneratePairingCode={createWorkspaceTelegramPairingCode}

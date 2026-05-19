@@ -39,6 +39,7 @@
   },
   "quickActions": {
     "label": "Jump to",
+    "repeatLabel": "Jump to",
     "sources": "Set up feeds",
     "jobs": "Configure monitors",
     "runs": "Check activity",
@@ -381,6 +382,7 @@
     }
   },
   "commandPalette": {
+    "open": "Command palette",
     "placeholder": "Type a command or search...",
     "noResults": "No matching commands",
     "hint": "Tip: Use Cmd+K to open this palette anytime",
@@ -452,6 +454,7 @@
     "runsFailed": "{{count}} failed",
     "runsOk": "OK",
     "runsFailedDetail": "{{count}} recent failures",
+    "openActivityFailures": "Open Activity ({{count}} failed)",
     "articlesUnread": "unread",
     "showAllViews": "Show all views",
     "showAllViewsTooltip": "Switch to the full 8-tab layout"

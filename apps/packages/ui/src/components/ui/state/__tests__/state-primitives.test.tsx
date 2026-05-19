@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ActionGroup, PermissionNotice, RecoveryCallout, SetupRequiredPanel, StatePanel } from "../"
 
@@ -32,6 +32,32 @@ describe("state primitives", () => {
     expect(screen.getByLabelText("Diagnostics")).toBeInTheDocument()
     expect(screen.getByText("/api/v1/health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
+  it("keeps raw endpoint details in diagnostics instead of the primary state copy", () => {
+    render(
+      <RecoveryCallout
+        state="unavailable"
+        title="Sources are unavailable on this server"
+        message="The connected server does not advertise ingestion source management."
+        diagnostics={[
+          { label: "Request path", value: "/api/v1/ingestion-sources", code: true },
+          { label: "Status", value: "404" }
+        ]}
+        primaryAction={{ label: "Open diagnostics", onClick: vi.fn() }}
+        data-testid="capability-state"
+      />
+    )
+
+    const panel = screen.getByTestId("capability-state")
+    expect(within(panel).getByRole("heading", { name: "Sources are unavailable on this server" }))
+      .not.toHaveTextContent("/api/v1/ingestion-sources")
+    expect(
+      within(panel).getByText("The connected server does not advertise ingestion source management.")
+    ).not.toHaveTextContent("/api/v1/ingestion-sources")
+    expect(within(panel).getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/ingestion-sources"
+    )
   })
 
   it("does not render an empty diagnostics section", () => {

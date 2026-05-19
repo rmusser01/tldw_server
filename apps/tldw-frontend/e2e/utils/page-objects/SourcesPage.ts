@@ -19,15 +19,17 @@ export class SourcesPage extends BasePage {
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
-    // Wait for heading, offline state, unsupported state, or empty state
+    // Wait for heading, offline state, unsupported state, unavailable state, or empty state
     const heading = this.page.getByText("Sources")
     const offline = this.page.getByText("Server is offline. Connect to manage ingestion sources.")
     const unsupported = this.page.getByText(/does not advertise ingestion source/i)
+    const unavailable = this.page.getByRole("heading", { name: /cannot reach sources/i })
     const empty = this.page.getByText("No ingestion sources yet.")
     await Promise.race([
       heading.first().waitFor({ state: "visible", timeout: 20_000 }),
       offline.first().waitFor({ state: "visible", timeout: 20_000 }),
       unsupported.first().waitFor({ state: "visible", timeout: 20_000 }),
+      unavailable.first().waitFor({ state: "visible", timeout: 20_000 }),
       empty.first().waitFor({ state: "visible", timeout: 20_000 }),
     ]).catch(() => {})
   }
@@ -48,6 +50,10 @@ export class SourcesPage extends BasePage {
 
   get unsupportedMessage(): Locator {
     return this.page.getByText(/does not advertise ingestion source/i)
+  }
+
+  get unavailableMessage(): Locator {
+    return this.page.getByRole("heading", { name: /cannot reach sources/i })
   }
 
   get emptyMessage(): Locator {
@@ -97,7 +103,8 @@ export class SourcesPage extends BasePage {
     const newSourceVisible = await this.newSourceButton.isVisible().catch(() => false)
     const unsupportedVisible = await this.unsupportedMessage.isVisible().catch(() => false)
     const offlineVisible = await this.offlineMessage.isVisible().catch(() => false)
-    return headingVisible && newSourceVisible && !unsupportedVisible && !offlineVisible
+    const unavailableVisible = await this.unavailableMessage.isVisible().catch(() => false)
+    return headingVisible && newSourceVisible && !unsupportedVisible && !offlineVisible && !unavailableVisible
   }
 
   /** Whether sources are listed */

@@ -16,8 +16,22 @@ const _origin =
 const HEALTH_URL = `${_origin}/api/v1/health`
 const MAX_WAIT_MS = 15_000
 const RETRY_INTERVAL_MS = 2_000
+const OFFLINE_BYPASS_KEYS = ["__tldw_allow_offline", "__tldw_test_bypass"] as const
 
 type GateState = "checking" | "ready" | "waiting" | "timeout"
+
+function readStorageFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "true"
+  } catch {
+    return false
+  }
+}
+
+function shouldBypassReadinessForOffline(): boolean {
+  if (typeof window === "undefined") return false
+  return OFFLINE_BYPASS_KEYS.some(readStorageFlag)
+}
 
 async function checkHealth(): Promise<boolean> {
   try {
@@ -37,12 +51,18 @@ export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   bypass?: boolean
 }> = ({ children, bypass = false }) => {
-  const [gate, setGate] = React.useState<GateState>("checking")
+  const [gate, setGate] = React.useState<GateState>(() =>
+    shouldBypassReadinessForOffline() ? "ready" : "checking"
+  )
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
     if (bypass) {
       setGate((current) => (current === "ready" ? current : "checking"))
+      return
+    }
+    if (shouldBypassReadinessForOffline()) {
+      setGate("ready")
       return
     }
 

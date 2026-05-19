@@ -60,6 +60,7 @@ describe("McpHubPage FTUX", () => {
   it("shows the explainer card on first visit", () => {
     renderMcpHubPage()
     expect(screen.getByTestId("mcp-hub-explainer")).toBeTruthy()
+    expect(screen.getByTestId("mcp-hub-status-summary")).toBeTruthy()
   })
 
   it("hides the explainer card after dismissal and persists to localStorage", async () => {
