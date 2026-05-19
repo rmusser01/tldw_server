@@ -19,15 +19,19 @@ export class SourcesPage extends BasePage {
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
-    // Wait for heading, offline state, unsupported state, or empty state
+    // Wait for heading, loading, offline state, unsupported state, unavailable state, or empty state
     const heading = this.page.getByText("Sources")
+    const loading = this.loadingSpinner
     const offline = this.page.getByText("Server is offline. Connect to manage ingestion sources.")
     const unsupported = this.page.getByText(/does not advertise ingestion source/i)
+    const unavailable = this.page.getByRole("heading", { name: /cannot reach sources/i })
     const empty = this.page.getByText("No ingestion sources yet.")
     await Promise.race([
       heading.first().waitFor({ state: "visible", timeout: 20_000 }),
+      loading.first().waitFor({ state: "visible", timeout: 20_000 }),
       offline.first().waitFor({ state: "visible", timeout: 20_000 }),
       unsupported.first().waitFor({ state: "visible", timeout: 20_000 }),
+      unavailable.first().waitFor({ state: "visible", timeout: 20_000 }),
       empty.first().waitFor({ state: "visible", timeout: 20_000 }),
     ]).catch(() => {})
   }
@@ -35,7 +39,7 @@ export class SourcesPage extends BasePage {
   // -- Locators --------------------------------------------------------------
 
   get heading(): Locator {
-    return this.page.getByRole("heading", { name: /sources/i })
+    return this.page.getByRole("heading", { name: /^sources$/i }).first()
   }
 
   get description(): Locator {
@@ -50,6 +54,10 @@ export class SourcesPage extends BasePage {
     return this.page.getByText(/does not advertise ingestion source/i)
   }
 
+  get unavailableMessage(): Locator {
+    return this.page.getByRole("heading", { name: /cannot reach sources/i })
+  }
+
   get emptyMessage(): Locator {
     return this.page.getByText("No ingestion sources yet.")
   }
@@ -61,7 +69,7 @@ export class SourcesPage extends BasePage {
 
   /** Loading spinner */
   get loadingSpinner(): Locator {
-    return this.page.locator(".ant-spin")
+    return this.page.locator("[data-testid='sources-loading-state'], .ant-spin-spinning, .ant-spin-dot, .ant-spin").first()
   }
 
   /** Error alert */
@@ -97,7 +105,16 @@ export class SourcesPage extends BasePage {
     const newSourceVisible = await this.newSourceButton.isVisible().catch(() => false)
     const unsupportedVisible = await this.unsupportedMessage.isVisible().catch(() => false)
     const offlineVisible = await this.offlineMessage.isVisible().catch(() => false)
-    return headingVisible && newSourceVisible && !unsupportedVisible && !offlineVisible
+    const unavailableVisible = await this.unavailableMessage.isVisible().catch(() => false)
+    const loadingVisible = await this.loadingSpinner.isVisible().catch(() => false)
+    return (
+      headingVisible &&
+      newSourceVisible &&
+      !loadingVisible &&
+      !unsupportedVisible &&
+      !offlineVisible &&
+      !unavailableVisible
+    )
   }
 
   /** Whether sources are listed */

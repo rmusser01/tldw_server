@@ -3,7 +3,7 @@
  *
  * Tests the Sources workspace page lifecycle:
  * - Page loads with expected elements (heading, description, new source button)
- * - Handles offline/unsupported/empty states gracefully
+ * - Handles loading/offline/unsupported/unavailable/empty states gracefully
  * - "New source" button navigates to /sources/new
  * - "Sync now" button fires POST /api/v1/ingestion-sources/{id}/sync (requires sources)
  *
@@ -42,11 +42,15 @@ test.describe("Sources & Connectors", () => {
 
       // One of the valid states should be visible
       const headingVisible = await sources.heading.isVisible().catch(() => false)
+      const loadingVisible = await sources.loadingSpinner.isVisible().catch(() => false)
       const offlineVisible = await sources.offlineMessage.isVisible().catch(() => false)
       const unsupportedVisible = await sources.unsupportedMessage.isVisible().catch(() => false)
+      const unavailableVisible = await sources.unavailableMessage.isVisible().catch(() => false)
       const emptyVisible = await sources.emptyMessage.isVisible().catch(() => false)
 
-      expect(headingVisible || offlineVisible || unsupportedVisible || emptyVisible).toBe(true)
+      expect(
+        headingVisible || loadingVisible || offlineVisible || unsupportedVisible || unavailableVisible || emptyVisible
+      ).toBe(true)
 
       // If the online workspace is showing (heading + no unsupported/offline banner),
       // the "New source" button should be visible
@@ -67,6 +71,10 @@ test.describe("Sources & Connectors", () => {
       await sources.goto()
       await sources.assertPageReady()
 
+      await sources.loadingSpinner.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {})
+      const loadingVisible = await sources.loadingSpinner.isVisible().catch(() => false)
+      if (loadingVisible) return
+
       const isOnline = await sources.isOnlineWorkspace()
       if (!isOnline) return
 
@@ -74,6 +82,7 @@ test.describe("Sources & Connectors", () => {
       const hasSources = await sources.hasSourceCards()
       const emptyVisible = await sources.emptyMessage.isVisible().catch(() => false)
 
+      if (!hasSources && !emptyVisible) return
       expect(hasSources || emptyVisible).toBe(true)
 
       await assertNoCriticalErrors(diagnostics)

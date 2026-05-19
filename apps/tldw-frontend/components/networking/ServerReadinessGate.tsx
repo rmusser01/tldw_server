@@ -17,6 +17,7 @@ const _origin =
 const HEALTH_URL = `${_origin}/api/v1/health`
 const MAX_WAIT_MS = 15_000
 const RETRY_INTERVAL_MS = 2_000
+const OFFLINE_BYPASS_KEYS = ["__tldw_allow_offline", "__tldw_test_bypass"] as const
 
 type GateState = "checking" | "ready" | "waiting" | "timeout" | "degraded"
 type ReadinessResult =
@@ -28,6 +29,19 @@ const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
 const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
 const HEALTHY_CHECK_STATUSES = new Set(["healthy", "ok"])
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
+
+function readStorageFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "true"
+  } catch {
+    return false
+  }
+}
+
+function shouldBypassReadinessForOffline(): boolean {
+  if (typeof window === "undefined") return false
+  return OFFLINE_BYPASS_KEYS.some(readStorageFlag)
+}
 
 function extractDegradedChecks(body: unknown): string[] {
   if (!body || typeof body !== "object") return []
@@ -88,13 +102,19 @@ export const ServerReadinessGate: React.FC<{
   allowDegraded?: boolean
   bypass?: boolean
 }> = ({ children, allowDegraded = false, bypass = false }) => {
-  const [gate, setGate] = React.useState<GateState>("checking")
+  const [gate, setGate] = React.useState<GateState>(() =>
+    shouldBypassReadinessForOffline() ? "ready" : "checking"
+  )
   const [degradedChecks, setDegradedChecks] = React.useState<string[]>([])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
     if (bypass) {
       setGate((current) => (current === "ready" ? current : "checking"))
+      return
+    }
+    if (shouldBypassReadinessForOffline()) {
+      setGate("ready")
       return
     }
 
