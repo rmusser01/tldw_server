@@ -16,7 +16,7 @@ When corruption is detected, `/api/v1/health` includes a sanitized failure paylo
       "last_error": "sqlite_corruption",
       "last_failure": {
         "reason_code": "sqlite_corruption",
-        "affected_db": "user:42/ChaChaNotes.db",
+        "affected_db": "ChaChaNotes.db",
         "recovery": {
           "automatic_repair": false,
           "documentation": "Docs/Operations/ChaChaNotes_DB_Recovery.md"
@@ -27,7 +27,7 @@ When corruption is detected, `/api/v1/health` includes a sanitized failure paylo
 }
 ```
 
-`affected_db` intentionally avoids absolute host paths. Resolve it by checking the configured `USER_DB_BASE_DIR` and the user id in the health payload.
+`affected_db` intentionally avoids absolute host paths and user identifiers because the aggregate health endpoint may be reachable without user authentication. Use the server log entry for the matching corruption event, authenticated user context, or an operator-side scan under `USER_DB_BASE_DIR` to identify the exact user directory.
 
 ## Recovery Steps
 

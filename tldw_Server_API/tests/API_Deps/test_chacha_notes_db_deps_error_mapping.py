@@ -24,8 +24,10 @@ def clear_chacha_dependency_state() -> Iterator[None]:
                 "init_failures": 0,
                 "last_init_ms": None,
                 "last_error": None,
+                "last_init_success": None,
                 "last_warn_dump": None,
                 "cached_instances": 0,
+                "consecutive_failures": 0,
                 "default_char_ensures": 0,
                 "default_char_failures": 0,
                 "warm_startups": 0,
@@ -103,11 +105,40 @@ async def test_create_and_prepare_db_records_corrupt_db_recovery_details(monkeyp
     assert snapshot["status"] == "degraded"
     assert snapshot["last_error"] == "sqlite_corruption"
     assert failure["reason_code"] == "sqlite_corruption"
-    assert failure["affected_db"] == "user:987/ChaChaNotes.db"
+    assert failure["affected_db"] == "ChaChaNotes.db"
     assert failure["recovery"]["automatic_repair"] is False
     assert failure["recovery"]["documentation"] == "Docs/Operations/ChaChaNotes_DB_Recovery.md"
+    assert "user:987" not in str(snapshot)
+    assert '"987"' not in str(snapshot)
     assert str(tmp_path) not in str(snapshot)
     assert "not a sqlite database" not in str(snapshot)
+
+
+def test_chacha_health_recovers_current_status_after_success(tmp_path):
+    corrupt_db = tmp_path / "987" / "ChaChaNotes.db"
+    corruption_error = chacha_deps.ChaChaDatabaseCorruptionError(
+        user_id=987,
+        db_path=corrupt_db,
+    )
+
+    chacha_deps._record_init(1.0, False, corruption_error)
+    failed_snapshot = chacha_deps.get_chacha_health_snapshot()
+
+    assert failed_snapshot["status"] == "degraded"
+    assert failed_snapshot["init_failures"] == 1
+    assert failed_snapshot["consecutive_failures"] == 1
+    assert failed_snapshot["last_init_success"] is False
+    assert failed_snapshot["last_failure"]["reason_code"] == "sqlite_corruption"
+
+    chacha_deps._record_init(2.0, True)
+    recovered_snapshot = chacha_deps.get_chacha_health_snapshot()
+
+    assert recovered_snapshot["status"] == "healthy"
+    assert recovered_snapshot["init_failures"] == 1
+    assert recovered_snapshot["consecutive_failures"] == 0
+    assert recovered_snapshot["last_init_success"] is True
+    assert recovered_snapshot["last_error"] is None
+    assert recovered_snapshot["last_failure"] is None
 
 
 @pytest.mark.asyncio

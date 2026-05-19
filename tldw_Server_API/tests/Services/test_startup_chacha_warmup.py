@@ -146,8 +146,10 @@ async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
                 "init_failures": 0,
                 "last_init_ms": None,
                 "last_error": None,
+                "last_init_success": None,
                 "last_warn_dump": None,
                 "cached_instances": 0,
+                "consecutive_failures": 0,
                 "default_char_ensures": 0,
                 "default_char_failures": 0,
                 "warm_startups": 0,
@@ -171,7 +173,11 @@ async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
     snapshot = chacha_deps.get_chacha_health_snapshot()
     assert snapshot["status"] == "degraded"
     assert snapshot["last_error"] == "sqlite_corruption"
-    assert snapshot["last_failure"]["affected_db"] == "user:43/ChaChaNotes.db"
+    assert snapshot["last_init_success"] is False
+    assert snapshot["consecutive_failures"] == 1
+    assert snapshot["warm_startups"] == 0
+    assert snapshot["last_failure"]["affected_db"] == "ChaChaNotes.db"
     assert snapshot["last_failure"]["recovery"]["automatic_repair"] is False
+    assert "user:43" not in str(snapshot)
     assert str(tmp_path) not in str(snapshot)
     assert "not a sqlite database" not in str(snapshot)

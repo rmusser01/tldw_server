@@ -150,10 +150,12 @@ async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monk
                 "init_failures": 1,
                 "last_init_ms": 2.5,
                 "last_error": "sqlite_corruption",
+                "last_init_success": False,
                 "cached_instances": 0,
+                "consecutive_failures": 1,
                 "default_char_ensures": 0,
                 "default_char_failures": 0,
-                "warm_startups": 0,
+                "warm_startups": 2,
                 "last_failure": {
                     "reason_code": "sqlite_corruption",
                     "affected_db": "user:42/ChaChaNotes.db",
@@ -171,11 +173,15 @@ async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monk
     assert response.status_code == 206
     assert body["status"] == "degraded"
     assert body["checks"]["chacha_notes"]["status"] == "degraded"
-    assert body["checks"]["chacha_notes"]["last_failure"]["affected_db"] == "user:42/ChaChaNotes.db"
+    assert body["checks"]["chacha_notes"]["last_init_success"] is False
+    assert body["checks"]["chacha_notes"]["consecutive_failures"] == 1
+    assert body["checks"]["chacha_notes"]["warm_startups"] == 2
+    assert body["checks"]["chacha_notes"]["last_failure"]["affected_db"] == "ChaChaNotes.db"
     assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["automatic_repair"] is False
     assert body["checks"]["chacha_notes"]["last_failure"]["recovery"]["documentation"] == (
         "Docs/Operations/ChaChaNotes_DB_Recovery.md"
     )
+    assert "user:42" not in str(body)
     assert str(tmp_path) not in str(body)
     assert "/private/" not in str(body)
 
