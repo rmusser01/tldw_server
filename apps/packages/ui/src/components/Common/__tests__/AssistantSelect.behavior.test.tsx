@@ -154,6 +154,58 @@ describe("AssistantSelect behavior", () => {
     expect(screen.queryByRole("button", { name: "Alpha" })).toBeNull()
   })
 
+  it("announces character and persona catalog loading in the selector", async () => {
+    mocks.listAllCharacters.mockReturnValue(new Promise(() => {}))
+    mocks.listPersonaProfiles.mockReturnValue(new Promise(() => {}))
+
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    const status = await screen.findByRole("status", {
+      name: /loading character and persona catalogs/i
+    })
+    expect(status).toHaveTextContent("Loading characters and personas")
+  })
+
+  it("shows a retryable character catalog failure instead of an empty list", async () => {
+    mocks.listAllCharacters.mockRejectedValueOnce(new Error("characters failed"))
+
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    expect(
+      await screen.findByText(/could not load characters/i)
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /retry characters/i }))
+
+    expect(mocks.listAllCharacters).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps loaded characters usable when persona catalog loading fails", async () => {
+    mocks.listPersonaProfiles.mockRejectedValueOnce(new Error("personas failed"))
+
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Select character or persona" })
+    )
+
+    expect(await screen.findByRole("button", { name: "Alpha" })).toBeInTheDocument()
+    await user.click(await screen.findByRole("tab", { name: "Personas" }))
+    expect(
+      await screen.findByText(/could not load personas/i)
+    ).toBeInTheDocument()
+  })
+
   it("uses solid design-token backgrounds for the selector panel", async () => {
     const user = userEvent.setup()
     renderAssistantSelect()

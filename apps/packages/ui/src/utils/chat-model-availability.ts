@@ -92,7 +92,14 @@ const translateReadinessCopy = (
     typeof fallbackOrOptions === "string"
       ? fallbackOrOptions
       : fallbackOrOptions.defaultValue
-  return String(fallback ?? key)
+  const fallbackText = String(fallback ?? key)
+  if (typeof fallbackOrOptions !== "string") {
+    return fallbackText.replace(/\{\{(\w+)\}\}/g, (_, token: string) => {
+      const value = fallbackOrOptions[token]
+      return value == null ? `{{${token}}}` : String(value)
+    })
+  }
+  return fallbackText
 }
 
 export function normalizeChatModelId(value: string | null | undefined): string {

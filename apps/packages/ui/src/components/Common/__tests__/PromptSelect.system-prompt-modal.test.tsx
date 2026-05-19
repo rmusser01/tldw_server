@@ -196,6 +196,44 @@ describe("PromptSelect system prompt modal", () => {
     expect(await screen.findByDisplayValue("Template body")).toBeInTheDocument()
   })
 
+  it("keeps the prompt trigger visible while the prompt library is loading", async () => {
+    mocks.getAllPrompts.mockReturnValue(new Promise(() => {}))
+
+    renderPromptSelect({
+      selectedSystemPrompt: undefined
+    })
+
+    expect(
+      await screen.findByRole("button", { name: /loading prompts/i })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: /loading prompts/i })).toHaveTextContent(
+      "Loading prompts"
+    )
+  })
+
+  it("shows prompt library errors with a retry action", async () => {
+    const user = userEvent.setup()
+    mocks.getAllPrompts.mockRejectedValueOnce(new Error("dexie unavailable"))
+    renderPromptSelect({
+      selectedSystemPrompt: undefined
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: /prompt library unavailable/i })
+    )
+
+    expect(
+      await screen.findByRole("menuitem", {
+        name: /prompt library unavailable/i
+      })
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("menuitem", { name: /retry prompt library/i })
+    )
+
+    expect(mocks.getAllPrompts).toHaveBeenCalledTimes(2)
+  })
+
   it("saves edited prompt content through setSystemPrompt", async () => {
     const user = userEvent.setup()
     const { props } = renderPromptSelect()

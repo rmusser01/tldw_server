@@ -415,6 +415,92 @@ describe("Playground cockpit shell", () => {
     });
   });
 
+  it("shows recovery when a restored route character can no longer be loaded", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=missing-character",
+    );
+    tldwClientState.getCharacter.mockResolvedValueOnce(null);
+    const assistantSelectListener = vi.fn();
+    window.addEventListener("tldw:open-assistant-select", assistantSelectListener);
+
+    render(<Playground />);
+
+    expect(
+      await screen.findByText("Character missing-character could not be loaded"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose character" }));
+    expect(assistantSelectListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: expect.objectContaining({ tab: "character" }),
+      }),
+    );
+
+    window.removeEventListener(
+      "tldw:open-assistant-select",
+      assistantSelectListener,
+    );
+  });
+
+  it("keeps the selected character while opening model settings from readiness recovery", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.selectedModel = null;
+    const modelSettingsListener = vi.fn();
+    window.addEventListener("tldw:open-model-settings", modelSettingsListener);
+
+    render(<Playground />);
+
+    expect(
+      await screen.findByText("Choose a chat model before chatting as Ariadne"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByTestId("character-chat-readiness-panel")).getByRole(
+        "button",
+        { name: "Open model settings" },
+      ),
+    );
+
+    expect(modelSettingsListener).toHaveBeenCalledTimes(1);
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+    expect(messageOptionState.value.selectedCharacter).toEqual({
+      id: "char-1",
+      name: "Ariadne",
+    });
+
+    window.removeEventListener(
+      "tldw:open-model-settings",
+      modelSettingsListener,
+    );
+  });
+
+  it("surfaces blocked server readiness locally in Character Chat mode", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+
+    render(<Playground />);
+
+    fireEvent(
+      window,
+      new CustomEvent("tldw:server-readiness-state", {
+        detail: { state: "blocked" },
+      }),
+    );
+
+    expect(
+      await screen.findByText("Connect to tldw_server before starting character chat"),
+    ).toBeInTheDocument();
+  });
+
   it("does not write a partial character when header intent only changes mode", async () => {
     render(<Playground />);
 

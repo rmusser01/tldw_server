@@ -17,6 +17,10 @@ import {
 } from "./PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
 import {
+  CharacterChatReadinessPanel,
+  type MissingCharacterRecovery,
+} from "./CharacterChatReadinessPanel";
+import {
   buildCockpitAssistantSummary,
   buildCockpitMcpSummary,
   buildCockpitPromptSummary,
@@ -116,6 +120,10 @@ import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
   getCharacterChatRouteIntent,
 } from "@/utils/character-chat-mode-intent";
+import {
+  buildCharacterChatReadiness,
+  type CharacterChatReadinessAction,
+} from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 
 const toText = (value: unknown): string =>
@@ -208,6 +216,10 @@ export const Playground = () => {
   >([]);
   const [serverReadinessState, setServerReadinessState] =
     React.useState<ServerReadinessState>(null);
+  const [routeCharacterRecovery, setRouteCharacterRecovery] =
+    React.useState<MissingCharacterRecovery | null>(null);
+  const [routeCharacterRetryToken, setRouteCharacterRetryToken] =
+    React.useState(0);
   const [composerDockMetrics, setComposerDockMetrics] =
     React.useState<ComposerDockLayoutMetrics | null>(null);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
@@ -551,11 +563,24 @@ export const Playground = () => {
       .then((character) => {
         if (routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
-        void setSelectedCharacter(character || fallbackCharacter);
+        if (character) {
+          setRouteCharacterRecovery(null);
+          void setSelectedCharacter(character);
+          return;
+        }
+        setRouteCharacterRecovery({
+          id: routeCharacterIntentId,
+          reason: "missing",
+        });
+        void setSelectedCharacter(fallbackCharacter);
       })
       .catch(() => {
         if (routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
+        setRouteCharacterRecovery({
+          id: routeCharacterIntentId,
+          reason: "load-error",
+        });
         void setSelectedCharacter(fallbackCharacter);
       })
       .finally(() => {
@@ -569,6 +594,7 @@ export const Playground = () => {
     };
   }, [
     routeCharacterIntentId,
+    routeCharacterRetryToken,
     setSelectedCharacter,
   ]);
 
@@ -576,8 +602,16 @@ export const Playground = () => {
     if (!routeCharacterIntentId) {
       routeCharacterIntentAppliedRef.current = null;
       routeCharacterIntentInFlightRef.current = null;
+      setRouteCharacterRecovery(null);
     }
   }, [routeCharacterIntentId]);
+
+  React.useEffect(() => {
+    if (!routeCharacterRecovery || !selectedCharacter?.id) return;
+    if (String(selectedCharacter.id) !== routeCharacterRecovery.id) {
+      setRouteCharacterRecovery(null);
+    }
+  }, [routeCharacterRecovery, selectedCharacter?.id]);
 
   React.useEffect(() => {
     const handleReadinessState = (event: Event) => {
@@ -1987,6 +2021,19 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
+  const characterChatReadiness = React.useMemo(
+    () =>
+      buildCharacterChatReadiness({
+        isServerConnected: serverReadinessState !== "blocked",
+        selectedCharacter,
+        selectedModel: providerRouteSummary.selectedModel,
+      }),
+    [
+      providerRouteSummary.selectedModel,
+      selectedCharacter,
+      serverReadinessState,
+    ],
+  );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
@@ -2342,6 +2389,34 @@ export const Playground = () => {
       settingsScope: providerRouteSummary.providerRouteLabel ?? null,
     });
   }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
+  const openCharacterSelectorFromReadiness = React.useCallback(() => {
+    openAssistantSelector({
+      tab: "character",
+      returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
+    });
+  }, []);
+  const retryRouteCharacterRecovery = React.useCallback(() => {
+    if (!routeCharacterRecovery) return;
+    routeCharacterIntentAppliedRef.current = null;
+    routeCharacterIntentInFlightRef.current = null;
+    setRouteCharacterRecovery(null);
+    setRouteCharacterRetryToken((previous) => previous + 1);
+  }, [routeCharacterRecovery]);
+  const handleCharacterChatReadinessAction = React.useCallback(
+    (action: CharacterChatReadinessAction) => {
+      if (action === "choose-character") {
+        openCharacterSelectorFromReadiness();
+        return;
+      }
+      if (
+        action === "open-model-settings" ||
+        action === "open-server-settings"
+      ) {
+        openModelSettingsFromCockpit();
+      }
+    },
+    [openCharacterSelectorFromReadiness, openModelSettingsFromCockpit],
+  );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
     openMcpSettings({
       returnFocusSelector: COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR,
@@ -2482,6 +2557,7 @@ export const Playground = () => {
       hasContext={hasChatContext}
       contextSummary={statusContextSummary}
       temporaryChat={temporaryChat}
+      characterChatActive={characterWorkflowActive}
       degraded={serverReadinessState === "degraded"}
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
@@ -2904,6 +2980,16 @@ export const Playground = () => {
                 )}
               </div>
             )}
+            {characterWorkflowActive ? (
+              <CharacterChatReadinessPanel
+                readiness={characterChatReadiness}
+                characterName={activeCharacterModeLabel}
+                missingCharacter={routeCharacterRecovery}
+                onAction={handleCharacterChatReadinessAction}
+                onChooseCharacter={openCharacterSelectorFromReadiness}
+                onRetryMissingCharacter={retryRouteCharacterRecovery}
+              />
+            ) : null}
           </div>
           <div
             ref={containerRef}

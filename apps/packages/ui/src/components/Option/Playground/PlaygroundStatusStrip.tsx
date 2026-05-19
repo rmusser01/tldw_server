@@ -55,6 +55,7 @@ export type PlaygroundStatusStripProps = {
   hasContext: boolean;
   contextSummary?: string[];
   temporaryChat?: boolean;
+  characterChatActive?: boolean;
   degraded?: boolean;
   degradedChecks?: string[];
   errorMessage?: string | null;
@@ -82,6 +83,8 @@ export const PlaygroundStatusStrip = ({
   sessionDetail,
   sessionError,
   hasContext,
+  temporaryChat,
+  characterChatActive = false,
   degraded = false,
   degradedChecks = [],
   errorMessage,
@@ -182,6 +185,15 @@ export const PlaygroundStatusStrip = ({
       normalizedSessionStatusLabel !== t("cockpit.idle", "Idle"),
   );
   const hasCriticalSessionState = showSessionStatusLabel || Boolean(sessionDetailLabel);
+  const characterPersistenceLabel = characterChatActive
+    ? serverBlocked
+      ? t("cockpit.characterLocalDraft", "Local character chat draft")
+      : temporaryChat
+        ? t("cockpit.characterTemporary", "Temporary character chat")
+        : sessionStatus === "loaded"
+          ? t("cockpit.characterSaved", "Saved character chat")
+          : t("cockpit.characterLocalDraft", "Local character chat draft")
+    : null;
 
   return (
     <footer
@@ -218,6 +230,9 @@ export const PlaygroundStatusStrip = ({
           )}
           {runtimeLabel}
         </span>
+        {characterPersistenceLabel ? (
+          <span className={pillClass}>{characterPersistenceLabel}</span>
+        ) : null}
         {hasCriticalSessionState ? (
           <>
             <span className={pillClass}>{sessionLabel}</span>
