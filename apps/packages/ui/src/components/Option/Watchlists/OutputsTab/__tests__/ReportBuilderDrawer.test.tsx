@@ -288,7 +288,12 @@ describe("ReportBuilderDrawer", () => {
     )
 
     expect(await screen.findByText("2 queued updates")).toBeInTheDocument()
-    expect(screen.getByText("Registry Ready")).toBeInTheDocument()
+    const readyBadge = screen.getByText("Registry Ready")
+    expect(readyBadge).toBeInTheDocument()
+    expect(readyBadge.closest("[data-ds-component='Badge']")).toHaveAttribute(
+      "data-ds-variant",
+      "success"
+    )
     expect(screen.queryByText("Ready")).not.toBeInTheDocument()
   })
 
