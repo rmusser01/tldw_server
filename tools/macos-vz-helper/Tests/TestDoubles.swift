@@ -27,6 +27,30 @@ final class RecordingBootDriver: VZBootDriving {
     }
 }
 
+enum TestBootDriverError: Error {
+    case bootFailed
+}
+
+final class FailingBootDriver: VZBootDriving {
+    private let error: Error
+    private(set) var lastReadinessTimeoutSeconds: TimeInterval?
+    private(set) var stoppedVMIDs: [String] = []
+
+    init(error: Error = TestBootDriverError.bootFailed) {
+        self.error = error
+    }
+
+    @discardableResult
+    func boot(vmID: String, templatePath: String, workspacePath: String, startupTimeoutSeconds: TimeInterval) throws -> VMResourceSnapshot {
+        lastReadinessTimeoutSeconds = startupTimeoutSeconds
+        throw error
+    }
+
+    func stop(vmID: String) throws {
+        stoppedVMIDs.append(vmID)
+    }
+}
+
 final class ReadyGuestBridge: GuestBridging {
     private let info: GuestAgentInfo?
 

@@ -44,6 +44,7 @@ Each prepared-host evidence packet should include these fields.
 | Failure drills | pass/fail/skip for drill-owned stale VM replacement and helper restart drill; include skip reason when `include_failure_drills` was not requested. |
 | Launchd drill | pass/fail/skip for `launchd-drill`; include skip reason unless a maintainer explicitly requested LaunchAgent validation. |
 | Stale socket drill | pass/fail/skip for `stale-socket-drill`; include runtime directory mode, socket path, command output, helper stdout/stderr paths, and skip reason when not requested. |
+| Stuck boot/readiness drills | pass/fail/skip for host-independent helper/runner stuck boot/readiness coverage and any later manual prepared-host drill; include stable failure reason or error code, create-path outcome, session-control outcome, helper stdout/stderr paths, serial-log pointers only, and skip reason when no manual drill was requested. |
 | Artifacts | workflow run URL or local artifact root, helper stdout/stderr files, serial logs, pytest logs, workflow logs, and checksums or sizes for retained artifacts. |
 | Expected skips | explicit non-blocking skips from the acceptance policy, including missing nightly opt-in, no launchd request, no failure-drill request, or local unprepared-host checks. |
 | Blocking regressions | any failed guarantee from the acceptance policy and the first failing command/log pointer. |
@@ -69,6 +70,7 @@ Use this checklist for a complete prepared-host acceptance entry.
 | Artifact upload or retention | Helper logs, serial logs, and pytest/workflow logs were retained or an early setup skip explains why none exist. | Yes |
 | Failure drills | Drill-owned stale VM replacement and helper restart drill results recorded. | Manual opt-in only |
 | Launchd drill | LaunchAgent bootstrap/kickstart/status/bootout drill results recorded. | Manual opt-in only |
+| Stuck boot/readiness drills | Host-independent helper/runner tests prove registry/session cleanup; any manual prepared-host drill records stable reason codes and artifact pointers without exposing raw serial logs. | Portable coverage only |
 | Host reboot drill | Post-reboot helper/session recovery evidence recorded. | Manual operator procedure only |
 
 ## Expected Skip Taxonomy
@@ -86,6 +88,8 @@ themselves:
 - managed helper `restart-drill` skipped because the helper was not started by
   `vz-helperctl.py start`
 - `launchd-drill` skipped because no maintainer requested LaunchAgent validation
+- manual stuck boot/readiness drill skipped because only host-independent
+  helper/runner coverage was requested for the current implementation slice
 - host reboot validation skipped because it remains a manual operator procedure
 
 If a prepared host passes preflight and then fails helper startup, real
@@ -130,7 +134,8 @@ GitHub Actions run with the packet fields above.
 | Failure-drill evidence | Manual opt-in only. | Record results when a maintainer runs with `include_failure_drills=true`. |
 | Launchd-drill evidence | Manual opt-in only. | Record results only when a runner is intentionally configured for LaunchAgent validation. |
 | Host reboot recovery | Manual operator procedure only and out of scheduled CI. | Add a dedicated operator drill once a prepared host can tolerate disruptive reboot testing and preserve logs. |
-| Stuck boot/readiness and guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow manual drills or diagnostics checks before considering automated coverage. |
+| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
+| Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
 | Stale socket handling | `tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill` provides a manual operator check for safe inactive socket recovery. | Record prepared-host evidence when a maintainer intentionally runs the drill; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 
 ## Recording Guidance
