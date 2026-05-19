@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Checkbox,
   Form,
@@ -14,6 +13,7 @@ import {
   Switch
 } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui"
 import type { WatchlistSource } from "@/types/watchlists"
 import {
   INTERVAL_HOURS_MAX,
@@ -358,9 +358,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       <div className="space-y-4">
         <Steps size="small" current={currentStep} items={stepItems} />
         {stepErrors.length > 0 && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title={t(
               "watchlists:overview.pipelineSetup.validationError",
               "Review the highlighted pipeline fields."
@@ -727,9 +726,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 </Button>
               </div>
               {previewError && (
-                <Alert
-                  type="warning"
-                  showIcon
+                <DesignSystemAlert
+                  variant="warning"
                   data-testid="watchlists-pipeline-preview-error"
                   title={previewError}
                 />

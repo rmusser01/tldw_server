@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   createWatchlistSourceMock: vi.fn(),
   createWatchlistJobMock: vi.fn(),
   deleteWatchlistJobMock: vi.fn(),
+  deleteWatchlistSourceMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
   createWatchlistOutputMock: vi.fn(),
   getWatchlistTemplateMock: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock("@/services/watchlists", () => ({
   createWatchlistSource: (...args: unknown[]) => mocks.createWatchlistSourceMock(...args),
   createWatchlistJob: (...args: unknown[]) => mocks.createWatchlistJobMock(...args),
   deleteWatchlistJob: (...args: unknown[]) => mocks.deleteWatchlistJobMock(...args),
+  deleteWatchlistSource: (...args: unknown[]) => mocks.deleteWatchlistSourceMock(...args),
   triggerWatchlistRun: (...args: unknown[]) => mocks.triggerWatchlistRunMock(...args),
   createWatchlistOutput: (...args: unknown[]) => mocks.createWatchlistOutputMock(...args),
   getWatchlistTemplate: (...args: unknown[]) => mocks.getWatchlistTemplateMock(...args),
@@ -223,5 +225,27 @@ describe("OverviewTab alert and health summary", () => {
 
     fireEvent.click(within(contentAlerts).getByRole("button", { name: "Create content alert rule" }))
     expect(mocks.setActiveTabMock).toHaveBeenCalledWith("alerts")
+  })
+
+  it("renders Overview health and setup callouts with the design-system Alert", async () => {
+    mocks.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
+
+    render(<OverviewTab />)
+
+    const healthTitle = await screen.findByText("System healthy")
+    expect(healthTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+
+    const setupTitle = screen.getByText("Setup complete")
+    expect(setupTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
+  it("renders Overview load failures with the design-system Alert", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    mocks.fetchOverviewMock.mockRejectedValue(new Error("overview unavailable"))
+
+    render(<OverviewTab />)
+
+    const failureTitle = await screen.findByText("Failed to load overview")
+    expect(failureTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   })
 })

@@ -166,6 +166,16 @@ describe("ReadinessSetupScreen", () => {
     expect(screen.getByText("Embeddings/RAG")).toBeInTheDocument()
     expect(screen.getByText("Speech")).toBeInTheDocument()
     expect(screen.getByText(/TTS: kokoro/i)).toHaveClass("secondary")
+    expect(
+      screen
+        .getByText("Review before provisioning")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Skipped-lane consequences")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Open backend setup/i })).toHaveAttribute(
       "href",
       "/setup"
@@ -247,6 +257,9 @@ describe("ReadinessSetupScreen", () => {
     render(<ReadinessSetupScreen />)
 
     expect(await screen.findByText("Local setup required")).toBeInTheDocument()
+    expect(
+      screen.getByText("Local setup required").closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(screen.getByText("Setup access is restricted to local requests.")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Open backend setup/i })).toHaveAttribute(
       "href",
@@ -269,6 +282,11 @@ describe("ReadinessSetupScreen", () => {
 
     expect(screen.queryByText("/api/v1/setup/readiness/status")).not.toBeInTheDocument()
     expect(screen.getByText(/watch the status cards/i)).toBeInTheDocument()
+    expect(
+      screen
+        .getByText(/watch the status cards/i)
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
   })
 
   it("prefers localized error copy when the readiness hook exposes an error key", async () => {
@@ -281,7 +299,27 @@ describe("ReadinessSetupScreen", () => {
     render(<ReadinessSetupScreen />)
 
     expect(screen.getByText("Localized setup readiness load failure.")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Readiness request failed")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(screen.queryByText("Request failed: 500 backend detail")).not.toBeInTheDocument()
+  })
+
+  it("renders the profile-empty state with the design-system EmptyState", async () => {
+    mocks.useSetupReadiness.mockReturnValue({
+      ...baseHookState,
+      profiles: {
+        ...readinessProfiles,
+        profiles: []
+      }
+    })
+
+    render(<ReadinessSetupScreen />)
+
+    const emptyTitle = await screen.findByText("No setup readiness profiles are available.")
+    expect(emptyTitle.closest('[data-ds-component="EmptyState"]')).toBeInTheDocument()
   })
 
   it("passes admin mode through to the setup readiness hook", () => {

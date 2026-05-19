@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest"
 import { PipelineWizard } from "../PipelineWizard"
 
+vi.setConfig({ testTimeout: 10_000 })
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string, options?: Record<string, unknown>) =>
@@ -62,6 +64,19 @@ const getDialog = () => screen.getByRole("dialog", { name: "Briefing pipeline bu
 const getDialogQueries = () => within(getDialog())
 
 describe("PipelineWizard", () => {
+  it("renders validation feedback with the design-system Alert", async () => {
+    renderWizard()
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+    })
+
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    const validationTitle = await screen.findByText("Review the highlighted pipeline fields.")
+    expect(validationTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+  })
+
   it("creates a pipeline from an existing source with digest and two-speaker audio", async () => {
     const { onSubmit } = renderWizard()
 
@@ -212,5 +227,36 @@ describe("PipelineWizard", () => {
 
     expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemin", "5")
     expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemax", "59")
+  })
+
+  it("renders preview failures with the design-system Alert", async () => {
+    renderWizard({ previewError: "Preview context unavailable" })
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+    })
+    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
+    })
+    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
+      target: { value: "Preview Brief" }
+    })
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Template")).toBeInTheDocument()
+    })
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
+    })
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    const previewTitle = await screen.findByText("Preview context unavailable")
+    expect(previewTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   })
 })
