@@ -17,6 +17,15 @@ https://github.com/ggerganov/llama.cpp/blob/cddae4884c853b1a7ab420458236d666e2e3
       3. cd to `llama.cpp` folder make` in the `llama.cpp` folder
       4. `server.exe -m ..\path\to\model -c <context_size>`
         * Example: `./server -m ../path/to/model -c 8192 -ngl 999` - This will run the model with a context size of 8192 tokens and offload all layers to the GPU.
+    - **tldw managed llama.cpp WebUI**
+      1. Build or install `llama-server`, then open the tldw WebUI at `/admin/llamacpp`.
+      2. In **Readiness**, set the executable path, models directory, allowed paths, and default host/port. Some changes require restarting the tldw API server before the active handler sees them.
+      3. In **Assets**, register an existing GGUF or mmproj file, or preview and confirm a local folder import. Local registration/import only updates the managed asset inventory; it does not create a profile, start a runtime, or change Chat routing.
+      4. In **Profiles**, create a durable runtime profile. Profiles store mode, model asset, optional mmproj projector, host/port, structured server arguments, provider alias, tags, autostart, and bounded restart policy. Profile state is stored by the backend in `llamacpp_profiles.json` next to the active tldw config file.
+      5. For multimodal or vision profiles, select a matching mmproj asset. The backend rejects missing or conflicting projector definitions, but hardware and VRAM fit messages stay warnings rather than hard blockers.
+      6. In **Runtime instances**, start the profile you want. Autostart profiles are reconciled on server startup, paused profiles stay paused, and restart attempts are bounded by the saved policy.
+      7. Use **Use in Chat** only after the desired runtime is running. This explicit action points the llama.cpp provider endpoint at that runtime; starting a profile alone does not silently rewire Chat.
+      8. Remote downloads and future catalog workflows live in the asset acquisition flow. They are not part of profile launch and do not automatically create profiles or start runtimes.
   - **Kobold.cpp** - c/p'd from: https://github.com/LostRuins/koboldcpp/wiki
     - **Windows**
       1. Download from here: https://github.com/LostRuins/koboldcpp/releases/latest
