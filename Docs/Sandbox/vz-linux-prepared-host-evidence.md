@@ -43,6 +43,7 @@ Each prepared-host evidence packet should include these fields.
 | Results | pass/fail/skip for daemon smoke, ephemeral command execution, same-session VM reuse, recovery diagnostics, dry-run reconciliation repair, helper shutdown, and artifact upload. |
 | Failure drills | pass/fail/skip for drill-owned stale VM replacement and helper restart drill; include skip reason when `include_failure_drills` was not requested. |
 | Launchd drill | pass/fail/skip for `launchd-drill`; include skip reason unless a maintainer explicitly requested LaunchAgent validation. |
+| Stale socket drill | pass/fail/skip for `stale-socket-drill`; include runtime directory mode, socket path, command output, helper stdout/stderr paths, and skip reason when not requested. |
 | Artifacts | workflow run URL or local artifact root, helper stdout/stderr files, serial logs, pytest logs, workflow logs, and checksums or sizes for retained artifacts. |
 | Expected skips | explicit non-blocking skips from the acceptance policy, including missing nightly opt-in, no launchd request, no failure-drill request, or local unprepared-host checks. |
 | Blocking regressions | any failed guarantee from the acceptance policy and the first failing command/log pointer. |
@@ -130,7 +131,7 @@ GitHub Actions run with the packet fields above.
 | Launchd-drill evidence | Manual opt-in only. | Record results only when a runner is intentionally configured for LaunchAgent validation. |
 | Host reboot recovery | Manual operator procedure only and out of scheduled CI. | Add a dedicated operator drill once a prepared host can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness and guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow manual drills or diagnostics checks before considering automated coverage. |
-| Stale socket handling | Covered by helper lifecycle docs and tests, but not yet recorded as prepared-host evidence in this tracker. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` before adding socket-path cleanup or status evidence. |
+| Stale socket handling | `tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill` provides a manual operator check for safe inactive socket recovery. | Record prepared-host evidence when a maintainer intentionally runs the drill; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 
 ## Recording Guidance
 
@@ -141,6 +142,24 @@ tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
   --bundle /path/to/canonical/bundle \
   --entitlements /path/to/helper.entitlements
 ```
+
+For a manual stale-socket check, use an isolated private runtime directory:
+
+```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-stale-socket.XXXXXX")"
+chmod 700 "$runtime_dir"
+trap 'rm -rf "$runtime_dir"' EXIT
+
+tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill \
+  --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
+  --socket "$runtime_dir/helper.sock" \
+  --pid-file "$runtime_dir/helper.pid" \
+  --log-dir "$runtime_dir/logs"
+```
+
+Record the runtime directory mode, socket path result, command output, helper
+stdout/stderr paths, and whether this was skipped because no maintainer
+requested the manual drill.
 
 For a lower-level run, use a private runtime directory and cleanup trap:
 

@@ -41,6 +41,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py build
 tools/macos-vz-helper/scripts/vz-helperctl.py start
 tools/macos-vz-helper/scripts/vz-helperctl.py status
 tools/macos-vz-helper/scripts/vz-helperctl.py restart-drill
+tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill
 tools/macos-vz-helper/scripts/vz-helperctl.py stop
 tools/macos-vz-helper/scripts/vz-helperctl.py plist
 tools/macos-vz-helper/scripts/vz-helperctl.py launchd status --dry-run
@@ -115,6 +116,28 @@ started through `vz-helperctl.py start`. It verifies the current managed helper
 status, stops it through the pid-file/socket lease, starts a replacement on the
 same managed paths, and verifies status again. It does not manage launchd,
 reboot the host, or take ownership of helpers started outside this wrapper.
+
+`stale-socket-drill` is an operator-managed check for the helper socket recovery
+path. It validates private runtime/log directories, creates or preserves only a
+safe inactive Unix socket, starts the helper through the normal managed start
+path, and verifies helper status afterward. It is manual only and must not be
+wired into normal PR/push CI.
+
+```bash
+runtime_dir="$(mktemp -d "${TMPDIR:-/tmp}/tldw-vz-stale-socket.XXXXXX")"
+chmod 700 "$runtime_dir"
+trap 'rm -rf "$runtime_dir"' EXIT
+
+tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill \
+  --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
+  --socket "$runtime_dir/helper.sock" \
+  --pid-file "$runtime_dir/helper.pid" \
+  --log-dir "$runtime_dir/logs"
+```
+
+For evidence, record the command output, runtime directory mode, socket path,
+helper stdout/stderr paths under the log directory, and whether the drill
+created a controlled stale socket or recovered a pre-existing inactive socket.
 
 For real host E2E smoke, prefer the managed wrapper:
 
