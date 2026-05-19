@@ -538,9 +538,6 @@ export const Playground = () => {
     if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
       return;
     }
-    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
-      return;
-    }
 
     const requestId = routeCharacterIntentRequestRef.current + 1;
     routeCharacterIntentRequestRef.current = requestId;
@@ -608,6 +605,9 @@ export const Playground = () => {
 
   React.useEffect(() => {
     if (!routeCharacterRecovery || !selectedCharacter?.id) return;
+    if (routeCharacterIntentInFlightRef.current === routeCharacterRecovery.id) {
+      return;
+    }
     if (String(selectedCharacter.id) !== routeCharacterRecovery.id) {
       setRouteCharacterRecovery(null);
     }

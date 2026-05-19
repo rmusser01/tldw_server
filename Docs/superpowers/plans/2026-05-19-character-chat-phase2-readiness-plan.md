@@ -110,4 +110,4 @@
 - Focused Vitest command covering changed components.
 - Real-backend browser smoke of Character Chat missing-model/character-selector flow.
 
-**Status:** In Progress
+**Status:** Complete

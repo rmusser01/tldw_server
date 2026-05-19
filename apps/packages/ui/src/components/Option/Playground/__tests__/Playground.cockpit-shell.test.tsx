@@ -444,6 +444,47 @@ describe("Playground cockpit shell", () => {
     );
   });
 
+  it("keeps restored route character recovery visible when an old character was selected", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=missing-character",
+    );
+    messageOptionState.value.selectedCharacter = {
+      id: "old-character",
+      name: "Old Character",
+    };
+    tldwClientState.getCharacter.mockRejectedValueOnce(new Error("missing"));
+
+    render(<Playground />);
+
+    expect(
+      await screen.findByText("Character missing-character could not be loaded"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Choose a character to start character chat"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps route character recovery valid through strict-mode effect replays", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=missing-character",
+    );
+    tldwClientState.getCharacter.mockRejectedValue(new Error("missing"));
+
+    render(
+      <React.StrictMode>
+        <Playground />
+      </React.StrictMode>,
+    );
+
+    expect(
+      await screen.findByText("Character missing-character could not be loaded"),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the selected character while opening model settings from readiness recovery", async () => {
     storageState.values.set("playgroundChatWorkflowMode", "character");
     messageOptionState.value.selectedCharacter = {
