@@ -658,6 +658,163 @@ def test_host_reboot_post_reports_invalid_pre_manifest(
     CASE.assertFalse((evidence / "host-reboot-post.json").exists())
 
 
+def test_read_host_reboot_pre_manifest_rejects_fifo_without_unsafe_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    manifest = evidence / "host-reboot-pre.json"
+    os.mkfifo(manifest)
+    observed_flags: list[int] = []
+    real_open = helperctl.os.open
+    real_read_text = Path.read_text
+
+    def tracking_open(path: str | bytes | os.PathLike[str] | os.PathLike[bytes], flags: int, mode: int = 0o777) -> int:
+        observed_flags.append(flags)
+        return real_open(path, flags, mode)
+
+    def fail_if_manifest_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == manifest:
+            raise AssertionError("pre manifest reader must not use Path.read_text on FIFO")
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(helperctl.os, "open", tracking_open)
+    monkeypatch.setattr(Path, "read_text", fail_if_manifest_read_text)
+
+    result, payload = helperctl._read_host_reboot_pre_manifest(evidence)
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_pre_manifest_invalid")
+    CASE.assertIsNone(payload)
+    CASE.assertTrue(observed_flags)
+    if hasattr(helperctl.os, "O_NONBLOCK"):
+        CASE.assertTrue(observed_flags[0] & helperctl.os.O_NONBLOCK)
+    if hasattr(helperctl.os, "O_NOFOLLOW"):
+        CASE.assertTrue(observed_flags[0] & helperctl.os.O_NOFOLLOW)
+
+
+def test_read_host_reboot_pre_manifest_rejects_symlink(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    target = tmp_path / "outside.json"
+    target.write_text('{"phase": "pre"}', encoding="utf-8")
+    (evidence / "host-reboot-pre.json").symlink_to(target)
+
+    result, payload = helperctl._read_host_reboot_pre_manifest(evidence)
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_pre_manifest_invalid")
+    CASE.assertIsNone(payload)
+
+
+def test_read_host_reboot_pre_manifest_rejects_non_object(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    (evidence / "host-reboot-pre.json").write_text("[]", encoding="utf-8")
+
+    result, payload = helperctl._read_host_reboot_pre_manifest(evidence)
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_pre_manifest_invalid")
+    CASE.assertIsNone(payload)
+
+
+def test_read_host_reboot_pre_manifest_rejects_oversized(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    manifest = evidence / "host-reboot-pre.json"
+    manifest.write_text(
+        json.dumps({"phase": "pre", "padding": "x" * helperctl.HOST_REBOOT_PRE_MANIFEST_MAX_BYTES}),
+        encoding="utf-8",
+    )
+
+    result, payload = helperctl._read_host_reboot_pre_manifest(evidence)
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_pre_manifest_invalid")
+    CASE.assertIsNone(payload)
+
+
+def test_host_reboot_manifests_drop_forbidden_helper_detail_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    socket_path = tmp_path / "helper.sock"
+    forbidden_details = {
+        "helper_instance_id": "before",
+        "helper_started_at": "2026-05-19T00:00:00Z",
+        "stdout": "secret stdout",
+        "stderr": "secret stderr",
+        "environment": {"TOKEN": "secret"},
+        "serial_log_contents": "secret serial",
+    }
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    pre_result = helperctl.run_host_reboot_pre(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=socket_path,
+        log_dir=tmp_path / "logs",
+        create_evidence_dir=True,
+        created_at_factory=lambda: "2026-05-19T00:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details=forbidden_details,
+        ),
+    )
+    post_results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=socket_path,
+        log_dir=tmp_path / "logs",
+        created_at_factory=lambda: "2026-05-19T01:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={
+                **forbidden_details,
+                "helper_instance_id": "after",
+                "helper_started_at": "2026-05-19T01:00:00Z",
+            },
+        ),
+    )
+
+    CASE.assertTrue(pre_result.ok)
+    CASE.assertEqual(post_results[-1], ("host_reboot_post", helperctl.CheckResult(ok=True)))
+    pre_payload = json.loads((evidence / "host-reboot-pre.json").read_text(encoding="utf-8"))
+    post_payload = json.loads((evidence / "host-reboot-post.json").read_text(encoding="utf-8"))
+    CASE.assertEqual(
+        pre_payload["helper_details"],
+        {
+            "helper_instance_id": "before",
+            "helper_started_at": "2026-05-19T00:00:00Z",
+        },
+    )
+    CASE.assertEqual(
+        post_payload["helper_details"],
+        {
+            "helper_instance_id": "after",
+            "helper_started_at": "2026-05-19T01:00:00Z",
+        },
+    )
+
+
 def test_host_reboot_post_reports_generation_changed(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

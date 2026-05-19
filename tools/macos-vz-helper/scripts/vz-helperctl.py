@@ -48,6 +48,9 @@ DEFAULT_LAUNCHD_LABEL = "org.tldw.macos-vz-helper"
 LAUNCHD_ACTIONS = {"bootstrap", "bootout", "kickstart", "status"}
 HOST_REBOOT_PRE_MANIFEST = "host-reboot-pre.json"
 HOST_REBOOT_POST_MANIFEST = "host-reboot-post.json"
+HOST_REBOOT_PRE_MANIFEST_MAX_BYTES = 64 * 1024
+HOST_REBOOT_HELPER_DETAIL_KEYS = frozenset({"helper_instance_id", "helper_started_at"})
+HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH = 256
 
 
 def _resolve_operational_path(path: Path) -> Path | None:
@@ -940,6 +943,24 @@ def ping_state_payload(state: PingState) -> dict[str, Any]:
     }
 
 
+def _host_reboot_helper_details(details: Mapping[str, Any] | None) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    if not details:
+        return sanitized
+    for key in HOST_REBOOT_HELPER_DETAIL_KEYS:
+        value = details.get(key)
+        if not isinstance(value, str):
+            continue
+        sanitized[key] = value[:HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH]
+    return sanitized
+
+
+def _host_reboot_ping_state_payload(state: PingState) -> dict[str, Any]:
+    payload = ping_state_payload(state)
+    payload["helper_details"] = _host_reboot_helper_details(state.details)
+    return payload
+
+
 def _host_reboot_created_at() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -986,7 +1007,7 @@ def run_host_reboot_pre(
         "launchd_label": launchd_label,
         "launchd_plist_path": str(launchd_plist_path) if launchd_plist_path is not None else "",
     }
-    payload.update(ping_state_payload(ping_state))
+    payload.update(_host_reboot_ping_state_payload(ping_state))
 
     manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
     write_result = write_json_private(manifest_path, payload)
@@ -1003,12 +1024,46 @@ def run_host_reboot_pre(
 
 def _read_host_reboot_pre_manifest(evidence_dir: Path) -> tuple[CheckResult, dict[str, Any] | None]:
     manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
+    flags = os.O_RDONLY
+    nofollow_flag = getattr(os, "O_NOFOLLOW", 0)
+    nonblock_flag = getattr(os, "O_NONBLOCK", 0)
+    flags |= nofollow_flag | nonblock_flag
+    if not nofollow_flag or not nonblock_flag:
+        try:
+            pre_open_stat = os.lstat(manifest_path)
+        except FileNotFoundError:
+            return CheckResult(False, "host_reboot_pre_manifest_missing", str(manifest_path)), None
+        except OSError as exc:
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(exc)), None
+        if stat.S_ISLNK(pre_open_stat.st_mode) or (not nonblock_flag and not stat.S_ISREG(pre_open_stat.st_mode)):
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+    fd: int | None = None
     try:
-        raw_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        fd = os.open(manifest_path, flags)
+        fd_stat = os.fstat(fd)
+        if not stat.S_ISREG(fd_stat.st_mode):
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+        if fd_stat.st_size > HOST_REBOOT_PRE_MANIFEST_MAX_BYTES:
+            return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+        chunks: list[bytes] = []
+        bytes_read = 0
+        while True:
+            chunk = os.read(fd, min(8192, HOST_REBOOT_PRE_MANIFEST_MAX_BYTES + 1 - bytes_read))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            bytes_read += len(chunk)
+            if bytes_read > HOST_REBOOT_PRE_MANIFEST_MAX_BYTES:
+                return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
+        raw_bytes = b"".join(chunks)
+        raw_payload = json.loads(raw_bytes.decode("utf-8"))
     except FileNotFoundError:
         return CheckResult(False, "host_reboot_pre_manifest_missing", str(manifest_path)), None
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return CheckResult(False, "host_reboot_pre_manifest_invalid", str(exc)), None
+    finally:
+        if fd is not None:
+            os.close(fd)
     if not isinstance(raw_payload, dict):
         return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
     return CheckResult(True, "host_reboot_pre_manifest_loaded", str(manifest_path)), raw_payload
@@ -1068,7 +1123,7 @@ def run_host_reboot_post(
     results.append(("helper_status", ping_state.result))
 
     pre_instance_id = _manifest_helper_instance_id(pre_manifest)
-    post_instance_id = (ping_state.details or {}).get("helper_instance_id", "")
+    post_instance_id = _host_reboot_helper_details(ping_state.details).get("helper_instance_id", "")
     generation_result = _helper_generation_result(pre_instance_id, post_instance_id)
     results.append(("helper_generation", generation_result))
 
@@ -1088,7 +1143,7 @@ def run_host_reboot_post(
         "post_helper_instance_id": post_instance_id,
         "helper_generation_reason": generation_result.reason,
     }
-    payload.update(ping_state_payload(ping_state))
+    payload.update(_host_reboot_ping_state_payload(ping_state))
 
     manifest_path = evidence_dir / HOST_REBOOT_POST_MANIFEST
     write_result = write_json_private(manifest_path, payload)
