@@ -951,6 +951,168 @@ def test_host_reboot_post_wraps_raising_ping_checker_and_writes_manifest(
     CASE.assertEqual(payload["post_helper_instance_id"], "")
 
 
+def test_host_reboot_drill_cli_pre_json_outputs_parseable_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    bundle = tmp_path / "bundle"
+    socket_path = tmp_path / "helper.sock"
+
+    def fake_run_host_reboot_pre(**kwargs: Any) -> helperctl.CheckResult:
+        print("incidental pre noise")
+        CASE.assertEqual(kwargs["evidence_dir"], evidence)
+        CASE.assertEqual(kwargs["bundle_path"], bundle)
+        CASE.assertEqual(kwargs["socket_path"], socket_path)
+        return helperctl.CheckResult(ok=True, reason="host_reboot_pre_manifest_written")
+
+    monkeypatch.setattr(helperctl, "run_host_reboot_pre", fake_run_host_reboot_pre)
+
+    code = helperctl.main(
+        [
+            "host-reboot-drill",
+            "pre",
+            "--evidence-dir",
+            str(evidence),
+            "--bundle",
+            str(bundle),
+            "--socket",
+            str(socket_path),
+            "--json",
+        ]
+    )
+
+    CASE.assertEqual(code, 0)
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(
+        output,
+        [
+            {
+                "name": "host_reboot_pre",
+                "ok": True,
+                "reason": "host_reboot_pre_manifest_written",
+                "message": "",
+            }
+        ],
+    )
+
+
+def test_host_reboot_drill_cli_post_json_outputs_parseable_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+
+    def fake_run_host_reboot_post(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        print("incidental post noise")
+        CASE.assertEqual(kwargs["evidence_dir"], evidence)
+        return [("host_reboot_post", helperctl.CheckResult(ok=True))]
+
+    monkeypatch.setattr(helperctl, "run_host_reboot_post", fake_run_host_reboot_post)
+
+    code = helperctl.main(
+        [
+            "host-reboot-drill",
+            "post",
+            "--evidence-dir",
+            str(evidence),
+            "--json",
+        ]
+    )
+
+    CASE.assertEqual(code, 0)
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(output, [{"name": "host_reboot_post", "ok": True, "reason": "ok", "message": ""}])
+
+
+def test_host_reboot_post_runs_smoke_against_restored_helper_socket(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    bundle = tmp_path / "bundle"
+    socket_path = tmp_path / "restored-helper.sock"
+    python_path = tmp_path / "python"
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_host_reboot_post(**kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        return [("host_reboot_post", helperctl.CheckResult(ok=True))]
+
+    def fake_run_vz_linux_host_smoke(**kwargs: Any) -> helperctl.CheckResult:
+        calls.append(kwargs)
+        return helperctl.CheckResult(ok=True, reason="dry_run")
+
+    def forbidden_smoke_helper(**kwargs: Any) -> helperctl.CheckResult:
+        raise AssertionError("host-reboot-drill post must not call smoke_helper")
+
+    monkeypatch.setattr(helperctl, "run_host_reboot_post", fake_run_host_reboot_post)
+    monkeypatch.setattr(helperctl, "run_vz_linux_host_smoke", fake_run_vz_linux_host_smoke)
+    monkeypatch.setattr(helperctl, "smoke_helper", forbidden_smoke_helper)
+
+    code = helperctl.main(
+        [
+            "host-reboot-drill",
+            "post",
+            "--evidence-dir",
+            str(evidence),
+            "--bundle",
+            str(bundle),
+            "--socket",
+            str(socket_path),
+            "--python",
+            str(python_path),
+            "--run-smoke",
+            "--dry-run",
+        ]
+    )
+
+    CASE.assertEqual(code, 0)
+    CASE.assertEqual(len(calls), 1)
+    CASE.assertEqual(calls[0]["bundle_path"], bundle)
+    CASE.assertEqual(calls[0]["socket_path"], socket_path)
+    CASE.assertEqual(calls[0]["python_path"], python_path)
+    CASE.assertIs(calls[0]["dry_run"], True)
+    CASE.assertIn("vz_linux_smoke: ok dry_run", capsys.readouterr().out)
+
+
+def test_host_reboot_drill_cli_launchd_requires_explicit_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+
+    def fail_if_called(**kwargs: Any) -> helperctl.CheckResult:
+        raise AssertionError("launchd mode without explicit metadata must not run pre phase")
+
+    monkeypatch.setattr(helperctl, "run_host_reboot_pre", fail_if_called)
+
+    code = helperctl.main(
+        [
+            "host-reboot-drill",
+            "pre",
+            "--evidence-dir",
+            str(evidence),
+            "--helper-mode",
+            "launchd",
+            "--json",
+        ]
+    )
+
+    CASE.assertEqual(code, 1)
+    output = json.loads(capsys.readouterr().out)
+    CASE.assertEqual(output[0]["reason"], "host_reboot_launchd_metadata_missing")
+    CASE.assertIn("--label", output[0]["message"])
+    CASE.assertIn("--plist-output", output[0]["message"])
+
+
 def test_write_json_private_creates_owner_only_file(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     manifest = tmp_path / "manifest.json"

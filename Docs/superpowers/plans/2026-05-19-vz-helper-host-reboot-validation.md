@@ -384,7 +384,7 @@ git commit -m "feat(vz): validate host reboot postflight evidence"
 - Modify: `tools/macos-vz-helper/scripts/vz-helperctl.py`
 - Test: `tools/macos-vz-helper/Tests/test_vz_helperctl.py`
 
-- [ ] **Step 1: Add failing CLI tests**
+- [x] **Step 1: Add failing CLI tests**
 
 Add tests that assert:
 
@@ -393,7 +393,7 @@ Add tests that assert:
 - `post --run-smoke` calls `run_vz_linux_host_smoke` with the restored helper socket, not `smoke_helper`
 - launchd mode requires explicit label/plist or returns a clear reason
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -404,7 +404,7 @@ python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py \
 
 Expected: fail because CLI wiring does not exist.
 
-- [ ] **Step 3: Implement CLI parser**
+- [x] **Step 3: Implement CLI parser**
 
 Add subparser:
 
@@ -434,7 +434,7 @@ For `post --run-smoke`, call `run_vz_linux_host_smoke(bundle_path=..., socket_pa
 Do not call `smoke_helper`, because `smoke_helper` delegates to the helper-owning
 script path and can start a separate helper.
 
-- [ ] **Step 4: Run focused CLI tests**
+- [x] **Step 4: Run focused CLI tests**
 
 Expected: pass.
 

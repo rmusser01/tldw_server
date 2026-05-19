@@ -2409,6 +2409,94 @@ def _launchd_drill_command(args: argparse.Namespace) -> int:
     return 0 if all(result.ok for _, result in results) else 1
 
 
+def _host_reboot_drill_launchd_metadata_result(args: argparse.Namespace) -> CheckResult | None:
+    if args.helper_mode != "launchd":
+        return None
+    missing: list[str] = []
+    if not args.label:
+        missing.append("--label")
+    if not args.plist_output:
+        missing.append("--plist-output")
+    if not missing:
+        return None
+    return CheckResult(
+        False,
+        "host_reboot_launchd_metadata_missing",
+        f"launchd host reboot drill requires explicit {', '.join(missing)}",
+    )
+
+
+def _host_reboot_drill_common_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    paths = default_paths()
+    log_dir = Path(args.log_dir) if args.log_dir else paths.log_dir
+    return {
+        "evidence_dir": Path(args.evidence_dir),
+        "bundle_path": Path(args.bundle) if args.bundle else Path(""),
+        "helper_path": Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        "helper_mode": args.helper_mode,
+        "socket_path": Path(args.socket_path) if args.socket_path else paths.socket_path,
+        "log_dir": log_dir,
+        "serial_log_dir": Path(args.serial_log_dir) if args.serial_log_dir else log_dir / "serial",
+        "launchd_label": args.label or "",
+        "launchd_plist_path": Path(args.plist_output) if args.plist_output else None,
+        "allow_volatile_evidence_dir": args.allow_volatile_evidence_dir,
+    }
+
+
+def _host_reboot_drill_command(args: argparse.Namespace) -> int:
+    metadata_result = _host_reboot_drill_launchd_metadata_result(args)
+    if metadata_result is not None:
+        results = [("host_reboot_launchd_metadata", metadata_result)]
+        _print_results(results, as_json=args.json)
+        return 1
+
+    common_kwargs = _host_reboot_drill_common_kwargs(args)
+    if args.phase == "pre":
+        pre_kwargs = dict(common_kwargs)
+        pre_kwargs["create_evidence_dir"] = args.create_evidence_dir
+        if args.json:
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = run_host_reboot_pre(**pre_kwargs)
+        else:
+            result = run_host_reboot_pre(**pre_kwargs)
+        results = [("host_reboot_pre", result)]
+        _print_results(results, as_json=args.json)
+        return 0 if result.ok else 1
+
+    post_kwargs = dict(common_kwargs)
+    if args.json:
+        with contextlib.redirect_stdout(io.StringIO()):
+            results = run_host_reboot_post(**post_kwargs)
+    else:
+        results = run_host_reboot_post(**post_kwargs)
+
+    if args.run_smoke:
+        if not args.bundle:
+            results.append(
+                (
+                    "vz_linux_smoke",
+                    CheckResult(False, "host_reboot_smoke_bundle_missing", "--bundle is required with --run-smoke"),
+                )
+            )
+        else:
+            smoke_kwargs = {
+                "bundle_path": Path(args.bundle),
+                "socket_path": post_kwargs["socket_path"],
+                "python_path": Path(args.python) if args.python else None,
+                "dry_run": args.dry_run,
+            }
+            if args.json:
+                smoke_kwargs["command_runner"] = run_command_captured
+                with contextlib.redirect_stdout(io.StringIO()):
+                    smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
+            else:
+                smoke_result = run_vz_linux_host_smoke(**smoke_kwargs)
+            results.append(("vz_linux_smoke", smoke_result))
+
+    _print_results(results, as_json=args.json)
+    return 0 if all(result.ok for _, result in results) else 1
+
+
 def _start_command(args: argparse.Namespace) -> int:
     paths = default_paths()
     result = start_helper(
@@ -2558,6 +2646,40 @@ def build_parser() -> argparse.ArgumentParser:
     launchd_drill.add_argument("--dry-run", action="store_true")
     launchd_drill.add_argument("--json", action="store_true")
     launchd_drill.set_defaults(func=_launchd_drill_command)
+
+    host_reboot_drill = subparsers.add_parser(
+        "host-reboot-drill",
+        help="record and validate manual host reboot helper evidence",
+    )
+    host_reboot_subparsers = host_reboot_drill.add_subparsers(dest="phase", required=True)
+    host_reboot_parent = argparse.ArgumentParser(add_help=False)
+    host_reboot_parent.add_argument("--evidence-dir", required=True)
+    host_reboot_parent.add_argument("--bundle")
+    host_reboot_parent.add_argument("--helper-mode", choices=("direct", "launchd"), default="direct")
+    host_reboot_parent.add_argument("--helper", "--helper-path", dest="helper_path")
+    host_reboot_parent.add_argument("--socket", "--socket-path", dest="socket_path")
+    host_reboot_parent.add_argument("--log-dir")
+    host_reboot_parent.add_argument("--serial-log-dir")
+    host_reboot_parent.add_argument("--label")
+    host_reboot_parent.add_argument("--plist-output")
+    host_reboot_parent.add_argument("--create-evidence-dir", action="store_true")
+    host_reboot_parent.add_argument("--allow-volatile-evidence-dir", action="store_true")
+    host_reboot_parent.add_argument("--run-smoke", action="store_true")
+    host_reboot_parent.add_argument("--python")
+    host_reboot_parent.add_argument("--dry-run", action="store_true")
+    host_reboot_parent.add_argument("--json", action="store_true")
+    host_reboot_pre = host_reboot_subparsers.add_parser(
+        "pre",
+        parents=[host_reboot_parent],
+        help="record bounded pre-reboot helper evidence",
+    )
+    host_reboot_pre.set_defaults(func=_host_reboot_drill_command)
+    host_reboot_post = host_reboot_subparsers.add_parser(
+        "post",
+        parents=[host_reboot_parent],
+        help="validate helper state after a manual host reboot",
+    )
+    host_reboot_post.set_defaults(func=_host_reboot_drill_command)
 
     start = subparsers.add_parser("start", help="start the helper")
     start.add_argument("--helper", "--helper-path", dest="helper_path")
