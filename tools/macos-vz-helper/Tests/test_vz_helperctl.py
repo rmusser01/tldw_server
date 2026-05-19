@@ -98,6 +98,16 @@ def test_protocol_version_surfaces_unexpected_import_errors(monkeypatch):
         load_helperctl("vz_helperctl_import_bug")
 
 
+def test_volatile_roots_ignore_unresolvable_tmpdir(monkeypatch, tmp_path):
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop, target_is_directory=True)
+    monkeypatch.setenv("TMPDIR", str(loop))
+
+    helperctl = load_helperctl("vz_helperctl_tmpdir_loop")
+
+    CASE.assertTrue(hasattr(helperctl, "VOLATILE_EVIDENCE_ROOTS"))
+
+
 def test_lookup_process_uses_single_wide_ps_call(monkeypatch):
     helperctl = load_helperctl()
     calls = []
@@ -376,6 +386,62 @@ def test_host_reboot_evidence_dir_rejects_volatile_root(
 
     CASE.assertEqual(result.reason, "host_reboot_evidence_dir_volatile")
     CASE.assertFalse(result.ok)
+
+
+def test_host_reboot_evidence_dir_reports_broken_symlink_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "evidence"
+    evidence.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.ensure_host_reboot_evidence_dir(evidence, create=True)
+
+    CASE.assertEqual(result.reason, "host_reboot_evidence_dir_not_private")
+    CASE.assertFalse(result.ok)
+    CASE.assertTrue(evidence.is_symlink())
+
+
+def test_host_reboot_evidence_dir_reports_file_parent_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    parent = tmp_path / "evidence-parent"
+    parent.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.ensure_host_reboot_evidence_dir(parent / "drill", create=True)
+
+    CASE.assertEqual(result.reason, "host_reboot_evidence_dir_not_private")
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(parent.read_text(encoding="utf-8"), "not a directory")
+
+
+def test_host_reboot_evidence_dir_creates_nested_components_owner_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    private_root.chmod(0o700)
+    evidence = private_root / "host-reboot" / "run-1" / "evidence"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    previous_umask = os.umask(0o022)
+    try:
+        result = helperctl.ensure_host_reboot_evidence_dir(evidence, create=True)
+    finally:
+        os.umask(previous_umask)
+
+    CASE.assertEqual(result.reason, "host_reboot_evidence_dir_ok")
+    CASE.assertTrue(result.ok)
+    CASE.assertEqual((private_root / "host-reboot").stat().st_mode & 0o777, 0o700)
+    CASE.assertEqual((private_root / "host-reboot" / "run-1").stat().st_mode & 0o777, 0o700)
+    CASE.assertEqual(evidence.stat().st_mode & 0o777, 0o700)
 
 
 def test_render_launchd_plist_includes_required_fields(tmp_path):
@@ -2990,6 +3056,33 @@ def test_ping_helper_state_preserves_helper_details(tmp_path: Path) -> None:
     CASE.assertEqual(state.details["helper_instance_id"], "before")
     CASE.assertEqual(state.details["helper_started_at"], "2026-05-19T00:00:00Z")
     CASE.assertNotIn("ignored_number", state.details)
+
+
+def test_ping_helper_state_preserves_raw_helper_json_string_details(monkeypatch, tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+
+    monkeypatch.setattr(
+        helperctl,
+        "_request_helper_ping",
+        lambda path: {
+            "protocol_version": helperctl.EXPECTED_HELPER_PROTOCOL_VERSION,
+            "helper_version": "test-helper",
+            "details": {
+                "helper_instance_id": "after",
+                "helper_started_at": "2026-05-19T01:00:00Z",
+                "ignored_number": 1,
+                123: "ignored key",
+            },
+        },
+    )
+
+    state = helperctl.ping_helper_state(tmp_path / "helper.sock")
+
+    CASE.assertEqual(state.result, helperctl.CheckResult(ok=True))
+    CASE.assertEqual(state.details["helper_instance_id"], "after")
+    CASE.assertEqual(state.details["helper_started_at"], "2026-05-19T01:00:00Z")
+    CASE.assertNotIn("ignored_number", state.details)
+    CASE.assertNotIn(123, state.details)
 
 
 def test_ping_helper_falls_back_to_socket_when_helper_client_import_breaks(monkeypatch):

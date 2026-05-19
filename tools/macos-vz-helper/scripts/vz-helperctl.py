@@ -46,15 +46,27 @@ else:
 INVALID_LIFECYCLE_LOCK_GRACE_SEC = 1.0
 DEFAULT_LAUNCHD_LABEL = "org.tldw.macos-vz-helper"
 LAUNCHD_ACTIONS = {"bootstrap", "bootout", "kickstart", "status"}
-VOLATILE_EVIDENCE_ROOTS = tuple(
-    Path(path).resolve()
-    for path in (
-        Path(os.sep) / "tmp",
-        Path(os.sep) / "private" / "tmp",
-        os.getenv("TMPDIR") or "",
-    )
-    if path
-)
+
+
+def _resolve_operational_path(path: Path) -> Path | None:
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _volatile_evidence_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for path in (Path(os.sep) / "tmp", Path(os.sep) / "private" / "tmp", os.getenv("TMPDIR") or ""):
+        if not path:
+            continue
+        resolved = _resolve_operational_path(Path(path))
+        if resolved is not None:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+VOLATILE_EVIDENCE_ROOTS = _volatile_evidence_roots()
 
 
 @dataclass(frozen=True)
@@ -204,16 +216,18 @@ def ensure_host_reboot_evidence_dir(
     create: bool = False,
     allow_volatile: bool = False,
 ) -> CheckResult:
-    if not allow_volatile:
-        for root in VOLATILE_EVIDENCE_ROOTS:
-            if _is_under_path(evidence_dir, root):
-                return CheckResult(False, "host_reboot_evidence_dir_volatile", str(evidence_dir))
-    if not evidence_dir.exists():
-        if not create:
+    try:
+        if not allow_volatile:
+            for root in VOLATILE_EVIDENCE_ROOTS:
+                if _is_under_path(evidence_dir, root):
+                    return CheckResult(False, "host_reboot_evidence_dir_volatile", str(evidence_dir))
+        if evidence_dir.is_symlink():
+            return CheckResult(False, "host_reboot_evidence_dir_not_private", str(evidence_dir))
+        if not evidence_dir.exists() and not create:
             return CheckResult(False, "host_reboot_evidence_dir_missing", str(evidence_dir))
-        evidence_dir.mkdir(mode=0o700, parents=True)
-        evidence_dir.chmod(0o700)
-    result = ensure_private_dir(evidence_dir, dry_run=False)
+        result = ensure_private_dir(evidence_dir, dry_run=not create)
+    except (FileExistsError, NotADirectoryError, PermissionError, OSError, RuntimeError, ValueError) as exc:
+        return CheckResult(False, "host_reboot_evidence_dir_not_private", str(exc))
     if not result.ok:
         return CheckResult(False, "host_reboot_evidence_dir_not_private", result.message or str(evidence_dir))
     return CheckResult(True, "host_reboot_evidence_dir_ok", str(evidence_dir))
