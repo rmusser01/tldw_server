@@ -73,17 +73,16 @@ Existing product and review documents:
 | TTS route can show provider/model/voice combinations that appear inconsistent | P1 | Phase 1 |
 | Settings copy points users to the wrong speech settings route | P2 | Phase 1 |
 | Missing first-run page orientation and semantic titles weaken discoverability and accessibility | P2 | Phase 1 |
-| Missing credential, model, and microphone recovery states are not actionable enough | P1 | Phase 1 and Phase 2A |
+| Missing credential, model, and microphone recovery states are not actionable enough | P1 | Phase 1 and Phase 2 |
 | TTS/STT readiness and health are not visible before users run actions | P1 | Phase 2 |
 | STT model selector drops catalog labels, descriptions, and capability context | P2 | Phase 2 |
-| STT capability metadata is not fully authoritative at per-model level | P1 risk | Phase 2A and Phase 2B |
+| STT capability metadata is not fully authoritative at per-model level | P1 risk | Phase 2 |
 | Browser TTS can be mistaken for a comparable server provider | P2 | Phase 2 and Phase 3 |
 | TTS and STT results do not preserve enough visible provenance for expert comparison | P1 | Phase 3 |
 | Comparison metadata such as backend latency, artifact id, cost, and model version can be unavailable | P1 risk | Phase 3 |
 | Presets are not per-user server state for TTS/STT workflows | P2 | Phase 4 |
 | Local history, server history, presets, and comparison runs are easy to conflate | P1 risk | Phase 4 |
 | Batch and repeat-use workflows require too much manual rebuilding | P2 | Phase 5 |
-| `/audio` route ambiguity could pull the work into an audio hub redesign | P2 risk | Phase 0 |
 
 ### 2.4 Current Backend Capability Sources
 
@@ -199,8 +198,7 @@ Requirements:
 4. Decide the canonical route relationship:
    - `/tts`: dedicated text-to-speech generation and comparison.
    - `/stt`: dedicated speech-to-text transcription and comparison.
-   - `/speech`: combined workflow for users who want speak/listen together.
-   - `/audio`: clear alias or redirect to `/speech` for this PRD. A standalone audio hub is out of scope and requires a separate decision/spec.
+   - `/speech` or `/audio`: combined workflow or hub, but not the only discoverability path for TTS/STT.
 5. Mark Browser TTS as "Browser preview" or equivalent copy anywhere it appears.
 
 Acceptance tests:
@@ -250,9 +248,6 @@ Goal: show users what can run now and what each visible option means.
 Requirements:
 
 1. Add a compact readiness summary at the top of `/tts` and `/stt`.
-
-Phase 2A must use current APIs and client-side composition first:
-
 2. TTS readiness should use:
    - `/api/v1/audio/providers`
    - `/api/v1/audio/voices/catalog`
@@ -260,18 +255,19 @@ Phase 2A must use current APIs and client-side composition first:
 3. STT readiness should use:
    - `/api/v1/audio/transcriptions/health`
    - static model catalog labels and descriptions
-   - existing frontend catalog data
+   - provider capability registry if a public endpoint or adapter-backed summary is exposed
 4. Capability rows must show metadata confidence:
    - Confirmed by health check.
+   - Confirmed by provider capability.
    - Inferred from static catalog.
    - Unknown.
 5. STT model selector should include useful labels, not only raw model ids:
    - Installed or available on demand.
    - Local or remote when known.
-   - Batch support when known.
-   - Streaming support when known.
-   - Diarization support when known.
-   - Timestamp or segment support when known.
+   - Batch support.
+   - Streaming support.
+   - Diarization support.
+   - Timestamp or segment support.
    - Language notes when available.
 6. TTS provider selector should include:
    - Local/cloud/browser type.
@@ -283,14 +279,7 @@ Phase 2A must use current APIs and client-side composition first:
    - No server history guarantee.
    - No provider latency comparison.
    - Download/export only if the implementation actually supports it.
-   - Excluded from server-backed presets, server-backed batch runs, and backend history unless explicitly stored as a `browser_local` client-only configuration that is revalidated in the browser before use.
 8. Unknown states must be explicit. Do not hide an option solely because metadata is incomplete.
-
-Phase 2B is optional and should only start if Phase 2A leaves material gaps:
-
-9. If client composition cannot make STT capability states clear enough, add an STT capability summary endpoint.
-10. The summary endpoint must combine model health, static catalog labels/descriptions, provider capability data, and source/confidence fields.
-11. The summary endpoint must distinguish unsupported from unknown.
 
 Acceptance tests:
 
@@ -299,8 +288,6 @@ Acceptance tests:
 3. A model with unknown diarization support is labeled unknown, not unsupported.
 4. Readiness states have accessible text, not color-only badges.
 5. Extension readiness display fits popup/options layouts without horizontal overflow.
-6. Phase 2A can ship without a new backend capability endpoint.
-7. If Phase 2B ships, capability fields show their source and never convert unknown into unsupported.
 
 ### Phase 3: Comparison Runs And Result Provenance
 
@@ -371,20 +358,13 @@ Goal: let users save and reuse preferred speech setups without relying on local-
 
 Requirements:
 
-1. Complete a storage ownership decision gate before implementing preset CRUD:
-   - Choose the backend service/module that owns audio presets.
-   - Choose the database boundary and table or document shape.
-   - Define migration behavior for new installs and existing users.
-   - Define AuthNZ principal resolution for single-user and multi-user modes.
-   - Confirm presets are not stored in TTS history, STT transcript rows, or generated artifact history.
-   - Confirm Browser TTS presets are either excluded from server storage or stored only as explicitly marked `browser_local` client configurations.
-2. Add per-user server-side preset storage for TTS and STT after the decision gate is complete.
-3. In single-user mode, presets must still resolve through the authenticated/default principal rather than a global shared config.
-4. Preset types:
+1. Add per-user server-side preset storage for TTS and STT.
+2. In single-user mode, presets must still resolve through the authenticated/default principal rather than a global shared config.
+3. Preset types:
    - TTS preset.
    - STT preset.
    - Combined speech preset, optional and only if `/speech` remains a combined workflow.
-5. Preset fields:
+4. Preset fields:
    - Name.
    - Description.
    - Kind: `tts`, `stt`, or `speech`.
@@ -393,31 +373,29 @@ Requirements:
    - Created/updated timestamps.
    - Owner user id or principal.
    - Favorite/default flags.
-6. Preset UX:
+5. Preset UX:
    - Save current setup.
    - Apply preset.
    - Duplicate preset.
    - Rename preset.
    - Delete preset.
    - Mark favorite/default.
-7. Applying a preset must validate readiness against current backend state:
+6. Applying a preset must validate readiness against current backend state:
    - Available: apply normally.
    - Partially available: apply supported fields and show recovery.
    - Unavailable: show what changed and offer alternatives.
-8. Migration:
+7. Migration:
    - Existing local storage or Dexie comparison history should not break.
    - Server presets start empty unless a deliberate import path is implemented.
    - If import is added, it must be explicit.
 
 Acceptance tests:
 
-1. A written storage ownership decision exists before preset CRUD implementation starts.
-2. A signed-in or single-user principal can save a TTS preset and see it after page reload.
-3. A saved STT preset can be applied from WebUI `/stt` and extension `#/stt`.
-4. A preset referencing an unavailable provider displays a recovery state instead of silently failing.
-5. Presets do not leak across users in multi-user mode.
-6. Deleting a preset does not delete generated audio or transcripts.
-7. Browser-local presets are not treated as portable server presets unless explicitly marked and revalidated.
+1. A signed-in or single-user principal can save a TTS preset and see it after page reload.
+2. A saved STT preset can be applied from WebUI `/stt` and extension `#/stt`.
+3. A preset referencing an unavailable provider displays a recovery state instead of silently failing.
+4. Presets do not leak across users in multi-user mode.
+5. Deleting a preset does not delete generated audio or transcripts.
 
 ### Phase 5: Batch, History, And Expert Tools
 
@@ -471,15 +449,15 @@ Quick wins that should stay in the first implementation slice:
 
 Medium product improvements:
 
-1. Phase 2A readiness strips for `/tts` and `/stt` using existing APIs.
-2. Capability labels with source/confidence where current data supports them.
+1. Readiness strips for `/tts` and `/stt`.
+2. Capability labels with source/confidence.
 3. Better STT model labels from the static catalog and health endpoint.
 4. Comparison rows that preserve configuration provenance.
 5. Retry, duplicate, and disable-row controls.
 
 Larger product and backend work:
 
-1. Phase 2B STT capability summary endpoint if client composition is insufficient.
+1. STT capability summary endpoint if client composition is insufficient.
 2. TTS response metadata linkage to history or artifact ids.
 3. Per-user server-side preset CRUD.
 4. Server-backed comparison run persistence.
@@ -494,7 +472,7 @@ Canonical route model:
 - `/tts`: dedicated TTS generation and comparison.
 - `/stt`: dedicated STT transcription and comparison.
 - `/speech`: combined round-trip workflow for users who want speak/listen together.
-- `/audio`: clear alias or redirect to `/speech` in this PRD. A lightweight audio hub is a separate future decision.
+- `/audio`: either redirects clearly to `/speech` or becomes a lightweight audio hub in a separate decision.
 - Extension `#/tts`: same dedicated TTS workflow as WebUI `/tts`, adapted to extension dimensions.
 - Extension `#/stt`: same dedicated STT workflow as WebUI `/stt`, adapted to extension dimensions.
 
@@ -664,11 +642,6 @@ Suggested shape:
 
 Presets should not be stored in TTS generation history. History and presets have different lifecycles.
 
-Browser TTS preset rule:
-
-- Browser TTS settings are not portable server-side presets by default.
-- If a browser voice configuration is saved, it must be marked `browser_local`, must not be included in backend batch jobs, and must be revalidated against the current browser voice list before use.
-
 ### 8.4 Comparison Run
 
 Comparison runs organize a set of configurations and results.
@@ -691,12 +664,6 @@ Suggested shape:
 ```
 
 Comparison runs may remain local in Phase 3. Server persistence is optional until Phase 4 or Phase 5.
-
-Privacy and retention rules:
-
-- Phase 3 comparison runs are local/in-session by default.
-- Full input text, uploaded audio, raw microphone blobs, and transcript source metadata should not be server-persisted unless the user explicitly saves, exports, or submits a server-backed job.
-- If server-backed comparison persistence is added later, avoid global reusable hashes for user text or audio. Prefer opaque run ids, short previews, and user-owned artifact references. If hashing is needed for deduplication, it must be scoped so it cannot become a cross-user content fingerprint.
 
 ### 8.5 Result Artifact
 
@@ -748,8 +715,6 @@ Each error should include:
 2. Next action.
 3. Diagnostic detail behind disclosure where safe.
 
-The UI should implement an error-classification layer between backend/client exceptions and visible copy. It should map known backend failures into the categories above and preserve unknown failures as "Unknown error" with safe diagnostics. Required test fixtures should cover missing credentials, invalid credentials, model unavailable, model not installed, permission denied, unsupported capability, file invalid, network/server failure, and unknown error.
-
 ### Empty States
 
 TTS empty state:
@@ -799,13 +764,11 @@ Add only if reuse is insufficient:
 1. STT capability summary endpoint:
    - Exposes provider capability plus model health plus static catalog metadata.
    - Must include source/confidence per capability field.
-   - Belongs to Phase 2B only, after Phase 2A proves existing APIs are insufficient.
 2. Audio preset CRUD:
    - `GET /api/v1/audio/presets`
    - `POST /api/v1/audio/presets`
    - `PATCH /api/v1/audio/presets/{id}`
    - `DELETE /api/v1/audio/presets/{id}`
-   - Belongs to Phase 4 only, after the storage ownership decision gate is complete.
 3. TTS response metadata link:
    - Header or JSON metadata endpoint that lets frontend connect generated audio to server history id/output id.
    - Required only if Phase 3 or Phase 5 needs reliable server-linked result metadata.
@@ -817,7 +780,6 @@ Add only if reuse is insufficient:
 3. Do not mark a capability unsupported if the backend cannot distinguish unsupported from unknown.
 4. Do not make Browser TTS flow depend on server APIs.
 5. Keep OpenAI-compatible endpoints compatible. Rich metadata should be additive.
-6. Do not persist Browser TTS provider choices as portable server presets unless they are explicitly marked browser-local.
 
 ## 11. State Management Requirements
 
@@ -832,7 +794,7 @@ Add only if reuse is insufficient:
 
 First-time success:
 
-- User can identify whether TTS/STT is ready within 10 seconds of route render in browser QA, measured from route navigation to visible readiness summary using mock readiness states plus at least one connected local-server run.
+- User can identify whether TTS/STT is ready within 10 seconds of page load.
 - User can run one no-setup or ready provider path without visiting settings when such a path exists.
 - Missing credential/model errors lead to the correct settings or setup action.
 
@@ -864,8 +826,6 @@ Phase 2 validation:
 - Mock provider readiness payload tests.
 - Mock STT health states: ready, unavailable, on-demand, error.
 - Accessibility checks for readiness badges.
-- Verify Phase 2A works without adding a new STT capability endpoint.
-- If Phase 2B is implemented, add backend/client contract tests for capability source/confidence and unknown-vs-unsupported behavior.
 
 Phase 3 validation:
 
@@ -873,16 +833,13 @@ Phase 3 validation:
 - STT comparison run test with three results.
 - Retry/duplicate action tests.
 - Metadata truthfulness tests for unknown/unavailable fields.
-- Privacy tests or review checklist proving local comparison runs do not server-persist full text/audio source data without explicit save/export/job submission.
 
 Phase 4 validation:
 
-- Storage ownership decision record reviewed before implementation.
 - Backend unit/integration tests for preset CRUD.
 - Auth tests for per-user isolation.
 - Frontend tests for save/apply/delete preset.
 - Extension apply-preset test.
-- Browser-local preset handling test, if Browser TTS configurations can be saved.
 
 Manual browser QA:
 
@@ -902,7 +859,6 @@ Implementation definition of done for each phase:
 4. Accessibility basics are checked for headings, labels, keyboard order, and non-color-only status.
 5. Documentation or settings copy is updated where route labels or setup guidance changes.
 6. Known backend metadata gaps are documented as unknown states, not hidden assumptions.
-7. Error mapping tests cover known backend/client failure categories.
 
 ## 14. Risks And Mitigations
 
@@ -915,19 +871,17 @@ Implementation definition of done for each phase:
 | Browser TTS gets confused with server providers | Users compare non-equivalent outputs | Label as Browser preview and exclude from default backend comparison |
 | Advanced STT controls overload first-time users | Cognitive load remains high | Collapse advanced controls and add plain labels |
 | Existing local history conflicts with server presets | Data loss or duplicate states | Keep local history and server presets separate |
-| Comparison runs accidentally persist sensitive text or audio metadata | Privacy regression | Keep Phase 3 runs local by default; require explicit save/export/job submission for server persistence |
-| Browser TTS presets are treated as portable backend presets | Broken reuse across devices or browsers | Exclude Browser TTS from server presets/batch by default or mark as `browser_local` and revalidate client-side |
 
 ## 15. Open Questions
 
-1. After Phase 2A, is a dedicated STT capability summary endpoint still needed?
-2. Should comparison runs become server-persisted in Phase 5, or remain local/exportable?
-3. Should saved presets be exportable with chatbooks/workspaces later, after per-user server presets ship?
-4. Which TTS metadata should be returned directly from `/api/v1/audio/speech` without breaking OpenAI compatibility: request id, history id, generation time, duration, byte size, or artifact id?
-5. Which STT result metadata from the internal normalized artifact should become visible on the public WebUI comparison cards?
-6. What default STT options should be shown for first-time users, given provider differences in diarization, timestamps, and streaming?
-7. Should voice cloning discoverability be included in this remediation, or handled by the existing TTS UX upgrade PRD?
-8. If a standalone `/audio` hub is still desired, what separate scope and success criteria should govern it outside this PRD?
+1. Should `/audio` become a lightweight audio hub, or should it remain a redirect to `/speech`?
+2. Should STT capability metadata be exposed through a new backend endpoint, or composed client-side from existing health/catalog/provider data?
+3. Should comparison runs become server-persisted in Phase 5, or remain local/exportable?
+4. Should saved presets be exportable with chatbooks/workspaces later, after per-user server presets ship?
+5. Which TTS metadata should be returned directly from `/api/v1/audio/speech` without breaking OpenAI compatibility: request id, history id, generation time, duration, byte size, or artifact id?
+6. Which STT result metadata from the internal normalized artifact should become visible on the public WebUI comparison cards?
+7. What default STT options should be shown for first-time users, given provider differences in diarization, timestamps, and streaming?
+8. Should voice cloning discoverability be included in this remediation, or handled by the existing TTS UX upgrade PRD?
 
 ## 16. Implementation Boundaries
 
@@ -935,11 +889,10 @@ Implementation should proceed in small PR slices:
 
 1. Route parity and visible copy fixes.
 2. TTS provider/model/voice state correctness.
-3. Phase 2A readiness strip and capability labels using existing APIs.
-4. Phase 2B STT capability summary endpoint only if Phase 2A is insufficient.
-5. Comparison run provenance and local privacy guardrails.
-6. Server preset ownership decision gate, then preset API and UI.
-7. Batch/history/export enhancements.
+3. Readiness strip and capability labels.
+4. Comparison run provenance.
+5. Server preset API and UI.
+6. Batch/history/export enhancements.
 
 Each slice should preserve existing APIs unless the phase explicitly requires an additive backend endpoint.
 
