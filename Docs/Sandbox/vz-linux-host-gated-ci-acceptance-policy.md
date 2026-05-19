@@ -127,6 +127,9 @@ The evidence directory must not be under `/tmp`, `$TMPDIR`, or another volatile
 root. Direct helper mode can use the managed socket defaults. Launchd helper
 mode must pass explicit `--label` and `--plist-output` in both `pre` and
 `post`, so the manifests identify the intended LaunchAgent.
+The drill also records a host boot marker, non-mutating lifecycle readiness
+checks, and bundle dry-run validation. A post phase with a missing or unchanged
+boot marker is a failed reboot proof, even if helper ping succeeds.
 
 When `post --run-smoke` is requested, the smoke must target the restored helper
 socket through the host smoke path. It must not launch a separate helper
@@ -203,8 +206,9 @@ prepared host and fails one of the accepted runtime guarantees:
   passed
 - a manually requested host reboot drill uses a missing, unsafe, or volatile
   evidence directory
-- a manually requested host reboot drill reports pre/post metadata mismatch,
-  helper ping failure, or helper protocol failure
+- a manually requested host reboot drill reports unavailable or unchanged host
+  boot marker, pre/post metadata mismatch, lifecycle readiness failure, helper
+  ping failure, or helper protocol failure
 - a manually requested host reboot drill reports post-smoke failure after
   `--run-smoke` was explicitly requested
 - cleanup leaves the helper process or accepted socket path behind

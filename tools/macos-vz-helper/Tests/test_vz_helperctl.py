@@ -444,6 +444,18 @@ def test_host_reboot_evidence_dir_creates_nested_components_owner_only(
     CASE.assertEqual(evidence.stat().st_mode & 0o777, 0o700)
 
 
+def _host_reboot_ok_readiness(helperctl: Any) -> Any:
+    return lambda **kwargs: [("helper_readiness", helperctl.CheckResult(True, "host_reboot_helper_ready"))]
+
+
+def _host_reboot_ok_bundle_validator(helperctl: Any) -> Any:
+    return lambda **kwargs: helperctl.CheckResult(True, "dry_run")
+
+
+def _host_reboot_boot_marker(helperctl: Any, marker: str = "boot-2") -> Any:
+    return lambda: helperctl.CheckResult(True, "host_boot_marker", marker)
+
+
 def test_host_reboot_pre_writes_bounded_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -471,6 +483,9 @@ def test_host_reboot_pre_writes_bounded_manifest(
         create_evidence_dir=True,
         created_at_factory=lambda: "2026-05-19T00:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        bundle_validator=_host_reboot_ok_bundle_validator(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -504,6 +519,12 @@ def test_host_reboot_pre_writes_bounded_manifest(
             "helper_protocol_version",
             "helper_version",
             "helper_details",
+            "host_boot_marker_ok",
+            "host_boot_marker_reason",
+            "host_boot_marker",
+            "lifecycle_results",
+            "bundle_validation_ok",
+            "bundle_validation_reason",
         },
     )
     CASE.assertEqual(payload["phase"], "pre")
@@ -521,6 +542,20 @@ def test_host_reboot_pre_writes_bounded_manifest(
     CASE.assertEqual(payload["helper_ping_reason"], "ok")
     CASE.assertEqual(payload["helper_protocol_version"], "1")
     CASE.assertEqual(payload["helper_version"], "test")
+    CASE.assertIs(payload["host_boot_marker_ok"], True)
+    CASE.assertEqual(payload["host_boot_marker"], "boot-1")
+    CASE.assertIs(payload["bundle_validation_ok"], True)
+    CASE.assertEqual(
+        payload["lifecycle_results"],
+        [
+            {
+                "name": "helper_readiness",
+                "ok": True,
+                "reason": "host_reboot_helper_ready",
+                "message": "",
+            }
+        ],
+    )
     CASE.assertEqual(
         payload["helper_details"],
         {
@@ -532,6 +567,63 @@ def test_host_reboot_pre_writes_bounded_manifest(
     CASE.assertNotIn("stdout", payload)
     CASE.assertNotIn("stderr", payload)
     CASE.assertNotIn("serial_log_contents", payload)
+
+
+def test_host_reboot_pre_writes_manifest_and_fails_lifecycle_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.run_host_reboot_pre(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        create_evidence_dir=True,
+        readiness_checker=lambda **kwargs: [
+            ("helper_readiness", helperctl.CheckResult(False, "host_reboot_helper_not_ready"))
+        ],
+        bundle_validator=_host_reboot_ok_bundle_validator(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
+        ping_checker=lambda path: helperctl.PingState(result=helperctl.CheckResult(True)),
+    )
+
+    CASE.assertEqual(result.reason, "host_reboot_helper_not_ready")
+    CASE.assertFalse(result.ok)
+    payload = json.loads((evidence / "host-reboot-pre.json").read_text(encoding="utf-8"))
+    CASE.assertEqual(payload["lifecycle_results"][0]["reason"], "host_reboot_helper_not_ready")
+
+
+def test_host_reboot_lifecycle_readiness_checks_launchd_status(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    calls: list[tuple[str, str, Path | None]] = []
+
+    def fake_launchd_status(action: str, **kwargs: Any) -> helperctl.CheckResult:
+        calls.append((action, kwargs["label"], kwargs["plist_path"]))
+        return helperctl.CheckResult(True)
+
+    def fake_check_collector(*args: Any, **kwargs: Any) -> list[tuple[str, helperctl.CheckResult]]:
+        return [("ping", helperctl.CheckResult(True))]
+
+    results = helperctl.host_reboot_lifecycle_readiness_results(
+        helper_mode="launchd",
+        helper_path=tmp_path / "helper",
+        socket_path=tmp_path / "helper.sock",
+        pid_file=tmp_path / "helper.pid",
+        log_dir=tmp_path / "logs",
+        launchd_label="org.tldw.test-helper",
+        launchd_plist_path=tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist",
+        launchd_status_checker=fake_launchd_status,
+        check_collector=fake_check_collector,
+    )
+
+    CASE.assertEqual(calls, [("status", "org.tldw.test-helper", tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist")])
+    CASE.assertEqual(dict(results)["helper_readiness"].reason, "host_reboot_helper_ready")
 
 
 def test_host_reboot_pre_dry_run_does_not_create_evidence_or_manifest(
@@ -551,6 +643,9 @@ def test_host_reboot_pre_dry_run_does_not_create_evidence_or_manifest(
         log_dir=tmp_path / "logs",
         create_evidence_dir=True,
         dry_run=True,
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        bundle_validator=_host_reboot_ok_bundle_validator(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -582,6 +677,9 @@ def test_host_reboot_pre_writes_manifest_and_returns_failed_ping(
         create_evidence_dir=True,
         created_at_factory=lambda: "2026-05-19T00:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        bundle_validator=_host_reboot_ok_bundle_validator(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(False, "helper_ping_failed", "socket unavailable"),
             protocol_version="",
@@ -621,6 +719,9 @@ def test_host_reboot_pre_wraps_raising_ping_checker_and_writes_manifest(
         create_evidence_dir=True,
         created_at_factory=lambda: "2026-05-19T00:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        bundle_validator=_host_reboot_ok_bundle_validator(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
         ping_checker=raising_ping_checker,
     )
 
@@ -812,6 +913,9 @@ def test_host_reboot_manifests_drop_forbidden_helper_detail_keys(
         create_evidence_dir=True,
         created_at_factory=lambda: "2026-05-19T00:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        bundle_validator=_host_reboot_ok_bundle_validator(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -828,6 +932,8 @@ def test_host_reboot_manifests_drop_forbidden_helper_detail_keys(
         log_dir=tmp_path / "logs",
         created_at_factory=lambda: "2026-05-19T01:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-2"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -879,6 +985,8 @@ def test_host_reboot_post_reports_generation_changed(
                 "launchd_label": "org.tldw.test-helper",
                 "launchd_plist_path": str(tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist"),
                 "helper_details": {"helper_instance_id": "before"},
+                "host_boot_marker_ok": True,
+                "host_boot_marker": "boot-1",
             }
         ),
         encoding="utf-8",
@@ -897,6 +1005,8 @@ def test_host_reboot_post_reports_generation_changed(
         launchd_plist_path=tmp_path / "LaunchAgents" / "org.tldw.test-helper.plist",
         created_at_factory=lambda: "2026-05-19T01:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-2"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -936,6 +1046,11 @@ def test_host_reboot_post_reports_generation_changed(
             "helper_protocol_version",
             "helper_version",
             "helper_details",
+            "host_boot_marker_ok",
+            "host_boot_marker_reason",
+            "host_boot_marker",
+            "host_reboot_marker_reason",
+            "lifecycle_results",
         },
     )
     CASE.assertEqual(payload["phase"], "post")
@@ -945,11 +1060,65 @@ def test_host_reboot_post_reports_generation_changed(
     CASE.assertEqual(payload["pre_helper_instance_id"], "before")
     CASE.assertEqual(payload["post_helper_instance_id"], "after")
     CASE.assertEqual(payload["helper_generation_reason"], "helper_generation_changed")
+    CASE.assertEqual(payload["host_boot_marker"], "boot-2")
+    CASE.assertEqual(payload["host_reboot_marker_reason"], "host_reboot_detected")
     CASE.assertIs(payload["helper_ping_ok"], True)
     CASE.assertNotIn("environment", payload)
     CASE.assertNotIn("stdout", payload)
     CASE.assertNotIn("stderr", payload)
     CASE.assertNotIn("serial_log_contents", payload)
+
+
+def test_host_reboot_post_rejects_unchanged_host_boot_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    evidence.chmod(0o700)
+    (evidence / "host-reboot-pre.json").write_text(
+        json.dumps(
+            {
+                "phase": "pre",
+                "helper_mode": "direct",
+                "bundle_path": str(tmp_path / "bundle"),
+                "helper_path": str(tmp_path / "bundle" / "macos-vz-helper"),
+                "socket_path": str(tmp_path / "helper.sock"),
+                "launchd_label": "",
+                "launchd_plist_path": "",
+                "helper_details": {"helper_instance_id": "same-helper"},
+                "host_boot_marker_ok": True,
+                "host_boot_marker": "boot-1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    results = helperctl.run_host_reboot_post(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-1"),
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(True),
+            protocol_version="1",
+            helper_version="test",
+            details={"helper_instance_id": "same-helper"},
+        ),
+    )
+
+    by_name = dict(results)
+    CASE.assertEqual(by_name["host_reboot_marker"].reason, "host_reboot_not_detected")
+    CASE.assertFalse(by_name["host_reboot_marker"].ok)
+    CASE.assertEqual(results[-1], ("host_reboot_post", by_name["host_reboot_marker"]))
+    payload = json.loads((evidence / "host-reboot-post.json").read_text(encoding="utf-8"))
+    CASE.assertEqual(payload["host_reboot_marker_reason"], "host_reboot_not_detected")
 
 
 def test_host_reboot_post_reports_metadata_mismatch_before_writing_manifest(
@@ -1030,6 +1199,8 @@ def test_host_reboot_metadata_matches_equivalent_relative_paths(
                 "phase": "pre",
                 **pre_metadata,
                 "helper_details": {"helper_instance_id": "before"},
+                "host_boot_marker_ok": True,
+                "host_boot_marker": "boot-1",
             }
         ),
         encoding="utf-8",
@@ -1044,6 +1215,8 @@ def test_host_reboot_metadata_matches_equivalent_relative_paths(
         helper_mode="direct",
         socket_path=Path("./helper.sock"),
         log_dir=logs,
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-2"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -1086,6 +1259,8 @@ def test_host_reboot_post_dry_run_does_not_write_post_manifest(
                 "launchd_label": "org.tldw.test-helper",
                 "launchd_plist_path": str(plist_path),
                 "helper_details": {"helper_instance_id": "before"},
+                "host_boot_marker_ok": True,
+                "host_boot_marker": "boot-1",
             }
         ),
         encoding="utf-8",
@@ -1102,6 +1277,8 @@ def test_host_reboot_post_dry_run_does_not_write_post_manifest(
         launchd_label="org.tldw.test-helper",
         launchd_plist_path=plist_path,
         dry_run=True,
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-2"),
         ping_checker=lambda path: helperctl.PingState(
             result=helperctl.CheckResult(True),
             protocol_version="1",
@@ -1136,6 +1313,8 @@ def test_host_reboot_post_wraps_raising_ping_checker_and_writes_manifest(
                 "launchd_label": "",
                 "launchd_plist_path": "",
                 "helper_details": {"helper_instance_id": "before"},
+                "host_boot_marker_ok": True,
+                "host_boot_marker": "boot-1",
             }
         ),
         encoding="utf-8",
@@ -1154,6 +1333,8 @@ def test_host_reboot_post_wraps_raising_ping_checker_and_writes_manifest(
         log_dir=tmp_path / "logs",
         created_at_factory=lambda: "2026-05-19T01:00:00Z",
         hostname_provider=lambda: "test-host",
+        readiness_checker=_host_reboot_ok_readiness(helperctl),
+        boot_marker_provider=_host_reboot_boot_marker(helperctl, "boot-2"),
         ping_checker=raising_ping_checker,
     )
 

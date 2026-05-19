@@ -118,6 +118,9 @@ and validates the restored helper after the machine comes back. The evidence
 directory must be durable across reboot and private to the operator; use a path
 such as `~/Library/Logs/tldw/vz-host-reboot-drill/<run-id>`, not `/tmp`,
 `$TMPDIR`, or another volatile root.
+The pre phase records a host boot marker, helper lifecycle preflight results,
+and bundle dry-run validation. The post phase fails if the host boot marker is
+missing or unchanged, because that means the drill did not prove a reboot.
 
 Direct helper mode uses the managed helper socket directly:
 
@@ -128,6 +131,7 @@ socket_path="$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/help
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
   --evidence-dir "$evidence_dir" \
   --socket "$socket_path" \
+  --pid-file "$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.pid" \
   --bundle /path/to/canonical/bundle \
   --create-evidence-dir
 
@@ -136,6 +140,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
   --evidence-dir "$evidence_dir" \
   --socket "$socket_path" \
+  --pid-file "$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.pid" \
   --bundle /path/to/canonical/bundle \
   --run-smoke
 ```
@@ -173,7 +178,9 @@ through the host smoke path. It must not start a new helper process for the
 post-reboot proof. Diagnostics and dry-run reconciliation repair remain
 operator-reviewed follow-up steps and are separate from this drill. Scheduled
 or nightly CI must not reboot hosts; this validation is manual or explicitly
-operator-triggered only.
+operator-triggered only. Blocking post failures include unchanged host boot
+marker, missing boot marker, failed lifecycle readiness, metadata mismatch,
+helper ping/protocol failure, and requested post-smoke failure.
 
 `restart-drill` is an operator-managed lifecycle drill for helpers already
 started through `vz-helperctl.py start`. It verifies the current managed helper

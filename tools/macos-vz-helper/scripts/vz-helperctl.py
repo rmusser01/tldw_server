@@ -52,6 +52,7 @@ HOST_REBOOT_POST_MANIFEST = "host-reboot-post.json"
 HOST_REBOOT_PRE_MANIFEST_MAX_BYTES = 64 * 1024
 HOST_REBOOT_HELPER_DETAIL_KEYS = frozenset({"helper_instance_id", "helper_started_at"})
 HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH = 256
+HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH = 512
 HOST_REBOOT_METADATA_MATCH_KEYS = (
     "helper_mode",
     "launchd_label",
@@ -971,8 +972,107 @@ def _host_reboot_ping_state_payload(state: PingState) -> dict[str, Any]:
     return payload
 
 
+def _host_reboot_result_payload(name: str, result: CheckResult) -> dict[str, object]:
+    return {
+        "name": name[:HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH],
+        "ok": result.ok,
+        "reason": result.reason[:HOST_REBOOT_HELPER_DETAIL_VALUE_MAX_LENGTH],
+        "message": result.message[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH],
+    }
+
+
+def _host_reboot_results_payload(results: Iterable[tuple[str, CheckResult]]) -> list[dict[str, object]]:
+    return [_host_reboot_result_payload(name, result) for name, result in results]
+
+
 def _host_reboot_created_at() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def host_boot_marker() -> CheckResult:
+    """Return a stable host boot marker for proving a reboot occurred."""
+    sysctl_path = Path("/usr/sbin/sysctl")
+    if sysctl_path.exists():
+        try:
+            completed = subprocess.run(  # nosec B603
+                [str(sysctl_path), "-n", "kern.boottime"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, PermissionError, OSError):
+            completed = None
+        if completed is not None and completed.returncode == 0:
+            marker = " ".join((completed.stdout or "").split())
+            if marker:
+                return CheckResult(True, "host_boot_marker", marker[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH])
+
+    linux_boot_id = Path("/proc/sys/kernel/random/boot_id")
+    try:
+        marker = linux_boot_id.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, PermissionError, OSError):
+        marker = ""
+    if marker:
+        return CheckResult(True, "host_boot_marker", marker[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH])
+    return CheckResult(False, "host_boot_marker_unavailable")
+
+
+def _host_reboot_boot_marker_payload(result: CheckResult) -> dict[str, Any]:
+    return {
+        "host_boot_marker_ok": result.ok,
+        "host_boot_marker_reason": result.reason,
+        "host_boot_marker": result.message[:HOST_REBOOT_RESULT_MESSAGE_MAX_LENGTH],
+    }
+
+
+def host_reboot_bundle_dry_run_validation(
+    *,
+    bundle_path: Path,
+    socket_path: Path,
+    python_path: Path | None = None,
+) -> CheckResult:
+    if not str(bundle_path) or str(bundle_path) == ".":
+        return CheckResult(False, "host_reboot_bundle_missing")
+    return run_vz_linux_host_smoke(
+        bundle_path=bundle_path,
+        socket_path=socket_path,
+        python_path=python_path,
+        dry_run=True,
+        command_runner=run_command_captured,
+    )
+
+
+def _host_reboot_bundle_payload(result: CheckResult) -> dict[str, Any]:
+    return {
+        "bundle_validation_ok": result.ok,
+        "bundle_validation_reason": result.reason,
+    }
+
+
+def _host_reboot_readiness_result(results: Iterable[tuple[str, CheckResult]]) -> CheckResult:
+    collected = list(results)
+    for name, result in collected:
+        if name == "helper_readiness":
+            return result
+    for name, result in collected:
+        if not result.ok:
+            return CheckResult(False, "host_reboot_lifecycle_check_failed", f"{name}:{result.reason}")
+    return CheckResult(False, "host_reboot_helper_not_ready")
+
+
+def _host_reboot_marker_result(pre_manifest: Mapping[str, Any], post_boot_marker: CheckResult) -> CheckResult:
+    if not bool(pre_manifest.get("host_boot_marker_ok")):
+        return CheckResult(False, "host_boot_marker_missing")
+    pre_marker = str(pre_manifest.get("host_boot_marker", ""))
+    if not pre_marker:
+        return CheckResult(False, "host_boot_marker_missing")
+    if not post_boot_marker.ok:
+        return post_boot_marker
+    if not post_boot_marker.message:
+        return CheckResult(False, "host_boot_marker_unavailable")
+    if pre_marker == post_boot_marker.message:
+        return CheckResult(False, "host_reboot_not_detected")
+    return CheckResult(True, "host_reboot_detected")
 
 
 def run_host_reboot_pre(
@@ -983,12 +1083,17 @@ def run_host_reboot_pre(
     socket_path: Path,
     log_dir: Path,
     helper_path: Path = DEFAULT_HELPER,
+    pid_file: Path | None = None,
+    entitlements_path: Path | None = None,
     serial_log_dir: Path | None = None,
     launchd_label: str = "",
     launchd_plist_path: Path | None = None,
     create_evidence_dir: bool = False,
     allow_volatile_evidence_dir: bool = False,
     dry_run: bool = False,
+    readiness_checker: Callable[..., list[tuple[str, CheckResult]]] | None = None,
+    bundle_validator: Callable[..., CheckResult] = host_reboot_bundle_dry_run_validation,
+    boot_marker_provider: Callable[[], CheckResult] = host_boot_marker,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     created_at_factory: Callable[[], str] = _host_reboot_created_at,
     hostname_provider: Callable[[], str] = socket.gethostname,
@@ -1003,6 +1108,23 @@ def run_host_reboot_pre(
         return evidence_result
     if dry_run:
         return CheckResult(True, "host_reboot_pre_dry_run", str(evidence_dir))
+
+    resolved_pid_file = pid_file or default_paths().pid_file
+    checker = readiness_checker or host_reboot_lifecycle_readiness_results
+    lifecycle_results = checker(
+        helper_mode=helper_mode,
+        helper_path=helper_path,
+        socket_path=socket_path,
+        pid_file=resolved_pid_file,
+        log_dir=log_dir,
+        launchd_label=launchd_label,
+        launchd_plist_path=launchd_plist_path,
+        entitlements_path=entitlements_path,
+        ping_checker=ping_checker,
+    )
+    readiness_result = _host_reboot_readiness_result(lifecycle_results)
+    boot_marker_result = boot_marker_provider()
+    bundle_result = bundle_validator(bundle_path=bundle_path, socket_path=socket_path)
 
     try:
         ping_state = _coerce_ping_state(ping_checker(socket_path))
@@ -1026,11 +1148,20 @@ def run_host_reboot_pre(
         )
     )
     payload.update(_host_reboot_ping_state_payload(ping_state))
+    payload.update(_host_reboot_boot_marker_payload(boot_marker_result))
+    payload["lifecycle_results"] = _host_reboot_results_payload(lifecycle_results)
+    payload.update(_host_reboot_bundle_payload(bundle_result))
 
     manifest_path = evidence_dir / HOST_REBOOT_PRE_MANIFEST
     write_result = write_json_private(manifest_path, payload)
     if not write_result.ok:
         return write_result
+    if not boot_marker_result.ok:
+        return boot_marker_result
+    if not readiness_result.ok:
+        return readiness_result
+    if not bundle_result.ok:
+        return bundle_result
     if not ping_state.result.ok:
         return CheckResult(
             False,
@@ -1152,11 +1283,15 @@ def run_host_reboot_post(
     socket_path: Path,
     log_dir: Path,
     helper_path: Path = DEFAULT_HELPER,
+    pid_file: Path | None = None,
+    entitlements_path: Path | None = None,
     serial_log_dir: Path | None = None,
     launchd_label: str = "",
     launchd_plist_path: Path | None = None,
     allow_volatile_evidence_dir: bool = False,
     dry_run: bool = False,
+    readiness_checker: Callable[..., list[tuple[str, CheckResult]]] | None = None,
+    boot_marker_provider: Callable[[], CheckResult] = host_boot_marker,
     ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
     created_at_factory: Callable[[], str] = _host_reboot_created_at,
     hostname_provider: Callable[[], str] = socket.gethostname,
@@ -1194,6 +1329,28 @@ def run_host_reboot_post(
         results.append(("host_reboot_post", metadata_result))
         return results
 
+    resolved_pid_file = pid_file or default_paths().pid_file
+    checker = readiness_checker or host_reboot_lifecycle_readiness_results
+    lifecycle_results = checker(
+        helper_mode=helper_mode,
+        helper_path=helper_path,
+        socket_path=socket_path,
+        pid_file=resolved_pid_file,
+        log_dir=log_dir,
+        launchd_label=launchd_label,
+        launchd_plist_path=launchd_plist_path,
+        entitlements_path=entitlements_path,
+        ping_checker=ping_checker,
+    )
+    results.extend((f"lifecycle_{name}", result) for name, result in lifecycle_results)
+    readiness_result = _host_reboot_readiness_result(lifecycle_results)
+    results.append(("helper_readiness", readiness_result))
+
+    boot_marker_result = boot_marker_provider()
+    results.append(("host_boot_marker", boot_marker_result))
+    reboot_marker_result = _host_reboot_marker_result(pre_manifest, boot_marker_result)
+    results.append(("host_reboot_marker", reboot_marker_result))
+
     try:
         ping_state = _coerce_ping_state(ping_checker(socket_path))
     except Exception as exc:
@@ -1214,9 +1371,12 @@ def run_host_reboot_post(
         "pre_helper_instance_id": pre_instance_id,
         "post_helper_instance_id": post_instance_id,
         "helper_generation_reason": generation_result.reason,
+        "host_reboot_marker_reason": reboot_marker_result.reason,
     }
     payload.update(current_metadata)
     payload.update(_host_reboot_ping_state_payload(ping_state))
+    payload.update(_host_reboot_boot_marker_payload(boot_marker_result))
+    payload["lifecycle_results"] = _host_reboot_results_payload(lifecycle_results)
 
     manifest_path = evidence_dir / HOST_REBOOT_POST_MANIFEST
     if dry_run:
@@ -1227,7 +1387,13 @@ def run_host_reboot_post(
         write_result = CheckResult(True, "host_reboot_post_manifest_written", write_result.message)
     results.append(("post_manifest", write_result))
 
-    if not ping_state.result.ok:
+    if not boot_marker_result.ok:
+        final_result = boot_marker_result
+    elif not reboot_marker_result.ok:
+        final_result = reboot_marker_result
+    elif not readiness_result.ok:
+        final_result = readiness_result
+    elif not ping_state.result.ok:
         final_result = ping_state.result
     elif not write_result.ok:
         final_result = write_result
@@ -1997,6 +2163,64 @@ def collect_check_results(
     return results
 
 
+def host_reboot_lifecycle_readiness_results(
+    *,
+    helper_mode: str,
+    helper_path: Path,
+    socket_path: Path,
+    pid_file: Path,
+    log_dir: Path,
+    launchd_label: str = "",
+    launchd_plist_path: Path | None = None,
+    entitlements_path: Path | None = None,
+    dry_run: bool = False,
+    ping_checker: Callable[[Path], CheckResult | PingState] = ping_helper_state,
+    check_collector: Callable[..., list[tuple[str, CheckResult]]] = collect_check_results,
+    launchd_status_checker: Callable[..., CheckResult] = run_launchd_action,
+) -> list[tuple[str, CheckResult]]:
+    results: list[tuple[str, CheckResult]] = []
+    if helper_mode == "launchd":
+        launchd_result = launchd_status_checker(
+            "status",
+            label=launchd_label,
+            plist_path=launchd_plist_path,
+            helper_path=helper_path,
+            socket_path=socket_path,
+            log_dir=log_dir,
+            dry_run=dry_run,
+        )
+        results.append(("launchd_status", launchd_result))
+
+    check_results = check_collector(
+        helper_path,
+        socket_path,
+        pid_file,
+        log_dir,
+        entitlements_path=entitlements_path,
+        dry_run=True,
+        ping_checker=ping_checker,
+    )
+    results.extend(check_results)
+
+    for name, result in results:
+        if not result.ok:
+            results.append(
+                (
+                    "helper_readiness",
+                    CheckResult(False, "host_reboot_lifecycle_check_failed", f"{name}:{result.reason}"),
+                )
+            )
+            return results
+
+    ping_result = next((result for name, result in results if name == "ping"), None)
+    if ping_result is None or ping_result.reason == "helper_not_running":
+        results.append(("helper_readiness", CheckResult(False, "host_reboot_helper_not_ready")))
+        return results
+
+    results.append(("helper_readiness", CheckResult(True, "host_reboot_helper_ready")))
+    return results
+
+
 def status_helper(
     helper_path: Path,
     socket_path: Path,
@@ -2509,6 +2733,8 @@ def _host_reboot_drill_common_kwargs(args: argparse.Namespace) -> dict[str, Any]
         "evidence_dir": Path(args.evidence_dir),
         "bundle_path": Path(args.bundle) if args.bundle else Path(""),
         "helper_path": Path(args.helper_path) if args.helper_path else DEFAULT_HELPER,
+        "pid_file": Path(args.pid_file) if args.pid_file else paths.pid_file,
+        "entitlements_path": Path(args.entitlements) if args.entitlements else None,
         "helper_mode": args.helper_mode,
         "socket_path": Path(args.socket_path) if args.socket_path else paths.socket_path,
         "log_dir": log_dir,
@@ -2743,10 +2969,12 @@ def build_parser() -> argparse.ArgumentParser:
     host_reboot_parent.add_argument("--helper-mode", choices=("direct", "launchd"), default="direct")
     host_reboot_parent.add_argument("--helper", "--helper-path", dest="helper_path")
     host_reboot_parent.add_argument("--socket", "--socket-path", dest="socket_path")
+    host_reboot_parent.add_argument("--pid-file")
     host_reboot_parent.add_argument("--log-dir")
     host_reboot_parent.add_argument("--serial-log-dir")
     host_reboot_parent.add_argument("--label")
     host_reboot_parent.add_argument("--plist-output")
+    host_reboot_parent.add_argument("--entitlements")
     host_reboot_parent.add_argument("--allow-volatile-evidence-dir", action="store_true")
     host_reboot_parent.add_argument("--dry-run", action="store_true")
     host_reboot_parent.add_argument("--json", action="store_true")

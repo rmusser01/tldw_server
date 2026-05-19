@@ -522,6 +522,13 @@ Status: not run for Task 5 closeout because it requires a disruptive manual
 operator reboot. The docs record this as a manual or explicitly
 operator-triggered prepared-host validation only.
 
+Post-review hardening added a host boot marker to the pre/post manifests,
+non-mutating lifecycle readiness results for direct and launchd modes, bundle
+dry-run validation in the pre phase, and a blocking
+`host_reboot_not_detected` result when the post phase sees the same boot marker
+recorded before reboot. The host reboot drill now fails closed when it cannot
+prove the host reboot boundary it is meant to validate.
+
 - [x] **Step 6: Update Backlog and commit**
 
 Record verification and known host-gated skips in TASK-438 and TASK-443, then

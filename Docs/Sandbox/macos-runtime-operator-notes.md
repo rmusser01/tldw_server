@@ -353,6 +353,10 @@ post-reboot helper proof. The evidence directory is part of the acceptance
 record: it must survive reboot, must be private to the operator, and must not
 live under `/tmp`, `$TMPDIR`, or another volatile root. Prefer a run-specific
 directory under `~/Library/Logs/tldw/vz-host-reboot-drill/`.
+The drill records the host boot marker before and after reboot. Post validation
+fails if the marker is missing or unchanged, which prevents a no-reboot same
+helper process from passing as a reboot proof. The pre phase also records
+non-mutating lifecycle readiness checks and bundle dry-run validation.
 
 Direct helper mode:
 
@@ -363,6 +367,7 @@ socket_path="$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/help
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
   --evidence-dir "$evidence_dir" \
   --socket "$socket_path" \
+  --pid-file "$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.pid" \
   --bundle /path/to/canonical/bundle \
   --create-evidence-dir
 
@@ -371,6 +376,7 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
   --evidence-dir "$evidence_dir" \
   --socket "$socket_path" \
+  --pid-file "$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.pid" \
   --bundle /path/to/canonical/bundle \
   --run-smoke
 ```
@@ -405,8 +411,9 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
 path. It must not start a new helper process, because that would validate a
 fresh helper rather than reboot recovery. Expected blocking failures for an
 explicit manual drill include a missing, unsafe, or volatile evidence
-directory; invalid or mismatched pre/post metadata; helper ping or protocol
-failure; and post-reboot smoke failure when `--run-smoke` is requested.
+directory; unavailable or unchanged host boot marker; invalid or mismatched
+pre/post metadata; failed lifecycle readiness; helper ping or protocol failure;
+and post-reboot smoke failure when `--run-smoke` is requested.
 
 The broader manual recovery procedure remains:
 
