@@ -39,14 +39,12 @@ Create one staged PRD for WebUI and browser extension TTS/STT readiness, compari
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: documentation-only change. Checked the PRD and task files for non-ASCII characters; none were found. Bandit skipped because no Python/code files were touched. Local spec review was performed instead of a subagent review because current session instructions require explicit user authorization before spawning subagents.
-
-Review hardening patch: split Phase 2 into existing-API Phase 2A and optional endpoint Phase 2B; narrowed `/audio` to alias/redirect scope; added Phase 4 preset storage ownership gate; constrained Browser TTS persistence to `browser_local` handling; added comparison-run privacy/retention rules; required UI error-classification tests; made readiness measurement explicit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created and hardened the staged TTS/STT WebUI and extension PRD. Follow-up review changes now make capability sequencing, preset ownership, Browser TTS persistence, comparison privacy, error mapping, and readiness measurement explicit before implementation planning.
+Created a staged PRD covering first-time and power-user TTS/STT journeys, WebUI and extension parity, readiness/capability disclosure, comparison result provenance, per-user server presets, batch/history improvements, risks, acceptance tests, and implementation boundaries. The PRD references existing backend TTS/STT product docs and keeps backend/API additions additive and phase-gated.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
