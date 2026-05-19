@@ -56,6 +56,7 @@ import {
 import type { TFunction } from "i18next"
 import type { NavigateFunction } from "react-router-dom"
 import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 
 // ---------------------------------------------------------------------------
 // Shared props type for the CharacterDialogs component
@@ -1218,7 +1219,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                             updatePageTitle(chat.title)
                             setConversationsOpen(false)
                             setConversationCharacter(null)
-                            navigate("/")
+                            navigate(buildCharacterChatPath({ characterId: id }))
                             setTimeout(() => {
                               focusComposer()
                             }, 0)

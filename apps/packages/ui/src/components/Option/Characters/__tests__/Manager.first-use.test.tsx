@@ -3124,7 +3124,9 @@ describe("CharactersManager first-use onboarding", () => {
         greeting: expect.any(String)
       })
     )
-    expect(navigateMock).toHaveBeenCalledWith("/")
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/chat?mode=character&characterId=char-1"
+    )
     expect(focusComposerMock).toHaveBeenCalled()
   }, 30000)
 
@@ -4083,7 +4085,9 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(screen.getByRole("button", { name: "Open full chat" }))
 
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith("/")
+      expect(navigateMock).toHaveBeenCalledWith(
+        "/chat?mode=character&characterId=303"
+      )
     })
     expect(setSelectedCharacterMock).toHaveBeenCalled()
     expect(setSelectedCharacterMock).toHaveBeenCalledWith(
@@ -4144,7 +4148,7 @@ describe("CharactersManager first-use onboarding", () => {
         })
       )
       expect(openSpy).toHaveBeenCalledWith(
-        expect.any(String),
+        expect.stringContaining("/chat?mode=character&characterId=char-new-tab"),
         "_blank",
         "noopener,noreferrer"
       )
@@ -4198,7 +4202,9 @@ describe("CharactersManager first-use onboarding", () => {
         })
       )
       expect(openSpy).toHaveBeenCalledWith(
-        expect.any(String),
+        expect.stringContaining(
+          "/chat?mode=character&characterId=char-new-tab-gallery"
+        ),
         "_blank",
         "noopener,noreferrer"
       )

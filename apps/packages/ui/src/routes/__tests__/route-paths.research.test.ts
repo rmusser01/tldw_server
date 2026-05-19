@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { CHAT_PATH, RESEARCH_PATH, buildChatThreadPath, buildResearchLaunchPath } from "../route-paths"
+import {
+  CHAT_PATH,
+  RESEARCH_PATH,
+  buildCharacterChatPath,
+  buildChatThreadPath,
+  buildResearchLaunchPath
+} from "../route-paths"
 import { SETTINGS_SERVER_CHAT_ID_PARAM } from "../../utils/settings-return"
 
 describe("route-paths deep research launch", () => {
@@ -57,5 +63,14 @@ describe("route-paths deep research launch", () => {
     expect(parsed.pathname).toBe(CHAT_PATH)
     expect(parsed.searchParams.get(SETTINGS_SERVER_CHAT_ID_PARAM)).toBe("chat_123")
     expect(parsed.searchParams.get("researchReturnRunId")).toBe("rs_1")
+  })
+
+  it("builds a first-class character chat intent path", () => {
+    const href = buildCharacterChatPath({ characterId: "char 123" })
+    const parsed = new URL(href, "https://example.local")
+
+    expect(parsed.pathname).toBe(CHAT_PATH)
+    expect(parsed.searchParams.get("mode")).toBe("character")
+    expect(parsed.searchParams.get("characterId")).toBe("char 123")
   })
 })

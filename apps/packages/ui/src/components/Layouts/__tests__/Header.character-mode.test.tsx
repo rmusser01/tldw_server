@@ -8,6 +8,7 @@ const setTemporaryChatMock = vi.fn()
 const setHeaderShortcutsExpandedMock = vi.fn().mockResolvedValue(undefined)
 const setSelectedCharacterMock = vi.fn()
 const navigateMock = vi.fn()
+let locationPathname = "/chat"
 
 const messageOptionState = {
   clearChat: clearChatMock,
@@ -38,7 +39,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
-  useLocation: () => ({ pathname: "/chat" }),
+  useLocation: () => ({ pathname: locationPathname }),
   useNavigate: () => navigateMock
 }))
 
@@ -129,13 +130,16 @@ describe("Header character mode sequencing", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     selectedCharacter = null
+    locationPathname = "/chat"
   })
 
-  it("opens character selection before scene controls when no character is active", () => {
+  it("enters character mode and opens selection before scene controls when no character is active", () => {
     const actorListener = vi.fn()
     const assistantListener = vi.fn()
+    const characterModeListener = vi.fn()
     window.addEventListener("tldw:open-actor-settings", actorListener)
     window.addEventListener("tldw:open-assistant-select", assistantListener)
+    window.addEventListener("tldw:character-chat-mode-intent", characterModeListener)
 
     try {
       render(<Header />)
@@ -143,8 +147,13 @@ describe("Header character mode sequencing", () => {
       fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
       expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
-      expect(clearChatMock).toHaveBeenCalledTimes(1)
+      expect(clearChatMock).not.toHaveBeenCalled()
       expect(actorListener).not.toHaveBeenCalled()
+      expect(characterModeListener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          detail: { source: "chat-header", characterId: null }
+        })
+      )
       expect(assistantListener).toHaveBeenCalledWith(
         expect.objectContaining({
           detail: { tab: "character", source: "chat-header" }
@@ -153,15 +162,18 @@ describe("Header character mode sequencing", () => {
     } finally {
       window.removeEventListener("tldw:open-actor-settings", actorListener)
       window.removeEventListener("tldw:open-assistant-select", assistantListener)
+      window.removeEventListener("tldw:character-chat-mode-intent", characterModeListener)
     }
   })
 
-  it("keeps an active character selected when starting a fresh character chat", () => {
+  it("keeps an active character selected and preserves the current chat", () => {
     selectedCharacter = { id: "char-1", name: "Rin" }
     const actorListener = vi.fn()
     const assistantListener = vi.fn()
+    const focusListener = vi.fn()
     window.addEventListener("tldw:open-actor-settings", actorListener)
     window.addEventListener("tldw:open-assistant-select", assistantListener)
+    window.addEventListener("tldw:focus-composer", focusListener)
 
     try {
       render(<Header />)
@@ -170,13 +182,29 @@ describe("Header character mode sequencing", () => {
       fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
       expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
-      expect(clearChatMock).toHaveBeenCalledTimes(1)
+      expect(clearChatMock).not.toHaveBeenCalled()
       expect(actorListener).not.toHaveBeenCalled()
       expect(assistantListener).not.toHaveBeenCalled()
+      expect(focusListener).toHaveBeenCalledTimes(1)
     } finally {
       window.removeEventListener("tldw:open-actor-settings", actorListener)
       window.removeEventListener("tldw:open-assistant-select", assistantListener)
+      window.removeEventListener("tldw:focus-composer", focusListener)
     }
+  })
+
+  it("routes non-chat surfaces into first-class character chat intent", () => {
+    locationPathname = "/settings/characters"
+    selectedCharacter = { id: "char-1", name: "Rin" }
+    render(<Header />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
+
+    expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
+    expect(clearChatMock).not.toHaveBeenCalled()
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/chat?mode=character&characterId=char-1"
+    )
   })
 
   it("clears character state when switching back to saved or temporary chat", () => {

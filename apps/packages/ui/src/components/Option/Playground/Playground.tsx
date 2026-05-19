@@ -105,13 +105,18 @@ import {
   SETTINGS_SERVER_CHAT_ID_PARAM,
 } from "@/utils/settings-return";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   resolveComposerBottomOffsetPx,
   type ComposerDockLayoutMetrics,
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
+import {
+  CHARACTER_CHAT_MODE_INTENT_EVENT,
+  getCharacterChatRouteIntent,
+} from "@/utils/character-chat-mode-intent";
+import type { Character } from "@/types/character";
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
@@ -138,6 +143,8 @@ const renderArtifactsPanel = () => (
 );
 
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state";
+const CHAT_WORKFLOW_MODE_STORAGE_KEY = "playgroundChatWorkflowMode";
+type PlaygroundChatWorkflowMode = "standard" | "character";
 type ServerReadinessState = "ready" | "degraded" | "blocked" | null;
 const COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR =
   "[data-cockpit-assistant-select-trigger]";
@@ -170,6 +177,11 @@ const getRecordString = (
   }
   return null;
 };
+
+const normalizeChatWorkflowMode = (
+  value: unknown,
+): PlaygroundChatWorkflowMode =>
+  value === "character" ? "character" : "standard";
 
 export const Playground = () => {
   const drop = React.useRef<HTMLDivElement>(null);
@@ -207,9 +219,17 @@ export const Playground = () => {
     DEFAULT_CHAT_SETTINGS.stickyChatInput,
   );
   const isMobileViewport = useMobile();
+  const location = useLocation();
   const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
     ? "focus"
     : "cockpit";
+  const [chatWorkflowMode, setChatWorkflowMode] =
+    useStorage<PlaygroundChatWorkflowMode>(
+      CHAT_WORKFLOW_MODE_STORAGE_KEY,
+      "standard",
+    );
+  const [characterModeIntentActive, setCharacterModeIntentActive] =
+    React.useState(false);
   const [chatLayoutMode, setChatLayoutMode] =
     useStorage<PlaygroundCockpitMode>(
       "playgroundChatLayoutMode",
@@ -384,6 +404,10 @@ export const Playground = () => {
     typeof setTimeout
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
+  const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
+  const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
+  const routeCharacterIntentRequestRef = React.useRef(0);
+  const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const showStarterDeck =
@@ -392,6 +416,26 @@ export const Playground = () => {
     !stableHistoryId &&
     !serverChatId &&
     !composerHasDraft;
+  const routeCharacterIntent = React.useMemo(
+    () => getCharacterChatRouteIntent(location.search),
+    [location.search],
+  );
+  const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
+  const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
+  const normalizedChatWorkflowMode =
+    normalizeChatWorkflowMode(chatWorkflowMode);
+  const characterWorkflowActive =
+    routeRequestsCharacterMode ||
+    characterModeIntentActive ||
+    normalizedChatWorkflowMode === "character" ||
+    selectedAssistant?.kind === "character" ||
+    Boolean(selectedCharacter?.id);
+  const activeCharacterModeLabel =
+    selectedAssistant?.kind === "character"
+      ? selectedAssistant.name
+      : selectedAssistant
+        ? null
+        : selectedCharacter?.name ?? null;
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
@@ -427,6 +471,113 @@ export const Playground = () => {
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
   }, [setRouteContext]);
+
+  React.useEffect(() => {
+    translationRef.current = t;
+  }, [t]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleCharacterModeIntent = () => {
+      setCharacterModeIntentActive(true);
+      void setChatWorkflowMode("character");
+    };
+    const handleStarterSelected = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: unknown }>).detail;
+      const mode = String(detail?.mode || "").trim().toLowerCase();
+      if (mode === "character") {
+        setCharacterModeIntentActive(true);
+        void setChatWorkflowMode("character");
+        return;
+      }
+      if (mode) {
+        setCharacterModeIntentActive(false);
+        void setChatWorkflowMode("standard");
+      }
+    };
+    window.addEventListener(
+      CHARACTER_CHAT_MODE_INTENT_EVENT,
+      handleCharacterModeIntent as EventListener,
+    );
+    window.addEventListener(
+      "tldw:playground-starter-selected",
+      handleStarterSelected as EventListener,
+    );
+    return () => {
+      window.removeEventListener(
+        CHARACTER_CHAT_MODE_INTENT_EVENT,
+        handleCharacterModeIntent as EventListener,
+      );
+      window.removeEventListener(
+        "tldw:playground-starter-selected",
+        handleStarterSelected as EventListener,
+      );
+    };
+  }, [setChatWorkflowMode]);
+
+  React.useEffect(() => {
+    if (!routeRequestsCharacterMode) return;
+    setCharacterModeIntentActive(true);
+    void setChatWorkflowMode("character");
+  }, [routeRequestsCharacterMode, setChatWorkflowMode]);
+
+  React.useEffect(() => {
+    if (!routeCharacterIntentId) return;
+    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
+      return;
+    }
+    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
+      return;
+    }
+
+    const requestId = routeCharacterIntentRequestRef.current + 1;
+    routeCharacterIntentRequestRef.current = requestId;
+    routeCharacterIntentInFlightRef.current = routeCharacterIntentId;
+    const fallbackCharacterName = toText(
+      translationRef.current(
+        "playground:characterChat.characterFallback",
+        "Character {{id}}",
+        {
+          id: routeCharacterIntentId,
+        },
+      ),
+    ).replace("{{id}}", routeCharacterIntentId);
+    const fallbackCharacter: Character = {
+      id: routeCharacterIntentId,
+      name: fallbackCharacterName,
+    };
+    void tldwClient
+      .getCharacter(routeCharacterIntentId)
+      .then((character) => {
+        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
+        void setSelectedCharacter(character || fallbackCharacter);
+      })
+      .catch(() => {
+        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
+        void setSelectedCharacter(fallbackCharacter);
+      })
+      .finally(() => {
+        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        routeCharacterIntentInFlightRef.current = null;
+      });
+    return () => {
+      if (routeCharacterIntentRequestRef.current === requestId) {
+        routeCharacterIntentRequestRef.current += 1;
+      }
+    };
+  }, [
+    routeCharacterIntentId,
+    setSelectedCharacter,
+  ]);
+
+  React.useEffect(() => {
+    if (!routeCharacterIntentId) {
+      routeCharacterIntentAppliedRef.current = null;
+      routeCharacterIntentInFlightRef.current = null;
+    }
+  }, [routeCharacterIntentId]);
 
   React.useEffect(() => {
     const handleReadinessState = (event: Event) => {
@@ -2457,9 +2608,33 @@ export const Playground = () => {
           )}
           <div className="px-4 pt-2">
             <div className="mx-auto flex w-full max-w-[64rem] items-center justify-between text-[11px] text-text-muted">
-              <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                {t("playground:regions.timeline", "Conversation timeline")}
-              </span>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span
+                  data-testid="playground-active-chat-mode"
+                  className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-medium ${
+                    characterWorkflowActive
+                      ? "border-primary/40 bg-primary/10 text-primaryStrong"
+                      : "border-border bg-surface2 text-text-muted"
+                  }`}
+                >
+                  {characterWorkflowActive
+                    ? toText(
+                        t(
+                          "playground:characterChat.modeLabel",
+                          "Character Chat",
+                        ),
+                      )
+                    : toText(t("playground:regions.standardChat", "Standard chat"))}
+                  {characterWorkflowActive && activeCharacterModeLabel ? (
+                    <span className="ml-1 max-w-[14rem] truncate text-text">
+                      {activeCharacterModeLabel}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                  {t("playground:regions.timeline", "Conversation timeline")}
+                </span>
+              </div>
               <div className="flex items-center gap-1.5">
                 <button
                   ref={shortcutsTriggerRef}

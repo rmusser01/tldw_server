@@ -2665,6 +2665,8 @@ async def handle_unified_websocket(
     control_session = WSControlSession(_get_ws_control_protocol_config())
     paused_audio_chunks: deque[tuple[bytes, float]] = deque()
     vad_warning_sent = False
+    transcript_dirty = False
+    full_transcript_emitted = False
 
     try:
         # Always wait for configuration message from client
@@ -3063,6 +3065,7 @@ async def handle_unified_websocket(
                 commit_received_at: Timestamp when the commit (manual or auto) was triggered.
                 auto_commit: Whether the emission was triggered by VAD turn detection.
             """
+            nonlocal transcript_dirty, full_transcript_emitted
             if transcriber is None:
                 return
             full_transcript = transcriber.get_full_transcript()
@@ -3180,14 +3183,18 @@ async def handle_unified_websocket(
                 except Exception as cb_exc:  # noqa: BLE001 - callback failures must not break streaming
                     logger.debug(f"on_full_transcript callback failed: {cb_exc}")
             await stream.send_json(payload)
+            full_transcript_emitted = True
+            transcript_dirty = False
             for frame in diarization_followup_frames:
                 await stream.send_json(frame)
 
         async def _process_audio_chunk(audio_bytes: bytes) -> bool:
+            nonlocal transcript_dirty
             if transcriber is None:
                 return True
 
             result = await transcriber.process_audio_chunk(audio_bytes)
+            transcript_dirty = True
             if not result:
                 return True
 
@@ -3320,6 +3327,8 @@ async def handle_unified_websocket(
                     if decision.should_reset:
                         paused_audio_chunks.clear()
                         transcriber.reset()
+                        transcript_dirty = False
+                        full_transcript_emitted = False
                         if insights_engine:
                             try:
                                 await insights_engine.reset()
@@ -3332,7 +3341,8 @@ async def handle_unified_websocket(
                                 logger.exception("Diarization reset failed: {}", diar_err)
 
                     if decision.should_emit_full_transcript:
-                        await _emit_full_transcript(time.time(), auto_commit=False)
+                        if transcript_dirty or not full_transcript_emitted:
+                            await _emit_full_transcript(time.time(), auto_commit=False)
 
                     if decision.should_close:
                         paused_audio_chunks.clear()

@@ -76,6 +76,10 @@ type BuildChatThreadPathOptions = {
   researchReturnRunId?: string | null
 }
 
+type BuildCharacterChatPathOptions = {
+  characterId?: string | number | null
+}
+
 const setTrimmedSearchParam = (
   params: URLSearchParams,
   key: string,
@@ -132,6 +136,18 @@ export const buildChatThreadPath = (
   )
   const encoded = params.toString()
   return encoded ? `${CHAT_PATH}?${encoded}` : CHAT_PATH
+}
+
+export const buildCharacterChatPath = (
+  options: BuildCharacterChatPathOptions = {}
+): string => {
+  const params = new URLSearchParams({ mode: "character" })
+  const characterId =
+    options.characterId == null ? "" : String(options.characterId).trim()
+  if (characterId) {
+    params.set("characterId", characterId)
+  }
+  return `${CHAT_PATH}?${params.toString()}`
 }
 
 export const buildMediaCollectionReviewPath = (

@@ -205,6 +205,13 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => vi.fn(),
+    useLocation: () => ({
+      pathname: window.location.pathname || "/chat",
+      search: window.location.search || "",
+      hash: window.location.hash || "",
+      state: null,
+      key: "test-location",
+    }),
   };
 });
 

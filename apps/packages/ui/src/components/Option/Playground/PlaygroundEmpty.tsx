@@ -97,11 +97,11 @@ export const PlaygroundEmpty = () => {
         icon: UserCircle2,
         title: t(
           "playground:empty.starterCharacterTitle",
-          "Chat as a character",
+          "Character chat / role-play",
         ),
         description: t(
           "playground:empty.starterCharacterBody",
-          "Pick a character persona and have the AI respond in their style.",
+          "Pick a character and keep role-play setup visible while you chat.",
         ),
         action: () => dispatchStarter("character"),
       },

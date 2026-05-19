@@ -40,6 +40,7 @@ import {
   buildCharacterChatReadiness,
   type CharacterChatReadiness
 } from "@/utils/chat-model-availability"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 
 export type CharacterChatIntentBlocker = {
   record: any
@@ -520,7 +521,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     }
 
     setChatIntentBlocker(null)
-    navigate("/")
+    navigate(buildCharacterChatPath({ characterId: characterSelection.id }))
     setTimeout(() => {
       focusComposer()
     }, 0)
@@ -538,7 +539,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       const characterSelection = buildCharacterSelectionPayload(record)
       await setSelectedCharacter(characterSelection)
       const opened = window.open(
-        resolveChatWorkspaceUrl(),
+        resolveChatWorkspaceUrl({ characterId: characterSelection.id }),
         "_blank",
         "noopener,noreferrer"
       )

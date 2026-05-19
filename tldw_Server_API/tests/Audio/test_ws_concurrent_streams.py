@@ -1,8 +1,7 @@
 import pytest
-from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
 @pytest.mark.asyncio
@@ -48,7 +47,7 @@ async def test_ws_concurrent_streams_denied(monkeypatch):
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
         except (WebSocketDisconnect, RuntimeError):
