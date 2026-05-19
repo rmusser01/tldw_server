@@ -14,6 +14,7 @@ const mockState = vi.hoisted(() => ({
   fetchWatchlistRunsMock: vi.fn(),
   bulkCreateSourcesMock: vi.fn(),
   createWatchlistSourceMock: vi.fn(),
+  deleteWatchlistSourceMock: vi.fn(),
   createWatchlistJobMock: vi.fn(),
   deleteWatchlistJobMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
@@ -72,6 +73,7 @@ vi.mock("@/services/watchlists", () => ({
   fetchWatchlistRuns: (...args: unknown[]) => mockState.fetchWatchlistRunsMock(...args),
   bulkCreateSources: (...args: unknown[]) => mockState.bulkCreateSourcesMock(...args),
   createWatchlistSource: (...args: unknown[]) => mockState.createWatchlistSourceMock(...args),
+  deleteWatchlistSource: (...args: unknown[]) => mockState.deleteWatchlistSourceMock(...args),
   createWatchlistJob: (...args: unknown[]) => mockState.createWatchlistJobMock(...args),
   deleteWatchlistJob: (...args: unknown[]) => mockState.deleteWatchlistJobMock(...args),
   triggerWatchlistRun: (...args: unknown[]) => mockState.triggerWatchlistRunMock(...args),
@@ -173,6 +175,21 @@ const getQuickSetupDialog = () => screen.getByRole("dialog", { name: "Add initia
 
 const clickPipelineNext = () => {
   fireEvent.click(pipelineQueries().getByRole("button", { name: "Next" }))
+}
+
+const advancePipelineFromMonitorToReview = async () => {
+  clickPipelineNext()
+  await waitFor(() => {
+    expect(pipelineQueries().getByLabelText("Template")).toBeInTheDocument()
+  })
+  clickPipelineNext()
+  await waitFor(() => {
+    expect(pipelineQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
+  })
+  clickPipelineNext()
+  await waitFor(() => {
+    expect(screen.getByTestId("watchlists-pipeline-review-summary")).toBeInTheDocument()
+  })
 }
 
 const selectPipelineFeed = async (label: string) => {
@@ -679,7 +696,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(pipelineQueries().getByRole("button", { name: "Create pipeline" })).toBeInTheDocument()
     })
@@ -703,14 +720,6 @@ describe("OverviewTab quick setup flow", () => {
     expect(mockState.openOutputPreviewMock).toHaveBeenCalledWith(505)
     expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
       type: "pipeline_setup_opened"
-    })
-    expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
-      type: "pipeline_setup_step_completed",
-      step: "scope"
-    })
-    expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
-      type: "pipeline_setup_step_completed",
-      step: "briefing"
     })
     expect(mockState.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({
       type: "pipeline_setup_step_completed",
@@ -759,7 +768,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(pipelineQueries().getByRole("button", { name: "Create pipeline" })).toBeInTheDocument()
     })
@@ -776,6 +785,54 @@ describe("OverviewTab quick setup flow", () => {
       mode: "create",
       runNow: true
     })
+    consoleErrorSpy.mockRestore()
+  }, 20_000)
+
+  it("rolls back a wizard-created source when pipeline creation fails before run start", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    mockState.fetchOverviewMock.mockResolvedValue(
+      createOverviewPayload({
+        sources: { total: 2, healthy: 2 },
+        jobs: { total: 1, active: 1 }
+      })
+    )
+    mockState.createWatchlistSourceMock.mockResolvedValue({ id: 707 })
+    mockState.createWatchlistJobMock.mockRejectedValue(new Error("job failed"))
+    mockState.deleteWatchlistSourceMock.mockResolvedValue({ success: true, source_id: 707 })
+
+    render(<OverviewTab />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-overview-cta-pipeline-builder")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-overview-cta-pipeline-builder"))
+    await waitFor(() => {
+      expect(pipelineQueries().getByLabelText("Create a new feed")).toBeInTheDocument()
+    })
+    fireEvent.click(pipelineQueries().getByLabelText("Create a new feed"))
+    fireEvent.change(pipelineQueries().getByLabelText("Feed name"), {
+      target: { value: "Policy Feed" }
+    })
+    fireEvent.change(pipelineQueries().getByLabelText("Feed URL"), {
+      target: { value: "https://example.com/policy.xml" }
+    })
+    clickPipelineNext()
+    await waitFor(() => {
+      expect(pipelineQueries().getByLabelText("Monitor name")).toBeInTheDocument()
+    })
+    fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
+      target: { value: "Policy Brief" }
+    })
+    await advancePipelineFromMonitorToReview()
+    fireEvent.click(pipelineQueries().getByRole("button", { name: "Create pipeline" }))
+
+    await waitFor(() => {
+      expect(mockState.deleteWatchlistSourceMock).toHaveBeenCalledWith(707)
+    })
+    expect(mockState.deleteWatchlistJobMock).not.toHaveBeenCalled()
+    expect(mockState.openOutputPreviewMock).not.toHaveBeenCalled()
+    expect(mockState.openRunDetailMock).not.toHaveBeenCalled()
     consoleErrorSpy.mockRestore()
   }, 20_000)
 
@@ -826,7 +883,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
 
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-preview-generate")).toBeInTheDocument()
@@ -883,7 +940,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
 
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-preview-generate")).toBeInTheDocument()
@@ -931,7 +988,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-test-generation")).toBeInTheDocument()
     })

@@ -3,7 +3,6 @@ import {
   Alert,
   Button,
   Card,
-  Checkbox,
   Empty,
   Form,
   Input,
@@ -19,7 +18,6 @@ import {
   Tag,
   Tooltip
 } from "antd"
-import type { StepsProps } from "antd"
 import {
   AlertTriangle,
   BellRing,
@@ -37,6 +35,7 @@ import {
   createWatchlistJob,
   createWatchlistSource,
   deleteWatchlistJob,
+  deleteWatchlistSource,
   fetchWatchlistRuns,
   fetchWatchlistSources,
   getWatchlistTemplate,
@@ -59,12 +58,15 @@ import {
 } from "./quick-setup"
 import type { JobPreviewResult } from "@/types/watchlists"
 import {
-  buildPipelineReviewSummary,
   toPipelineJobCreatePayload,
-  toPipelineOutputCreatePayload,
-  validateBriefingPipelineDraft,
-  type BriefingPipelineDraft
+  toPipelineOutputCreatePayload
 } from "./pipeline-contract"
+import { PipelineWizard } from "./PipelineWizard"
+import {
+  toBriefingPipelineDraft,
+  toPipelineWizardSourcePayload,
+  type PipelineWizardDraft
+} from "./pipeline-wizard-state"
 import {
   type WatchlistsOnboardingPath,
   readWatchlistsOnboardingPath,
@@ -88,61 +90,6 @@ const QUICK_SETUP_STEP_FIELDS: Array<Array<keyof QuickSetupValues>> = [
   ["monitorName", "schedulePreset", "setupGoal", "runNow", "includeAudioBriefing"],
   []
 ]
-const PIPELINE_SETUP_MAX_STEP = 2
-
-interface PipelineBuilderValues {
-  sourceIds: number[]
-  monitorName: string
-  schedulePreset: "none" | "hourly" | "daily" | "weekdays"
-  templateName: string
-  includeAudio: boolean
-  audioVoice: string
-  targetAudioMinutes: number
-  emailDeliveryEnabled: boolean
-  emailRecipients: string[]
-  chatbookDeliveryEnabled: boolean
-  chatbookTitle: string
-  runNow: boolean
-}
-
-const PIPELINE_DEFAULT_VALUES: PipelineBuilderValues = {
-  sourceIds: [],
-  monitorName: "",
-  schedulePreset: "daily",
-  templateName: "briefing_md",
-  includeAudio: true,
-  audioVoice: "alloy",
-  targetAudioMinutes: 8,
-  emailDeliveryEnabled: false,
-  emailRecipients: [],
-  chatbookDeliveryEnabled: false,
-  chatbookTitle: "",
-  runNow: true
-}
-
-const toPipelineDraft = (values: PipelineBuilderValues): BriefingPipelineDraft => ({
-  monitorName: values.monitorName,
-  sourceIds: values.sourceIds || [],
-  schedulePreset: values.schedulePreset,
-  templateName: values.templateName,
-  includeAudio: values.includeAudio,
-  audioVoice: values.includeAudio ? values.audioVoice : undefined,
-  targetAudioMinutes: values.includeAudio ? Number(values.targetAudioMinutes) : undefined,
-  emailRecipients: values.emailDeliveryEnabled
-    ? (values.emailRecipients || []).map((entry) => String(entry || "").trim()).filter((entry) => entry.length > 0)
-    : [],
-  createChatbook: Boolean(values.chatbookDeliveryEnabled),
-  chatbookTitle: values.chatbookDeliveryEnabled ? String(values.chatbookTitle || "").trim() : undefined
-})
-
-const PIPELINE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-const normalizePipelineRecipients = (value: unknown): string[] =>
-  Array.isArray(value)
-    ? value
-      .map((entry) => String(entry || "").trim().toLowerCase())
-      .filter((entry) => entry.length > 0)
-    : []
 
 export const OverviewTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
@@ -157,7 +104,6 @@ export const OverviewTab: React.FC = () => {
   const [quickSetupCandidatePreviewLoading, setQuickSetupCandidatePreviewLoading] = useState(false)
   const [quickSetupCandidatePreviewError, setQuickSetupCandidatePreviewError] = useState<string | null>(null)
   const [pipelineSetupOpen, setPipelineSetupOpen] = useState(false)
-  const [pipelineSetupStep, setPipelineSetupStep] = useState(0)
   const [pipelineSetupSubmitting, setPipelineSetupSubmitting] = useState(false)
   const [pipelineSourcesLoading, setPipelineSourcesLoading] = useState(false)
   const [pipelineSources, setPipelineSources] = useState<WatchlistSource[]>([])
@@ -176,7 +122,6 @@ export const OverviewTab: React.FC = () => {
   const pipelineSetupWasOpenRef = useRef(false)
   const quickSetupPreviewRequestRef = useRef(0)
   const [quickSetupForm] = Form.useForm<QuickSetupValues>()
-  const [pipelineSetupForm] = Form.useForm<PipelineBuilderValues>()
 
   const setActiveTab = useWatchlistsStore((s) => s.setActiveTab)
   const setOutputsRunFilter = useWatchlistsStore((s) => s.setOutputsRunFilter)
@@ -660,10 +605,6 @@ export const OverviewTab: React.FC = () => {
       })
       const items = Array.isArray(result.items) ? result.items : []
       setPipelineSources(items)
-      const selectedIds = pipelineSetupForm.getFieldValue("sourceIds") as number[] | undefined
-      if ((!selectedIds || selectedIds.length === 0) && items.length === 1) {
-        pipelineSetupForm.setFieldsValue({ sourceIds: [items[0].id] })
-      }
     } catch (err) {
       console.error("Failed to load watchlist sources for pipeline setup:", err)
       setPipelineSources([])
@@ -676,11 +617,9 @@ export const OverviewTab: React.FC = () => {
     } finally {
       setPipelineSourcesLoading(false)
     }
-  }, [pipelineSetupForm, selectedWatchlistId, t])
+  }, [selectedWatchlistId, t])
 
   const openPipelineSetup = useCallback(() => {
-    pipelineSetupForm.setFieldsValue(PIPELINE_DEFAULT_VALUES)
-    setPipelineSetupStep(0)
     setPipelinePreviewError(null)
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
@@ -688,60 +627,19 @@ export const OverviewTab: React.FC = () => {
     setPipelineSetupOpen(true)
     void trackWatchlistsOnboardingTelemetry({ type: "pipeline_setup_opened" })
     void loadPipelineSources()
-  }, [loadPipelineSources, pipelineSetupForm])
+  }, [loadPipelineSources])
 
   const closePipelineSetup = useCallback(() => {
     if (pipelineSetupSubmitting) return
     setPipelineSetupOpen(false)
-    setPipelineSetupStep(0)
     setPipelinePreviewLoading(false)
     setPipelinePreviewError(null)
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
     setPipelinePreviewWarnings([])
-    pipelineSetupForm.resetFields()
-  }, [pipelineSetupForm, pipelineSetupSubmitting])
+  }, [pipelineSetupSubmitting])
 
-  const handlePipelineSetupBack = useCallback(() => {
-    setPipelineSetupStep((prev) => Math.max(0, prev - 1))
-  }, [])
-
-  const handlePipelineSetupNext = useCallback(async () => {
-    try {
-      let completedStep: "scope" | "briefing" | null = null
-      if (pipelineSetupStep === 0) {
-        await pipelineSetupForm.validateFields(["sourceIds"])
-        completedStep = "scope"
-      } else if (pipelineSetupStep === 1) {
-        const includeAudio = Boolean(pipelineSetupForm.getFieldValue("includeAudio"))
-        const emailDeliveryEnabled = Boolean(pipelineSetupForm.getFieldValue("emailDeliveryEnabled"))
-        const fields: Array<keyof PipelineBuilderValues> = [
-          "monitorName",
-          "schedulePreset",
-          "templateName"
-        ]
-        if (includeAudio) {
-          fields.push("audioVoice", "targetAudioMinutes")
-        }
-        if (emailDeliveryEnabled) {
-          fields.push("emailRecipients")
-        }
-        await pipelineSetupForm.validateFields(fields)
-        completedStep = "briefing"
-      }
-      if (completedStep) {
-        void trackWatchlistsOnboardingTelemetry({
-          type: "pipeline_setup_step_completed",
-          step: completedStep
-        })
-      }
-      setPipelineSetupStep((prev) => Math.min(prev + 1, PIPELINE_SETUP_MAX_STEP))
-    } catch {
-      // Field-level validation state is already surfaced by antd form.
-    }
-  }, [pipelineSetupForm, pipelineSetupStep])
-
-  const generatePipelineTemplatePreview = useCallback(async () => {
+  const generatePipelineTemplatePreview = useCallback(async (wizardDraft: PipelineWizardDraft) => {
     setPipelinePreviewLoading(true)
     setPipelinePreviewError(null)
     setPipelinePreviewRendered(null)
@@ -749,11 +647,7 @@ export const OverviewTab: React.FC = () => {
     setPipelinePreviewWarnings([])
 
     try {
-      const values = {
-        ...PIPELINE_DEFAULT_VALUES,
-        ...pipelineSetupForm.getFieldsValue(true)
-      } as PipelineBuilderValues
-      const draft = toPipelineDraft(values)
+      const draft = toBriefingPipelineDraft(wizardDraft)
       const templateName = String(draft.templateName || "").trim()
       if (!templateName) {
         setPipelinePreviewError(
@@ -865,58 +759,37 @@ export const OverviewTab: React.FC = () => {
     } finally {
       setPipelinePreviewLoading(false)
     }
-  }, [pipelineSetupForm, selectedWatchlistId, t])
+  }, [selectedWatchlistId, t])
 
   const completePipelineSetup = useCallback(async (
-    options?: { mode?: "create" | "test"; forceRunNow?: boolean }
+    wizardDraft: PipelineWizardDraft,
+    options: { mode?: "create" | "test" } = {}
   ) => {
+    let createdSourceId: number | null = null
     let createdJobId: number | null = null
     let createdRunId: number | null = null
     const mode = options?.mode || "create"
     let shouldRunNowForTelemetry = false
-    let pipelineFailureStage: "validation" | "job_create" | "run_trigger" | "output_create" | "rollback" =
-      "job_create"
+    let pipelineFailureStage: "source_create" | "job_create" | "run_trigger" | "output_create" | "rollback" =
+      wizardDraft.sourceMode === "new" ? "source_create" : "job_create"
 
     try {
       setPipelineSetupSubmitting(true)
-      const values = {
-        ...PIPELINE_DEFAULT_VALUES,
-        ...pipelineSetupForm.getFieldsValue(true)
-      } as PipelineBuilderValues
-      const shouldRunNow = Boolean(values.runNow || options?.forceRunNow)
+      const shouldRunNow = Boolean(wizardDraft.runNow || mode === "test")
       shouldRunNowForTelemetry = shouldRunNow
 
-      const draft = toPipelineDraft(values)
-      const validation = validateBriefingPipelineDraft(draft)
-      if (!validation.valid) {
-        const errorFields = validation.errors.map((key) => ({
-          name: key as keyof PipelineBuilderValues,
-          errors: [
-            t(
-              "watchlists:overview.pipelineSetup.validation.required",
-              "Complete this field before continuing."
-            )
-          ]
-        }))
-        pipelineSetupForm.setFields(errorFields)
-        if (validation.errors.includes("sourceIds")) {
-          setPipelineSetupStep(0)
-        } else {
-          setPipelineSetupStep(1)
-        }
-        message.error(
-          t(
-            "watchlists:overview.pipelineSetup.validationError",
-            "Review the highlighted pipeline fields."
-          )
+      let sourceIds = wizardDraft.sourceIds
+      if (wizardDraft.sourceMode === "new") {
+        const sourcePayload = toPipelineWizardSourcePayload(
+          wizardDraft,
+          selectedWatchlistId ?? undefined
         )
-        void trackWatchlistsOnboardingTelemetry({
-          type: "pipeline_setup_failed",
-          stage: "validation",
-          mode,
-          runNow: shouldRunNow
-        })
-        return
+        if (!sourcePayload) {
+          throw new Error("source_payload_missing")
+        }
+        const source = await createWatchlistSource(sourcePayload)
+        createdSourceId = source.id
+        sourceIds = [source.id]
       }
 
       void trackWatchlistsOnboardingTelemetry({
@@ -930,6 +803,7 @@ export const OverviewTab: React.FC = () => {
       })
 
       pipelineFailureStage = "job_create"
+      const draft = toBriefingPipelineDraft(wizardDraft, sourceIds)
       const job = await createWatchlistJob({
         ...toPipelineJobCreatePayload(draft),
         watchlist_id: selectedWatchlistId ?? undefined
@@ -995,16 +869,24 @@ export const OverviewTab: React.FC = () => {
         mode,
         runNow: shouldRunNowForTelemetry
       })
-      if (createdJobId != null && createdRunId == null) {
+      if (createdRunId != null) {
+        setActiveTab("runs")
+        openRunDetail(createdRunId)
+        message.error(
+          t(
+            "watchlists:overview.pipelineSetup.error",
+            "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
+          )
+        )
+        return
+      }
+
+      let rollbackFailed = false
+      if (createdJobId != null) {
         try {
           await deleteWatchlistJob(createdJobId)
-          message.warning(
-            t(
-              "watchlists:overview.pipelineSetup.rollbackSuccess",
-              "Pipeline setup failed before run start. Monitor creation was rolled back."
-            )
-          )
         } catch (rollbackError) {
+          rollbackFailed = true
           console.error("Failed to rollback pipeline monitor creation:", rollbackError)
           void trackWatchlistsOnboardingTelemetry({
             type: "pipeline_setup_failed",
@@ -1012,18 +894,40 @@ export const OverviewTab: React.FC = () => {
             mode,
             runNow: shouldRunNowForTelemetry
           })
+        }
+      }
+      if (createdSourceId != null) {
+        try {
+          await deleteWatchlistSource(createdSourceId)
+        } catch (rollbackError) {
+          rollbackFailed = true
+          console.error("Failed to rollback pipeline source creation:", rollbackError)
+          void trackWatchlistsOnboardingTelemetry({
+            type: "pipeline_setup_failed",
+            stage: "rollback",
+            mode,
+            runNow: shouldRunNowForTelemetry
+          })
+        }
+      }
+
+      if (createdJobId != null || createdSourceId != null) {
+        if (rollbackFailed) {
           message.error(
             t(
               "watchlists:overview.pipelineSetup.rollbackFailed",
               "Pipeline setup failed and rollback was incomplete. Review Monitors for cleanup."
             )
           )
+        } else {
+          message.warning(
+            t(
+              "watchlists:overview.pipelineSetup.rollbackSuccess",
+              "Pipeline setup failed before run start. Created resources were rolled back."
+            )
+          )
         }
       } else {
-        if (createdRunId != null) {
-          setActiveTab("runs")
-          openRunDetail(createdRunId)
-        }
         message.error(
           t(
             "watchlists:overview.pipelineSetup.error",
@@ -1036,10 +940,10 @@ export const OverviewTab: React.FC = () => {
     }
   }, [
     closePipelineSetup,
+    deleteWatchlistSource,
     loadOverview,
     openOutputPreview,
     openRunDetail,
-    pipelineSetupForm,
     selectedWatchlistId,
     setActiveTab,
     setOutputsRunFilter,
@@ -1172,44 +1076,6 @@ export const OverviewTab: React.FC = () => {
           "watchlists:overview.onboarding.quickSetup.destination.jobs",
           "After setup, you will land in Monitors to schedule and tune your workflow."
         )
-  const pipelineSetupValues = Form.useWatch([], pipelineSetupForm) as
-    | Partial<PipelineBuilderValues>
-    | undefined
-  const pipelineDraftPreview = toPipelineDraft({
-    ...PIPELINE_DEFAULT_VALUES,
-    ...(pipelineSetupValues || {})
-  } as PipelineBuilderValues)
-  const pipelineReviewSummary = buildPipelineReviewSummary(pipelineDraftPreview)
-  const pipelineEmailRecipients = normalizePipelineRecipients(pipelineSetupValues?.emailRecipients)
-  const pipelineHasValidEmailRecipients = !pipelineSetupValues?.emailDeliveryEnabled || (
-    pipelineEmailRecipients.length > 0 &&
-    pipelineEmailRecipients.every((entry) => PIPELINE_EMAIL_PATTERN.test(entry))
-  )
-  const pipelineScopeComplete = Array.isArray(pipelineDraftPreview.sourceIds) && pipelineDraftPreview.sourceIds.length > 0
-  const pipelineBriefingComplete = Boolean(
-    pipelineDraftPreview.monitorName.trim().length > 0 &&
-      pipelineDraftPreview.templateName.trim().length > 0 &&
-      (!pipelineDraftPreview.includeAudio ||
-        (Boolean(pipelineDraftPreview.audioVoice) &&
-          Number(pipelineDraftPreview.targetAudioMinutes || 0) > 0)) &&
-      pipelineHasValidEmailRecipients
-  )
-  const pipelineReviewComplete = pipelineScopeComplete && pipelineBriefingComplete
-  const pipelineStepItems = useMemo<NonNullable<StepsProps["items"]>>(() => ([
-    {
-      title: t("watchlists:overview.pipelineSetup.steps.scope", "Scope"),
-      status: pipelineScopeComplete ? "finish" : pipelineSetupStep === 0 ? "process" : "wait"
-    },
-    {
-      title: t("watchlists:overview.pipelineSetup.steps.briefing", "Briefing"),
-      status: pipelineBriefingComplete ? "finish" : pipelineSetupStep === 1 ? "process" : "wait"
-    },
-    {
-      title: t("watchlists:overview.pipelineSetup.steps.review", "Review"),
-      status: pipelineReviewComplete ? "finish" : pipelineSetupStep === 2 ? "process" : "wait"
-    }
-  ]), [pipelineBriefingComplete, pipelineReviewComplete, pipelineScopeComplete, pipelineSetupStep, t])
-  const pipelineSetupIsLastStep = pipelineSetupStep >= PIPELINE_SETUP_MAX_STEP
   const overviewBadges = getOverviewTabBadges(data?.health)
 
   if (!hasSelectedWatchlist) {
@@ -2213,455 +2079,24 @@ export const OverviewTab: React.FC = () => {
         </div>
       </Modal>
 
-      <Modal
+      <PipelineWizard
         open={pipelineSetupOpen}
-        title={t("watchlists:overview.pipelineSetup.title", "Briefing pipeline builder")}
+        sources={pipelineSources}
+        sourcesLoading={pipelineSourcesLoading}
+        submitting={pipelineSetupSubmitting}
+        previewLoading={pipelinePreviewLoading}
+        previewError={pipelinePreviewError}
+        previewRendered={pipelinePreviewRendered}
+        previewRunId={pipelinePreviewRunId}
+        previewWarnings={pipelinePreviewWarnings}
         onCancel={closePipelineSetup}
-        destroyOnHidden
-        maskClosable={!pipelineSetupSubmitting}
-        footer={[
-          <Button
-            key="cancel"
-            onClick={closePipelineSetup}
-            disabled={pipelineSetupSubmitting}
-          >
-            {t("common:cancel", "Cancel")}
-          </Button>,
-          <Button
-            key="back"
-            onClick={handlePipelineSetupBack}
-            disabled={pipelineSetupSubmitting || pipelineSetupStep === 0}
-          >
-            {t("common:back", "Back")}
-          </Button>,
-          pipelineSetupIsLastStep ? (
-            <Button
-              key="test-generation"
-              data-testid="watchlists-pipeline-test-generation"
-              onClick={() => {
-                void completePipelineSetup({ mode: "test", forceRunNow: true })
-              }}
-              loading={pipelineSetupSubmitting}
-            >
-              {t("watchlists:overview.pipelineSetup.actions.testGeneration", "Run test generation")}
-            </Button>
-          ) : null,
-          <Button
-            key="next"
-            type="primary"
-            loading={pipelineSetupSubmitting}
-            onClick={() => {
-              if (pipelineSetupIsLastStep) {
-                void completePipelineSetup({ mode: "create" })
-              } else {
-                void handlePipelineSetupNext()
-              }
-            }}
-          >
-            {pipelineSetupIsLastStep
-              ? t("watchlists:overview.pipelineSetup.actions.finish", "Create pipeline")
-              : t("common:next", "Next")}
-          </Button>
-        ]}
-      >
-        <div className="space-y-4">
-          <Steps
-            size="small"
-            current={pipelineSetupStep}
-            items={pipelineStepItems}
-          />
-
-          <Form
-            form={pipelineSetupForm}
-            layout="vertical"
-            initialValues={PIPELINE_DEFAULT_VALUES}
-          >
-            {pipelineSetupStep === 0 && (
-              <div className="space-y-2">
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.sources", "Feeds")}
-                  name="sourceIds"
-                  rules={[
-                    {
-                      validator: (_rule, value) => {
-                        if (Array.isArray(value) && value.length > 0) {
-                          return Promise.resolve()
-                        }
-                        return Promise.reject(
-                          new Error(
-                            t(
-                              "watchlists:overview.pipelineSetup.validation.sourcesRequired",
-                              "Select at least one feed"
-                            )
-                          )
-                        )
-                      }
-                    }
-                  ]}
-                >
-                  <Checkbox.Group className="grid gap-2">
-                    {pipelineSources.map((source) => (
-                      <Checkbox key={source.id} value={source.id}>
-                        {source.name || `Feed #${source.id}`}
-                      </Checkbox>
-                    ))}
-                  </Checkbox.Group>
-                </Form.Item>
-                {pipelineSourcesLoading && (
-                  <div className="text-xs text-text-muted">
-                    {t("watchlists:overview.pipelineSetup.sourcesLoading", "Loading feeds...")}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {pipelineSetupStep === 1 && (
-              <div className="space-y-1">
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.monitorName", "Monitor name")}
-                  name="monitorName"
-                  rules={[
-                    {
-                      required: true,
-                      message: t(
-                        "watchlists:overview.pipelineSetup.validation.monitorNameRequired",
-                        "Enter a monitor name"
-                      )
-                    }
-                  ]}
-                >
-                  <Input autoFocus />
-                </Form.Item>
-
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}
-                  name="schedulePreset"
-                >
-                  <Select
-                    options={[
-                      { value: "none", label: t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only") },
-                      { value: "hourly", label: t("watchlists:overview.onboarding.quickSetup.schedule.hourly", "Hourly") },
-                      { value: "daily", label: t("watchlists:overview.onboarding.quickSetup.schedule.daily", "Daily at 08:00") },
-                      { value: "weekdays", label: t("watchlists:overview.onboarding.quickSetup.schedule.weekdays", "Weekdays at 08:00") }
-                    ]}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.template", "Template")}
-                  name="templateName"
-                  rules={[
-                    {
-                      required: true,
-                      message: t(
-                        "watchlists:overview.pipelineSetup.validation.templateRequired",
-                        "Enter a template name"
-                      )
-                    }
-                  ]}
-                >
-                  <Input />
-                </Form.Item>
-
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.includeAudio", "Include audio briefing")}
-                  name="includeAudio"
-                  valuePropName="checked"
-                >
-                  <Switch
-                    aria-label={t(
-                      "watchlists:overview.pipelineSetup.fields.includeAudio",
-                      "Include audio briefing"
-                    )}
-                  />
-                </Form.Item>
-
-                {pipelineSetupValues?.includeAudio && (
-                  <>
-                    <Form.Item
-                      label={t("watchlists:overview.pipelineSetup.fields.audioVoice", "Audio voice")}
-                      name="audioVoice"
-                      rules={[
-                        {
-                          required: true,
-                          message: t(
-                            "watchlists:overview.pipelineSetup.validation.audioVoiceRequired",
-                            "Select an audio voice"
-                          )
-                        }
-                      ]}
-                    >
-                      <Select
-                        options={[
-                          { value: "alloy", label: "Alloy" },
-                          { value: "nova", label: "Nova" },
-                          { value: "echo", label: "Echo" }
-                        ]}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      label={t("watchlists:overview.pipelineSetup.fields.audioMinutes", "Target audio minutes")}
-                      name="targetAudioMinutes"
-                      rules={[
-                        {
-                          required: true,
-                          type: "number",
-                          min: 1,
-                          message: t(
-                            "watchlists:overview.pipelineSetup.validation.audioMinutesRequired",
-                            "Enter target audio minutes"
-                          )
-                        }
-                      ]}
-                    >
-                      <Input type="number" min={1} />
-                    </Form.Item>
-                  </>
-                )}
-
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email delivery")}
-                  name="emailDeliveryEnabled"
-                  valuePropName="checked"
-                >
-                  <Switch
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email delivery")}
-                  />
-                </Form.Item>
-
-                {pipelineSetupValues?.emailDeliveryEnabled && (
-                  <Form.Item
-                    label={t("watchlists:overview.pipelineSetup.fields.emailRecipients", "Email recipients")}
-                    name="emailRecipients"
-                    rules={[
-                      {
-                        validator: (_rule, value) => {
-                          const recipients = normalizePipelineRecipients(value)
-                          if (recipients.length === 0) {
-                            return Promise.reject(
-                              new Error(
-                                t(
-                                  "watchlists:overview.pipelineSetup.validation.emailRecipientsRequired",
-                                  "Enter at least one recipient email"
-                                )
-                              )
-                            )
-                          }
-                          const invalidRecipients = recipients.filter(
-                            (entry) => !PIPELINE_EMAIL_PATTERN.test(entry)
-                          )
-                          if (invalidRecipients.length > 0) {
-                            return Promise.reject(
-                              new Error(
-                                t(
-                                  "watchlists:overview.pipelineSetup.validation.emailRecipientsInvalid",
-                                  "Fix invalid email recipients before continuing."
-                                )
-                              )
-                            )
-                          }
-                          return Promise.resolve()
-                        }
-                      }
-                    ]}
-                  >
-                    <Select
-                      mode="tags"
-                      tokenSeparators={[","]}
-                      placeholder={t(
-                        "watchlists:overview.pipelineSetup.fields.emailRecipientsPlaceholder",
-                        "name@example.com"
-                      )}
-                    />
-                  </Form.Item>
-                )}
-
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.chatbookDelivery", "Chatbook delivery")}
-                  name="chatbookDeliveryEnabled"
-                  valuePropName="checked"
-                >
-                  <Switch
-                    aria-label={t(
-                      "watchlists:overview.pipelineSetup.fields.chatbookDelivery",
-                      "Chatbook delivery"
-                    )}
-                  />
-                </Form.Item>
-
-                {pipelineSetupValues?.chatbookDeliveryEnabled && (
-                  <Form.Item
-                    label={t("watchlists:overview.pipelineSetup.fields.chatbookTitle", "Chatbook title")}
-                    name="chatbookTitle"
-                  >
-                    <Input
-                      placeholder={t(
-                        "watchlists:overview.pipelineSetup.fields.chatbookTitlePlaceholder",
-                        "Morning Intel"
-                      )}
-                    />
-                  </Form.Item>
-                )}
-
-                <Form.Item
-                  label={t("watchlists:overview.pipelineSetup.fields.runNow", "Run immediately")}
-                  name="runNow"
-                  valuePropName="checked"
-                >
-                  <Switch
-                    aria-label={t("watchlists:overview.pipelineSetup.fields.runNow", "Run immediately")}
-                  />
-                </Form.Item>
-              </div>
-            )}
-
-            {pipelineSetupStep === 2 && (
-              <div className="space-y-3 text-sm">
-                <p className="text-text-muted">
-                  {t(
-                    "watchlists:overview.pipelineSetup.reviewDescription",
-                    "Confirm this pipeline before creating monitor, run, and output artifacts."
-                  )}
-                </p>
-                <div className="rounded-md border border-border bg-surface p-3">
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.pipelineSetup.review.monitor", "Monitor")}:
-                    </span>{" "}
-                    {pipelineSetupValues?.monitorName || "—"}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.pipelineSetup.review.feeds", "Feeds")}:
-                    </span>{" "}
-                    {Array.isArray(pipelineSetupValues?.sourceIds)
-                      ? pipelineSetupValues?.sourceIds.length
-                      : 0}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.pipelineSetup.review.schedule", "Schedule")}:
-                    </span>{" "}
-                    {pipelineReviewSummary.scheduleLabel}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.pipelineSetup.review.artifacts", "Artifacts")}:
-                    </span>{" "}
-                    {pipelineReviewSummary.artifacts.join(", ")}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.pipelineSetup.review.deliveries", "Deliveries")}:
-                    </span>{" "}
-                    {pipelineReviewSummary.deliveries.join(", ")}
-                  </p>
-                  {pipelineSetupValues?.emailDeliveryEnabled && (
-                    <p>
-                      <span className="font-medium">
-                        {t("watchlists:overview.pipelineSetup.review.emailRecipients", "Email recipients")}:
-                      </span>{" "}
-                      {pipelineEmailRecipients.length}
-                    </p>
-                  )}
-                  {pipelineSetupValues?.chatbookDeliveryEnabled && (
-                    <p>
-                      <span className="font-medium">
-                        {t("watchlists:overview.pipelineSetup.review.chatbookTitle", "Chatbook title")}:
-                      </span>{" "}
-                      {String(pipelineSetupValues?.chatbookTitle || "").trim() || "Watchlists Briefing"}
-                    </p>
-                  )}
-                  <p>
-                    <span className="font-medium">
-                      {t("watchlists:overview.pipelineSetup.review.runNow", "Run now")}:
-                    </span>{" "}
-                    {pipelineSetupValues?.runNow ? t("common:yes", "Yes") : t("common:no", "No")}
-                  </p>
-                </div>
-                <div className="rounded-md border border-border bg-surface p-3 text-xs text-text-muted space-y-1">
-                  <p data-testid="watchlists-pipeline-review-outcome-text">
-                    {t(
-                      "watchlists:overview.pipelineSetup.review.textOutcome",
-                      "Text outcome: {{template}} template will generate a written report artifact.",
-                      {
-                        template: String(pipelineSetupValues?.templateName || "briefing_md")
-                      }
-                    )}
-                  </p>
-                  <p data-testid="watchlists-pipeline-review-outcome-audio">
-                    {pipelineSetupValues?.includeAudio
-                      ? t(
-                          "watchlists:overview.pipelineSetup.review.audioOutcomeEnabled",
-                          "Audio outcome: voice {{voice}} targeting about {{minutes}} minutes.",
-                          {
-                            voice: String(pipelineSetupValues?.audioVoice || "alloy"),
-                            minutes: Number(pipelineSetupValues?.targetAudioMinutes || 8)
-                          }
-                        )
-                      : t(
-                          "watchlists:overview.pipelineSetup.review.audioOutcomeDisabled",
-                          "Audio outcome: disabled. Reports will be text-only."
-                        )}
-                  </p>
-                </div>
-                <div className="rounded-md border border-border bg-surface p-3 space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs text-text-muted">
-                      {t(
-                        "watchlists:overview.pipelineSetup.preview.description",
-                        "Preview template output using the latest completed run context before creating the pipeline."
-                      )}
-                    </p>
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        void generatePipelineTemplatePreview()
-                      }}
-                      loading={pipelinePreviewLoading}
-                      data-testid="watchlists-pipeline-preview-generate"
-                    >
-                      {t("watchlists:overview.pipelineSetup.preview.generate", "Generate preview")}
-                    </Button>
-                  </div>
-                  {pipelinePreviewError && (
-                    <Alert
-                      type="warning"
-                      showIcon
-                      data-testid="watchlists-pipeline-preview-error"
-                      title={pipelinePreviewError}
-                    />
-                  )}
-                  {pipelinePreviewRunId != null && !pipelinePreviewError && (
-                    <p className="text-xs text-text-muted">
-                      {t(
-                        "watchlists:overview.pipelineSetup.preview.context",
-                        "Preview context run: #{{runId}}",
-                        { runId: pipelinePreviewRunId }
-                      )}
-                    </p>
-                  )}
-                  {pipelinePreviewWarnings.length > 0 && (
-                    <ul className="list-disc pl-5 text-xs text-text-muted">
-                      {pipelinePreviewWarnings.map((warning, index) => (
-                        <li key={`${warning}-${index}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {pipelinePreviewRendered && (
-                    <pre
-                      className="max-h-48 overflow-auto rounded border border-border bg-background p-2 text-xs"
-                      data-testid="watchlists-pipeline-preview-rendered"
-                    >
-                      {pipelinePreviewRendered}
-                    </pre>
-                  )}
-                </div>
-              </div>
-            )}
-          </Form>
-        </div>
-      </Modal>
+        onSubmit={(draft, options) => {
+          void completePipelineSetup(draft, options)
+        }}
+        onPreview={(draft) => {
+          void generatePipelineTemplatePreview(draft)
+        }}
+      />
     </div>
   )
 }

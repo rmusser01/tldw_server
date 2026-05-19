@@ -93,6 +93,9 @@ describe("watchlists pipeline contract", () => {
       format: "md",
       template_name: "briefing_md",
       template_version: 2,
+      generate_audio: true,
+      audio_voice: "alloy",
+      target_audio_minutes: 8,
       metadata: {
         audio: {
           enabled: true,

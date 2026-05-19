@@ -760,7 +760,7 @@ git commit -m "feat: persist watchlist audio briefing artifacts"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts`
 - Regression: `apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.experimental-ia.test.tsx`
 
-- [ ] **Step 1: Write failing wizard state tests**
+- [x] **Step 1: Write failing wizard state tests**
 
 Cover:
 
@@ -771,18 +771,18 @@ Cover:
 - Optional audio supports 0-4 speakers.
 - Review summary names source, cadence, filters, output, delivery, and audio.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 cd apps/packages/ui
 bunx vitest run src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-wizard-state.test.ts src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts --maxWorkers=1 --no-file-parallelism
 ```
 
-- [ ] **Step 3: Implement wizard state helpers**
+- [x] **Step 3: Implement wizard state helpers**
 
 Keep state pure. Use existing service calls from the component, not from helper files.
 
-- [ ] **Step 4: Implement additive `PipelineWizard`**
+- [x] **Step 4: Implement additive `PipelineWizard`**
 
 Wizard steps:
 
@@ -794,17 +794,17 @@ Wizard steps:
 
 The wizard should call existing `createWatchlistSource`, `createWatchlistJob`, `triggerWatchlistRun`, and `createWatchlistOutput` helpers. It must not bypass existing API contracts.
 
-- [ ] **Step 5: Wire into overview without removing full controls**
+- [x] **Step 5: Wire into overview without removing full controls**
 
 Add "Create briefing pipeline" as an entry point. Preserve current Sources/Items/Outputs primary tabs and "Show all views".
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run the command from Step 2 again.
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/quick-setup.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-wizard-state.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/PipelineWizard.test.tsx apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-wizard-state.test.ts apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.experimental-ia.test.tsx
