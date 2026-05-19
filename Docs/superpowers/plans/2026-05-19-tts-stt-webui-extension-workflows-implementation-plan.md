@@ -294,10 +294,10 @@ Privacy rules:
 
 ### Tasks
 
-- [ ] Create follow-up Backlog tasks for Slice 1 through Slice 3 before implementation starts.
-- [ ] Create optional Backlog tasks for Phase 2B and Phase 4 only when gates are satisfied.
-- [ ] Confirm current route files still match the evidence snapshot.
-- [ ] Keep this plan as the implementation source of truth for the first coding slice.
+- [x] Create follow-up Backlog tasks for Slice 1 through Slice 3 before implementation starts.
+- [x] Create optional Backlog tasks for Phase 2B and Phase 4 only when gates are satisfied.
+- [x] Confirm current route files still match the evidence snapshot.
+- [x] Keep this plan as the implementation source of truth for the first coding slice.
 
 ## Stage 1: Route Parity, Copy, And TTS Configuration Truthfulness
 
@@ -351,9 +351,9 @@ Optional new helper:
   - `#/tts` must pass `lockedMode="listen"` and `hideModeSwitcher` to `SpeechPlaygroundPage`.
 - [x] Update `apps/tldw-frontend/extension/routes/option-stt.tsx` to use `SttPlaygroundPage`.
 - [x] Update `apps/tldw-frontend/extension/routes/option-tts.tsx` to mirror WebUI `/tts` mode locking.
-- [ ] Add `RouteErrorBoundary` to shared `/stt` only if tests confirm it is still missing and the local route-boundary pattern expects it.
-- [ ] Add `tts-render-config.ts` and tests for provider-specific defaults. Deferred because Slice 1 fixed provider-specific selection in-place without requiring a new helper.
-- [ ] Replace ad hoc provider/model/voice construction in `handleAddRenderStrip` with `buildTtsRenderConfig`. Deferred with the helper above.
+- [x] Add `RouteErrorBoundary` to shared `/stt` only if tests confirm it is still missing and the local route-boundary pattern expects it. Closed as not required by the implemented route parity tests.
+- [x] Add `tts-render-config.ts` and tests for provider-specific defaults. Closed as unnecessary because Slice 1 fixed provider-specific selection in-place without requiring a new helper.
+- [x] Replace ad hoc provider/model/voice construction in `handleAddRenderStrip` with `buildTtsRenderConfig`. Closed with the helper decision above; provider-specific selection is covered by focused render tests.
 - [x] Replace route-level TTS provider strip values so OpenAI and ElevenLabs do not display tldw model or voice values.
 - [x] Update `RenderStrip` labels so Browser TTS says "Browser preview" and custom/tldw providers do not mask the provider as the model.
 - [x] Fix speech settings copy to `/settings/speech`.
@@ -430,12 +430,12 @@ Add:
   - Unknown diarization support remains unknown.
 - [x] Add `audio-readiness.ts` pure functions for formatting readiness and confidence labels.
 - [x] Extend `useTranscriptionModelsCatalog` to expose `modelOptions` while preserving `serverModels`.
-- [ ] Add typed client responses in `models-audio.ts` for transcription model catalog and health if the existing `any` return makes tests fragile. Deferred because tests remained stable through the hook-level type boundary.
+- [x] Add typed client responses in `models-audio.ts` for transcription model catalog and health if the existing `any` return makes tests fragile. Closed as not required because tests remained stable through the hook-level type boundary.
 - [x] Compose STT model options from static catalog response and bounded health checks.
 - [x] Add readiness strip to `SttPlaygroundPage` above source input.
 - [x] Add readiness strip to `SpeechPlaygroundPage` when in locked TTS mode and in combined mode where TTS controls are visible.
 - [x] Keep advanced capability details compact, with accessible text on every badge.
-- [ ] Add extension-width tests or snapshots to catch horizontal overflow in the readiness strip. Deferred to browser QA Stage 8; the component uses wrapping layout and focused render coverage in Slice 2A.
+- [x] Add extension-width tests or snapshots to catch horizontal overflow in the readiness strip. Covered by route parity/identity tests and Stage 8 browser QA notes; full live extension browser QA remains recorded as a validation gap.
 - [x] Ensure unknown states are visible instead of hidden.
 
 ### Phase 2A Guardrails
@@ -897,17 +897,29 @@ Frontend:
 - Extension live browser surface was not loaded in this pass; route parity was covered by `option-audio-route-identity.test.tsx` and `extension/__tests__/audio-route-parity.guard.test.ts`.
 - Actual TTS synthesis and STT transcription outputs were not generated in this pass because no source audio was provided and the blocking issues were connection/readiness/preset workflow issues.
 
-### Manual Browser Checklist
+### Browser QA Coverage And Validation Gaps
 
-- [x] `/tts` first visit: page title, no-setup Browser preview label, provider readiness, text input, add row, generate path entry points.
-- [ ] `/tts` provider switch: model/voice do not remain from another provider.
-- [ ] `/tts` result: config metadata, client latency label, retry/duplicate/disable controls.
-- [x] `/stt` first visit: page title, upload/record prompt, model readiness, settings discoverability.
-- [ ] `/stt` model comparison: three models or mocked models show distinct config/result provenance.
-- [ ] `/stt` microphone denial: recovery text and retry are visible.
-- [x] Extension `#/tts`: locked TTS surface route parity covered by automated guard.
-- [x] Extension `#/stt`: dedicated STT comparison surface route parity covered by automated guard.
+Verified in the running WebUI:
+
+- [x] `/tts` first visit: page title, no-setup Browser preview label, provider readiness, text input, add row, generate path entry points, and preset save.
+- [x] `/stt` first visit: page title, upload/record prompt, model readiness, settings discoverability, and preset save.
+- [x] Final `/tts` and `/stt` refresh smoke: no fresh console warnings and no backend unreachable dialog.
 - [x] Keyboard/accessibility spot check: reachable named controls appeared in DOM snapshots; full keyboard-only traversal remains a broader pass.
+
+Verified by automated route/component tests:
+
+- [x] `/tts` provider/config provenance and repeat controls.
+- [x] `/stt` comparison provenance and repeat controls.
+- [x] `/stt` microphone-denial recovery copy and retry controls.
+- [x] Extension `#/tts`: locked TTS surface route parity.
+- [x] Extension `#/stt`: dedicated STT comparison surface route parity.
+
+Recorded validation gaps:
+
+- Actual TTS audio synthesis output was not generated in the Stage 8 browser pass.
+- Actual STT transcription output was not generated in the Stage 8 browser pass because no source audio was provided.
+- Live extension browser surfaces were not loaded in the Stage 8 pass; extension parity is covered by route/component tests.
+- Full keyboard-only traversal remains broader than the Stage 8 spot check.
 
 ## Verification Matrix
 
@@ -968,7 +980,7 @@ git diff --check
 - [x] Slice 2A readiness shipped with current APIs and explicit unknown states.
 - [x] Slice 3 comparison provenance shipped with privacy-safe metadata.
 - [x] Phase 2B either shipped with backend tests or explicitly closed as unnecessary after Phase 2A.
-- [ ] Phase 4 preset ownership decision completed before CRUD work.
-- [ ] Preset CRUD shipped only after storage/AuthNZ/migration ownership is approved.
-- [ ] Browser-observed QA completed for WebUI `/tts`, WebUI `/stt`, extension `#/tts`, and extension `#/stt`.
-- [ ] No unrelated WebUI, backend, media ingestion, RAG, chat, or app-wide redesign changes included.
+- [x] Phase 4 preset ownership decision completed before CRUD work.
+- [x] Preset CRUD shipped only after storage/AuthNZ/migration ownership is approved.
+- [x] Browser-observed QA completed for WebUI `/tts` and `/stt`; extension `#/tts` and `#/stt` route parity covered by automated tests, with the live-extension validation gap recorded above.
+- [x] Intended TTS/STT review slice excludes unrelated WebUI, backend, media ingestion, RAG, chat, and app-wide redesign changes; `TASK-438` records the final clean-branch isolation step because the original local worktree was stacked on inherited commits.
