@@ -44,6 +44,8 @@ Verification:
 - `git diff --check` passed.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -q tldw_Server_API/app/core/Sandbox/runners/vz_linux_runner.py` passed.
 - Bandit on touched test files reports the existing pytest `assert` and hardcoded temp-path baseline; rerunning with `B101,B108` skipped passed.
+- PR review follow-up: changed the new stuck boot/readiness doc-contract test to use `_normalized_existing_text(...)` for both docs, preserving this module's targeted missing-file failure messages.
+- PR review verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q` passed; Bandit on that test file passed; `git diff --check` passed.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

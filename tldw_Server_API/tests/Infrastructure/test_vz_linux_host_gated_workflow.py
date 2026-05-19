@@ -244,8 +244,8 @@ def test_vz_linux_prepared_host_evidence_tracker_defines_packet() -> None:
 
 def test_vz_linux_stuck_boot_readiness_contract_records_pointers_not_raw_logs() -> None:
     """Stuck boot/readiness evidence should be stable and avoid raw log exposure."""
-    tracker = _normalized_text(EVIDENCE_TRACKER_PATH)
-    operator_notes = _normalized_text(OPERATOR_NOTES_PATH)
+    tracker = _normalized_existing_text(EVIDENCE_TRACKER_PATH, "Prepared-host evidence tracker")
+    operator_notes = _normalized_existing_text(OPERATOR_NOTES_PATH, "macOS runtime operator notes")
 
     for required_term in (
         "stable failure reason or error code",
