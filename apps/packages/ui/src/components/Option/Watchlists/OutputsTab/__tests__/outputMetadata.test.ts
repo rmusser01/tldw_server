@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   buildDeliveryDisclosureSummary,
   buildRegenerateOutputRequest,
@@ -266,6 +266,23 @@ describe("outputMetadata helpers", () => {
 
     expect(getReadinessLabel("legacy_live_only")).toBe("Live provenance only")
     expect(getReadinessTagColor("legacy_live_only")).toBe("default")
+  })
+
+  it("uses design-system registry labels for canonical readiness and audio states", async () => {
+    vi.resetModules()
+    vi.doMock("@/design-system", () => ({
+      READY_STATE_LABEL: "Registry Ready",
+      BLOCKED_STATE_LABEL: "Registry Blocked",
+      LOADING_STATE_LABEL: "Registry Loading"
+    }))
+
+    const metadataModule = await import("../outputMetadata")
+
+    expect(metadataModule.getReadinessLabel("ready")).toBe("Registry Ready")
+    expect(metadataModule.getReadinessLabel("blocked")).toBe("Registry Blocked")
+    expect(metadataModule.getAudioStatusLabel("ready")).toBe("Registry Ready")
+
+    vi.doUnmock("@/design-system")
   })
 
   it("returns safe legacy defaults when report metadata is absent or malformed", () => {

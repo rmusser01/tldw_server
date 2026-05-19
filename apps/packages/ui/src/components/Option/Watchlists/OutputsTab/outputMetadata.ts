@@ -8,6 +8,10 @@ import type {
   WatchlistReportReadinessWarningSeverity,
   WatchlistRunAudioStatus
 } from "@/types/watchlists"
+import {
+  BLOCKED_STATE_LABEL,
+  READY_STATE_LABEL
+} from "@/design-system"
 
 export interface DeliveryStatusSummary {
   channel: string
@@ -299,9 +303,9 @@ export const getReadinessTagColor = (state: WatchlistReportReadinessState): stri
 }
 
 export const getReadinessLabel = (state: WatchlistReportReadinessState): string => {
-  if (state === "ready") return "Ready"
+  if (state === "ready") return READY_STATE_LABEL
   if (state === "warning") return "Needs review"
-  if (state === "blocked") return "Blocked"
+  if (state === "blocked") return BLOCKED_STATE_LABEL
   return "Live provenance only"
 }
 
@@ -416,7 +420,7 @@ export const getAudioStatusColor = (status: string): string => {
 export const getAudioStatusLabel = (status: string): string => {
   const normalized = status.trim().toLowerCase()
   if (normalized === "completed") return "Completed"
-  if (normalized === "ready") return "Ready"
+  if (normalized === "ready") return READY_STATE_LABEL
   if (normalized === "fallback") return "Fallback"
   if (normalized === "partial") return "Partial"
   if (normalized === "queued") return "Queued"

@@ -255,6 +255,7 @@ describe("RunDetailDrawer source column", () => {
       expect(screen.getByText("TechCrunch")).toBeInTheDocument()
       expect(screen.getByText("Included in briefing")).toBeInTheDocument()
       expect(screen.getByText("Monitor #1 produced 1 report for this run.")).toBeInTheDocument()
+      expect(screen.getByText("Run linkage").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
   })
 
@@ -401,6 +402,10 @@ describe("RunDetailDrawer source column", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Suggested recovery steps")).toBeInTheDocument()
+      expect(
+        screen.getByText("Suggested recovery steps").closest('[data-ds-component="RecoveryCallout"]')
+      ).toBeInTheDocument()
+      expect(screen.getByText("Common causes").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText("Edit monitor schedule")).toBeInTheDocument()
       expect(screen.getByText("Review source settings")).toBeInTheDocument()
     })
@@ -422,6 +427,7 @@ describe("RunDetailDrawer source column", () => {
     mocks.getRunDetailsMock.mockResolvedValue({
       ...baseRunDetails,
       filter_tallies: { "kw:earnings": 2 },
+      truncated: true,
       filtered_sample: [
         {
           id: 7001,
@@ -439,6 +445,12 @@ describe("RunDetailDrawer source column", () => {
       expect(
         screen.getByText("Showing 1 recently filtered item for quick diagnosis.")
       ).toBeInTheDocument()
+      expect(
+        screen
+          .getByText("Showing 1 recently filtered item for quick diagnosis.")
+          .closest('[data-ds-component="Alert"]')
+      ).toBeInTheDocument()
+      expect(screen.getByText("Logs truncated").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
   })
 

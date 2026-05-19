@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Descriptions,
   Drawer,
@@ -17,6 +16,9 @@ import {
 import type { ColumnsType } from "antd/es/table"
 import { Download } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { LOADING_STATE_LABEL } from "@/design-system"
+import { Alert } from "@/components/ui"
+import { RecoveryCallout } from "@/components/ui/state"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   cancelWatchlistRun,
@@ -1008,7 +1010,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 
     const hasFinalAudio = Boolean(audioSummary.downloadUrl || audioSummary.finalArtifact)
     const statusText = audioStatusLoading
-      ? t("watchlists:runs.detail.audioStatusLoading", "Loading")
+      ? t("watchlists:runs.detail.audioStatusLoading", LOADING_STATE_LABEL)
       : audioStatusError
         ? t("watchlists:runs.detail.audioStatusUnavailable", "Unknown")
         : audioSummary.statusLabel
@@ -1073,19 +1075,21 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         <div className="space-y-4">
           {data && (
             <Alert
-              type="info"
-              showIcon
+              variant="info"
               title={t("watchlists:runs.detail.linkageTitle", "Run linkage")}
-              description={t(
-                "watchlists:runs.detail.linkageDescription",
-                "Monitor #{{jobId}} produced {{count}} report{{plural}} for this run.",
-                {
-                  jobId: data.job_id,
-                  count: linkedOutputCount ?? 0,
-                  plural: linkedOutputCount === 1 ? "" : "s"
-                }
-              )}
-              action={(
+            >
+              <div className="space-y-2">
+                <p>
+                  {t(
+                    "watchlists:runs.detail.linkageDescription",
+                    "Monitor #{{jobId}} produced {{count}} report{{plural}} for this run.",
+                    {
+                      jobId: data.job_id,
+                      count: linkedOutputCount ?? 0,
+                      plural: linkedOutputCount === 1 ? "" : "s"
+                    }
+                  )}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <Button size="small" onClick={handleEditMonitor}>
                     {t("watchlists:runs.detail.openMonitor", "Open monitor")}
@@ -1099,8 +1103,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                     {t("watchlists:runs.detail.openRunOutputs", "Open reports for this run")}
                   </Button>
                 </div>
-              )}
-            />
+              </div>
+            </Alert>
           )}
 
           {renderAudioStatusPanel()}
@@ -1141,40 +1145,32 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 
           {data?.error_msg && (
             <div className="mt-4 space-y-3">
-              <Alert
-                type="warning"
-                showIcon
+              <RecoveryCallout
+                state="error"
                 title={t("watchlists:runs.detail.remediationTitle", "Suggested recovery steps")}
-                description={remediationHint || t(
+                message={remediationHint || t(
                   "watchlists:runs.detail.remediationFallback",
                   "Open logs and adjust source or monitor settings, then retry."
                 )}
-                action={(
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="small"
-                      type="primary"
-                      onClick={handleRetryRun}
-                      loading={retryingRun}
-                    >
-                      {t("watchlists:runs.detail.retryRun", "Retry run")}
-                    </Button>
-                    <Button
-                      size="small"
-                      onClick={handleEditMonitor}
-                    >
-                      {t("watchlists:runs.detail.editMonitor", "Edit monitor schedule")}
-                    </Button>
-                    {showSourceRecoveryAction && (
-                      <Button
-                        size="small"
-                        onClick={handleOpenSources}
-                      >
-                        {t("watchlists:runs.detail.openSources", "Review source settings")}
-                      </Button>
-                    )}
-                  </div>
-                )}
+                primaryAction={{
+                  label: t("watchlists:runs.detail.retryRun", "Retry run"),
+                  onClick: handleRetryRun,
+                  loading: retryingRun
+                }}
+                secondaryActions={[
+                  {
+                    label: t("watchlists:runs.detail.editMonitor", "Edit monitor schedule"),
+                    onClick: handleEditMonitor
+                  },
+                  ...(showSourceRecoveryAction
+                    ? [
+                        {
+                          label: t("watchlists:runs.detail.openSources", "Review source settings"),
+                          onClick: handleOpenSources
+                        }
+                      ]
+                    : [])
+                ]}
               />
               <div className="p-3 bg-danger/10 border border-danger/30 rounded text-sm text-danger font-mono">
                 {data.error_msg}
@@ -1182,17 +1178,15 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               {/* Common causes by failure kind */}
               {failureKind && failureKind !== "unknown" && (
                 <Alert
-                  type="info"
-                  showIcon
+                  variant="info"
                   title={t("watchlists:runs.detail.commonCausesTitle", "Common causes")}
-                  description={
-                    <ul className="list-disc pl-4 text-sm space-y-1">
-                      {(COMMON_CAUSES_BY_KIND[failureKind] ?? []).map(([key, fallback]) => (
-                        <li key={key}>{t(key, fallback)}</li>
-                      ))}
-                    </ul>
-                  }
-                />
+                >
+                  <ul className="list-disc pl-4 text-sm space-y-1">
+                    {(COMMON_CAUSES_BY_KIND[failureKind] ?? []).map(([key, fallback]) => (
+                      <li key={key}>{t(key, fallback)}</li>
+                    ))}
+                  </ul>
+                </Alert>
               )}
             </div>
           )}
@@ -1203,8 +1197,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                 {t("watchlists:runs.detail.filteredSampleTitle", "Filtered item sample")}
               </div>
               <Alert
-                type="info"
-                showIcon
+                variant="info"
                 title={t(
                   "watchlists:runs.detail.filteredSampleSummary",
                   "Showing {{count}} recently filtered item{{plural}} for quick diagnosis.",
@@ -1213,11 +1206,12 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                     plural: data.filtered_sample.length === 1 ? "" : "s"
                   }
                 )}
-                description={t(
+              >
+                {t(
                   "watchlists:runs.detail.filteredSampleHelp",
                   "Use this sample with filter tallies below to tune include/exclude rules."
                 )}
-              />
+              </Alert>
               <div className="space-y-2">
                 {data.filtered_sample.map((sample, index) => {
                   const record = typeof sample === "object" && sample !== null
@@ -1306,21 +1300,21 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           </div>
           {streamError && (
             <Alert
-              type="error"
-              showIcon
+              variant="error"
               className="mb-3"
               title={t("watchlists:runs.detail.streamErrorTitle", "Stream error")}
-              description={streamError}
-            />
+            >
+              {streamError}
+            </Alert>
           )}
           {data?.truncated && (
             <Alert
-              type="warning"
-              showIcon
+              variant="warning"
               className="mb-3"
               title={t("watchlists:runs.detail.logsTruncated", "Logs truncated")}
-              description={t("watchlists:runs.detail.logsTruncatedDesc", "Showing the most recent log output.")}
-            />
+            >
+              {t("watchlists:runs.detail.logsTruncatedDesc", "Showing the most recent log output.")}
+            </Alert>
           )}
           {data?.log_text ? (
             <pre className="bg-bg text-text p-4 rounded-lg font-mono text-xs max-h-96 overflow-auto whitespace-pre-wrap border border-border">
@@ -1428,20 +1422,14 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           <Spin size="large" />
         </div>
       ) : error ? (
-        <Alert
-          type={error.severity}
-          showIcon
+        <RecoveryCallout
+          state={error.severity === "warning" ? "degraded" : "error"}
           title={error.title}
-          description={error.description}
-          action={(
-            <Button
-              size="small"
-              type="primary"
-              onClick={() => void loadRunDetails()}
-            >
-              {t("watchlists:errors.retry", "Retry")}
-            </Button>
-          )}
+          message={error.description}
+          primaryAction={{
+            label: t("watchlists:errors.retry", "Retry"),
+            onClick: () => void loadRunDetails()
+          }}
         />
       ) : data ? (
         <Tabs items={tabItems} />
