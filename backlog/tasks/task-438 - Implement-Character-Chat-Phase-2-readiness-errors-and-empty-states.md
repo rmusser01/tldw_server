@@ -18,6 +18,7 @@ references:
 - TASK-428
 - TASK-429
 - TASK-431
+- https://github.com/rmusser01/tldw_server/pull/1866
 documentation:
 - Docs/Product/WebUI/Character_Chat_Roleplay_First_Class_PRD_2026_05_18.md
 priority: high
@@ -76,6 +77,7 @@ Implement Phase 2 from the first-class Character Chat PRD: make incomplete Chara
 - Browser smoke also confirmed fallback character intent persisted in local storage as `selectedCharacter` and `selectedAssistant` with id `missing-character`.
 - `bunx tsc --noEmit --pretty false` still fails on existing repo-wide TypeScript debt; captured output in `/tmp/tldw_phase2_tsc_after_strict.txt` has 255 lines and no matches for the touched files listed above.
 - Bandit skipped: this slice only touches frontend TypeScript/tests plus Backlog/plan documentation, with no Python source changes.
+- Draft PR: https://github.com/rmusser01/tldw_server/pull/1866
 
 ## Final Summary
 
