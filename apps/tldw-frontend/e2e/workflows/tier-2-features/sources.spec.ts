@@ -65,15 +65,16 @@ test.describe("Sources & Connectors", () => {
 
     test("should show empty state or source list when online", async ({
       authedPage,
+      serverInfo,
       diagnostics,
     }) => {
+      skipIfServerUnavailable(serverInfo)
+
       sources = new SourcesPage(authedPage)
       await sources.goto()
       await sources.assertPageReady()
 
-      await sources.loadingSpinner.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {})
-      const loadingVisible = await sources.loadingSpinner.isVisible().catch(() => false)
-      if (loadingVisible) return
+      await expect(sources.loadingSpinner).toBeHidden({ timeout: 15_000 })
 
       const isOnline = await sources.isOnlineWorkspace()
       if (!isOnline) return
@@ -82,7 +83,6 @@ test.describe("Sources & Connectors", () => {
       const hasSources = await sources.hasSourceCards()
       const emptyVisible = await sources.emptyMessage.isVisible().catch(() => false)
 
-      if (!hasSources && !emptyVisible) return
       expect(hasSources || emptyVisible).toBe(true)
 
       await assertNoCriticalErrors(diagnostics)

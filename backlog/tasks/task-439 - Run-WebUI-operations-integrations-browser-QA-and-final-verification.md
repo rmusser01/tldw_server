@@ -2,6 +2,11 @@
 id: TASK-439
 title: Run WebUI operations integrations browser QA and final verification
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-05-19 19:24
+labels: []
+dependencies: []
 priority: medium
 modified_files:
 - apps/packages/ui/src/components/Option/Sources/SourcesWorkspacePage.tsx
@@ -37,6 +42,7 @@ Docs/superpowers/plans/2026-05-17-webui-operations-integrations-implementation-p
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification found two scoped defects before closeout.
 
@@ -45,11 +51,14 @@ Verification found two scoped defects before closeout.
 - Clean-branch E2E against current `dev` also exposed a backend-offline Sources shell that can keep showing loading under the heading. The Sources loading state now has a stable status/test hook, and the E2E only runs list/empty assertions after the page actually presents a finished data state.
 - Browser QA found a mobile Watchlists orientation alert layout defect where Ant `Alert.action` squeezed the title into single-character wrapping. The action buttons now live in the alert description block, and the mobile screenshot was rechecked.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed WP10 Task 7 verification. Route contract tests passed: 8 files / 21 tests. Component state tests passed: 6 files / 48 tests, plus ServerReadinessGate passed 1 file / 4 tests. Focused placeholder E2E passed 9 tests. Parent-required E2E passed 13 tests with 8 expected skips. Expanded WP10 E2E passed 22 tests with 5 expected skips after the Watchlists mobile fix. Browser plugin was unavailable in this Codex session with `Browser is not available: iab`, so browser-observed QA used Playwright directly against the local Next dev server on port 18080. Desktop QA covered /admin, /admin/server, /mcp-hub, /sources, /connectors, /integrations, /scheduled-tasks, /watchlists, /workflow-editor, and /skills. Mobile QA covered /watchlists, /workflow-editor, and /mcp-hub. Inspected routes rendered expected content or recovery states with no readiness-gate or framework-overlay blockers. Console diagnostics had expected backend-offline fetch failures because the API server was intentionally not running, and no page errors. Static cleanup checks passed for touched files: git diff --check and trailing-whitespace scan. Clean-branch packaging on current `dev` preserved newer route/readiness behavior and reverified the final delta: ServerReadinessGate passed 8 tests, Watchlists orientation guidance passed 4 tests, SourcesWorkspacePage passed 8 tests, and focused Playwright Sources/placeholder routes passed 14 tests with 2 expected backend-dependent skips. Bandit was not applicable because this slice touched frontend TypeScript/E2E and Backlog metadata only; no Python code was changed. Remaining risk: this final QA validates offline/recovery rendering and route behavior, not live backend data paths.
+
+PR review follow-up: addressed both unresolved Gemini review threads in sources.spec.ts by replacing the swallowed loading timeout with Playwright's explicit toBeHidden assertion, requiring server availability for the online-only content test, and preserving the source-list-or-empty-state assertion so blank online content fails. Focused Sources Playwright passed locally: 2 passed, 3 explicit backend-unavailable skips.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
