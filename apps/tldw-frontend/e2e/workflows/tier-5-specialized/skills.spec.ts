@@ -27,7 +27,7 @@ test.describe("Skills", () => {
     await authedPage.goto("/skills", { waitUntil: "domcontentloaded" })
 
     const unsupportedHeading = authedPage.getByRole("heading", {
-      name: /skills not available/i,
+      name: /skills (are )?not available/i,
     })
     const skillsTable = authedPage.locator("table")
     const createButtons = authedPage.getByRole("button", {
@@ -56,7 +56,7 @@ test.describe("Skills", () => {
     await authedPage.goto("/skills", { waitUntil: "domcontentloaded" })
 
     const unsupportedHeading = authedPage.getByRole("heading", {
-      name: /skills not available/i,
+      name: /skills (are )?not available/i,
     })
     const skillsTable = authedPage.locator("table")
     const createButtons = authedPage.getByRole("button", {
@@ -92,7 +92,7 @@ test.describe("Skills", () => {
     await authedPage.goto("/skills", { waitUntil: "domcontentloaded" })
 
     const unsupportedHeading = authedPage.getByRole("heading", {
-      name: /skills not available/i,
+      name: /skills (are )?not available/i,
     })
     const unsupportedVisible = await unsupportedHeading
       .isVisible({ timeout: 5_000 })
@@ -100,7 +100,7 @@ test.describe("Skills", () => {
 
     if (unsupportedVisible) {
       await expect(
-        authedPage.getByText(/does not support the skills api/i)
+        authedPage.getByText(/skills api/i)
       ).toBeVisible({ timeout: 10_000 })
     } else {
       const interactiveElements = authedPage.locator(

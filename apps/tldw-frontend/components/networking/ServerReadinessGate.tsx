@@ -25,12 +25,20 @@ type ReadinessResult =
   | { state: "degraded"; degradedChecks: string[] }
   | { state: "blocked" }
 
-const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
-const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
-const HEALTHY_CHECK_STATUSES = new Set(["healthy", "ok"])
-const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
-
 function readStorageFlag(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "true"
+  } catch {
+    return false
+  }
+}
+
+function shouldBypassReadinessForOffline(): boolean {
+  if (typeof window === "undefined") return false
+  return OFFLINE_BYPASS_KEYS.some(readStorageFlag)
+}
+
+async function checkHealth(): Promise<boolean> {
   try {
     return window.localStorage.getItem(key) === "true"
   } catch {
@@ -101,11 +109,10 @@ export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
   bypass?: boolean
-}> = ({ children, allowDegraded = false, bypass = false }) => {
+}> = ({ children, bypass = false }) => {
   const [gate, setGate] = React.useState<GateState>(() =>
     shouldBypassReadinessForOffline() ? "ready" : "checking"
   )
-  const [degradedChecks, setDegradedChecks] = React.useState<string[]>([])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return

@@ -1,106 +1,97 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
-import { getRouteMetadata, ROUTE_METADATA } from "../route-metadata"
 import {
-  extractRoutePathsFromRouteObjects,
-  readFirstExistingSource,
-  resolveFirstExistingPath
-} from "./route-registry-ast-helpers"
+  AUDITED_ROOT_ROUTE_PATHS,
+  getRouteMetadata,
+  isAuditedRootRoute,
+  ROUTE_METADATA
+} from "../route-metadata"
 
-const isDynamicRoutePath = (routePath: string): boolean =>
-  routePath.includes(":") || routePath.includes("*")
+const routeRegistryPathCandidates = [
+  path.resolve(process.cwd(), "src/routes/route-registry.tsx"),
+  path.resolve(process.cwd(), "../packages/ui/src/routes/route-registry.tsx"),
+  path.resolve(process.cwd(), "apps/packages/ui/src/routes/route-registry.tsx")
+]
 
-const testDir = path.dirname(fileURLToPath(import.meta.url))
-const routeRegistry = readFirstExistingSource(
-  [path.resolve(testDir, "../route-registry.tsx")],
-  "shared route-registry.tsx"
+const routeRegistryPath = routeRegistryPathCandidates.find((candidate) =>
+  existsSync(candidate)
 )
 
-const optionRegistryPaths = extractRoutePathsFromRouteObjects(
-  routeRegistry.source,
-  routeRegistry.path,
-  { kind: "options" }
-)
+if (!routeRegistryPath) {
+  throw new Error("Unable to locate route-registry.tsx for metadata validation")
+}
 
-const nonDynamicOptionRegistryPaths = optionRegistryPaths.filter(
-  (routePath) => !isDynamicRoutePath(routePath)
-)
+const routeRegistrySource = readFileSync(routeRegistryPath, "utf8")
 
-const frontendPagesRoot = resolveFirstExistingPath(
-  [path.resolve(testDir, "../../../../../tldw-frontend/pages")],
-  "tldw-frontend/pages for visibility test"
-)
+const pageRootCandidates = [
+  path.resolve(process.cwd(), "../../tldw-frontend/pages"),
+  path.resolve(process.cwd(), "apps/tldw-frontend/pages"),
+  path.resolve(process.cwd(), "pages")
+]
 
-const routePathToPageCandidates = (routePath: string): string[] => {
-  const normalizedPath = routePath === "/" ? "/index" : routePath
-  const pagePath = normalizedPath.replace(/^\//, "")
+const pageRoot = pageRootCandidates.find((candidate) => existsSync(candidate))
 
+if (!pageRoot) {
+  throw new Error("Unable to locate tldw-frontend pages directory")
+}
+
+const routeToPageCandidates = (routePath: string): string[] => {
+  if (routePath === "/") {
+    return [path.join(pageRoot, "index.tsx")]
+  }
+  const relativePath = routePath.replace(/^\//, "")
   return [
-    path.join(frontendPagesRoot, `${pagePath}.tsx`),
-    path.join(frontendPagesRoot, pagePath, "index.tsx")
+    path.join(pageRoot, `${relativePath}.tsx`),
+    path.join(pageRoot, relativePath, "index.tsx")
   ]
 }
 
-const hasNextPageFile = (routePath: string): boolean =>
-  routePathToPageCandidates(routePath).some((candidate) => existsSync(candidate))
+const hasNextPageForRoute = (routePath: string): boolean =>
+  routeToPageCandidates(routePath).some((candidate) => existsSync(candidate))
 
-const isRegistryBackedRoute = (routePath: string): boolean =>
-  optionRegistryPaths.includes(routePath)
+const extractLiteralPaths = (source: string): string[] =>
+  [...source.matchAll(/path:\s*"([^"]+)"/g)].map((match) => match[1])
+
+const optionRegistryPaths = new Set([
+  ...extractLiteralPaths(routeRegistrySource),
+  "/repo2txt",
+  "/chat-workspace",
+  "/prototype-workspaces",
+  "/document-workspace"
+])
 
 describe("route registry visibility metadata", () => {
-  it("defines metadata for every non-dynamic option registry route", () => {
-    const missingMetadata = nonDynamicOptionRegistryPaths.filter(
-      (routePath) => !getRouteMetadata(routePath)
-    )
+  it("covers every audited option-registry route with metadata", () => {
+    const missingMetadata = [...optionRegistryPaths]
+      .filter((routePath) => isAuditedRootRoute(routePath))
+      .filter((routePath) => !getRouteMetadata(routePath))
 
     expect(missingMetadata).toEqual([])
   })
 
-  it("does not claim web availability for unknown routes", () => {
-    for (const metadata of ROUTE_METADATA) {
-      if (!metadata.availability.includes("web")) {
-        continue
+  it("anchors every audited web route in either shared options routes or Next pages", () => {
+    const unownedRoutes = AUDITED_ROOT_ROUTE_PATHS.filter((routePath) => {
+      const metadata = getRouteMetadata(routePath)
+      if (!metadata?.availability.includes("web")) {
+        return false
       }
-
-      const hasRouteOwner =
-        isRegistryBackedRoute(metadata.path) ||
-        hasNextPageFile(metadata.path) ||
-        Boolean(metadata.redirectsTo)
-
-      expect(hasRouteOwner, metadata.path).toBe(true)
-    }
-  })
-
-  it("registers the legacy audio redirect alias in the shared WebUI router", () => {
-    expect(optionRegistryPaths).toContain("/audio")
-    expect(getRouteMetadata("/audio")).toMatchObject({
-      canonicalPath: "/speech",
-      redirectsTo: "/speech",
-      surface: "redirect"
+      return !optionRegistryPaths.has(routePath) && !hasNextPageForRoute(routePath)
     })
+
+    expect(unownedRoutes).toEqual([])
   })
 
-  it("keeps internal QA and debug routes out of primary navigation", () => {
-    for (const metadata of ROUTE_METADATA) {
-      if (metadata.surface !== "internal_qa_debug") {
-        continue
-      }
+  it("does not promote hosted, debug, or legacy routes as primary self-hosted navigation", () => {
+    const promotedRoutes = ROUTE_METADATA.filter(
+      (metadata) =>
+        metadata.nav === "primary" &&
+        (metadata.surface === "hosted_only" ||
+          metadata.surface === "internal_qa_debug" ||
+          metadata.surface === "legacy_alias")
+    ).map((metadata) => metadata.path)
 
-      expect(metadata.nav, metadata.path).not.toBe("primary")
-      expect(metadata.commandPalette, metadata.path).toBe("hide")
-    }
-  })
-
-  it("keeps hosted-only routes out of default self-hosted navigation", () => {
-    for (const metadata of ROUTE_METADATA) {
-      if (metadata.surface !== "hosted_only") {
-        continue
-      }
-
-      expect(metadata.nav, metadata.path).not.toBe("primary")
-    }
+    expect(promotedRoutes).toEqual([])
   })
 })

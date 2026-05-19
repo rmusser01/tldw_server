@@ -35,6 +35,64 @@ import {
   type McpHubWorkflowKey
 } from "./mcpHubWorkflowConfig"
 
+type McpHubStatusItem = {
+  key: string
+  title: string
+  description: string
+  statusLabel: string
+  workflow: McpHubWorkflowKey
+  view: McpHubViewKey
+  actionLabel: string
+}
+
+const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
+  {
+    key: "servers-credentials",
+    title: "Servers & Credentials",
+    description: "External servers and credential slots load in the setup workflow.",
+    statusLabel: "Setup workflow",
+    workflow: "setup",
+    view: "credentials",
+    actionLabel: "Open Servers & Credentials"
+  },
+  {
+    key: "policy-assignments",
+    title: "Policy Assignments",
+    description: "User, group, and default access assignments live in the access workflow.",
+    statusLabel: "Access workflow",
+    workflow: "access",
+    view: "assignments",
+    actionLabel: "Open Policy Assignments"
+  },
+  {
+    key: "approvals",
+    title: "Approvals",
+    description: "Approval policies and governance packs live in the governance workflow.",
+    statusLabel: "Governance workflow",
+    workflow: "governance",
+    view: "approvals",
+    actionLabel: "Open Approvals"
+  },
+  {
+    key: "workspace-boundaries",
+    title: "Workspace Boundaries",
+    description: "Path scopes and shared workspace boundaries live in the workspaces workflow.",
+    statusLabel: "Workspaces workflow",
+    workflow: "workspaces",
+    view: "path-scopes",
+    actionLabel: "Open Workspace Boundaries"
+  },
+  {
+    key: "audit-findings",
+    title: "Audit Findings",
+    description: "Broken references and risky configuration findings live in the audit workflow.",
+    statusLabel: "Audit workflow",
+    workflow: "audit",
+    view: "audit",
+    actionLabel: "Open Audit Findings"
+  }
+]
+
 export const McpHubPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const [explainerDismissed, setExplainerDismissed] = useState(
@@ -172,6 +230,39 @@ export const McpHubPage = () => {
       <Typography.Text type="secondary">
         Manage external tool servers and governance policies for the Model Context Protocol (MCP).
       </Typography.Text>
+      <section
+        aria-label="MCP Hub status summary"
+        className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"
+        data-testid="mcp-hub-status-summary"
+      >
+        {MCP_HUB_STATUS_ITEMS.map((item) => (
+          <article
+            key={item.key}
+            className="rounded-lg border border-border bg-surface p-3 shadow-sm"
+            data-testid={`mcp-hub-status-${item.key}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h2 className="text-sm font-semibold text-text">{item.title}</h2>
+              <span className="rounded-full border border-border bg-surface2 px-2 py-0.5 text-xs text-text-muted">
+                {item.statusLabel}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-text-muted">{item.description}</p>
+            <Button
+              className="mt-3"
+              size="small"
+              onClick={() =>
+                updateRouteState({
+                  workflow: item.workflow,
+                  view: item.view
+                })
+              }
+            >
+              {item.actionLabel}
+            </Button>
+          </article>
+        ))}
+      </section>
       {!explainerDismissed && (
         <Alert
           data-testid="mcp-hub-explainer"

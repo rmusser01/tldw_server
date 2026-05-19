@@ -9,6 +9,7 @@ export type RecoveryState =
   | "error"
   | "auth_required"
   | "setup_required"
+  | "permission_denied"
 
 export interface RecoveryCalloutProps extends Omit<StatePanelProps, "state"> {
   state: RecoveryState

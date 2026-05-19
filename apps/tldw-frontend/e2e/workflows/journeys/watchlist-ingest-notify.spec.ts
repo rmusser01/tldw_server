@@ -340,7 +340,13 @@ test.describe("Watchlist -> Ingest -> Notify journey", () => {
       await page.goto("/watchlists", { waitUntil: "domcontentloaded" })
       await waitForConnection(page)
 
-      await page.getByRole("button", { name: "Open Monitors" }).click()
+      await expect(page.getByTestId("watchlists-health-bar")).toBeVisible()
+      await expect(page.getByTestId("watchlists-repeat-actions")).toBeVisible()
+      await expect(page.getByTestId("watchlists-repeat-open-runs")).toBeVisible()
+
+      await page.getByTestId("watchlists-open-command-palette").click()
+      await expect(page.getByTestId("watchlists-command-palette-input")).toBeVisible()
+      await page.getByTestId("watchlists-command-nav-monitors").click()
 
       await expect(page.getByLabel(/Monitors table/i)).toBeVisible()
       await expect(page.getByText("Morning Brief")).toBeVisible()
