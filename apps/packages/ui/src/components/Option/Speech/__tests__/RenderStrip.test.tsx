@@ -154,6 +154,43 @@ describe("RenderStrip", () => {
     expect(onConfigTagClick).toHaveBeenCalledWith("r1", "voice")
   })
 
+  it("shows TTS provenance metadata and repeat controls", () => {
+    const onDuplicate = vi.fn()
+    const onToggleDisabled = vi.fn()
+    render(
+      <RenderStrip
+        id="r1"
+        state="ready"
+        config={{ ...baseConfig, speed: 1.25 }}
+        audioUrl="blob:test"
+        metadata={{
+          createdAt: "2026-03-06T14:05:09.000Z",
+          inputTextLength: 33,
+          inputTextPreview: "Hello world from the TTS renderer",
+          inputTextPreviewTruncated: false,
+          inputTextHash: "local-12345678",
+          audioSizeBytes: 100,
+          clientLatencyMs: 1234
+        }}
+        onDuplicate={onDuplicate}
+        onToggleDisabled={onToggleDisabled}
+      />
+    )
+
+    expect(screen.getByText("2026-03-06 14:05:09 UTC")).toBeInTheDocument()
+    expect(screen.getByText("Input 33 chars")).toBeInTheDocument()
+    expect(screen.getByText("Hello world from the TTS renderer")).toBeInTheDocument()
+    expect(screen.getByText("Hash local-12345678")).toBeInTheDocument()
+    expect(screen.getByText("100 B")).toBeInTheDocument()
+    expect(screen.getByText("Client measured 1.2s")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate" }))
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }))
+
+    expect(onDuplicate).toHaveBeenCalledWith("r1")
+    expect(onToggleDisabled).toHaveBeenCalledWith("r1", true)
+  })
+
   it("has correct aria-label", () => {
     render(<RenderStrip id="r1" state="idle" config={baseConfig} />)
     expect(

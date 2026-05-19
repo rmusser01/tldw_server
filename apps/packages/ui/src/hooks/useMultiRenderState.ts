@@ -8,6 +8,10 @@ import {
   classifyAudioError,
   type AudioErrorClassification
 } from "@/components/Option/Audio/audio-error-classification"
+import {
+  buildTtsResultMetadata,
+  type TtsResultMetadata
+} from "@/components/Option/Audio/comparison-provenance"
 
 export type RenderEntry = {
   id: string
@@ -18,6 +22,8 @@ export type RenderEntry = {
   errorMessage?: string
   errorSettingsHref?: "/settings/speech"
   progress?: number
+  metadata?: TtsResultMetadata
+  disabled?: boolean
 }
 
 let nextId = 1
@@ -48,6 +54,10 @@ const configToOverrides = (config: RenderStripConfig): TtsProviderOverrides => {
   }
   return overrides
 }
+
+const cloneConfig = (config: RenderStripConfig): RenderStripConfig => ({
+  ...config
+})
 
 export const useMultiRenderState = () => {
   const [renders, setRenders] = useState<RenderEntry[]>([])
@@ -117,13 +127,20 @@ export const useMultiRenderState = () => {
     async (id: string, text: string) => {
       if (!text.trim()) return
 
-      updateRender(id, { state: "generating", progress: 0, errorMessage: undefined })
-
       const entry = renders.find((r) => r.id === id)
       if (!entry) return
 
+      const createdAt = new Date().toISOString()
+      updateRender(id, {
+        state: "generating",
+        progress: 0,
+        errorMessage: undefined,
+        metadata: buildTtsResultMetadata(text, createdAt)
+      })
+
       const controller = new AbortController()
       abortControllersRef.current.set(id, controller)
+      const start = performance.now()
 
       try {
         const overrides = configToOverrides(entry.config)
@@ -136,7 +153,10 @@ export const useMultiRenderState = () => {
           updateRender(id, {
             state: "error",
             errorMessage: formatRenderErrorMessage(classified),
-            errorSettingsHref: classified.settingsHref
+            errorSettingsHref: classified.settingsHref,
+            metadata: buildTtsResultMetadata(text, createdAt, {
+              clientLatencyMs: performance.now() - start
+            })
           })
           return
         }
@@ -144,6 +164,7 @@ export const useMultiRenderState = () => {
         if (controller.signal.aborted) return
 
         const audio = await context.synthesize(context.utterance)
+        const clientLatencyMs = performance.now() - start
 
         if (controller.signal.aborted) return
 
@@ -161,7 +182,11 @@ export const useMultiRenderState = () => {
           state: "ready",
           audioUrl: url,
           audioBlob: blob,
-          progress: 100
+          progress: 100,
+          metadata: buildTtsResultMetadata(text, createdAt, {
+            audioSizeBytes: blob.size,
+            clientLatencyMs
+          })
         })
       } catch (error) {
         if (controller.signal.aborted) return
@@ -169,7 +194,10 @@ export const useMultiRenderState = () => {
         updateRender(id, {
           state: "error",
           errorMessage: formatRenderErrorMessage(classified),
-          errorSettingsHref: classified.settingsHref
+          errorSettingsHref: classified.settingsHref,
+          metadata: buildTtsResultMetadata(text, createdAt, {
+            clientLatencyMs: performance.now() - start
+          })
         })
       } finally {
         abortControllersRef.current.delete(id)
@@ -181,7 +209,7 @@ export const useMultiRenderState = () => {
   const generateAll = useCallback(
     async (text: string) => {
       const pending = renders.filter(
-        (r) => r.state === "idle" || r.state === "error"
+        (r) => !r.disabled && (r.state === "idle" || r.state === "error")
       )
       await Promise.allSettled(
         pending.map((r) => generateRender(r.id, text))
@@ -189,6 +217,30 @@ export const useMultiRenderState = () => {
     },
     [renders, generateRender]
   )
+
+  const duplicateRender = useCallback((id: string) => {
+    setRenders((prev) => {
+      const source = prev.find((render) => render.id === id)
+      if (!source) return prev
+      return [
+        ...prev,
+        {
+          id: genId(),
+          config: cloneConfig(source.config),
+          state: "idle" as const,
+          disabled: false
+        }
+      ]
+    })
+  }, [])
+
+  const setRenderDisabled = useCallback((id: string, disabled: boolean) => {
+    setRenders((prev) =>
+      prev.map((render) =>
+        render.id === id ? { ...render, disabled } : render
+      )
+    )
+  }, [])
 
   const clearAll = useCallback(() => {
     for (const url of objectUrlsRef.current.values()) {
@@ -252,7 +304,9 @@ export const useMultiRenderState = () => {
     [advancePlayQueue]
   )
 
-  const hasIdle = renders.some((r) => r.state === "idle" || r.state === "error")
+  const hasIdle = renders.some(
+    (r) => !r.disabled && (r.state === "idle" || r.state === "error")
+  )
   const hasReady = renders.some((r) => r.state === "ready")
   const isAnyGenerating = renders.some((r) => r.state === "generating")
 
@@ -265,6 +319,8 @@ export const useMultiRenderState = () => {
     updateConfig,
     generateRender,
     generateAll,
+    duplicateRender,
+    setRenderDisabled,
     clearAll,
     startPlaying,
     stopPlaying,

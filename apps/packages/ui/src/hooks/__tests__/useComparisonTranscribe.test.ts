@@ -76,6 +76,52 @@ describe("useComparisonTranscribe", () => {
     })
   })
 
+  it("stores request configuration and available response metadata", async () => {
+    mockTranscribe.mockResolvedValueOnce({
+      text: "hello world",
+      language: "en",
+      duration: 2.5,
+      segments: [{ text: "hello" }, { text: "world" }],
+      words: [{ word: "hello" }, { word: "world" }]
+    })
+
+    const { result } = renderHook(() => useComparisonTranscribe())
+    const blob = makeBlob("audio-content")
+
+    await act(async () => {
+      await result.current.transcribeAll(blob, ["whisper-large"], {
+        language: "en",
+        task: "translate",
+        response_format: "verbose_json",
+        timestamp_granularities: ["word", "segment"],
+        segment: true
+      })
+    })
+
+    expect(result.current.results[0].config).toEqual({
+      model: "whisper-large",
+      language: "en",
+      task: "translate",
+      responseFormat: "verbose_json",
+      timestampGranularities: ["word", "segment"],
+      segmentationEnabled: true
+    })
+    expect(result.current.results[0].metadata).toMatchObject({
+      audioSourceLabel: "Recorded audio",
+      audioSizeBytes: blob.size,
+      language: "en",
+      durationSeconds: 2.5,
+      segmentCount: 2,
+      wordCount: 2
+    })
+    expect(result.current.results[0].metadata?.createdAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T/
+    )
+    expect(typeof result.current.results[0].metadata?.clientLatencyMs).toBe(
+      "number"
+    )
+  })
+
   it("isolates per-model errors", async () => {
     mockTranscribe
       .mockResolvedValueOnce({ text: "success" })
@@ -118,7 +164,7 @@ describe("useComparisonTranscribe", () => {
     expect(result.current.results[0].errorSettingsHref).toBe("/settings/speech")
   })
 
-  it("retries a single model", async () => {
+  it("retries a single model with the original row configuration", async () => {
     mockTranscribe
       .mockRejectedValueOnce(new Error("timeout"))
       .mockResolvedValueOnce({ text: "ok" })
@@ -136,7 +182,7 @@ describe("useComparisonTranscribe", () => {
       .mockResolvedValueOnce({ text: "other" })
 
     await act(async () => {
-      await result.current.transcribeAll(blob, ["m1", "m2"], {})
+      await result.current.transcribeAll(blob, ["m1", "m2"], { language: "de" })
     })
 
     expect(result.current.results[0].status).toBe("error")
@@ -155,7 +201,7 @@ describe("useComparisonTranscribe", () => {
 
     expect(mockTranscribe).toHaveBeenLastCalledWith(blob, {
       model: "m1",
-      language: "en"
+      language: "de"
     })
   })
 
@@ -168,6 +214,46 @@ describe("useComparisonTranscribe", () => {
 
     expect(mockTranscribe).not.toHaveBeenCalled()
     expect(result.current.results).toEqual([])
+  })
+
+  it("duplicates rows and skips disabled rows during repeat runs", async () => {
+    mockTranscribe.mockResolvedValueOnce({ text: "first result" })
+
+    const { result } = renderHook(() => useComparisonTranscribe())
+    const blob = makeBlob()
+
+    await act(async () => {
+      await result.current.transcribeAll(blob, ["m1"], { language: "de" })
+    })
+
+    const originalId = result.current.results[0].id
+
+    act(() => {
+      result.current.duplicateResult(originalId)
+      result.current.setResultDisabled(originalId, true)
+    })
+
+    expect(result.current.results).toHaveLength(2)
+    expect(result.current.results[0].disabled).toBe(true)
+    expect(result.current.results[1].id).not.toBe(originalId)
+    expect(result.current.results[1].model).toBe("m1")
+    expect(result.current.results[1].requestOptions).toEqual({ language: "de" })
+
+    mockTranscribe.mockReset()
+    mockTranscribe.mockResolvedValueOnce({ text: "duplicate rerun" })
+
+    await act(async () => {
+      await result.current.transcribeAll(blob, ["m1"], { language: "en" })
+    })
+
+    expect(mockTranscribe).toHaveBeenCalledTimes(1)
+    expect(mockTranscribe).toHaveBeenCalledWith(blob, {
+      model: "m1",
+      language: "de"
+    })
+    expect(result.current.results[0].disabled).toBe(true)
+    expect(result.current.results[0].text).toBe("first result")
+    expect(result.current.results[1].text).toBe("duplicate rerun")
   })
 
   it("clears results", async () => {

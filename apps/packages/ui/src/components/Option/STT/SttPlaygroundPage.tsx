@@ -176,7 +176,9 @@ export const SttPlaygroundPage: React.FC = () => {
             model: r.model,
             text: r.text,
             latencyMs: r.latencyMs,
-            wordCount: r.wordCount
+            wordCount: r.wordCount,
+            config: r.config,
+            metadata: r.metadata
           }))
         if (historyResults.length === 0) return
         const entry: SttHistoryEntry = {

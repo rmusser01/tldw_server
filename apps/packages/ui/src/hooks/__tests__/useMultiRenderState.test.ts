@@ -199,6 +199,74 @@ describe("useMultiRenderState", () => {
     expect(result.current.renders[0].audioUrl).toBe("blob:mock-url")
   })
 
+  it("stores TTS render provenance metadata after generation", async () => {
+    const { result } = renderHook(() => useMultiRenderState())
+    act(() => {
+      result.current.addRender({
+        provider: "tldw",
+        voice: "af_heart",
+        model: "kokoro",
+        format: "mp3",
+        speed: 1.25
+      })
+    })
+
+    const id = result.current.renders[0].id
+    await act(async () => {
+      await result.current.generateRender(id, "Hello world from the TTS renderer")
+    })
+
+    expect(result.current.renders[0].metadata).toMatchObject({
+      inputTextLength: 33,
+      inputTextPreview: "Hello world from the TTS renderer",
+      inputTextPreviewTruncated: false,
+      audioSizeBytes: 100
+    })
+    expect(result.current.renders[0].metadata?.createdAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T/
+    )
+    expect(result.current.renders[0].metadata?.inputTextHash).toMatch(/^local-/)
+    expect(typeof result.current.renders[0].metadata?.clientLatencyMs).toBe(
+      "number"
+    )
+  })
+
+  it("duplicates render rows and skips disabled rows during generate all", async () => {
+    const { result } = renderHook(() => useMultiRenderState())
+    act(() => {
+      result.current.addRender({
+        provider: "tldw",
+        voice: "af_heart",
+        model: "kokoro",
+        format: "mp3",
+        speed: 1
+      })
+    })
+
+    const originalId = result.current.renders[0].id
+    act(() => {
+      result.current.duplicateRender(originalId)
+      result.current.setRenderDisabled(originalId, true)
+    })
+
+    expect(result.current.renders).toHaveLength(2)
+    expect(result.current.renders[0].disabled).toBe(true)
+    expect(result.current.renders[1].id).not.toBe(originalId)
+    expect(result.current.renders[1].config).toEqual(
+      result.current.renders[0].config
+    )
+
+    vi.mocked(resolveTtsProviderContext).mockClear()
+
+    await act(async () => {
+      await result.current.generateAll("Hello world")
+    })
+
+    expect(resolveTtsProviderContext).toHaveBeenCalledTimes(1)
+    expect(result.current.renders[0].state).toBe("idle")
+    expect(result.current.renders[1].state).toBe("ready")
+  })
+
   it("classifies and redacts render generation failures", async () => {
     vi.mocked(resolveTtsProviderContext).mockResolvedValueOnce({
       provider: "tldw",

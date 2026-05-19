@@ -2870,6 +2870,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                             audioBlob={render.audioBlob}
                             errorMessage={render.errorMessage}
                             errorSettingsHref={render.errorSettingsHref}
+                            metadata={render.metadata}
+                            disabled={render.disabled}
                             progress={render.progress}
                             isPlaying={multiRender.playingId === render.id}
                             forcePaused={multiRender.playingId !== null && multiRender.playingId !== render.id}
@@ -2885,6 +2887,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                             onPlay={multiRender.startPlaying}
                             onPause={multiRender.stopPlaying}
                             onEnd={multiRender.handleStripEnded}
+                            onDuplicate={multiRender.duplicateRender}
+                            onToggleDisabled={multiRender.setRenderDisabled}
                             onRetry={(id) => {
                               const effectiveText = useDraftEditor ? transcriptDraft : ttsText
                               void multiRender.generateRender(id, effectiveText)

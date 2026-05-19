@@ -520,7 +520,17 @@ Add:
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/RenderStrip.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx`
 - `cd apps/tldw-frontend && bun run e2e:smoke:audio`
 
-**Status:** Not Started
+**Status:** Complete via `TASK-432`
+
+### Stage 4 Verification Notes
+
+- Added shared comparison provenance helpers for created time, byte size, client-measured latency, text preview, and local text hash.
+- STT comparison rows now keep row IDs, request config, response metadata, retry-original-settings behavior, duplicate rows, disabled rows, and history provenance.
+- TTS render rows now keep created time, input preview/hash, audio size, client latency, duplicate rows, and disabled rows for Generate All.
+- Verified with `./node_modules/.bin/vitest run src/components/Option/Audio/__tests__/comparison-provenance.test.ts src/hooks/__tests__/useComparisonTranscribe.test.ts src/components/Option/STT/__tests__/ComparisonPanel.test.tsx src/components/Option/STT/__tests__/HistoryPanel.test.tsx src/hooks/__tests__/useMultiRenderState.test.ts src/components/Option/Speech/__tests__/RenderStrip.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx`: 7 files, 75 tests passed.
+- `bun run e2e:smoke:audio` starts only outside the sandbox. The run finished with 2 passing and 4 failing tests because the frontend attempted `http://127.0.0.1:8000/api/v1/health` while no backend was listening; downstream STT/speech smoke checks remained blocked in that no-backend app state.
+- `./node_modules/.bin/tsc --noEmit --pretty false` still fails on the existing package-wide frontend baseline; the listed failures were outside the touched TTS/STT comparison files.
+- `./node_modules/.bin/vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.audio-source.test.tsx` still has one unrelated low-level audio-capture ownership message failure.
 
 ### Files
 
@@ -541,16 +551,16 @@ Add:
 
 ### Implementation Steps
 
-- [ ] Add pure helpers for text preview/hash, created-time formatting, byte-size formatting, and client-latency labeling.
-- [ ] Extend `ComparisonResult` to include `config` and `metadata` while preserving current fields.
-- [ ] Update `extractText` or a new response normalizer to also extract `language`, `duration`, `segments`, and `word` metadata when present.
-- [ ] Store STT comparison history with configuration provenance, not only model/text/latency/word count.
-- [ ] Add STT card metadata rows for language, duration, segment count, timestamp settings, and source label.
-- [ ] Add TTS render row metadata for provider/model/voice/format/speed, created time, input length, input preview/hash, byte size, and client latency.
-- [ ] Label client-measured latency as "Client measured" or equivalent.
-- [ ] Add retry, duplicate, and disable controls to TTS and STT rows using existing icon/button patterns.
-- [ ] Preserve current copy, save-to-notes, download, and history actions.
-- [ ] Ensure result metadata cannot resize rows unpredictably at extension widths.
+- [x] Add pure helpers for text preview/hash, created-time formatting, byte-size formatting, and client-latency labeling.
+- [x] Extend `ComparisonResult` to include `config` and `metadata` while preserving current fields.
+- [x] Update `extractText` or a new response normalizer to also extract `language`, `duration`, `segments`, and `word` metadata when present.
+- [x] Store STT comparison history with configuration provenance, not only model/text/latency/word count.
+- [x] Add STT card metadata rows for language, duration, segment count, timestamp settings, and source label.
+- [x] Add TTS render row metadata for provider/model/voice/format/speed, created time, input length, input preview/hash, byte size, and client latency.
+- [x] Label client-measured latency as "Client measured" or equivalent.
+- [x] Add retry, duplicate, and disable controls to TTS and STT rows using existing icon/button patterns.
+- [x] Preserve current copy, save-to-notes, download, and history actions.
+- [x] Ensure result metadata cannot resize rows unpredictably at extension widths.
 
 ## Stage 5: Optional Phase 2B STT Capability Summary Endpoint
 

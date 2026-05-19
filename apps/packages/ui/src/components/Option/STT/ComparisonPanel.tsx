@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { Button, Card, Input, Select, Skeleton, Tag, Tooltip, Typography } from "antd"
-import { Copy, RotateCcw, Save } from "lucide-react"
+import { Ban, Copy, CopyPlus, RotateCcw, Save } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useComparisonTranscribe } from "@/hooks/useComparisonTranscribe"
 import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import type { SttModelOption } from "@/components/Option/Audio/audio-readiness"
+import {
+  formatByteSize,
+  formatClientLatency,
+  formatCreatedAt
+} from "@/components/Option/Audio/comparison-provenance"
 
 const { Text } = Typography
 
@@ -30,8 +35,10 @@ export interface ComparisonPanelProps {
 interface ResultCardProps {
   result: ComparisonResult
   onCopy: (text: string) => void
-  onRetry: (model: string) => void
+  onRetry: (target: string) => void
   onSave: (text: string, model: string) => void
+  onDuplicate: (target: string) => void
+  onToggleDisabled: (target: string, disabled: boolean) => void
 }
 
 const ResultCard: React.FC<ResultCardProps> = ({
@@ -39,6 +46,8 @@ const ResultCard: React.FC<ResultCardProps> = ({
   onCopy,
   onRetry,
   onSave,
+  onDuplicate,
+  onToggleDisabled,
 }) => {
   const { t } = useTranslation("playground")
   const [editedText, setEditedText] = useState(result.text)
@@ -48,6 +57,39 @@ const ResultCard: React.FC<ResultCardProps> = ({
   }, [result.text])
 
   const isPending = result.status === "pending" || result.status === "running"
+  const resultTarget = result.id || result.model
+  const metadata = result.metadata
+  const config = result.config
+  const wordCount =
+    metadata?.wordCount ??
+    result.wordCount ??
+    editedText.split(/\s+/).filter(Boolean).length
+  const provenanceTags = [
+    metadata?.createdAt ? formatCreatedAt(metadata.createdAt) : undefined,
+    metadata?.audioSourceLabel,
+    formatByteSize(metadata?.audioSizeBytes),
+    formatClientLatency(metadata?.clientLatencyMs ?? result.latencyMs),
+    metadata?.language || config?.language
+      ? `Language ${metadata?.language || config?.language}`
+      : undefined,
+    config?.task ? `Task ${config.task}` : undefined,
+    config?.responseFormat ? `Format ${config.responseFormat}` : undefined,
+    config?.timestampGranularities?.length
+      ? `Timestamps ${config.timestampGranularities.join(", ")}`
+      : undefined,
+    config?.segmentationEnabled ? "Segmentation on" : undefined,
+    config?.diarizationRequested ? "Diarization requested" : undefined,
+    metadata?.durationSeconds != null
+      ? `Duration ${metadata.durationSeconds.toFixed(1)}s`
+      : undefined,
+    metadata?.segmentCount != null
+      ? `${metadata.segmentCount} ${
+          metadata.segmentCount === 1 ? "segment" : "segments"
+        }`
+      : undefined,
+    `${wordCount} ${t("stt.comparison.words", "words")}`,
+    result.disabled ? "Disabled for Run All" : undefined
+  ].filter((tag): tag is string => Boolean(tag))
 
   return (
     <Card
@@ -79,7 +121,7 @@ const ResultCard: React.FC<ResultCardProps> = ({
             <Button
               size="small"
               icon={<RotateCcw className="h-3.5 w-3.5" />}
-              onClick={() => onRetry(result.model)}
+              onClick={() => onRetry(resultTarget)}
             >
               {t("stt.comparison.retry", "Retry")}
             </Button>
@@ -97,17 +139,13 @@ const ResultCard: React.FC<ResultCardProps> = ({
             aria-label={`Transcript from ${result.model}`}
           />
           <div className="flex flex-wrap items-center gap-2">
-            {result.latencyMs != null && (
-              <Tag bordered>
-                {(result.latencyMs / 1000).toFixed(1)}s
+            {provenanceTags.map((tag) => (
+              <Tag key={tag} bordered>
+                {tag}
               </Tag>
-            )}
-            <Tag bordered>
-              {editedText.split(/\s+/).filter(Boolean).length}{" "}
-              {t("stt.comparison.words", "words")}
-            </Tag>
+            ))}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Tooltip title={t("stt.comparison.copyTooltip", "Copy to clipboard")}>
               <Button
                 size="small"
@@ -124,6 +162,37 @@ const ResultCard: React.FC<ResultCardProps> = ({
                 onClick={() => onSave(editedText, result.model)}
               >
                 {t("stt.comparison.saveToNotes", "Save to Notes")}
+              </Button>
+            </Tooltip>
+            <Tooltip
+              title={t(
+                "stt.comparison.duplicateTooltip",
+                "Duplicate this row with the same transcription settings"
+              )}
+            >
+              <Button
+                size="small"
+                icon={<CopyPlus className="h-3.5 w-3.5" />}
+                onClick={() => onDuplicate(resultTarget)}
+              >
+                {t("stt.comparison.duplicate", "Duplicate")}
+              </Button>
+            </Tooltip>
+            <Tooltip
+              title={
+                result.disabled
+                  ? t("stt.comparison.enableTooltip", "Include this row in Run All")
+                  : t("stt.comparison.disableTooltip", "Skip this row in Run All")
+              }
+            >
+              <Button
+                size="small"
+                icon={<Ban className="h-3.5 w-3.5" />}
+                onClick={() => onToggleDisabled(resultTarget, !result.disabled)}
+              >
+                {result.disabled
+                  ? t("stt.comparison.enable", "Enable")
+                  : t("stt.comparison.disable", "Disable")}
               </Button>
             </Tooltip>
           </div>
@@ -150,8 +219,14 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
   const notification = useAntdNotification()
   const [models, setModels] = useState<string[]>(selectedModelsProp ?? [])
 
-  const { results, isRunning, transcribeAll, retryModel } =
-    useComparisonTranscribe()
+  const {
+    results,
+    isRunning,
+    transcribeAll,
+    retryModel,
+    duplicateResult,
+    setResultDisabled
+  } = useComparisonTranscribe()
 
   // Sync from prop when provided
   useEffect(() => {
@@ -277,11 +352,13 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {results.map((result) => (
             <ResultCard
-              key={result.model}
+              key={result.id || result.model}
               result={result}
               onCopy={handleCopy}
               onRetry={handleRetry}
               onSave={onSaveToNotes}
+              onDuplicate={duplicateResult}
+              onToggleDisabled={setResultDisabled}
             />
           ))}
         </div>
