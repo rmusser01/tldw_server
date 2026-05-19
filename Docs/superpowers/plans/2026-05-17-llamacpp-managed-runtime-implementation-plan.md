@@ -428,14 +428,12 @@ git commit -m "feat: harden llama.cpp runtime admin console"
 
 **Files:**
 - Modify: `Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md`
-- Modify: `Docs/Published/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md`
 - Modify: `Docs/API-related/llamacpp_integration_modes.md`
-- Modify: `Docs/Published/API-related/llamacpp_integration_modes.md`
 - Create or modify: `apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts`
 - Modify: `backlog/tasks/task-418 - Plan-llama.cpp-managed-runtime-closeout-implementation.md` only for task closeout if this implementation happens in the same branch family
 - Test: focused backend, frontend, E2E, Bandit, diff checks
 
-- [ ] **Step 1: Write E2E smoke coverage**
+- [x] **Step 1: Write E2E smoke coverage**
 
 Use mocked backend responses unless the existing E2E server fixture can safely expose llama.cpp admin stubs. Cover:
 - assets load;
@@ -445,7 +443,9 @@ Use mocked backend responses unless the existing E2E server fixture can safely e
 - `Use in Chat` is not offered for stopped profiles;
 - backend warnings display as warnings, not hard-blocking full page load.
 
-- [ ] **Step 2: Update docs**
+Result: added `apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts` with mocked assets, profiles, runtimes, runtime warnings, and running-only Chat wiring assertions.
+
+- [x] **Step 2: Update docs**
 
 Document:
 - profile store location and purpose;
@@ -455,7 +455,9 @@ Document:
 - autostart/restart policy limitations;
 - remote downloads/catalogs are deferred to the acquisition workflow.
 
-- [ ] **Step 3: Run backend verification**
+Result: updated the source llama.cpp integration/user-guide docs with the managed runtime profile contract, default-profile compatibility, local register/import semantics, mmproj pairing, bounded autostart/restart behavior, and deferred download/catalog boundaries. `Docs/Published` files are intentionally left untouched because they are generated from the source docs.
+
+- [x] **Step 3: Run backend verification**
 
 ```bash
 python -m pytest \
@@ -471,7 +473,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Run frontend verification**
+Result: PASS, 163 passed, 5 warnings.
+
+- [x] **Step 4: Run frontend verification**
 
 ```bash
 cd apps/packages/ui
@@ -484,7 +488,9 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 5: Run E2E smoke if environment is available**
+Result: PASS, 42 passed across 4 files.
+
+- [x] **Step 5: Run E2E smoke if environment is available**
 
 ```bash
 # Set TLDW_E2E_API_KEY in your shell from your local test configuration first.
@@ -494,7 +500,9 @@ bunx playwright test apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spe
 
 Expected: PASS, or document the missing server/browser environment blocker.
 
-- [ ] **Step 6: Run Bandit on touched backend paths**
+Result: PASS with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` set so the Next dev server can start in advanced deployment mode. Command used from `apps/tldw-frontend`: `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bunx playwright test e2e/workflows/llamacpp-runtime-admin.spec.ts --reporter=line`.
+
+- [x] **Step 6: Run Bandit on touched backend paths**
 
 ```bash
 python -m bandit \
@@ -510,7 +518,9 @@ python -m bandit \
 
 Expected: no high/medium findings in touched code. Fix new findings before closeout.
 
-- [ ] **Step 7: Run diff checks**
+Result: PASS, no findings. Output written to `/tmp/bandit_llamacpp_runtime_rollout.json`.
+
+- [x] **Step 7: Run diff checks**
 
 ```bash
 git diff --check
@@ -519,23 +529,28 @@ git status --short
 
 Expected: no whitespace errors; only expected files are modified.
 
-- [ ] **Step 8: Commit Task 6**
+Result: `git diff --check` passed; `git status --short` showed only the expected docs, E2E smoke, and Backlog closeout task changes before final task tracking updates.
+
+- [x] **Step 8: Commit Task 6**
 
 ```bash
 git add \
-  Docs \
+  Docs/API-related/llamacpp_integration_modes.md \
+  Docs/User_Guides/Integrations_Experiments/Setting_up_a_local_LLM.md \
+  Docs/superpowers/plans/2026-05-17-llamacpp-managed-runtime-implementation-plan.md \
   apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts \
-  backlog/tasks/task-418\ -\ Plan-llama.cpp-managed-runtime-closeout-implementation.md
+  backlog/tasks/task-418\ -\ Plan-llama.cpp-managed-runtime-closeout-implementation.md \
+  backlog/completed/task-418.15\ -\ Finalize-llama.cpp-managed-runtime-rollout.md
 git commit -m "docs: close out llama.cpp managed runtime rollout"
 ```
 
 ## Final PR Checklist
 
-- [ ] Backend focused tests pass.
-- [ ] Frontend focused tests pass.
-- [ ] E2E smoke passes or blocker is documented.
-- [ ] Bandit runs on touched backend Python paths.
-- [ ] `git diff --check` passes.
-- [ ] Backlog child tasks are current.
-- [ ] PR body includes a human-owned `Change summary` placeholder for maintainer completion.
-- [ ] Remote downloads/catalogs remain deferred and are not partially implemented in this runtime PR.
+- [x] Backend focused tests pass.
+- [x] Frontend focused tests pass.
+- [x] E2E smoke passes or blocker is documented.
+- [x] Bandit runs on touched backend Python paths.
+- [x] `git diff --check` passes.
+- [x] Backlog child tasks are current.
+- [x] PR body includes a human-owned `Change summary` placeholder for maintainer completion.
+- [x] Remote downloads/catalogs remain deferred and are not partially implemented in this runtime PR.

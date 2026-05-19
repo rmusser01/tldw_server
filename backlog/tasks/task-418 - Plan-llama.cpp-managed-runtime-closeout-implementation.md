@@ -37,6 +37,8 @@ Write a consolidation implementation plan for the remaining llama.cpp managed ru
 
 <!-- SECTION:NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-17-llamacpp-managed-runtime-implementation-plan.md as a consolidation and closeout plan grounded in current origin/dev. The plan references the landed Stage 1, Asset Inventory V2, mmproj/model-family, saved profile editor, and acquisition/import plans; it decomposes remaining runtime work into supervision reconciliation, validation hardening, V1/API compatibility, provider metadata, Admin UI, and rollout verification. Bandit not run because this task changes docs/backlog only. Standalone tracking is intentional because origin/dev has a duplicate TASK-397 ID collision. PR #1815 review follow-up replaced a fake key-like TLDW_E2E_API_KEY assignment with a note to supply the value from local test configuration.
+
+Rollout closeout follow-through completed under TASK-418.15: source docs now cover managed runtime profile behavior, default-profile compatibility, local import/register, mmproj pairing, bounded restart/autostart behavior, and deferred acquisition boundaries. `Docs/Published` files are generated and intentionally left untouched. The new admin E2E smoke plus focused frontend/backend/Bandit/diff verification passed. The Playwright smoke requires `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` when starting the advanced-mode frontend dev server.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

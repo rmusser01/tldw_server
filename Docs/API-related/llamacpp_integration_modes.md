@@ -49,6 +49,28 @@ The `/admin/llamacpp` WebUI is an admin/operator surface for the managed plane. 
 
 After a managed server is running, the page shows **Use this in Chat**. This is intentionally explicit: it calls `POST /api/v1/llamacpp/use-in-chat` and updates the provider-plane `llama_api` endpoint only after the admin chooses it. Starting a managed server alone does not mutate chat provider settings.
 
+## Managed Runtime Profiles
+
+The managed plane now stores durable llama.cpp runtime profiles. A profile is a backend-owned service definition, not just a saved browser form. It records the profile ID, name, enabled state, mode, selected GGUF asset or model path, optional mmproj projector, host/port policy, structured server arguments, autostart setting, bounded restart policy, provider alias, and tags.
+
+Profile state is persisted in `llamacpp_profiles.json` next to the active tldw config file resolved by setup configuration. Treat this as a server-owned file: use the Admin UI or `/api/v1/llamacpp/profiles*` endpoints instead of editing it while the API server is running.
+
+The legacy one-server API remains a compatibility wrapper around the reserved `default` profile:
+
+- `POST /api/v1/llamacpp/start_server`
+- `POST /api/v1/llamacpp/start-by-model`
+- `GET /api/v1/llamacpp/status`
+- `GET /api/v1/llamacpp/logs/tail`
+- `POST /api/v1/llamacpp/use-in-chat`
+
+Those endpoints target only the default profile. Multi-profile operators should use `/api/v1/llamacpp/profiles` for desired service definitions and `/api/v1/llamacpp/instances` for observed runtime state across all profiles.
+
+Profiles can reference assets discovered by the asset inventory or direct model paths that pass the configured allowlist. Local registration and folder import are the preferred ways to make files visible before profile creation. Remote download and future catalog workflows belong to the acquisition path; they do not automatically create profiles, start runtimes, or rewire Chat.
+
+Vision profiles require an explicit mmproj pairing. Use `mmproj_model_id` for an inventory projector asset, or a backend-validated `server_args.mmproj` path. If both are supplied, they must resolve to the same projector file. The backend rejects missing or conflicting projector definitions while keeping resource-fit warnings advisory.
+
+Autostart and restart policy are intentionally bounded. On startup, the reconciler starts only enabled profiles with `autostart=true`. Paused profiles are not restarted until resumed. Restart attempts honor the stored limit, and the profile records bounded last-failure metadata such as state, exit code, model path, and error summary instead of raw logs or environment.
+
 ## Model Acquisition And Import
 
 The `/admin/llamacpp` **Assets** panel helps operators make local GGUF and mmproj files visible to the managed plane without changing runtime or provider-plane state by surprise.
