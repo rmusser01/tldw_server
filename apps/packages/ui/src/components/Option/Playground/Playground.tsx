@@ -123,6 +123,7 @@ import {
 } from "@/utils/character-chat-mode-intent";
 import {
   buildCharacterChatReadiness,
+  getCharacterChatReadinessCopy,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
@@ -249,7 +250,7 @@ export const Playground = () => {
   React.useEffect(() => {
     let cancelled = false;
 
-    void fetchChatModels({ returnEmpty: true })
+    void fetchChatModels({ returnEmpty: true, forceRefresh: true })
       .then((models) => {
         if (cancelled) return;
         setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
@@ -2063,6 +2064,25 @@ export const Playground = () => {
       streaming,
     ],
   );
+  const characterChatBlocked =
+    characterWorkflowActive && characterChatReadiness.status === "blocked";
+  const characterChatModelBlocked =
+    characterChatBlocked &&
+    characterChatReadiness.missingRequirement === "chat-model";
+  const characterChatReadinessCopy = React.useMemo(
+    () =>
+      characterChatBlocked
+        ? getCharacterChatReadinessCopy(characterChatReadiness, t, {
+            characterName: activeCharacterModeLabel,
+          })
+        : null,
+    [
+      activeCharacterModeLabel,
+      characterChatBlocked,
+      characterChatReadiness,
+      t,
+    ],
+  );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
@@ -2408,6 +2428,8 @@ export const Playground = () => {
     toolSummary: cockpitToolSummary,
     compositionStatus,
     composition: null,
+    modelUnavailable: characterChatModelBlocked,
+    modelUnavailableDetail: characterChatReadinessCopy?.title ?? null,
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2555,7 +2577,9 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
       runtimeStatus={
-        serverReadinessState === "blocked"
+        characterChatBlocked
+          ? "error"
+          : serverReadinessState === "blocked"
           ? "error"
           : streaming
           ? "streaming"
@@ -2563,7 +2587,7 @@ export const Playground = () => {
             ? "degraded"
             : "ready"
       }
-      runtimeStatusDetail={runtimeStatusDetail}
+      runtimeStatusDetail={characterChatReadinessCopy?.title ?? runtimeStatusDetail}
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
       assistantSummary={cockpitAssistantSummary}
@@ -2605,6 +2629,8 @@ export const Playground = () => {
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
       serverBlocked={serverReadinessState === "blocked"}
+      modelUnavailable={characterChatModelBlocked}
+      modelUnavailableMessage={characterChatReadinessCopy?.title ?? null}
       compositionStatus={compositionStatus}
       onStopStreaming={() => stopStreamingRequest()}
       onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}

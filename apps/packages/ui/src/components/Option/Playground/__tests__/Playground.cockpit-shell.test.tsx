@@ -87,6 +87,8 @@ const tldwServerState = vi.hoisted(() => ({
     {
       model: "openai:gpt-4.1-mini",
       provider: "openai",
+      is_configured: true,
+      provider_is_configured: true,
     },
   ]),
 }));
@@ -324,6 +326,8 @@ describe("Playground cockpit shell", () => {
       {
         model: "openai:gpt-4.1-mini",
         provider: "openai",
+        is_configured: true,
+        provider_is_configured: true,
       },
     ]);
     tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({
@@ -352,6 +356,12 @@ describe("Playground cockpit shell", () => {
     ).toHaveTextContent("Context and runtime rails visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true,
+        forceRefresh: true,
+      });
+    });
   });
 
   it("shows the starter deck for a true blank chat state", async () => {
@@ -530,7 +540,9 @@ describe("Playground cockpit shell", () => {
       render(<Playground />);
 
       expect(
-        await screen.findByText("Choose a chat model before chatting as Ariadne"),
+        within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
+          "Choose a chat model before chatting as Ariadne",
+        ),
       ).toBeInTheDocument();
 
       fireEvent.click(
@@ -566,13 +578,54 @@ describe("Playground cockpit shell", () => {
       {
         model: "openai:gpt-4.1-mini",
         provider: "openai",
+        is_configured: true,
+        provider_is_configured: true,
       },
     ]);
 
     render(<Playground />);
 
     expect(
-      await screen.findByText("Choose a chat model before chatting as Ariadne"),
+      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
+        "Choose a chat model before chatting as Ariadne",
+      ),
+    ).toBeInTheDocument();
+    const chatStatus = screen.getByRole("status", { name: "Chat status" });
+    expect(chatStatus).toHaveTextContent("Model unavailable");
+    expect(chatStatus).not.toHaveTextContent("Ready");
+  });
+
+  it("does not treat catalog-only backend models as ready for character chat", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.selectedModel = "tldw:gpt-4o";
+    tldwServerState.fetchChatModels.mockResolvedValueOnce([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        provider: "openai",
+        is_configured: false,
+        provider_is_configured: false,
+        catalog_only: true,
+      } as any,
+      {
+        id: "gemma3:1b",
+        model: "tldw:gemma3:1b",
+        provider: "ollama",
+        is_configured: true,
+        provider_is_configured: true,
+      } as any,
+    ]);
+
+    render(<Playground />);
+
+    expect(
+      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
+        "Choose a chat model before chatting as Ariadne",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -588,7 +641,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     expect(
-      await screen.findByText("Character chat is preparing"),
+      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
+        "Character chat is preparing",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -612,7 +667,9 @@ describe("Playground cockpit shell", () => {
       );
 
       expect(
-        await screen.findByText("Connect to tldw_server before starting character chat"),
+        within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
+          "Connect to tldw_server before starting character chat",
+        ),
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Open server settings" }));

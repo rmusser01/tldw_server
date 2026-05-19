@@ -151,6 +151,27 @@ describe("playground composition preview summary", () => {
     });
   });
 
+  it("marks a selected model unavailable when readiness rejects the route", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: "tldw",
+          selectedModel: "gpt-4o",
+          providerRouteLabel: "tldw:gpt-4o",
+        },
+        modelUnavailable: true,
+        modelUnavailableDetail: "Choose a chat model before chatting as Ada",
+      }),
+    );
+
+    expect(summary.overallState).toBe("unavailable");
+    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+      state: "unavailable",
+      title: "tldw:gpt-4o",
+      detail: "Choose a chat model before chatting as Ada",
+    });
+  });
+
   it("keeps MCP unavailable distinct from empty context and preserves character context", () => {
     const summary = buildPlaygroundCompositionPreviewSummary(
       baseInput({

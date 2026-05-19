@@ -223,6 +223,37 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(openModelSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("does not show Ready when the selected Character Chat model is unavailable", () => {
+    const openModelSettings = vi.fn();
+
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="tldw"
+        selectedModel="gpt-4o"
+        messageCount={1}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUnavailable
+        modelUnavailableMessage="Choose a chat model before chatting as Ada"
+        onOpenModelSettings={openModelSettings}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model unavailable");
+    expect(status).toHaveTextContent("Choose a chat model before chatting as Ada");
+    expect(status).not.toHaveTextContent("Ready");
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(openModelSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("shows context preview loading without treating the chat route as degraded", () => {
     render(
       <PlaygroundStatusStrip
