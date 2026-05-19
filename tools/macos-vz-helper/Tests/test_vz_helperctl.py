@@ -534,6 +534,76 @@ def test_host_reboot_pre_writes_bounded_manifest(
     CASE.assertNotIn("serial_log_contents", payload)
 
 
+def test_host_reboot_pre_writes_manifest_and_returns_failed_ping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    socket_path = tmp_path / "helper.sock"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    result = helperctl.run_host_reboot_pre(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=socket_path,
+        log_dir=tmp_path / "logs",
+        create_evidence_dir=True,
+        created_at_factory=lambda: "2026-05-19T00:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=lambda path: helperctl.PingState(
+            result=helperctl.CheckResult(False, "helper_ping_failed", "socket unavailable"),
+            protocol_version="",
+            helper_version="",
+            details={"helper_instance_id": "before"},
+        ),
+    )
+
+    manifest = evidence / "host-reboot-pre.json"
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "helper_ping_failed")
+    CASE.assertEqual(result.message, "socket unavailable")
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    CASE.assertIs(payload["helper_ping_ok"], False)
+    CASE.assertEqual(payload["helper_ping_reason"], "helper_ping_failed")
+    CASE.assertEqual(payload["helper_details"], {"helper_instance_id": "before"})
+
+
+def test_host_reboot_pre_wraps_raising_ping_checker_and_writes_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    monkeypatch.setattr(helperctl, "VOLATILE_EVIDENCE_ROOTS", ())
+
+    def raising_ping_checker(path: Path) -> helperctl.PingState:
+        raise RuntimeError("helper socket refused connection")
+
+    result = helperctl.run_host_reboot_pre(
+        evidence_dir=evidence,
+        bundle_path=tmp_path / "bundle",
+        helper_path=tmp_path / "bundle" / "macos-vz-helper",
+        helper_mode="direct",
+        socket_path=tmp_path / "helper.sock",
+        log_dir=tmp_path / "logs",
+        create_evidence_dir=True,
+        created_at_factory=lambda: "2026-05-19T00:00:00Z",
+        hostname_provider=lambda: "test-host",
+        ping_checker=raising_ping_checker,
+    )
+
+    manifest = evidence / "host-reboot-pre.json"
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "helper_ping_failed")
+    CASE.assertEqual(result.message, "helper socket refused connection")
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    CASE.assertIs(payload["helper_ping_ok"], False)
+    CASE.assertEqual(payload["helper_ping_reason"], "helper_ping_failed")
+
+
 def test_write_json_private_creates_owner_only_file(tmp_path: Path) -> None:
     helperctl = load_helperctl()
     manifest = tmp_path / "manifest.json"
@@ -544,6 +614,35 @@ def test_write_json_private_creates_owner_only_file(tmp_path: Path) -> None:
     CASE.assertEqual(result.reason, "host_reboot_manifest_written")
     CASE.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
     CASE.assertEqual(json.loads(manifest.read_text(encoding="utf-8")), {"phase": "pre"})
+
+
+def test_write_json_private_hardens_existing_manifest_before_serialization_failure(
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"old": true}\n', encoding="utf-8")
+    manifest.chmod(0o644)
+
+    result = helperctl.write_json_private(manifest, {"bad": object()})
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_manifest_write_failed")
+    CASE.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+
+
+def test_write_json_private_refuses_final_symlink_without_touching_target(tmp_path: Path) -> None:
+    helperctl = load_helperctl()
+    target = tmp_path / "target.json"
+    target.write_text('{"target": true}\n', encoding="utf-8")
+    link = tmp_path / "manifest.json"
+    link.symlink_to(target)
+
+    result = helperctl.write_json_private(link, {"phase": "pre"})
+
+    CASE.assertFalse(result.ok)
+    CASE.assertEqual(result.reason, "host_reboot_manifest_write_failed")
+    CASE.assertEqual(target.read_text(encoding="utf-8"), '{"target": true}\n')
 
 
 def test_ping_state_payload_maps_helper_manifest_fields() -> None:

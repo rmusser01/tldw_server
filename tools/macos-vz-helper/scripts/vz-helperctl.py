@@ -236,17 +236,21 @@ def ensure_host_reboot_evidence_dir(
 
 
 def write_json_private(path: Path, payload: Mapping[str, Any]) -> CheckResult:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags = os.O_WRONLY | os.O_CREAT
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     fd: int | None = None
     try:
         fd = os.open(path, flags, 0o600)
+        path_stat = os.fstat(fd)
+        if not stat.S_ISREG(path_stat.st_mode):
+            raise OSError(f"manifest target is not a regular file: {path}")
+        os.fchmod(fd, 0o600)
+        os.ftruncate(fd, 0)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = None
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        path.chmod(0o600)
     except (OSError, TypeError, ValueError) as exc:
         if fd is not None:
             with contextlib.suppress(OSError):
@@ -963,7 +967,10 @@ def run_host_reboot_pre(
     if not evidence_result.ok:
         return evidence_result
 
-    ping_state = _coerce_ping_state(ping_checker(socket_path))
+    try:
+        ping_state = _coerce_ping_state(ping_checker(socket_path))
+    except Exception as exc:
+        ping_state = PingState(CheckResult(False, "helper_ping_failed", str(exc)))
     payload: dict[str, Any] = {
         "phase": "pre",
         "created_at": created_at_factory(),
@@ -983,6 +990,12 @@ def run_host_reboot_pre(
     write_result = write_json_private(manifest_path, payload)
     if not write_result.ok:
         return write_result
+    if not ping_state.result.ok:
+        return CheckResult(
+            False,
+            ping_state.result.reason,
+            ping_state.result.message or str(manifest_path),
+        )
     return CheckResult(True, "host_reboot_pre_manifest_written", str(manifest_path))
 
 

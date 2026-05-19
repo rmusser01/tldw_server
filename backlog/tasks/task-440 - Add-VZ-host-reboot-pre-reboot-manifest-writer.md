@@ -36,9 +36,10 @@ Implement Task 2 from Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-va
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-- Implemented Task 2 pre-reboot manifest helpers and tests. The pre helper validates the evidence directory through the existing host reboot safety helper, pings the configured helper socket through an injectable checker, writes only the approved manifest fields to `host-reboot-pre.json`, and records helper ping/version/details metadata without raw env, stdout/stderr, serial log contents, or arbitrary extra fields.
-- Verification: focused pytest selector passed, full helperctl test file passed (`153 passed, 6 skipped`), `py_compile` passed, Bandit on the touched script reported `results=0` and `errors=0`, and `git diff --check` passed.
-- Known skips: restored-helper smoke execution and real host reboot validation were not run because they are outside Task 2 scope.
+- Implemented Task 2 pre-reboot manifest helpers and review-fix hardening. The pre helper validates the evidence directory, captures helper ping state through an injectable checker, writes bounded `host-reboot-pre.json` evidence, and now returns non-ok when ping fails while preserving the successful `host_reboot_pre_manifest_written` reason for healthy pings.
+- Hardened `write_json_private()` to validate and modify the opened file descriptor only: final-component symlinks are refused via the open path, non-regular fd targets are rejected, existing manifests are set to `0600` before truncation/write, and operational failures keep the stable `host_reboot_manifest_write_failed` reason.
+- Verification: focused pytest selector passed after an expected red run (`6 passed`), full helperctl test file passed (`157 passed, 6 skipped`), `py_compile` passed, Bandit on the touched script reported `results=0` and `errors=0`, and `git diff --check` passed.
+- Known skips: restored-helper smoke execution, post-reboot comparison, CLI wiring, and real host reboot validation were not run because they are outside Task 2 scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
