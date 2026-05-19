@@ -515,6 +515,8 @@ class RunCancelResponse(BaseModel):
 
 
 class RunStageRetryResponse(BaseModel):
+    """Response returned after retrying a single recoverable run stage."""
+
     run_id: int
     stage: str
     retried: bool
@@ -525,6 +527,8 @@ class RunStageRetryResponse(BaseModel):
 
 
 class RunDiagnosticsResponse(BaseModel):
+    """Safe diagnostics bundle for a watchlist run and its recovery options."""
+
     run_id: int
     generated_at: str
     run: dict[str, Any]

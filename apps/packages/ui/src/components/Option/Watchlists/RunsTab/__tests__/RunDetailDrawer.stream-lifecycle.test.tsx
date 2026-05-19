@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   openJobFormMock: vi.fn(),
   messageErrorMock: vi.fn(),
   messageSuccessMock: vi.fn(),
+  messageWarningMock: vi.fn(),
   translateMock: vi.fn(
     (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
       if (typeof defaultValue !== "string") return key
@@ -141,7 +142,7 @@ vi.mock("antd", () => {
     message: {
       error: mocks.messageErrorMock,
       success: mocks.messageSuccessMock,
-      warning: vi.fn()
+      warning: mocks.messageWarningMock
     }
   }
 })
@@ -496,6 +497,63 @@ describe("RunDetailDrawer stream lifecycle", () => {
       expect(mocks.retryWatchlistRunAudioMock).toHaveBeenCalledWith(10)
       expect(mocks.getWatchlistRunDiagnosticsMock).toHaveBeenCalledWith(10)
     })
+    expect(mocks.triggerWatchlistRunMock).not.toHaveBeenCalled()
+  })
+
+  it("does not report success when stage-specific retries are skipped", async () => {
+    mocks.getRunDetailsMock.mockResolvedValue({
+      ...baseRunDetails,
+      status: "completed",
+      finished_at: "2026-02-18T10:01:00Z",
+      stats: {
+        ...baseRunDetails.stats,
+        audio_briefing_task_id: "audio-task-10"
+      }
+    })
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({
+      items: [{ id: 55 }],
+      total: 1,
+      page: 1,
+      size: 1,
+      has_more: false
+    })
+    mocks.getWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      task_id: "audio-task-10",
+      status: "failed",
+      download_url: null,
+      error: "tts_failed"
+    })
+    mocks.retryWatchlistRunDeliveryMock.mockResolvedValue({
+      run_id: 10,
+      stage: "delivery",
+      retried: false,
+      message: "Delivery retry was skipped."
+    })
+    mocks.retryWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      stage: "audio",
+      retried: false,
+      message: "Audio retry was skipped."
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Retry delivery" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Retry audio" })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry delivery" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry audio" }))
+
+    await waitFor(() => {
+      expect(mocks.retryWatchlistRunDeliveryMock).toHaveBeenCalledWith(10)
+      expect(mocks.retryWatchlistRunAudioMock).toHaveBeenCalledWith(10)
+    })
+    expect(mocks.messageWarningMock).toHaveBeenCalledWith("Delivery retry was skipped.")
+    expect(mocks.messageWarningMock).toHaveBeenCalledWith("Audio retry was skipped.")
+    expect(mocks.messageSuccessMock).not.toHaveBeenCalled()
     expect(mocks.triggerWatchlistRunMock).not.toHaveBeenCalled()
   })
 

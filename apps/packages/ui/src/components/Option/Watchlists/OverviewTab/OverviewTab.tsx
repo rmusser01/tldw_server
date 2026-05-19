@@ -118,6 +118,7 @@ export const OverviewTab: React.FC = () => {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const quickSetupTriggerRef = useRef<HTMLButtonElement | null>(null)
   const quickSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
+  const quickSetupFocusRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pipelineSetupRestoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const quickSetupWasOpenRef = useRef(false)
   const pipelineSetupWasOpenRef = useRef(false)
@@ -194,6 +195,16 @@ export const OverviewTab: React.FC = () => {
 
   const quickSetupAutoShownWatchlistRef = useRef<number | null>(null)
 
+  const restoreQuickSetupFocus = useCallback(() => {
+    if (quickSetupFocusRestoreTimerRef.current) {
+      clearTimeout(quickSetupFocusRestoreTimerRef.current)
+      quickSetupFocusRestoreTimerRef.current = null
+    }
+    const target = quickSetupRestoreFocusTargetRef.current
+    quickSetupRestoreFocusTargetRef.current = null
+    restoreFocusToElement(target)
+  }, [])
+
   useLayoutEffect(() => {
     if (quickSetupOpen) {
       if (!quickSetupWasOpenRef.current) {
@@ -206,9 +217,18 @@ export const OverviewTab: React.FC = () => {
 
     if (quickSetupWasOpenRef.current) {
       quickSetupWasOpenRef.current = false
-      restoreFocusToElement(quickSetupRestoreFocusTargetRef.current)
+      quickSetupFocusRestoreTimerRef.current = setTimeout(restoreQuickSetupFocus, 0)
     }
-  }, [quickSetupOpen])
+  }, [quickSetupOpen, restoreQuickSetupFocus])
+
+  useEffect(() => {
+    return () => {
+      if (quickSetupFocusRestoreTimerRef.current) {
+        clearTimeout(quickSetupFocusRestoreTimerRef.current)
+        quickSetupFocusRestoreTimerRef.current = null
+      }
+    }
+  }, [])
 
   useLayoutEffect(() => {
     if (pipelineSetupOpen) {
@@ -1641,7 +1661,7 @@ export const OverviewTab: React.FC = () => {
         open={quickSetupOpen}
         title={t("watchlists:overview.onboarding.quickSetup.title", "Add initial collection")}
         onCancel={quickSetupSubmitting ? undefined : cancelQuickSetup}
-        afterClose={() => restoreFocusToElement(quickSetupRestoreFocusTargetRef.current)}
+        afterClose={restoreQuickSetupFocus}
         destroyOnHidden
         maskClosable={!quickSetupSubmitting}
         footer={[

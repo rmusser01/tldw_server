@@ -1021,6 +1021,12 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     setRetryingDelivery(true)
     try {
       const result = await retryWatchlistRunDelivery(runId)
+      if (!result.retried) {
+        message.warning(
+          result.message || t("watchlists:runs.detail.deliveryRetrySkipped", "Delivery retry was not started.")
+        )
+        return
+      }
       message.success(
         t("watchlists:runs.detail.deliveryRetrySuccess", "Delivery retry completed for output #{{id}}.", {
           id: result.output_id ?? "-"
@@ -1038,9 +1044,17 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const handleRetryAudio = async () => {
     if (!runId || retryingAudio) return
     setRetryingAudio(true)
+    setAudioStatusError(null)
     try {
       const result = await retryWatchlistRunAudio(runId)
+      if (!result.retried) {
+        message.warning(
+          result.message || t("watchlists:runs.detail.audioRetrySkipped", "Audio retry was not started.")
+        )
+        return
+      }
       if (result.task_id) {
+        setAudioStatusError(null)
         setAudioStatus((prev) => ({
           ...(prev || { run_id: runId }),
           run_id: runId,

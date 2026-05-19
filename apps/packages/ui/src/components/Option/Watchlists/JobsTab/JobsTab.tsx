@@ -108,7 +108,8 @@ export const JobsTab: React.FC = () => {
 
   // Local state
   const [triggeringJobId, setTriggeringJobId] = useState<number | null>(null)
-  const [cloningJobId, setCloningJobId] = useState<number | null>(null)
+  const cloningJobIdsRef = useRef<Set<number>>(new Set())
+  const [cloningJobIds, setCloningJobIds] = useState<Set<number>>(() => new Set())
   const [previewJob, setPreviewJob] = useState<WatchlistJob | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
@@ -349,8 +350,29 @@ export const JobsTab: React.FC = () => {
     }
   }
 
+  const startCloningJob = useCallback((jobId: number) => {
+    if (cloningJobIdsRef.current.has(jobId)) {
+      return false
+    }
+    const next = new Set(cloningJobIdsRef.current)
+    next.add(jobId)
+    cloningJobIdsRef.current = next
+    setCloningJobIds(next)
+    return true
+  }, [])
+
+  const finishCloningJob = useCallback((jobId: number) => {
+    if (!cloningJobIdsRef.current.has(jobId)) {
+      return
+    }
+    const next = new Set(cloningJobIdsRef.current)
+    next.delete(jobId)
+    cloningJobIdsRef.current = next
+    setCloningJobIds(next)
+  }, [])
+
   const handleCloneJob = async (job: WatchlistJob) => {
-    setCloningJobId(job.id)
+    if (!startCloningJob(job.id)) return
     try {
       const cloned = await createWatchlistJob(buildClonedWatchlistJobPayload(job))
       addJob(cloned)
@@ -365,7 +387,7 @@ export const JobsTab: React.FC = () => {
       console.error("Failed to clone job:", err)
       message.error(t("watchlists:jobs.cloneError", "Failed to clone monitor"))
     } finally {
-      setCloningJobId(null)
+      finishCloningJob(job.id)
     }
   }
 
@@ -598,7 +620,7 @@ export const JobsTab: React.FC = () => {
               aria-label={t("watchlists:jobs.cloneMonitorAria", "Clone {{name}}", { name: record.name })}
               icon={<Copy className="h-4 w-4" />}
               onClick={() => handleCloneJob(record)}
-              loading={cloningJobId === record.id}
+              loading={cloningJobIds.has(record.id)}
             />
           </Tooltip>
           <Tooltip title={t("common:delete", "Delete")}>
@@ -769,7 +791,7 @@ export const JobsTab: React.FC = () => {
                 aria-label={t("watchlists:jobs.cloneMonitorAria", "Clone {{name}}", { name: job.name })}
                 icon={<Copy className="h-4 w-4" />}
                 onClick={() => handleCloneJob(job)}
-                loading={cloningJobId === job.id}
+                loading={cloningJobIds.has(job.id)}
               />
               <Button
                 type="text"

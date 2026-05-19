@@ -31,12 +31,12 @@ Implement PR5 Tasks 9-10 from Docs/superpowers/plans/2026-05-18-watchlists-diges
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Clone monitor preserves scope, cadence, filters, output, delivery, and audio cast fields where supported while resetting runtime state.
-- [ ] #2 Clone source preserves fetch/extraction/dedupe identity rules while resetting runtime status and seen state.
-- [ ] #3 Command palette exposes create, clone, run, preview, retry, and export actions where backing operations exist or clearly reports unavailable actions.
-- [ ] #4 Batch test/validation actions reuse safe existing APIs unless a backend endpoint is required.
-- [ ] #5 Operator diagnostics/retry controls distinguish delivery/audio retries from full ingestion reruns.
-- [ ] #6 Focused frontend and backend tests cover the implemented behavior, or skipped coverage is documented with the blocker.
+- [x] #1 Clone monitor preserves scope, cadence, filters, output, delivery, and audio cast fields where supported while resetting runtime state.
+- [x] #2 Clone source preserves fetch/extraction/dedupe identity rules while resetting runtime status and seen state.
+- [x] #3 Command palette exposes create, clone, run, preview, retry, and export actions where backing operations exist or clearly reports unavailable actions.
+- [x] #4 Batch test/validation actions reuse safe existing APIs unless a backend endpoint is required.
+- [x] #5 Operator diagnostics/retry controls distinguish delivery/audio retries from full ingestion reruns.
+- [x] #6 Focused frontend and backend tests cover the implemented behavior, or skipped coverage is documented with the blocker.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,10 +59,10 @@ Watchlists PR5 power-user reuse and recovery slice is implemented on codex/watch
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

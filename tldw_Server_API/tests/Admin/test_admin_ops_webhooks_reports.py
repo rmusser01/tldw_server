@@ -275,6 +275,11 @@ class TestWebhookDeliveryRecording:
     def test_record_and_list_deliveries(self, monkeypatch, tmp_path):
         """Record 5 deliveries and list them back, newest first."""
         service, _ = _configure_store(monkeypatch, tmp_path)
+        timestamps = iter(
+            f"2026-05-19T00:00:0{idx}.000000+00:00"
+            for idx in range(10)
+        )
+        monkeypatch.setattr(service, "_now_iso", lambda: next(timestamps))
 
         webhook = service.create_webhook(
             url="https://example.com/hook",

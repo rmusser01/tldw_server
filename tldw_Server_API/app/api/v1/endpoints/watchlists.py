@@ -855,6 +855,33 @@ def _resolve_watchlists_db_for_target_user(
         raise HTTPException(status_code=500, detail="watchlists_db_unavailable") from exc
 
 
+def _resolve_collections_db_for_target_user(
+    current_user: User,
+    current_db: CollectionsDatabase,
+    target_user_id: int,
+) -> CollectionsDatabase:
+    """Return a Collections DB bound to the already-authorized target user."""
+    current_user_id = _safe_int(getattr(current_user, "id", None), -1)
+    if target_user_id == current_user_id:
+        return current_db
+    try:
+        return CollectionsDatabase.for_user(user_id=target_user_id)
+    except _DatabaseError as exc:
+        logger.error(
+            "watchlists.resolve_target_collections_db failed for user={}: error_type={}",
+            target_user_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=500, detail="collections_db_unavailable") from exc
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "watchlists.resolve_target_collections_db failed for user={}: error_type={}",
+            target_user_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(status_code=500, detail="collections_db_unavailable") from exc
+
+
 async def _resolve_target_watchlists_context(
     *,
     current_user: User,
@@ -4725,6 +4752,7 @@ async def stream_run(
 
 
 def _parse_json_object(raw: Any) -> dict[str, Any]:
+    """Parse a JSON object payload without leaking malformed metadata errors."""
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str) and raw.strip():
@@ -4736,7 +4764,90 @@ def _parse_json_object(raw: Any) -> dict[str, Any]:
     return {}
 
 
+_TEXT_DELIVERY_FORMATS = {"html", "md", "markdown", "txt", "text"}
+_AUDIO_DELIVERY_FORMATS = {"aac", "flac", "m4a", "mp3", "ogg", "opus", "wav"}
+_AUDIO_DELIVERY_TYPES = {"audio", "audio_briefing", "podcast_audio", "tts_audio"}
+
+
+def _sanitize_delivery_result(raw: Any) -> dict[str, Any]:
+    """Return delivery status fields safe for output metadata and diagnostics."""
+    if not isinstance(raw, dict):
+        return {}
+    channel = str(raw.get("channel") or "").strip()
+    delivery_status = str(raw.get("status") or "").strip()
+    safe: dict[str, Any] = {}
+    if channel:
+        safe["channel"] = channel
+    if delivery_status:
+        safe["status"] = delivery_status
+
+    reason = raw.get("reason")
+    if isinstance(reason, str) and reason:
+        safe["reason"] = reason[:120]
+
+    document_id = raw.get("document_id")
+    if document_id is not None:
+        safe["document_id"] = document_id
+
+    deliveries = raw.get("deliveries")
+    if isinstance(deliveries, list):
+        status_counts: dict[str, int] = {}
+        for entry in deliveries:
+            if not isinstance(entry, dict):
+                continue
+            entry_status = str(entry.get("status") or "unknown")
+            status_counts[entry_status] = status_counts.get(entry_status, 0) + 1
+        safe["delivery_count"] = len(deliveries)
+        if status_counts:
+            safe["delivery_status_counts"] = status_counts
+    return safe
+
+
+def _sanitize_delivery_results(raw: Any) -> list[dict[str, Any]]:
+    """Sanitize delivery result lists from current and historical metadata."""
+    if not isinstance(raw, list):
+        return []
+    return [safe for entry in raw if (safe := _sanitize_delivery_result(entry))]
+
+
+def _notification_delivery_summary(result: Any) -> dict[str, Any]:
+    """Convert a NotificationResult-like object into a sanitized result summary."""
+    details = getattr(result, "details", None)
+    raw = dict(details) if isinstance(details, dict) else {}
+    raw["channel"] = getattr(result, "channel", raw.get("channel", ""))
+    raw["status"] = getattr(result, "status", raw.get("status", ""))
+    return _sanitize_delivery_result(raw)
+
+
+def _is_audio_output_row(row: Any, metadata: dict[str, Any]) -> bool:
+    """Return whether an output row is an audio artifact or audio-derived variant."""
+    output_format = str(getattr(row, "format", None) or metadata.get("format") or "").lower()
+    output_type = str(getattr(row, "type", None) or metadata.get("type") or "").lower()
+    variant_kind = str(metadata.get("variant_kind") or "").lower()
+    return (
+        output_format in _AUDIO_DELIVERY_FORMATS
+        or output_type in _AUDIO_DELIVERY_TYPES
+        or variant_kind in {"audio", "tts"}
+    )
+
+
+def _has_delivery_plan(metadata: dict[str, Any]) -> bool:
+    """Return whether metadata includes a persisted delivery plan."""
+    return isinstance(metadata.get("delivery_plan"), dict)
+
+
+def _is_canonical_delivery_output(row: Any, metadata: dict[str, Any]) -> bool:
+    """Prefer the base text artifact for delivery retries over derived outputs."""
+    if not _has_delivery_plan(metadata) or _is_audio_output_row(row, metadata):
+        return False
+    if metadata.get("variant_of") is not None or metadata.get("variant_kind"):
+        return False
+    output_format = str(getattr(row, "format", None) or metadata.get("format") or "").lower()
+    return not output_format or output_format in _TEXT_DELIVERY_FORMATS
+
+
 def _output_row_summary(row: Any) -> dict[str, Any]:
+    """Build the diagnostics-safe subset of an output artifact row."""
     metadata = _parse_output_metadata(row)
     return {
         "id": int(getattr(row, "id", 0) or 0),
@@ -4746,15 +4857,17 @@ def _output_row_summary(row: Any) -> dict[str, Any]:
         "format": getattr(row, "format", None),
         "type": getattr(row, "type", None),
         "created_at": getattr(row, "created_at", None),
-        "deliveries": metadata.get("deliveries") if isinstance(metadata.get("deliveries"), list) else [],
+        "deliveries": _sanitize_delivery_results(metadata.get("deliveries")),
         "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
         "audio_briefing_status": metadata.get("audio_briefing_status"),
         "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
     }
 
 
-def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit: int = 10) -> list[Any]:
-    rows, _total = collections_db.list_output_artifacts(
+async def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit: int = 10) -> list[Any]:
+    """List watchlist-origin output artifacts for a run without blocking the event loop."""
+    rows, _total = await run_in_threadpool(
+        collections_db.list_output_artifacts,
         run_id=run_id,
         limit=limit,
         offset=0,
@@ -4777,7 +4890,8 @@ async def retry_run_audio(
     ),
     current_user: User = Depends(get_request_user),
     db=Depends(get_watchlists_db_for_user),
-):
+) -> RunStageRetryResponse:
+    """Retry the audio briefing stage for a completed or failed watchlist run."""
     _enforce_runs_admin_if_configured(current_user)
     resolved_user_id, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
@@ -4818,8 +4932,11 @@ async def retry_run_audio(
     run_stats["audio_briefing_task_id"] = task_id
     run_stats["audio_briefing_retry_task_id"] = task_id
     run_stats["audio_briefing_status"] = "pending"
-    with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-        target_db.update_run(run_id, stats_json=json.dumps(run_stats))
+    try:
+        await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error("watchlists.retry_audio failed to persist retry state for run={}: {}", run_id, exc)
+        raise HTTPException(status_code=500, detail="audio_retry_state_update_failed") from exc
 
     return RunStageRetryResponse(
         run_id=run_id,
@@ -4844,30 +4961,46 @@ async def retry_run_delivery(
     current_user: User = Depends(get_request_user),
     db=Depends(get_watchlists_db_for_user),
     collections_db=Depends(get_collections_db_for_user),
-):
+) -> RunStageRetryResponse:
+    """Retry configured delivery channels for the latest watchlist output of a run."""
     _enforce_runs_admin_if_configured(current_user)
     resolved_user_id, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
         current_db=db,
         target_user_id=target_user_id,
     )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
+    )
     try:
         run = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
 
-    output_rows = _list_run_watchlist_outputs(collections_db, run_id, limit=20)
+    output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=20)
     if not output_rows:
         raise HTTPException(status_code=404, detail="output_not_found")
 
     selected_row = None
     selected_metadata: dict[str, Any] = {}
+    fallback_row = None
+    fallback_metadata: dict[str, Any] = {}
     for row in output_rows:
         metadata = _parse_output_metadata(row)
-        if isinstance(metadata.get("delivery_plan"), dict):
+        if not _has_delivery_plan(metadata):
+            continue
+        if _is_canonical_delivery_output(row, metadata):
             selected_row = row
             selected_metadata = metadata
             break
+        if fallback_row is None and not _is_audio_output_row(row, metadata):
+            fallback_row = row
+            fallback_metadata = metadata
+    if selected_row is None and fallback_row is not None:
+        selected_row = fallback_row
+        selected_metadata = fallback_metadata
     if selected_row is None:
         raise HTTPException(status_code=400, detail="delivery_plan_not_found")
 
@@ -4875,9 +5008,10 @@ async def retry_run_delivery(
     title = output.title or f"watchlist-output-{output.id}"
     output_format = output.format or getattr(selected_row, "format", None) or "md"
     delivery_plan = selected_metadata.get("delivery_plan") or {}
+    is_delegated_retry = resolved_user_id != _safe_int(getattr(current_user, "id", None), -1)
     notifications = NotificationsService(
         user_id=int(resolved_user_id),
-        user_email=getattr(current_user, "email", None),
+        user_email=None if is_delegated_retry else getattr(current_user, "email", None),
     )
     delivery_results: list[dict[str, Any]] = []
     chatbook_path_update: str | None = None
@@ -4906,27 +5040,22 @@ async def retry_run_delivery(
             text_body=text_body or None,
             recipients=email_cfg.get("recipients"),
             attachments=attachments,
-            fallback_to_user_email=True,
+            fallback_to_user_email=not is_delegated_retry,
         )
-        delivery_results.append(
-            {
-                "channel": email_result.channel,
-                "status": email_result.status,
-                **email_result.details,
-            }
-        )
+        delivery_results.append(_notification_delivery_summary(email_result))
 
     chat_cfg = delivery_plan.get("chatbook") if isinstance(delivery_plan.get("chatbook"), dict) else None
     if chat_cfg and bool(chat_cfg.get("enabled", True)):
         chat_metadata = dict(chat_cfg.get("metadata") or {})
         chat_metadata.update(
             {
-                "job_id": int(run.job_id),
+                "job_id": int(getattr(run, "job_id", 0) or 0),
                 "run_id": run_id,
                 "output_id": output.id,
             }
         )
-        chat_result = notifications.deliver_chatbook(
+        chat_result = await run_in_threadpool(
+            notifications.deliver_chatbook,
             title=chat_cfg.get("title") or title,
             content=output.content or "",
             description=chat_cfg.get("description"),
@@ -4935,13 +5064,7 @@ async def retry_run_delivery(
             model=chat_cfg.get("model", "watchlists"),
             conversation_id=chat_cfg.get("conversation_id"),
         )
-        delivery_results.append(
-            {
-                "channel": chat_result.channel,
-                "status": chat_result.status,
-                **chat_result.details,
-            }
-        )
+        delivery_results.append(_notification_delivery_summary(chat_result))
         doc_id = chat_result.details.get("document_id")
         if chat_result.status == "stored" and doc_id is not None:
             chatbook_path_update = f"generated_document:{doc_id}"
@@ -4955,7 +5078,8 @@ async def retry_run_delivery(
     if isinstance(selected_metadata["delivery_retry_results"], list):
         selected_metadata["delivery_retry_results"].extend(delivery_results)
     selected_metadata["delivery_retry_at"] = _utcnow_iso()
-    collections_db.update_output_artifact_metadata(
+    await run_in_threadpool(
+        target_collections_db.update_output_artifact_metadata,
         output.id,
         metadata_json=json.dumps({k: v for k, v in selected_metadata.items() if v is not None}),
         chatbook_path=chatbook_path_update,
@@ -4985,12 +5109,18 @@ async def get_run_diagnostics(
     current_user: User = Depends(get_request_user),
     db=Depends(get_watchlists_db_for_user),
     collections_db=Depends(get_collections_db_for_user),
-):
+) -> RunDiagnosticsResponse:
+    """Return run diagnostics, output summaries, and safe recovery affordances."""
     _enforce_runs_admin_if_configured(current_user)
-    _resolved_user_id, target_db = await _resolve_target_watchlists_context(
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
         current_user=current_user,
         current_db=db,
         target_user_id=target_user_id,
+    )
+    target_collections_db = _resolve_collections_db_for_target_user(
+        current_user=current_user,
+        current_db=collections_db,
+        target_user_id=resolved_user_id,
     )
     try:
         run = target_db.get_run(run_id)
@@ -5010,7 +5140,7 @@ async def get_run_diagnostics(
 
     job_payload: dict[str, Any] | None = None
     output_prefs: dict[str, Any] = {}
-    with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+    try:
         job = target_db.get_job(run.job_id)
         output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
         job_payload = {
@@ -5026,8 +5156,10 @@ async def get_run_diagnostics(
             "audio_enabled": bool(output_prefs.get("generate_audio")),
             "delivery_configured": isinstance(output_prefs.get("deliveries"), dict),
         }
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning("watchlists.diagnostics failed to load job metadata for run={}: {}", run_id, exc)
 
-    output_rows = _list_run_watchlist_outputs(collections_db, run_id, limit=25)
+    output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=25)
     outputs = [_output_row_summary(row) for row in output_rows]
     audio_task_id = stats.get("audio_briefing_task_id")
     audio_payload = {
@@ -6655,13 +6787,7 @@ async def create_output(
                 attachments=attachments,
                 fallback_to_user_email=True,
             )
-            delivery_results.append(
-                {
-                    "channel": email_result.channel,
-                    "status": email_result.status,
-                    **email_result.details,
-                }
-            )
+            delivery_results.append(_notification_delivery_summary(email_result))
             metadata_update_needed = True
 
         chat_cfg = delivery_plan.get("chatbook") if isinstance(delivery_plan.get("chatbook"), dict) else None
@@ -6684,13 +6810,7 @@ async def create_output(
                 model=chat_cfg.get("model", "watchlists"),
                 conversation_id=chat_cfg.get("conversation_id"),
             )
-            delivery_results.append(
-                {
-                    "channel": chat_result.channel,
-                    "status": chat_result.status,
-                    **chat_result.details,
-                }
-            )
+            delivery_results.append(_notification_delivery_summary(chat_result))
             doc_id = chat_result.details.get("document_id")
             if chat_result.status == "stored" and doc_id is not None:
                 chatbook_path_update = f"generated_document:{doc_id}"

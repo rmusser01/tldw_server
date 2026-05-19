@@ -181,7 +181,8 @@ export const SourcesTab: React.FC = () => {
   )
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkWorking, setBulkWorking] = useState(false)
-  const [cloningSourceId, setCloningSourceId] = useState<number | null>(null)
+  const cloningSourceIdsRef = useRef<Set<number>>(new Set())
+  const [cloningSourceIds, setCloningSourceIds] = useState<Set<number>>(() => new Set())
   const [bulkMoveTargetValue, setBulkMoveTargetValue] = useState<BulkMoveTargetValue>(null)
   const [checkingSourceIds, setCheckingSourceIds] = useState<number[]>([])
   const [importOpen, setImportOpen] = useState(false)
@@ -1165,8 +1166,29 @@ export const SourcesTab: React.FC = () => {
     }
   }
 
+  const startCloningSource = useCallback((sourceId: number) => {
+    if (cloningSourceIdsRef.current.has(sourceId)) {
+      return false
+    }
+    const next = new Set(cloningSourceIdsRef.current)
+    next.add(sourceId)
+    cloningSourceIdsRef.current = next
+    setCloningSourceIds(next)
+    return true
+  }, [])
+
+  const finishCloningSource = useCallback((sourceId: number) => {
+    if (!cloningSourceIdsRef.current.has(sourceId)) {
+      return
+    }
+    const next = new Set(cloningSourceIdsRef.current)
+    next.delete(sourceId)
+    cloningSourceIdsRef.current = next
+    setCloningSourceIds(next)
+  }, [])
+
   const handleCloneSource = async (source: WatchlistSource) => {
-    setCloningSourceId(source.id)
+    if (!startCloningSource(source.id)) return
     try {
       const cloned = await createWatchlistSource(
         buildClonedWatchlistSourcePayload(source, selectedWatchlistId)
@@ -1184,7 +1206,7 @@ export const SourcesTab: React.FC = () => {
       console.error("Failed to clone source:", err)
       message.error(t("watchlists:sources.cloneError", "Failed to clone feed"))
     } finally {
-      setCloningSourceId(null)
+      finishCloningSource(source.id)
     }
   }
 
@@ -1408,7 +1430,7 @@ export const SourcesTab: React.FC = () => {
               size="small"
               aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: record.name })}
               icon={<Copy className="h-4 w-4" />}
-              loading={cloningSourceId === record.id}
+              loading={cloningSourceIds.has(record.id)}
               onClick={() => handleCloneSource(record)}
             />
           </Tooltip>
@@ -1565,7 +1587,7 @@ export const SourcesTab: React.FC = () => {
                   size="small"
                   aria-label={t("watchlists:sources.cloneFeedAria", "Clone {{name}}", { name: source.name })}
                   icon={<Copy className="h-4 w-4" />}
-                  loading={cloningSourceId === source.id}
+                  loading={cloningSourceIds.has(source.id)}
                   onClick={() => handleCloneSource(source)}
                 />
                 <Button

@@ -24,6 +24,7 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
+import { downloadBlob } from "@/utils/download-blob"
 import {
   bulkCreateSources,
   createWatchlist,
@@ -704,22 +705,10 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = React.useState(0)
   const triggerRefresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
-  const downloadTextFile = useCallback((content: string, filename: string, type: string) => {
-    const blob = new Blob([content], { type })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement("a")
-    anchor.href = url
-    anchor.download = filename
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    URL.revokeObjectURL(url)
-  }, [])
-
   const exportSourcesFromPalette = useCallback(async () => {
     try {
       const opml = await exportOpml()
-      downloadTextFile(opml, `watchlists_sources_${Date.now()}.opml`, "application/xml")
+      downloadBlob(new Blob([opml], { type: "application/xml" }), `watchlists_sources_${Date.now()}.opml`)
       notification.success({
         message: t("watchlists:sources.exported", "OPML exported"),
         placement: "bottomRight",
@@ -733,12 +722,12 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         duration: 5
       })
     }
-  }, [downloadTextFile, notification, t])
+  }, [notification, t])
 
   const exportRunsFromPalette = useCallback(async () => {
     try {
       const csv = await exportRunsCsv({ scope: "global", include_tallies: true })
-      downloadTextFile(csv, `watchlists_runs_${Date.now()}.csv`, "text/csv;charset=utf-8")
+      downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `watchlists_runs_${Date.now()}.csv`)
       notification.success({
         message: t("watchlists:runs.exported", "Activity CSV exported"),
         placement: "bottomRight",
@@ -752,7 +741,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         duration: 5
       })
     }
-  }, [downloadTextFile, notification, t])
+  }, [notification, t])
 
   const tabHelpLabels = {
     overview: t("watchlists:help.tabs.overview", "Overview guidance"),
