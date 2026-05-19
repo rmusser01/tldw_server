@@ -54,6 +54,8 @@ import type {
   WatchlistReportReadiness,
   WatchlistRun,
   WatchlistRunAudioStatus,
+  WatchlistRunDiagnostics,
+  WatchlistRunStageRetryResponse,
   WatchlistSettings,
   WatchlistSource,
   WatchlistSourceCreate,
@@ -678,6 +680,33 @@ export const getWatchlistRunAudio = async (
 ): Promise<WatchlistRunAudioStatus> => {
   return bgRequest<WatchlistRunAudioStatus>({
     path: `/api/v1/watchlists/runs/${runId}/audio` as any,
+    method: "GET"
+  })
+}
+
+export const retryWatchlistRunAudio = async (
+  runId: number
+): Promise<WatchlistRunStageRetryResponse> => {
+  return bgRequest<WatchlistRunStageRetryResponse>({
+    path: `/api/v1/watchlists/runs/${runId}/retry-audio` as any,
+    method: "POST"
+  })
+}
+
+export const retryWatchlistRunDelivery = async (
+  runId: number
+): Promise<WatchlistRunStageRetryResponse> => {
+  return bgRequest<WatchlistRunStageRetryResponse>({
+    path: `/api/v1/watchlists/runs/${runId}/retry-delivery` as any,
+    method: "POST"
+  })
+}
+
+export const getWatchlistRunDiagnostics = async (
+  runId: number
+): Promise<WatchlistRunDiagnostics> => {
+  return bgRequest<WatchlistRunDiagnostics>({
+    path: `/api/v1/watchlists/runs/${runId}/diagnostics` as any,
     method: "GET"
   })
 }

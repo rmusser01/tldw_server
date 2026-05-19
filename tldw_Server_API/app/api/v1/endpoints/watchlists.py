@@ -173,7 +173,9 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
     PreviewResponse,
     Run,
     RunCancelResponse,
+    RunDiagnosticsResponse,
     RunDetail,
+    RunStageRetryResponse,
     RunsListResponse,
     ScrapedItem,
     ScrapedItemBatchUpdateRequest,
@@ -4715,6 +4717,337 @@ async def stream_run(
         logger.error(f"Watchlists WS error: {exc}")
         with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
             await stream.ws.close(code=status.WS_1011_INTERNAL_ERROR)
+
+
+# --------------------
+# Operator Recovery
+# --------------------
+
+
+def _parse_json_object(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _output_row_summary(row: Any) -> dict[str, Any]:
+    metadata = _parse_output_metadata(row)
+    return {
+        "id": int(getattr(row, "id", 0) or 0),
+        "run_id": getattr(row, "run_id", None),
+        "job_id": getattr(row, "job_id", None),
+        "title": getattr(row, "title", None),
+        "format": getattr(row, "format", None),
+        "type": getattr(row, "type", None),
+        "created_at": getattr(row, "created_at", None),
+        "deliveries": metadata.get("deliveries") if isinstance(metadata.get("deliveries"), list) else [],
+        "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
+        "audio_briefing_status": metadata.get("audio_briefing_status"),
+        "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
+    }
+
+
+def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit: int = 10) -> list[Any]:
+    rows, _total = collections_db.list_output_artifacts(
+        run_id=run_id,
+        limit=limit,
+        offset=0,
+        metadata_origin="watchlists",
+    )
+    return list(rows or [])
+
+
+@router.post(
+    "/runs/{run_id}/retry-audio",
+    response_model=RunStageRetryResponse,
+    summary="Retry only the audio briefing stage for a run",
+)
+async def retry_run_audio(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: retry audio for another user ID.",
+    ),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+):
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    try:
+        run = target_db.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run_not_found") from None
+    try:
+        job = target_db.get_job(run.job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job_not_found") from None
+
+    output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
+    if not output_prefs.get("generate_audio"):
+        run_stats = _parse_json_object(getattr(run, "stats_json", None))
+        if not run_stats.get("audio_briefing_task_id"):
+            raise HTTPException(status_code=400, detail="audio_not_configured")
+    output_prefs["generate_audio"] = True
+
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+        trigger_audio_briefing,
+    )
+
+    task_id = await trigger_audio_briefing(
+        user_id=int(resolved_user_id),
+        job_id=int(run.job_id),
+        run_id=run_id,
+        output_prefs=output_prefs,
+        db=target_db,
+    )
+    if not task_id:
+        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
+
+    run_stats = _parse_json_object(getattr(run, "stats_json", None))
+    run_stats["audio_briefing_task_id"] = task_id
+    run_stats["audio_briefing_retry_task_id"] = task_id
+    run_stats["audio_briefing_status"] = "pending"
+    with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+        target_db.update_run(run_id, stats_json=json.dumps(run_stats))
+
+    return RunStageRetryResponse(
+        run_id=run_id,
+        stage="audio",
+        retried=True,
+        task_id=str(task_id),
+    )
+
+
+@router.post(
+    "/runs/{run_id}/retry-delivery",
+    response_model=RunStageRetryResponse,
+    summary="Retry only the output delivery stage for a run",
+)
+async def retry_run_delivery(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: retry delivery for another user ID.",
+    ),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
+):
+    _enforce_runs_admin_if_configured(current_user)
+    resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    try:
+        run = target_db.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run_not_found") from None
+
+    output_rows = _list_run_watchlist_outputs(collections_db, run_id, limit=20)
+    if not output_rows:
+        raise HTTPException(status_code=404, detail="output_not_found")
+
+    selected_row = None
+    selected_metadata: dict[str, Any] = {}
+    for row in output_rows:
+        metadata = _parse_output_metadata(row)
+        if isinstance(metadata.get("delivery_plan"), dict):
+            selected_row = row
+            selected_metadata = metadata
+            break
+    if selected_row is None:
+        raise HTTPException(status_code=400, detail="delivery_plan_not_found")
+
+    output = await _row_to_output(selected_row, user_id=int(resolved_user_id))
+    title = output.title or f"watchlist-output-{output.id}"
+    output_format = output.format or getattr(selected_row, "format", None) or "md"
+    delivery_plan = selected_metadata.get("delivery_plan") or {}
+    notifications = NotificationsService(
+        user_id=int(resolved_user_id),
+        user_email=getattr(current_user, "email", None),
+    )
+    delivery_results: list[dict[str, Any]] = []
+    chatbook_path_update: str | None = None
+
+    email_cfg = delivery_plan.get("email") if isinstance(delivery_plan.get("email"), dict) else None
+    if email_cfg and bool(email_cfg.get("enabled", True)):
+        html_body, text_body = _build_email_bodies(
+            output.content or "",
+            output_format,
+            title,
+            email_cfg.get("body_format", "auto"),
+        )
+        attachments = None
+        if email_cfg.get("attach_file", True) and output.content:
+            ext = "html" if output_format == "html" else "md"
+            safe_base = title.replace("/", "_")
+            attachments = [
+                {
+                    "filename": f"{safe_base}.{ext}",
+                    "content": (output.content or "").encode("utf-8"),
+                }
+            ]
+        email_result = await notifications.deliver_email(
+            subject=email_cfg.get("subject") or title,
+            html_body=html_body,
+            text_body=text_body or None,
+            recipients=email_cfg.get("recipients"),
+            attachments=attachments,
+            fallback_to_user_email=True,
+        )
+        delivery_results.append(
+            {
+                "channel": email_result.channel,
+                "status": email_result.status,
+                **email_result.details,
+            }
+        )
+
+    chat_cfg = delivery_plan.get("chatbook") if isinstance(delivery_plan.get("chatbook"), dict) else None
+    if chat_cfg and bool(chat_cfg.get("enabled", True)):
+        chat_metadata = dict(chat_cfg.get("metadata") or {})
+        chat_metadata.update(
+            {
+                "job_id": int(run.job_id),
+                "run_id": run_id,
+                "output_id": output.id,
+            }
+        )
+        chat_result = notifications.deliver_chatbook(
+            title=chat_cfg.get("title") or title,
+            content=output.content or "",
+            description=chat_cfg.get("description"),
+            metadata=chat_metadata,
+            provider=chat_cfg.get("provider", "watchlists"),
+            model=chat_cfg.get("model", "watchlists"),
+            conversation_id=chat_cfg.get("conversation_id"),
+        )
+        delivery_results.append(
+            {
+                "channel": chat_result.channel,
+                "status": chat_result.status,
+                **chat_result.details,
+            }
+        )
+        doc_id = chat_result.details.get("document_id")
+        if chat_result.status == "stored" and doc_id is not None:
+            chatbook_path_update = f"generated_document:{doc_id}"
+            selected_metadata["chatbook_document_id"] = doc_id
+
+    if not delivery_results:
+        raise HTTPException(status_code=400, detail="delivery_channels_not_enabled")
+
+    selected_metadata["deliveries"] = delivery_results
+    selected_metadata.setdefault("delivery_retry_results", [])
+    if isinstance(selected_metadata["delivery_retry_results"], list):
+        selected_metadata["delivery_retry_results"].extend(delivery_results)
+    selected_metadata["delivery_retry_at"] = _utcnow_iso()
+    collections_db.update_output_artifact_metadata(
+        output.id,
+        metadata_json=json.dumps({k: v for k, v in selected_metadata.items() if v is not None}),
+        chatbook_path=chatbook_path_update,
+    )
+
+    return RunStageRetryResponse(
+        run_id=run_id,
+        stage="delivery",
+        retried=True,
+        output_id=int(output.id),
+        delivery_results=delivery_results,
+    )
+
+
+@router.get(
+    "/runs/{run_id}/diagnostics",
+    response_model=RunDiagnosticsResponse,
+    summary="Download a diagnostic bundle for a watchlist run",
+)
+async def get_run_diagnostics(
+    run_id: int = Path(..., ge=1),
+    target_user_id: int | None = Query(
+        None,
+        ge=1,
+        description="Admin-only: fetch diagnostics for another user ID.",
+    ),
+    current_user: User = Depends(get_request_user),
+    db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
+):
+    _enforce_runs_admin_if_configured(current_user)
+    _resolved_user_id, target_db = await _resolve_target_watchlists_context(
+        current_user=current_user,
+        current_db=db,
+        target_user_id=target_user_id,
+    )
+    try:
+        run = target_db.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="run_not_found") from None
+
+    stats = _parse_json_object(getattr(run, "stats_json", None))
+    run_payload = {
+        "id": int(getattr(run, "id", run_id)),
+        "job_id": int(getattr(run, "job_id", 0) or 0),
+        "status": getattr(run, "status", None),
+        "started_at": getattr(run, "started_at", None),
+        "finished_at": getattr(run, "finished_at", None),
+        "stats": stats,
+        "error_msg": getattr(run, "error_msg", None),
+    }
+
+    job_payload: dict[str, Any] | None = None
+    output_prefs: dict[str, Any] = {}
+    with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+        job = target_db.get_job(run.job_id)
+        output_prefs = _parse_json_object(getattr(job, "output_prefs_json", None))
+        job_payload = {
+            "id": int(getattr(job, "id", run.job_id)),
+            "name": getattr(job, "name", None),
+            "schedule_expr": getattr(job, "schedule_expr", None),
+            "active": getattr(job, "active", None),
+            "watchlist_id": getattr(job, "watchlist_id", None),
+            "output_auto_enabled": bool(
+                isinstance(output_prefs.get("auto_output"), dict)
+                and output_prefs.get("auto_output", {}).get("enabled")
+            ),
+            "audio_enabled": bool(output_prefs.get("generate_audio")),
+            "delivery_configured": isinstance(output_prefs.get("deliveries"), dict),
+        }
+
+    output_rows = _list_run_watchlist_outputs(collections_db, run_id, limit=25)
+    outputs = [_output_row_summary(row) for row in output_rows]
+    audio_task_id = stats.get("audio_briefing_task_id")
+    audio_payload = {
+        "task_id": audio_task_id,
+        "status": stats.get("audio_briefing_status"),
+    } if audio_task_id else None
+
+    return RunDiagnosticsResponse(
+        run_id=run_id,
+        generated_at=_utcnow_iso(),
+        run=run_payload,
+        job=job_payload,
+        outputs=outputs,
+        audio=audio_payload,
+        recovery={
+            "can_retry_full_run": bool(run_payload.get("job_id")),
+            "can_retry_delivery": any(output.get("delivery_plan_present") for output in outputs),
+            "can_retry_audio": bool(audio_task_id or output_prefs.get("generate_audio")),
+        },
+    )
 
 
 # --------------------

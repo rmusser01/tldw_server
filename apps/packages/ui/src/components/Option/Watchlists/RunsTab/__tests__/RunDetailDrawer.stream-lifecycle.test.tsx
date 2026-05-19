@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   fetchWatchlistSourcesMock: vi.fn(),
   fetchWatchlistOutputsMock: vi.fn(),
   getWatchlistRunAudioMock: vi.fn(),
+  getWatchlistRunDiagnosticsMock: vi.fn(),
+  retryWatchlistRunAudioMock: vi.fn(),
+  retryWatchlistRunDeliveryMock: vi.fn(),
   updateScrapedItemMock: vi.fn(),
   exportRunTalliesCsvMock: vi.fn(),
   triggerWatchlistRunMock: vi.fn(),
@@ -161,7 +164,10 @@ vi.mock("@/services/watchlists", () => ({
   fetchScrapedItems: (...args: any[]) => mocks.fetchScrapedItemsMock(...args),
   fetchWatchlistOutputs: (...args: any[]) => mocks.fetchWatchlistOutputsMock(...args),
   fetchWatchlistSources: (...args: any[]) => mocks.fetchWatchlistSourcesMock(...args),
+  getWatchlistRunDiagnostics: (...args: any[]) => mocks.getWatchlistRunDiagnosticsMock(...args),
   getWatchlistRunAudio: (...args: any[]) => mocks.getWatchlistRunAudioMock(...args),
+  retryWatchlistRunAudio: (...args: any[]) => mocks.retryWatchlistRunAudioMock(...args),
+  retryWatchlistRunDelivery: (...args: any[]) => mocks.retryWatchlistRunDeliveryMock(...args),
   getRunDetails: (...args: any[]) => mocks.getRunDetailsMock(...args),
   triggerWatchlistRun: (...args: any[]) => mocks.triggerWatchlistRunMock(...args),
   updateScrapedItem: (...args: any[]) => mocks.updateScrapedItemMock(...args)
@@ -255,6 +261,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
     vi.clearAllMocks()
     MockWebSocket.reset()
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket)
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
     mocks.translateMock.mockImplementation(
       (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
         if (typeof defaultValue !== "string") return key
@@ -294,6 +301,24 @@ describe("RunDetailDrawer stream lifecycle", () => {
       status: "unknown",
       download_url: null
     })
+    mocks.getWatchlistRunDiagnosticsMock.mockResolvedValue({
+      run_id: 10,
+      generated_at: "2026-05-19T04:00:00Z",
+      run: { id: 10, status: "completed" }
+    })
+    mocks.retryWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      stage: "audio",
+      retried: true,
+      task_id: "retry-audio-10"
+    })
+    mocks.retryWatchlistRunDeliveryMock.mockResolvedValue({
+      run_id: 10,
+      stage: "delivery",
+      retried: true,
+      output_id: 55,
+      delivery_results: [{ channel: "email", status: "sent" }]
+    })
     mocks.updateScrapedItemMock.mockResolvedValue({})
     mocks.exportRunTalliesCsvMock.mockResolvedValue("")
     mocks.triggerWatchlistRunMock.mockResolvedValue({ id: 999, status: "pending", job_id: 1 })
@@ -304,6 +329,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
     cleanup()
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   const waitForFirstSocket = async (): Promise<MockWebSocket> => {
@@ -426,6 +452,51 @@ describe("RunDetailDrawer stream lifecycle", () => {
     })
     const link = screen.getByRole("link", { name: "Download final audio" })
     expect(link).toHaveAttribute("href", "/api/v1/watchlists/runs/10/audio/download")
+  })
+
+  it("offers stage-specific retry and diagnostics controls without triggering a full rerun", async () => {
+    mocks.getRunDetailsMock.mockResolvedValue({
+      ...baseRunDetails,
+      status: "completed",
+      finished_at: "2026-02-18T10:01:00Z",
+      stats: {
+        ...baseRunDetails.stats,
+        audio_briefing_task_id: "audio-task-10"
+      }
+    })
+    mocks.fetchWatchlistOutputsMock.mockResolvedValue({
+      items: [{ id: 55 }],
+      total: 1,
+      page: 1,
+      size: 1,
+      has_more: false
+    })
+    mocks.getWatchlistRunAudioMock.mockResolvedValue({
+      run_id: 10,
+      task_id: "audio-task-10",
+      status: "failed",
+      download_url: null,
+      error: "tts_failed"
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Retry delivery" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Retry audio" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Download diagnostics" })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry delivery" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry audio" }))
+    fireEvent.click(screen.getByRole("button", { name: "Download diagnostics" }))
+
+    await waitFor(() => {
+      expect(mocks.retryWatchlistRunDeliveryMock).toHaveBeenCalledWith(10)
+      expect(mocks.retryWatchlistRunAudioMock).toHaveBeenCalledWith(10)
+      expect(mocks.getWatchlistRunDiagnosticsMock).toHaveBeenCalledWith(10)
+    })
+    expect(mocks.triggerWatchlistRunMock).not.toHaveBeenCalled()
   })
 
   it("reconnects after unexpected close when run is non-terminal", async () => {
