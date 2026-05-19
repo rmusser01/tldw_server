@@ -4918,6 +4918,8 @@ async def retry_run_audio(
         trigger_audio_briefing,
     )
 
+    if str(getattr(run, "status", "")).lower() in {"running", "queued"}:
+        raise HTTPException(status_code=409, detail="audio_retry_run_in_progress")
     task_id = await trigger_audio_briefing(
         user_id=int(resolved_user_id),
         job_id=int(run.job_id),
