@@ -14,6 +14,8 @@ import { ComparisonPanel } from "./ComparisonPanel"
 import { HistoryPanel } from "./HistoryPanel"
 import type { SttHistoryEntry, SttHistoryResult } from "./HistoryPanel"
 import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
+import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
+import { buildSttReadinessItems } from "@/components/Option/Audio/audio-readiness"
 import {
   saveSttRecording,
   getSttRecording,
@@ -25,14 +27,17 @@ const { Text, Title } = Typography
 export const SttPlaygroundPage: React.FC = () => {
   const { t } = useTranslation(["playground"])
   const notification = useAntdNotification()
+  const [globalModel] = useStorage("sttModel", "whisper-1")
 
   // ── Server models (fetched on mount) ──────────────────────────────
   const {
     serverModels,
+    modelOptions,
     serverModelsLoading,
     serverModelsError,
     retryServerModels
   } = useTranscriptionModelsCatalog({
+    defaultModel: globalModel,
     warnLabel: "STT Playground"
   })
 
@@ -137,6 +142,16 @@ export const SttPlaygroundPage: React.FC = () => {
     }
     return opts
   }, [sttSettings])
+
+  const readinessItems = useMemo(
+    () =>
+      buildSttReadinessItems({
+        modelOptions,
+        loading: serverModelsLoading,
+        error: serverModelsError
+      }),
+    [modelOptions, serverModelsError, serverModelsLoading]
+  )
 
   // ── History (persisted via Plasmo storage) ────────────────────────
   const [history, setHistory] = useStorage<SttHistoryEntry[]>(
@@ -345,6 +360,7 @@ export const SttPlaygroundPage: React.FC = () => {
       </div>
 
       <div className="mt-4 space-y-4">
+        <AudioReadinessStrip items={readinessItems} label="STT readiness" />
         {!currentBlob && (
           <p className="text-center text-sm text-text-muted mb-4">
             {t("playground:stt.firstUseHint", "Press the record button or upload an audio file to get started with transcription.")}
@@ -396,6 +412,7 @@ export const SttPlaygroundPage: React.FC = () => {
           <ComparisonPanel
             blob={currentBlob}
             availableModels={serverModels}
+            availableModelOptions={modelOptions}
             sttOptions={sttOptions}
             onSaveToNotes={handleSaveToNotes}
             onComparisonComplete={handleComparisonComplete}

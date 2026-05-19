@@ -290,7 +290,7 @@ Privacy rules:
 
 **Tests:** Documentation verification only for this plan.
 
-**Status:** Not Started
+**Status:** Complete via `TASK-428`; follow-up implementation tasks were created for Slice 1 and Slice 2A before file edits.
 
 ### Tasks
 
@@ -318,7 +318,7 @@ Privacy rules:
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/components/Option/Speech/__tests__/RenderStrip.test.tsx`
 - `cd apps/tldw-frontend && bun run test:extension -- extension/__tests__/audio-route-parity.guard.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete via `TASK-429` / commit `9fcf83198`.
 
 ### Files
 
@@ -346,19 +346,19 @@ Optional new helper:
 
 ### Implementation Steps
 
-- [ ] Write failing route parity tests for extension `#/stt` and `#/tts`.
+- [x] Write failing route parity tests for extension `#/stt` and `#/tts`.
   - `#/stt` must import/render `SttPlaygroundPage`.
   - `#/tts` must pass `lockedMode="listen"` and `hideModeSwitcher` to `SpeechPlaygroundPage`.
-- [ ] Update `apps/tldw-frontend/extension/routes/option-stt.tsx` to use `SttPlaygroundPage`.
-- [ ] Update `apps/tldw-frontend/extension/routes/option-tts.tsx` to mirror WebUI `/tts` mode locking.
+- [x] Update `apps/tldw-frontend/extension/routes/option-stt.tsx` to use `SttPlaygroundPage`.
+- [x] Update `apps/tldw-frontend/extension/routes/option-tts.tsx` to mirror WebUI `/tts` mode locking.
 - [ ] Add `RouteErrorBoundary` to shared `/stt` only if tests confirm it is still missing and the local route-boundary pattern expects it.
-- [ ] Add `tts-render-config.ts` and tests for provider-specific defaults.
-- [ ] Replace ad hoc provider/model/voice construction in `handleAddRenderStrip` with `buildTtsRenderConfig`.
-- [ ] Replace route-level TTS provider strip values so OpenAI and ElevenLabs do not display tldw model or voice values.
-- [ ] Update `RenderStrip` labels so Browser TTS says "Browser preview" and custom/tldw providers do not mask the provider as the model.
-- [ ] Fix speech settings copy to `/settings/speech`.
-- [ ] Add first-run empty copy for dedicated TTS and STT routes using the PRD language.
-- [ ] Verify keyboard focus order did not regress for route headings, primary inputs, and result rows.
+- [ ] Add `tts-render-config.ts` and tests for provider-specific defaults. Deferred because Slice 1 fixed provider-specific selection in-place without requiring a new helper.
+- [ ] Replace ad hoc provider/model/voice construction in `handleAddRenderStrip` with `buildTtsRenderConfig`. Deferred with the helper above.
+- [x] Replace route-level TTS provider strip values so OpenAI and ElevenLabs do not display tldw model or voice values.
+- [x] Update `RenderStrip` labels so Browser TTS says "Browser preview" and custom/tldw providers do not mask the provider as the model.
+- [x] Fix speech settings copy to `/settings/speech`.
+- [x] Add first-run empty copy for dedicated TTS and STT routes using the PRD language.
+- [x] Verify keyboard focus order did not regress for route headings, primary inputs, and result rows through focused render tests.
 
 ### Stage 1 Commit Guidance
 
@@ -395,7 +395,7 @@ git commit -m "fix speech route parity and tts config provenance"
 - `cd apps/packages/ui && bunx vitest run src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx src/components/Option/Speech/__tests__/TtsProviderStrip.test.tsx`
 - `cd apps/tldw-frontend && bun run test:extension -- extension/__tests__/audio-route-parity.guard.test.tsx`
 
-**Status:** Not Started
+**Status:** Complete via `TASK-430` / commit `a43bc013d`.
 
 ### Files
 
@@ -420,7 +420,7 @@ Add:
 
 ### Implementation Steps
 
-- [ ] Add failing tests for readiness summary states:
+- [x] Add failing tests for readiness summary states:
   - TTS provider ready.
   - TTS provider missing credentials.
   - Browser preview available.
@@ -428,15 +428,15 @@ Add:
   - STT model on demand.
   - STT model unavailable.
   - Unknown diarization support remains unknown.
-- [ ] Add `audio-readiness.ts` pure functions for formatting readiness and confidence labels.
-- [ ] Extend `useTranscriptionModelsCatalog` to expose `modelOptions` while preserving `serverModels`.
-- [ ] Add typed client responses in `models-audio.ts` for transcription model catalog and health if the existing `any` return makes tests fragile.
-- [ ] Compose STT model options from static catalog response and bounded health checks.
-- [ ] Add readiness strip to `SttPlaygroundPage` above source input.
-- [ ] Add readiness strip to `SpeechPlaygroundPage` when in locked TTS mode and in combined mode where TTS controls are visible.
-- [ ] Keep advanced capability details compact, with accessible text on every badge.
-- [ ] Add extension-width tests or snapshots to catch horizontal overflow in the readiness strip.
-- [ ] Ensure unknown states are visible instead of hidden.
+- [x] Add `audio-readiness.ts` pure functions for formatting readiness and confidence labels.
+- [x] Extend `useTranscriptionModelsCatalog` to expose `modelOptions` while preserving `serverModels`.
+- [ ] Add typed client responses in `models-audio.ts` for transcription model catalog and health if the existing `any` return makes tests fragile. Deferred because tests remained stable through the hook-level type boundary.
+- [x] Compose STT model options from static catalog response and bounded health checks.
+- [x] Add readiness strip to `SttPlaygroundPage` above source input.
+- [x] Add readiness strip to `SpeechPlaygroundPage` when in locked TTS mode and in combined mode where TTS controls are visible.
+- [x] Keep advanced capability details compact, with accessible text on every badge.
+- [ ] Add extension-width tests or snapshots to catch horizontal overflow in the readiness strip. Deferred to browser QA Stage 8; the component uses wrapping layout and focused render coverage in Slice 2A.
+- [x] Ensure unknown states are visible instead of hidden.
 
 ### Phase 2A Guardrails
 
@@ -831,8 +831,8 @@ git diff --check
 
 ## Definition Of Done For Implementation Program
 
-- [ ] Slice 1 route parity and TTS config truthfulness shipped with tests.
-- [ ] Slice 2A readiness shipped with current APIs and explicit unknown states.
+- [x] Slice 1 route parity and TTS config truthfulness shipped with tests.
+- [x] Slice 2A readiness shipped with current APIs and explicit unknown states.
 - [ ] Slice 3 comparison provenance shipped with privacy-safe metadata.
 - [ ] Phase 2B either shipped with backend tests or explicitly closed as unnecessary after Phase 2A.
 - [ ] Phase 4 preset ownership decision completed before CRUD work.

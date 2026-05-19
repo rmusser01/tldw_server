@@ -3,6 +3,12 @@ import { useTranslation } from "react-i18next"
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
+import {
+  buildSttModelOptions,
+  type SttModelCatalog,
+  type SttModelHealth,
+  type SttModelOption
+} from "@/components/Option/Audio/audio-readiness"
 
 type UseTranscriptionModelsCatalogOptions = {
   activeModel?: string
@@ -15,6 +21,7 @@ type UseTranscriptionModelsCatalogOptions = {
 
 type UseTranscriptionModelsCatalogResult = {
   serverModels: string[]
+  modelOptions: SttModelOption[]
   serverModelsLoading: boolean
   serverModelsError: string | null
   retryServerModels: () => void
@@ -38,6 +45,7 @@ export function useTranscriptionModelsCatalog(
   } = options
 
   const [serverModels, setServerModels] = React.useState<string[]>([])
+  const [modelOptions, setModelOptions] = React.useState<SttModelOption[]>([])
   const [serverModelsLoading, setServerModelsLoading] = React.useState(true)
   const [serverModelsError, setServerModelsError] = React.useState<string | null>(
     null
@@ -50,6 +58,7 @@ export function useTranscriptionModelsCatalog(
     if (!enabled) {
       setServerModelsLoading(false)
       setServerModelsError(null)
+      setModelOptions((current) => (current.length === 0 ? current : []))
       return () => {
         cancelled = true
       }
@@ -65,15 +74,31 @@ export function useTranscriptionModelsCatalog(
         try {
           const res = await tldwClient.getTranscriptionModels({
             timeoutMs: 10_000
-          })
+          }) as SttModelCatalog
           const all = Array.isArray(res?.all_models) ? (res.all_models as string[]) : []
-          if (!cancelled && all.length > 0) {
-            const unique = Array.from(new Set(all)).sort()
+          const unique = Array.from(new Set(all)).sort()
+          const readinessModel =
+            activeModel && unique.includes(activeModel)
+              ? activeModel
+              : defaultModel && unique.includes(defaultModel)
+                ? defaultModel
+                : unique[0]
+          const healthByModel: Record<string, SttModelHealth | undefined> = {}
+          if (readinessModel) {
+            try {
+              healthByModel[readinessModel] =
+                await tldwClient.getTranscriptionModelHealth(readinessModel)
+            } catch {
+              healthByModel[readinessModel] = undefined
+            }
+          }
+          if (!cancelled) {
             setServerModels(unique)
+            setModelOptions(buildSttModelOptions({ catalog: res, healthByModel }))
             if (onInitialModel && !activeModel) {
               const initial =
                 defaultModel && unique.includes(defaultModel) ? defaultModel : unique[0]
-              onInitialModel(initial)
+              if (initial) onInitialModel(initial)
             }
           }
           lastError = null
@@ -87,6 +112,7 @@ export function useTranscriptionModelsCatalog(
       }
 
       if (lastError && !cancelled) {
+        setModelOptions((current) => (current.length === 0 ? current : []))
         setServerModelsError(
           isTimeoutLikeError(lastError)
             ? (t(
@@ -133,6 +159,7 @@ export function useTranscriptionModelsCatalog(
 
   return {
     serverModels,
+    modelOptions,
     serverModelsLoading,
     serverModelsError,
     retryServerModels

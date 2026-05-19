@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { useComparisonTranscribe } from "@/hooks/useComparisonTranscribe"
 import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import type { SttModelOption } from "@/components/Option/Audio/audio-readiness"
 
 const { Text } = Typography
 
@@ -15,6 +16,7 @@ const { Text } = Typography
 export interface ComparisonPanelProps {
   blob: Blob | null
   availableModels: string[]
+  availableModelOptions?: SttModelOption[]
   selectedModels?: string[]
   sttOptions: Record<string, any>
   onSaveToNotes: (text: string, model: string) => void
@@ -128,6 +130,7 @@ const ResultCard: React.FC<ResultCardProps> = ({
 export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
   blob,
   availableModels,
+  availableModelOptions,
   selectedModels: selectedModelsProp,
   sttOptions,
   onSaveToNotes,
@@ -188,6 +191,18 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
   )
 
   const canTranscribe = !!blob && models.length > 0 && !isRunning
+  const modelSelectOptions =
+    availableModelOptions && availableModelOptions.length > 0
+      ? availableModelOptions.map((model) => ({
+          label: model.label,
+          value: model.id,
+          title: [
+            model.description,
+            `Availability: ${model.availability}`,
+            model.sources.availability ? `Source: ${model.sources.availability}` : null
+          ].filter(Boolean).join(" | ")
+        }))
+      : availableModels.map((m) => ({ label: m, value: m }))
 
   // Cmd/Ctrl+Enter keyboard shortcut to trigger Transcribe All
   useEffect(() => {
@@ -217,7 +232,7 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
           value={models}
           onChange={setModels}
           style={{ minWidth: 280, flex: 1 }}
-          options={availableModels.map((m) => ({ label: m, value: m }))}
+          options={modelSelectOptions}
         />
         <Tooltip
           title={

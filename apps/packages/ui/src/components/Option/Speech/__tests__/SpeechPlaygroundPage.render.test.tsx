@@ -433,6 +433,9 @@ describe("SpeechPlaygroundPage", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Text to Speech" })
     ).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "TTS readiness" })).toHaveTextContent(
+      "Browser preview: Ready"
+    )
     expect(
       screen.getByText("Draft text, choose a voice, and generate audio in one place.")
     ).toBeInTheDocument()

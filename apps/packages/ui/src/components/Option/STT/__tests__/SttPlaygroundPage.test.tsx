@@ -23,6 +23,7 @@ const storageValues: Record<string, unknown> = {
 let comparisonPanelProps: Record<string, unknown> | null = null
 const {
   getTranscriptionModelsMock,
+  getTranscriptionModelHealthMock,
   transcribeAudioMock,
   createNoteMock,
   notificationErrorMock,
@@ -31,6 +32,7 @@ const {
   tMock
 } = vi.hoisted(() => ({
   getTranscriptionModelsMock: vi.fn(),
+  getTranscriptionModelHealthMock: vi.fn(),
   transcribeAudioMock: vi.fn(),
   createNoteMock: vi.fn(),
   notificationErrorMock: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getTranscriptionModels: getTranscriptionModelsMock,
+    getTranscriptionModelHealth: getTranscriptionModelHealthMock,
     transcribeAudio: transcribeAudioMock,
     createNote: createNoteMock
   }
@@ -123,7 +126,31 @@ describe("SttPlaygroundPage", () => {
     comparisonPanelProps = null
     getTranscriptionModelsMock.mockReset()
     getTranscriptionModelsMock.mockResolvedValue({
+      categories: {
+        "Whisper Models": [
+          {
+            value: "whisper-1",
+            label: "Whisper 1",
+            description: "Default server model"
+          }
+        ],
+        "Distil-Whisper Models": [
+          {
+            value: "distil-v3",
+            label: "Distil v3",
+            description: "Fast distilled model"
+          }
+        ]
+      },
       all_models: ["whisper-1", "distil-v3"]
+    })
+    getTranscriptionModelHealthMock.mockReset()
+    getTranscriptionModelHealthMock.mockResolvedValue({
+      available: true,
+      usable: true,
+      on_demand: false,
+      message: "Ready",
+      provider: "whisper"
     })
     transcribeAudioMock.mockReset()
     transcribeAudioMock.mockResolvedValue({ text: "test" })
@@ -146,6 +173,27 @@ describe("SttPlaygroundPage", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Speech to Text" })
     ).toBeTruthy()
+  })
+
+  it("renders model readiness from the server catalog and health check", async () => {
+    render(<SttPlaygroundPage />)
+
+    expect(
+      await screen.findByRole("status", { name: "STT readiness" })
+    ).toHaveTextContent("STT models: Ready")
+    expect(getTranscriptionModelHealthMock).toHaveBeenCalledWith("whisper-1")
+    expect(comparisonPanelProps?.availableModelOptions).toEqual([
+      expect.objectContaining({
+        id: "distil-v3",
+        label: "Distil v3",
+        availability: "unknown"
+      }),
+      expect.objectContaining({
+        id: "whisper-1",
+        label: "Whisper 1",
+        availability: "ready"
+      })
+    ])
   })
 
   it("renders all 3 zones (recording-strip, comparison-panel, history-panel)", () => {

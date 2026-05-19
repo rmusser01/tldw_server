@@ -73,6 +73,8 @@ import { TtsOutputTab } from "@/components/Option/Speech/TtsOutputTab"
 import { TtsAdvancedTab } from "@/components/Option/Speech/TtsAdvancedTab"
 import { VoiceCloningManager } from "@/components/Option/TTS/VoiceCloningManager"
 import { RenderStrip } from "@/components/Option/Speech/RenderStrip"
+import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
+import { buildTtsReadinessItems } from "@/components/Option/Audio/audio-readiness"
 import { VoicePickerModal, type VoiceSelection } from "@/components/Option/Speech/VoicePickerModal"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
@@ -952,6 +954,16 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     tldwVoice,
     ttsSettings
   ])
+  const ttsReadinessItems = React.useMemo(
+    () =>
+      buildTtsReadinessItems({
+        provider,
+        hasAudio,
+        providersInfo,
+        elevenLabsApiKey: ttsSettings?.elevenLabsApiKey
+      }),
+    [hasAudio, provider, providersInfo, ttsSettings?.elevenLabsApiKey]
+  )
 
   React.useEffect(() => {
     if (provider !== "elevenlabs" || ttsSettings?.elevenLabsApiKey) {
@@ -2618,6 +2630,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                 {/* Zone 1: Workspace */}
                 <div className="flex-1 flex flex-col min-w-0">
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <AudioReadinessStrip items={ttsReadinessItems} label="TTS readiness" />
                     <TtsProviderStrip
                       provider={provider}
                       model={currentTtsSelection.model}
