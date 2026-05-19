@@ -93,7 +93,12 @@ export const SourcesWorkspacePage: React.FC<SourcesWorkspacePageProps> = ({
         </div>
 
         {sourcesQuery.isLoading ? (
-          <div className="flex justify-center py-10">
+          <div
+            className="flex justify-center py-10"
+            data-testid="sources-loading-state"
+            role="status"
+            aria-label={t("sources:states.loading", "Loading sources")}
+          >
             <Spin />
           </div>
         ) : null}
