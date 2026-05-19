@@ -75,6 +75,75 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(status).not.toHaveTextContent("Not saved");
   });
 
+  it("labels temporary Character Chat persistence explicitly", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={1}
+        sessionLabel="Temporary chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Temporary character chat");
+  });
+
+  it("labels saved Character Chat persistence when session history is loaded", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={4}
+        sessionLabel="Server chat"
+        sessionStatus="loaded"
+        sessionStatusLabel="Local history"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Saved character chat");
+  });
+
+  it("labels blocked-server Character Chat as a local draft", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        serverBlocked
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Local character chat draft");
+  });
+
   it("renders degraded checks as warning-only status", () => {
     render(
       <PlaygroundStatusStrip
