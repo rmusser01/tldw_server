@@ -177,15 +177,36 @@ const toBooleanFlag = (value: unknown): boolean | null => {
   return null
 }
 
-function readBooleanFlag(
-  model: ModelDescriptor,
-  keys: string[]
-): boolean | null {
-  const records = [model, model.details, model.metadata].filter(
+const CATALOG_ONLY_FLAG_KEYS = [
+  "catalog_only",
+  "catalogOnly",
+  "is_catalog_only",
+  "isCatalogOnly"
+] as const
+
+const CONFIGURED_FLAG_KEYS = [
+  "is_configured",
+  "isConfigured",
+  "configured",
+  "provider_is_configured",
+  "providerIsConfigured",
+  "provider_configured",
+  "providerConfigured"
+] as const
+
+function getChatModelDescriptorRecords(
+  model: ModelDescriptor
+): Record<string, unknown>[] {
+  return [model, model.details, model.metadata].filter(
     (record): record is Record<string, unknown> =>
       Boolean(record && typeof record === "object")
   )
+}
 
+function readBooleanFlagFromRecords(
+  records: Record<string, unknown>[],
+  keys: readonly string[]
+): boolean | null {
   for (const record of records) {
     for (const key of keys) {
       if (!Object.prototype.hasOwnProperty.call(record, key)) continue
@@ -201,30 +222,22 @@ function isUsableChatModelDescriptor(
   model: ModelDescriptor,
   options: BuildAvailableChatModelIdsOptions = {}
 ): boolean {
-  const catalogOnly = readBooleanFlag(model, [
-    "catalog_only",
-    "catalogOnly",
-    "is_catalog_only",
-    "isCatalogOnly"
-  ])
+  const records = getChatModelDescriptorRecords(model)
+  const catalogOnly = readBooleanFlagFromRecords(
+    records,
+    CATALOG_ONLY_FLAG_KEYS
+  )
   if (catalogOnly === true) return false
 
   let hasConfiguredFlag = catalogOnly != null
-  const configuredFlags = [
-    "is_configured",
-    "isConfigured",
-    "configured",
-    "provider_is_configured",
-    "providerIsConfigured",
-    "provider_configured",
-    "providerConfigured"
-  ]
-  for (const key of configuredFlags) {
-    const flag = readBooleanFlag(model, [key])
-    if (flag != null) {
+  for (const record of records) {
+    for (const key of CONFIGURED_FLAG_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const flag = toBooleanFlag(record[key])
+      if (flag == null) continue
       hasConfiguredFlag = true
+      if (flag === false) return false
     }
-    if (flag === false) return false
   }
 
   if (options.requireConfiguredFlags && !hasConfiguredFlag) {

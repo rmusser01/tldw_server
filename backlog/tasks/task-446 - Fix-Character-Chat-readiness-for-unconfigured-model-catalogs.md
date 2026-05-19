@@ -35,12 +35,18 @@ Follow-up after PR #1866 merged. Real-backend smoke on /chat?mode=character show
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: focused Vitest suite passed with 9 files and 114 tests; git diff --check passed; real-backend browser smoke showed tldw:gpt-4o blocked with Model unavailable in the status strip and Error in the runtime rail. Full TypeScript still fails on existing repo-wide baseline debt, with no touched-file errors after fixing the local cockpit test typing issue. Bandit skipped because only frontend TypeScript/tests and Backlog docs were touched.
+
+Review follow-up: PR #1871 remained open/draft after the user reported "pr merged"; Gemini review comments requested removing repeated boolean-flag record allocations and simplifying runtime status logic.
+
+Review follow-up verification: the 9-file focused Vitest suite still passed with 114 tests, git diff --check passed, and bunx tsc --noEmit --pretty false still reports the existing repo-wide baseline TypeScript debt with no new touched-file errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed Character Chat readiness so catalog-only or explicitly unconfigured backend model descriptors cannot make a role-play session look ready. The /chat cockpit now force-refreshes readiness-critical model metadata, fails closed on stale unflagged descriptors for Character Chat, invalidates the persisted model-cache schema, and propagates model-unavailable state into the readiness panel, composition preview, runtime rail, and bottom status strip.
+
+PR #1871 review follow-up removed repeated per-flag descriptor record allocation in the model availability helper and simplified equivalent runtime-status branching in Playground.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
