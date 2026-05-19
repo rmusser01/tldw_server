@@ -232,6 +232,12 @@ def ensure_host_reboot_evidence_dir(
     dry_run: bool = False,
     allow_volatile: bool = False,
 ) -> CheckResult:
+    """Validate and optionally create the durable host-reboot evidence directory.
+
+    The directory is the trust boundary for pre/post reboot manifests, so it
+    must not live under a volatile root unless explicitly allowed and must pass
+    the same owner-only directory checks used by helper runtime paths.
+    """
     try:
         if not allow_volatile:
             for root in VOLATILE_EVIDENCE_ROOTS:
@@ -250,27 +256,76 @@ def ensure_host_reboot_evidence_dir(
 
 
 def write_json_private(path: Path, payload: Mapping[str, Any]) -> CheckResult:
+    """Atomically write a private JSON manifest without exposing partial data.
+
+    Existing regular manifests are hardened to owner-only permissions before the
+    write. The new payload is written to a private temp file in the same
+    directory, flushed, fsynced, and atomically replaced into place so an
+    interrupted write does not leave truncated final evidence.
+    """
+    try:
+        existing_stat = os.lstat(path)
+        if stat.S_ISLNK(existing_stat.st_mode) or not stat.S_ISREG(existing_stat.st_mode):
+            raise OSError(f"manifest target is not a regular file: {path}")
+        harden_flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            harden_flags |= os.O_NOFOLLOW
+        if hasattr(os, "O_NONBLOCK"):
+            harden_flags |= os.O_NONBLOCK
+        harden_fd: int | None = None
+        try:
+            harden_fd = os.open(path, harden_flags, 0o600)
+            harden_stat = os.fstat(harden_fd)
+            if not stat.S_ISREG(harden_stat.st_mode):
+                raise OSError(f"manifest target is not a regular file: {path}")
+            os.fchmod(harden_fd, 0o600)
+        finally:
+            if harden_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(harden_fd)
+    except FileNotFoundError:
+        pass
+    except (OSError, TypeError, ValueError) as exc:
+        return CheckResult(False, "host_reboot_manifest_write_failed", str(exc))
+
     flags = os.O_WRONLY | os.O_CREAT
+    if hasattr(os, "O_EXCL"):
+        flags |= os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
         flags |= os.O_NONBLOCK
     fd: int | None = None
+    temp_path: Path | None = path.with_name(f".{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
     try:
-        fd = os.open(path, flags, 0o600)
+        fd = os.open(temp_path, flags, 0o600)
         path_stat = os.fstat(fd)
         if not stat.S_ISREG(path_stat.st_mode):
-            raise OSError(f"manifest target is not a regular file: {path}")
+            raise OSError(f"manifest temp target is not a regular file: {temp_path}")
         os.fchmod(fd, 0o600)
-        os.ftruncate(fd, 0)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = None
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        temp_path = None
+        dir_fd: int | None = None
+        with contextlib.suppress(OSError):
+            try:
+                dir_fd = os.open(path.parent, os.O_RDONLY, 0o700)
+                os.fsync(dir_fd)
+            finally:
+                if dir_fd is not None:
+                    os.close(dir_fd)
     except (OSError, TypeError, ValueError) as exc:
         if fd is not None:
             with contextlib.suppress(OSError):
                 os.close(fd)
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
         return CheckResult(False, "host_reboot_manifest_write_failed", str(exc))
     return CheckResult(True, "host_reboot_manifest_written", str(path))
 
@@ -1220,7 +1275,8 @@ def _read_host_reboot_pre_manifest(evidence_dir: Path) -> tuple[CheckResult, dic
         return CheckResult(False, "host_reboot_pre_manifest_invalid", str(exc)), None
     finally:
         if fd is not None:
-            os.close(fd)
+            with contextlib.suppress(OSError):
+                os.close(fd)
     if not isinstance(raw_payload, dict):
         return CheckResult(False, "host_reboot_pre_manifest_invalid", str(manifest_path)), None
     if raw_payload.get("phase") != "pre":
@@ -1262,6 +1318,8 @@ def _host_reboot_metadata_payload(
 
 def _host_reboot_metadata_path(path: Path | None) -> str:
     if path is None:
+        return ""
+    if not str(path) or str(path) == ".":
         return ""
     try:
         return str(path.expanduser().resolve(strict=False))

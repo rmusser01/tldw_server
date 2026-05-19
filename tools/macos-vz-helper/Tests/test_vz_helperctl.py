@@ -901,6 +901,28 @@ def test_read_host_reboot_pre_manifest_rejects_oversized(tmp_path: Path) -> None
     CASE.assertIsNone(payload)
 
 
+def test_read_host_reboot_pre_manifest_suppresses_close_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    helperctl = load_helperctl()
+    evidence = tmp_path / "durable" / "drill"
+    evidence.mkdir(parents=True, mode=0o700)
+    (evidence / "host-reboot-pre.json").write_text('{"phase": "pre"}\n', encoding="utf-8")
+    real_close = helperctl.os.close
+
+    def close_then_raise(fd: int) -> None:
+        real_close(fd)
+        raise OSError("close failed")
+
+    monkeypatch.setattr(helperctl.os, "close", close_then_raise)
+
+    result, payload = helperctl._read_host_reboot_pre_manifest(evidence)
+
+    CASE.assertTrue(result.ok)
+    CASE.assertEqual(payload, {"phase": "pre"})
+
+
 def test_host_reboot_manifests_drop_forbidden_helper_detail_keys(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -979,6 +1001,21 @@ def test_host_reboot_manifests_drop_forbidden_helper_detail_keys(
             "helper_started_at": "2026-05-19T01:00:00Z",
         },
     )
+
+
+def test_host_reboot_metadata_keeps_missing_bundle_empty() -> None:
+    helperctl = load_helperctl()
+
+    metadata = helperctl._host_reboot_metadata_payload(
+        bundle_path=Path(""),
+        helper_path=Path("/helper"),
+        helper_mode="direct",
+        socket_path=Path("/helper.sock"),
+        launchd_label="",
+        launchd_plist_path=None,
+    )
+
+    CASE.assertEqual(metadata["bundle_path"], "")
 
 
 def test_host_reboot_post_reports_generation_changed(
@@ -1694,6 +1731,7 @@ def test_write_json_private_hardens_existing_manifest_before_serialization_failu
     CASE.assertFalse(result.ok)
     CASE.assertEqual(result.reason, "host_reboot_manifest_write_failed")
     CASE.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+    CASE.assertEqual(manifest.read_text(encoding="utf-8"), '{"old": true}\n')
 
 
 def test_write_json_private_refuses_final_symlink_without_touching_target(tmp_path: Path) -> None:

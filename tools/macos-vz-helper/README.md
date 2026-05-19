@@ -125,7 +125,13 @@ missing or unchanged, because that means the drill did not prove a reboot.
 Direct helper mode uses the managed helper socket directly:
 
 ```bash
-evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+evidence_root="$HOME/Library/Logs/tldw/vz-host-reboot-drill"
+mkdir -p "$evidence_root"
+chmod 700 "$evidence_root"
+run_id="manual-$(date +%Y%m%d-%H%M%S)"
+printf '%s\n' "$run_id" > "$evidence_root/latest-run-id"
+chmod 600 "$evidence_root/latest-run-id"
+evidence_dir="$evidence_root/$run_id"
 socket_path="$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.sock"
 
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
@@ -136,6 +142,11 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
   --create-evidence-dir
 
 # Manually reboot the host, then restore or verify the same helper socket path.
+
+evidence_root="$HOME/Library/Logs/tldw/vz-host-reboot-drill"
+run_id="$(cat "$evidence_root/latest-run-id")"
+evidence_dir="$evidence_root/$run_id"
+socket_path="$HOME/Library/Application Support/tldw/sandbox/macos-vz-helper/helper.sock"
 
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
   --evidence-dir "$evidence_dir" \
@@ -152,7 +163,13 @@ the intended LaunchAgent instead of an implicit default:
 ```bash
 label="org.tldw.macos-vz-helper.manual-reboot"
 plist="$HOME/Library/LaunchAgents/${label}.plist"
-evidence_dir="$HOME/Library/Logs/tldw/vz-host-reboot-drill/manual-$(date +%Y%m%d-%H%M%S)"
+evidence_root="$HOME/Library/Logs/tldw/vz-host-reboot-drill"
+mkdir -p "$evidence_root"
+chmod 700 "$evidence_root"
+run_id="manual-$(date +%Y%m%d-%H%M%S)"
+printf '%s\n' "$run_id" > "$evidence_root/latest-launchd-run-id"
+chmod 600 "$evidence_root/latest-launchd-run-id"
+evidence_dir="$evidence_root/$run_id"
 
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
   --helper-mode launchd \
@@ -163,6 +180,12 @@ tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill pre \
   --create-evidence-dir
 
 # Manually reboot the host, then verify launchd restored the helper.
+
+label="org.tldw.macos-vz-helper.manual-reboot"
+plist="$HOME/Library/LaunchAgents/${label}.plist"
+evidence_root="$HOME/Library/Logs/tldw/vz-host-reboot-drill"
+run_id="$(cat "$evidence_root/latest-launchd-run-id")"
+evidence_dir="$evidence_root/$run_id"
 
 tools/macos-vz-helper/scripts/vz-helperctl.py host-reboot-drill post \
   --helper-mode launchd \
