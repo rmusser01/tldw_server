@@ -433,12 +433,26 @@ hostless cleanup contract currently covers:
 - `vz_linux` helper-execution failure after VM creation; this must terminate
   the helper VM, clear active VM/run-directory bookkeeping, and remove the
   auto-created workspace.
+- `vz_linux` helper boot-driver failure during `create_vm`; this must remove
+  the helper registry's booting record and leave no VM in status or list output.
+- `vz_linux` guest-readiness failure during `create_vm`; this must stop the
+  booted machine through the helper cleanup primitive, remove the helper
+  registry record, and leave no healthy session VM for reuse.
+- `vz_linux` session-mode `create_vm` failure after a stale or unhealthy
+  candidate was rejected; this must clear the stale session-control row, avoid
+  writing a replacement row, skip guest command execution, and leave no active
+  Python runner VM/run-directory bookkeeping.
 
 Real Virtualization.framework cleanup remains host-gated. The portable tests do
 not prove that a prepared Apple silicon host releases every VM process,
 virtiofs resource, serial log handle, or helper-side run clone. Operators should
 use the real host smoke below for VM process lifecycle coverage, including
 ephemeral VM teardown and same-session VM reuse.
+
+Stuck boot/readiness evidence should use stable helper or runner error codes
+such as boot failure or guest readiness timeout, helper stdout/stderr paths, and
+serial-log file pointers. Diagnostics and evidence packets should not read raw
+serial logs into API output or documentation entries.
 
 ## Real Host E2E Smoke
 

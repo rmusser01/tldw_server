@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
 POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
 EVIDENCE_TRACKER_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-prepared-host-evidence.md"
+OPERATOR_NOTES_PATH = REPO_ROOT / "Docs" / "Sandbox" / "macos-runtime-operator-notes.md"
 ROADMAP_PATH = (
     REPO_ROOT
     / "Docs"
@@ -229,6 +230,7 @@ def test_vz_linux_prepared_host_evidence_tracker_defines_packet() -> None:
         "Helper build/signing",
         "Real `vz_linux` ephemeral execution",
         "Same-session VM reuse",
+        "Stuck boot/readiness drills",
         "Artifacts",
         "Expected skips",
         "Residual gaps",
@@ -237,6 +239,34 @@ def test_vz_linux_prepared_host_evidence_tracker_defines_packet() -> None:
         _require(
             required_term in tracker,
             f"Evidence tracker should include packet term {required_term}",
+        )
+
+
+def test_vz_linux_stuck_boot_readiness_contract_records_pointers_not_raw_logs() -> None:
+    """Stuck boot/readiness evidence should be stable and avoid raw log exposure."""
+    tracker = _normalized_text(EVIDENCE_TRACKER_PATH)
+    operator_notes = _normalized_text(OPERATOR_NOTES_PATH)
+
+    for required_term in (
+        "stable failure reason or error code",
+        "session-control outcome",
+        "serial-log pointers only",
+        "without exposing raw serial logs",
+    ):
+        _require(
+            required_term in tracker,
+            f"Evidence tracker should capture stuck boot/readiness term {required_term}",
+        )
+
+    for required_term in (
+        "boot-driver failure",
+        "guest-readiness failure",
+        "avoid writing a replacement row",
+        "should not read raw serial logs into API output",
+    ):
+        _require(
+            required_term in operator_notes,
+            f"Operator notes should document stuck boot/readiness cleanup term {required_term}",
         )
 
 

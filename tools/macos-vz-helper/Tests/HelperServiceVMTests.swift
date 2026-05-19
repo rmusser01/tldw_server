@@ -31,6 +31,62 @@ import Testing
     #expect(response.details["helper_started_at"] == "2026-05-09T00:00:00Z")
 }
 
+@Test func helperServiceCreateVMClearsRegistryWhenBootDriverFails() throws {
+    let registry = VMRegistry()
+    let bootDriver = FailingBootDriver()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: bootDriver,
+        guestBridge: ReadyGuestBridge()
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    #expect(throws: TestBootDriverError.self) {
+        _ = try service.createVM(
+            vmID: "vm-service-boot-failed",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 5
+        )
+    }
+
+    #expect(service.getVMStatus(vmID: "vm-service-boot-failed") == nil)
+    #expect(service.listVMs().vms.isEmpty)
+    #expect(bootDriver.stoppedVMIDs == ["vm-service-boot-failed"])
+}
+
+@Test func helperServiceCreateVMClearsRegistryWhenReadinessFails() throws {
+    let registry = VMRegistry()
+    let bootDriver = RecordingBootDriver()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: bootDriver,
+        guestBridge: FailingGuestBridge(error: VSockSessionError.requestTimedOut("vm-service-readiness-failed"))
+    )
+    let service = HelperService(
+        hostFacts: HostFacts(isMacOS: true, isAppleSilicon: true),
+        registry: registry,
+        vmManager: manager
+    )
+
+    #expect(throws: VSockSessionError.self) {
+        _ = try service.createVM(
+            vmID: "vm-service-readiness-failed",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 5
+        )
+    }
+
+    #expect(service.getVMStatus(vmID: "vm-service-readiness-failed") == nil)
+    #expect(service.listVMs().vms.isEmpty)
+    #expect(bootDriver.stoppedVMIDs == ["vm-service-readiness-failed"])
+}
+
 @Test func helperServiceSurfacesResourceSnapshotInCreateStatusAndList() throws {
     let registry = VMRegistry()
     let manager = VZLinuxVMManager(

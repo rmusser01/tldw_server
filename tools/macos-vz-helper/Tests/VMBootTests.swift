@@ -112,6 +112,29 @@ import Testing
     #expect(bootDriver.lastReadinessTimeoutSeconds == 12)
 }
 
+@Test func createVMRemovesBootingRecordWhenBootDriverFails() throws {
+    let registry = VMRegistry()
+    let bootDriver = FailingBootDriver()
+    let manager = VZLinuxVMManager(
+        registry: registry,
+        bootDriver: bootDriver,
+        guestBridge: ReadyGuestBridge()
+    )
+
+    #expect(throws: TestBootDriverError.self) {
+        _ = try manager.createVM(
+            vmID: "vm-boot-failed",
+            templatePath: "/tmp/template.img",
+            workspacePath: "/tmp/workspace",
+            readinessTimeoutSeconds: 7
+        )
+    }
+
+    #expect(registry.status(vmID: "vm-boot-failed") == nil)
+    #expect(bootDriver.stoppedVMIDs == ["vm-boot-failed"])
+    #expect(bootDriver.lastReadinessTimeoutSeconds == 7)
+}
+
 @Test func createVMStopsBootedMachineWhenReadinessFails() throws {
     let registry = VMRegistry()
     let bootDriver = RecordingBootDriver()

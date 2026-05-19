@@ -10,6 +10,7 @@ import tldw_Server_API.app.core.Sandbox.runners.vz_common as vz_common
 import tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner as vz_linux_module
 from tldw_Server_API.app.core.Sandbox.image_store import SandboxImageStore
 from tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client import (
+    MacOSVirtualizationHelperFailure,
     MacOSVirtualizationHelperProtocolError,
     MacOSVirtualizationHelperUnavailable,
 )
@@ -360,6 +361,102 @@ def test_vz_linux_image_store_does_not_persist_manifest_when_create_vm_fails(
     assert status.phase == RunPhase.failed
     assert "create_vm_failed" in status.message
     assert SandboxImageStore(root_path=store_root).get_run_clone_manifest("vz-run-create-fails") is None
+
+
+def test_vz_linux_session_create_vm_readiness_failure_does_not_persist_reuse_state(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
+    calls: list[str] = []
+    deleted: list[str] = []
+    stored: list[dict[str, object]] = []
+    terminated: list[str] = []
+
+    class _Store:
+        def get_vz_session_control(self, session_id: str) -> dict[str, object]:
+            assert session_id == "sess-readiness-timeout"
+            return {
+                "runtime": "vz_linux",
+                "vm_id": "vm-stale",
+                "template_id": "vz_linux:stale",
+                "workspace_mount": str(tmp_path),
+                "agent_ready": True,
+            }
+
+        def delete_vz_session_control(self, session_id: str) -> bool:
+            deleted.append(session_id)
+            return True
+
+        def put_vz_session_control(self, **kwargs: object) -> None:
+            stored.append(dict(kwargs))
+
+    class _FakeHelper:
+        def get_vm_status(self, vm_id: str) -> HelperVMStatusReply:
+            assert vm_id == "vm-stale"
+            calls.append("get_vm_status")
+            return HelperVMStatusReply(
+                protocol_version="1",
+                helper_version="0.1.0",
+                vm_id=vm_id,
+                state="booting",
+                healthy=False,
+            )
+
+        def validate_template(self, request: dict[str, object]) -> dict[str, object]:
+            calls.append("validate_template")
+            return {
+                "template_id": "vz_linux:new-template",
+                "ready": True,
+                "reasons": [],
+            }
+
+        def create_vm(self, request: dict[str, object]) -> HelperVMReply:
+            calls.append("create_vm")
+            assert request["run_id"] == "vz-run-readiness-timeout"
+            assert request["session_id"] == "sess-readiness-timeout"
+            assert request["session_mode"] is True
+            raise MacOSVirtualizationHelperFailure(
+                "guest_readiness_timed_out",
+                "guest readiness timed out",
+            )
+
+        def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
+            raise AssertionError(f"exec_guest should not run after readiness failure: {vm_id} {request}")
+
+        def terminate_vm(self, vm_id: str) -> bool:
+            terminated.append(vm_id)
+            return True
+
+    monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
+
+    run_id = "vz-run-readiness-timeout"
+    try:
+        status = VZLinuxRunner(session_control_store=_Store()).start_run(
+            run_id=run_id,
+            spec=RunSpec(
+                session_id="sess-readiness-timeout",
+                runtime=RuntimeType.vz_linux,
+                base_image="ubuntu-24.04",
+                command=["/bin/echo", "ok"],
+                network_policy="deny_all",
+            ),
+            session_workspace=str(tmp_path),
+        )
+
+        assert status.phase == RunPhase.failed
+        assert "guest_readiness_timed_out" in status.message
+        assert calls == ["get_vm_status", "validate_template", "create_vm"]
+        assert deleted == ["sess-readiness-timeout"]
+        assert stored == []
+        assert terminated == []
+        with VZLinuxRunner._active_lock:  # type: ignore[attr-defined]
+            assert run_id not in VZLinuxRunner._active_vm  # type: ignore[attr-defined]
+            assert run_id not in VZLinuxRunner._active_run_dir  # type: ignore[attr-defined]
+    finally:
+        with VZLinuxRunner._active_lock:  # type: ignore[attr-defined]
+            VZLinuxRunner._active_vm.pop(run_id, None)  # type: ignore[attr-defined]
+            VZLinuxRunner._active_run_dir.pop(run_id, None)  # type: ignore[attr-defined]
 
 
 def test_vz_linux_raw_template_path_ignores_unavailable_image_store(monkeypatch, tmp_path) -> None:
