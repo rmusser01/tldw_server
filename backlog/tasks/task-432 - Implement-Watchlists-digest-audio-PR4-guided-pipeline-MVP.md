@@ -53,7 +53,7 @@ Baseline existing pipeline tests passed: OverviewTab.quick-setup.test.tsx + pipe
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the PR4 guided briefing pipeline MVP inside /watchlists. Added pure wizard state helpers, an additive five-step PipelineWizard (source, monitor, digest, optional audio, review), overview integration for existing or newly-created sources, variable cadence, optional 0-4 speaker audio contracts, preview/test-generation actions, and focused tests. Verification: focused Vitest suite passed (36 tests), watchlists static typecheck passed, and git diff --check passed. Bandit not run because this PR touches frontend/docs/backlog files only.
+Implemented PR4 guided briefing pipeline MVP and addressed PR #1851 review feedback. Review fixes: unknown template formats are no longer forced to Markdown, schedule validation now matches persisted cron bounds for intervals/hours/minutes, numeric interval/time controls expose matching bounds, wizard-created sources are rolled back for pre-run pipeline failures, and wizard option/review labels now use translation-backed copy helpers. Verification: focused Watchlists suite passed (41 tests across wizard, state, contract, static guard, and quick-setup coverage), and git diff --check passed. Bandit not run because this PR touches frontend/docs/backlog files only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

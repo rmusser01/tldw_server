@@ -25,6 +25,9 @@ describe("watchlists pipeline wizard state", () => {
         sourceType: "rss",
         monitorName: "Morning Brief",
         templateName: "briefing_md",
+        scheduleMode: "interval",
+        scheduleIntervalUnit: "hours",
+        scheduleIntervalValue: 100,
         emailDeliveryEnabled: true,
         emailRecipients: ["bad-email"],
         audioEnabled: true,
@@ -40,6 +43,7 @@ describe("watchlists pipeline wizard state", () => {
     ).toEqual({
       valid: false,
       errors: expect.arrayContaining([
+        "scheduleIntervalValue",
         "emailRecipients",
         "audioSpeakers",
         "audioSpeakerIds",
@@ -59,6 +63,24 @@ describe("watchlists pipeline wizard state", () => {
         audioSpeakers: []
       })
     ).toEqual({ valid: true, errors: [] })
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
+        sourceMode: "existing",
+        sourceIds: [10],
+        monitorName: "Morning Brief",
+        templateName: "briefing_md",
+        scheduleMode: "daily",
+        scheduleHour: 24,
+        scheduleMinute: 60,
+        audioEnabled: false,
+        audioSpeakers: []
+      })
+    ).toEqual({
+      valid: false,
+      errors: expect.arrayContaining(["scheduleHour", "scheduleMinute"])
+    })
   })
 
   it("builds source payloads and variable cadence contract drafts", () => {
@@ -123,6 +145,24 @@ describe("watchlists pipeline wizard state", () => {
     )
 
     timezoneSpy.mockRestore()
+  })
+
+  it("does not force an unknown template format into payload drafts", () => {
+    const draft = {
+      ...createDefaultPipelineWizardDraft(),
+      sourceMode: "existing" as const,
+      sourceIds: [10],
+      monitorName: "HTML Brief",
+      templateName: "html_newsletter",
+      audioEnabled: false,
+      audioSpeakers: []
+    }
+
+    expect(toBriefingPipelineDraft(draft)).toEqual(
+      expect.not.objectContaining({
+        templateFormat: expect.any(String)
+      })
+    )
   })
 
   it("summarizes source, cadence, filters, output, delivery, and audio expectations", () => {

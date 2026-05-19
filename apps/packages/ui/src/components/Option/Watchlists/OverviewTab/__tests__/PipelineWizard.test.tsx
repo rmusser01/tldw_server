@@ -5,7 +5,11 @@ import { PipelineWizard } from "../PipelineWizard"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback || key
+    t: (key: string, fallback?: string, options?: Record<string, unknown>) =>
+      (fallback || key).replace(/\{\{(\w+)\}\}/g, (_match, token) => {
+        const value = options?.[token]
+        return value == null ? "" : String(value)
+      })
   })
 }))
 
@@ -180,5 +184,33 @@ describe("PipelineWizard", () => {
         { mode: "create" }
       )
     })
+  })
+
+  it("surfaces interval bounds that match the persisted cron bounds", async () => {
+    renderWizard()
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+    })
+    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
+    })
+    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
+      target: { value: "Oversized Interval" }
+    })
+    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Every N hours/minutes"))
+
+    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemin", "1")
+    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemax", "23")
+
+    fireEvent.mouseDown(getDialogQueries().getByLabelText("Interval unit"))
+    fireEvent.click(await screen.findByText("Minutes"))
+
+    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemin", "5")
+    expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemax", "59")
   })
 })

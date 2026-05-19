@@ -35,6 +35,7 @@ import {
   createWatchlistJob,
   createWatchlistSource,
   deleteWatchlistJob,
+  deleteWatchlistSource,
   fetchWatchlistRuns,
   fetchWatchlistSources,
   getWatchlistTemplate,
@@ -764,6 +765,7 @@ export const OverviewTab: React.FC = () => {
     wizardDraft: PipelineWizardDraft,
     options: { mode?: "create" | "test" } = {}
   ) => {
+    let createdSourceId: number | null = null
     let createdJobId: number | null = null
     let createdRunId: number | null = null
     const mode = options?.mode || "create"
@@ -786,6 +788,7 @@ export const OverviewTab: React.FC = () => {
           throw new Error("source_payload_missing")
         }
         const source = await createWatchlistSource(sourcePayload)
+        createdSourceId = source.id
         sourceIds = [source.id]
       }
 
@@ -866,16 +869,24 @@ export const OverviewTab: React.FC = () => {
         mode,
         runNow: shouldRunNowForTelemetry
       })
-      if (createdJobId != null && createdRunId == null) {
+      if (createdRunId != null) {
+        setActiveTab("runs")
+        openRunDetail(createdRunId)
+        message.error(
+          t(
+            "watchlists:overview.pipelineSetup.error",
+            "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
+          )
+        )
+        return
+      }
+
+      let rollbackFailed = false
+      if (createdJobId != null) {
         try {
           await deleteWatchlistJob(createdJobId)
-          message.warning(
-            t(
-              "watchlists:overview.pipelineSetup.rollbackSuccess",
-              "Pipeline setup failed before run start. Monitor creation was rolled back."
-            )
-          )
         } catch (rollbackError) {
+          rollbackFailed = true
           console.error("Failed to rollback pipeline monitor creation:", rollbackError)
           void trackWatchlistsOnboardingTelemetry({
             type: "pipeline_setup_failed",
@@ -883,18 +894,40 @@ export const OverviewTab: React.FC = () => {
             mode,
             runNow: shouldRunNowForTelemetry
           })
+        }
+      }
+      if (createdSourceId != null) {
+        try {
+          await deleteWatchlistSource(createdSourceId)
+        } catch (rollbackError) {
+          rollbackFailed = true
+          console.error("Failed to rollback pipeline source creation:", rollbackError)
+          void trackWatchlistsOnboardingTelemetry({
+            type: "pipeline_setup_failed",
+            stage: "rollback",
+            mode,
+            runNow: shouldRunNowForTelemetry
+          })
+        }
+      }
+
+      if (createdJobId != null || createdSourceId != null) {
+        if (rollbackFailed) {
           message.error(
             t(
               "watchlists:overview.pipelineSetup.rollbackFailed",
               "Pipeline setup failed and rollback was incomplete. Review Monitors for cleanup."
             )
           )
+        } else {
+          message.warning(
+            t(
+              "watchlists:overview.pipelineSetup.rollbackSuccess",
+              "Pipeline setup failed before run start. Created resources were rolled back."
+            )
+          )
         }
       } else {
-        if (createdRunId != null) {
-          setActiveTab("runs")
-          openRunDetail(createdRunId)
-        }
         message.error(
           t(
             "watchlists:overview.pipelineSetup.error",
@@ -907,6 +940,7 @@ export const OverviewTab: React.FC = () => {
     }
   }, [
     closePipelineSetup,
+    deleteWatchlistSource,
     loadOverview,
     openOutputPreview,
     openRunDetail,

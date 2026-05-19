@@ -6,6 +6,10 @@ import type {
 } from "@/types/watchlists"
 import {
   buildCronFromPreset,
+  INTERVAL_HOURS_MAX,
+  INTERVAL_HOURS_MIN,
+  INTERVAL_MINUTES_MAX,
+  INTERVAL_MINUTES_MIN,
   type ScheduleIntervalUnit,
   type WeekdayToken
 } from "../JobsTab/schedule-utils"
@@ -37,7 +41,7 @@ export interface PipelineWizardDraft {
   scheduleMinute: number
   scheduleWeekday: WeekdayToken
   templateName: string
-  templateFormat: "md" | "html"
+  templateFormat?: "md" | "html"
   emailDeliveryEnabled: boolean
   emailRecipients: string[]
   chatbookDeliveryEnabled: boolean
@@ -62,6 +66,29 @@ export interface PipelineWizardReviewSummary {
   audio: string
 }
 
+interface PipelineWizardCadenceCopy {
+  manual?: string
+  interval?: (value: number, unit: ScheduleIntervalUnit) => string
+  daily?: (time: string) => string
+  weekly?: (weekday: string, time: string) => string
+  weekdayLabels?: Partial<Record<WeekdayToken, string>>
+}
+
+export interface PipelineWizardReviewSummaryCopy {
+  newFeed?: string
+  noFeedsSelected?: string
+  feedLabel?: (id: number) => string
+  filters?: string
+  noTemplate?: string
+  outputDigest?: (templateName: string) => string
+  email?: string
+  chatbook?: string
+  inAppReports?: string
+  audioBriefing?: (speakerCount: number) => string
+  audioDisabled?: string
+  cadence?: PipelineWizardCadenceCopy
+}
+
 interface SourceLabel {
   id: number
   name?: string | null
@@ -83,7 +110,6 @@ export const createDefaultPipelineWizardDraft = (): PipelineWizardDraft => ({
   scheduleMinute: 0,
   scheduleWeekday: "MON",
   templateName: "",
-  templateFormat: "md",
   emailDeliveryEnabled: false,
   emailRecipients: [],
   chatbookDeliveryEnabled: false,
@@ -154,7 +180,24 @@ export const validatePipelineWizardDraft = (
 
   if (draft.scheduleMode === "interval") {
     const value = Number(draft.scheduleIntervalValue)
-    if (!Number.isFinite(value) || value <= 0) errors.push("scheduleIntervalValue")
+    const minValue =
+      draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+    const maxValue =
+      draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
+    if (!Number.isInteger(value) || value < minValue || value > maxValue) {
+      errors.push("scheduleIntervalValue")
+    }
+    if (draft.scheduleIntervalUnit === "hours") {
+      const minute = Number(draft.scheduleMinute)
+      if (!Number.isInteger(minute) || minute < 0 || minute > 59) errors.push("scheduleMinute")
+    }
+  }
+
+  if (draft.scheduleMode === "daily" || draft.scheduleMode === "weekly") {
+    const hour = Number(draft.scheduleHour)
+    const minute = Number(draft.scheduleMinute)
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23) errors.push("scheduleHour")
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) errors.push("scheduleMinute")
   }
 
   if (draft.emailDeliveryEnabled) {
@@ -269,7 +312,7 @@ export const toBriefingPipelineDraft = (
     scheduleExpr: schedule.schedule_expr,
     timezone: schedule.timezone,
     templateName: trim(draft.templateName),
-    templateFormat: draft.templateFormat,
+    ...(draft.templateFormat ? { templateFormat: draft.templateFormat } : {}),
     includeAudio: Boolean(draft.audioEnabled),
     audioVoice: firstSpeakerVoice,
     audioCast,
@@ -297,46 +340,60 @@ const WEEKDAY_LABELS: Record<WeekdayToken, string> = {
   SUN: "Sunday"
 }
 
-export const formatPipelineWizardCadence = (draft: PipelineWizardDraft): string => {
-  if (draft.scheduleMode === "manual") return "Manual only"
+export const formatPipelineWizardCadence = (
+  draft: PipelineWizardDraft,
+  copy: PipelineWizardCadenceCopy = {}
+): string => {
+  if (draft.scheduleMode === "manual") return copy.manual || "Manual only"
   if (draft.scheduleMode === "interval") {
     const value = Math.max(1, Math.floor(Number(draft.scheduleIntervalValue) || 1))
+    if (copy.interval) return copy.interval(value, draft.scheduleIntervalUnit)
     const unit = draft.scheduleIntervalUnit === "minutes" ? "minute" : "hour"
     return `Every ${value} ${unit}${value === 1 ? "" : "s"}`
   }
   if (draft.scheduleMode === "weekly") {
-    return `Weekly on ${WEEKDAY_LABELS[draft.scheduleWeekday]} at ${formatTime(
-      draft.scheduleHour,
-      draft.scheduleMinute
-    )}`
+    const weekday = copy.weekdayLabels?.[draft.scheduleWeekday] || WEEKDAY_LABELS[draft.scheduleWeekday]
+    const time = formatTime(draft.scheduleHour, draft.scheduleMinute)
+    if (copy.weekly) return copy.weekly(weekday, time)
+    return `Weekly on ${weekday} at ${time}`
   }
-  return `Daily at ${formatTime(draft.scheduleHour, draft.scheduleMinute)}`
+  const time = formatTime(draft.scheduleHour, draft.scheduleMinute)
+  return copy.daily ? copy.daily(time) : `Daily at ${time}`
 }
 
 export const buildPipelineWizardReviewSummary = (
   draft: PipelineWizardDraft,
-  existingSources: SourceLabel[] = []
+  existingSources: SourceLabel[] = [],
+  copy: PipelineWizardReviewSummaryCopy = {}
 ): PipelineWizardReviewSummary => {
-  const sourceLookup = new Map(existingSources.map((source) => [source.id, trim(source.name) || `Feed #${source.id}`]))
+  const sourceLookup = new Map(
+    existingSources.map((source) => [
+      source.id,
+      trim(source.name) || (copy.feedLabel ? copy.feedLabel(source.id) : `Feed #${source.id}`)
+    ])
+  )
   const selectedSources = draft.sourceMode === "new"
-    ? trim(draft.sourceName) || "New feed"
+    ? trim(draft.sourceName) || copy.newFeed || "New feed"
     : (draft.sourceIds || [])
-      .map((id) => sourceLookup.get(id) || `Feed #${id}`)
-      .join(", ") || "No feeds selected"
+      .map((id) => sourceLookup.get(id) || (copy.feedLabel ? copy.feedLabel(id) : `Feed #${id}`))
+      .join(", ") || copy.noFeedsSelected || "No feeds selected"
   const delivery = [
-    draft.emailDeliveryEnabled ? "Email" : null,
-    draft.chatbookDeliveryEnabled ? "Chatbook" : null
-  ].filter(Boolean).join(", ") || "In-app reports"
+    draft.emailDeliveryEnabled ? copy.email || "Email" : null,
+    draft.chatbookDeliveryEnabled ? copy.chatbook || "Chatbook" : null
+  ].filter(Boolean).join(", ") || copy.inAppReports || "In-app reports"
   const speakers = draft.audioEnabled ? normalizePipelineWizardSpeakers(draft.audioSpeakers).length : 0
+  const templateName = trim(draft.templateName) || copy.noTemplate || "No template"
 
   return {
     sources: selectedSources,
-    cadence: formatPipelineWizardCadence(draft),
-    filters: "Monitor filters can be refined after creation",
-    output: `${trim(draft.templateName) || "No template"} digest`,
+    cadence: formatPipelineWizardCadence(draft, copy.cadence),
+    filters: copy.filters || "Monitor filters can be refined after creation",
+    output: copy.outputDigest ? copy.outputDigest(templateName) : `${templateName} digest`,
     delivery,
     audio: speakers > 0
-      ? `${speakers} speaker${speakers === 1 ? "" : "s"} audio briefing`
-      : "Audio disabled"
+      ? copy.audioBriefing
+        ? copy.audioBriefing(speakers)
+        : `${speakers} speaker${speakers === 1 ? "" : "s"} audio briefing`
+      : copy.audioDisabled || "Audio disabled"
   }
 }

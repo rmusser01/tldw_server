@@ -5,6 +5,7 @@ import {
   Checkbox,
   Form,
   Input,
+  InputNumber,
   Modal,
   Radio,
   Select,
@@ -15,6 +16,14 @@ import {
 import { useTranslation } from "react-i18next"
 import type { WatchlistSource } from "@/types/watchlists"
 import {
+  INTERVAL_HOURS_MAX,
+  INTERVAL_HOURS_MIN,
+  INTERVAL_MINUTES_MAX,
+  INTERVAL_MINUTES_MIN,
+  type ScheduleIntervalUnit,
+  type WeekdayToken
+} from "../JobsTab/schedule-utils"
+import {
   buildPipelineWizardReviewSummary,
   createDefaultPipelineWizardDraft,
   type PipelineWizardAudioSpeakerDraft,
@@ -23,7 +32,6 @@ import {
   type PipelineWizardSourceMode,
   validatePipelineWizardDraft
 } from "./pipeline-wizard-state"
-import type { ScheduleIntervalUnit, WeekdayToken } from "../JobsTab/schedule-utils"
 
 interface PipelineWizardProps {
   open: boolean
@@ -45,46 +53,18 @@ export type { PipelineWizardProps }
 const STEP_COUNT = 5
 const LAST_STEP = STEP_COUNT - 1
 
-const WEEKDAY_OPTIONS: Array<{ value: WeekdayToken; label: string }> = [
-  { value: "MON", label: "Monday" },
-  { value: "TUE", label: "Tuesday" },
-  { value: "WED", label: "Wednesday" },
-  { value: "THU", label: "Thursday" },
-  { value: "FRI", label: "Friday" },
-  { value: "SAT", label: "Saturday" },
-  { value: "SUN", label: "Sunday" }
-]
-
-const SCHEDULE_OPTIONS: Array<{ value: PipelineWizardScheduleMode; label: string }> = [
-  { value: "manual", label: "Manual only" },
-  { value: "interval", label: "Every N hours/minutes" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" }
-]
-
-const INTERVAL_UNIT_OPTIONS: Array<{ value: ScheduleIntervalUnit; label: string }> = [
-  { value: "hours", label: "Hours" },
-  { value: "minutes", label: "Minutes" }
-]
-
-const SPEAKER_COUNT_OPTIONS = [
-  { value: 1, label: "1 speaker" },
-  { value: 2, label: "2 speakers" },
-  { value: 3, label: "3 speakers" },
-  { value: 4, label: "4 speakers" }
-]
-
 const DEFAULT_SPEAKER_VOICES = ["alloy", "nova", "echo", "fable"]
 
 const createSpeakers = (
   count: number,
-  existing: PipelineWizardAudioSpeakerDraft[]
+  existing: PipelineWizardAudioSpeakerDraft[],
+  speakerLabel: (index: number) => string = (index) => `Speaker ${index}`
 ): PipelineWizardAudioSpeakerDraft[] =>
   Array.from({ length: Math.max(1, Math.min(4, count)) }, (_item, index) => {
     const current = existing[index]
     return {
       id: current?.id || `speaker_${index + 1}`,
-      label: current?.label || `Speaker ${index + 1}`,
+      label: current?.label || speakerLabel(index + 1),
       role: current?.role || (index === 0 ? "host" : "speaker"),
       voice: current?.voice || DEFAULT_SPEAKER_VOICES[index] || DEFAULT_SPEAKER_VOICES[0],
       persona: current?.persona
@@ -141,12 +121,19 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     setStepErrors([])
   }
 
+  const getSpeakerLabel = (index: number) =>
+    t("watchlists:overview.pipelineSetup.speaker.defaultLabel", "Speaker {{index}}", { index })
+
   const updateSpeaker = (
     index: number,
     patch: Partial<PipelineWizardAudioSpeakerDraft>
   ) => {
     setDraft((previous) => {
-      const nextSpeakers = createSpeakers(previous.audioSpeakers.length || 1, previous.audioSpeakers)
+      const nextSpeakers = createSpeakers(
+        previous.audioSpeakers.length || 1,
+        previous.audioSpeakers,
+        getSpeakerLabel
+      )
       nextSpeakers[index] = {
         ...nextSpeakers[index],
         ...patch
@@ -159,9 +146,100 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     setStepErrors([])
   }
 
+  const weekdayOptions = useMemo<Array<{ value: WeekdayToken; label: string }>>(
+    () => [
+      { value: "MON", label: t("watchlists:overview.pipelineSetup.weekdays.monday", "Monday") },
+      { value: "TUE", label: t("watchlists:overview.pipelineSetup.weekdays.tuesday", "Tuesday") },
+      { value: "WED", label: t("watchlists:overview.pipelineSetup.weekdays.wednesday", "Wednesday") },
+      { value: "THU", label: t("watchlists:overview.pipelineSetup.weekdays.thursday", "Thursday") },
+      { value: "FRI", label: t("watchlists:overview.pipelineSetup.weekdays.friday", "Friday") },
+      { value: "SAT", label: t("watchlists:overview.pipelineSetup.weekdays.saturday", "Saturday") },
+      { value: "SUN", label: t("watchlists:overview.pipelineSetup.weekdays.sunday", "Sunday") }
+    ],
+    [t]
+  )
+  const weekdayLabelByToken = useMemo(
+    () => Object.fromEntries(weekdayOptions.map((option) => [option.value, option.label])) as Record<WeekdayToken, string>,
+    [weekdayOptions]
+  )
+  const scheduleOptions = useMemo<Array<{ value: PipelineWizardScheduleMode; label: string }>>(
+    () => [
+      { value: "manual", label: t("watchlists:overview.pipelineSetup.schedule.manual", "Manual only") },
+      { value: "interval", label: t("watchlists:overview.pipelineSetup.schedule.interval", "Every N hours/minutes") },
+      { value: "daily", label: t("watchlists:overview.pipelineSetup.schedule.daily", "Daily") },
+      { value: "weekly", label: t("watchlists:overview.pipelineSetup.schedule.weekly", "Weekly") }
+    ],
+    [t]
+  )
+  const intervalUnitOptions = useMemo<Array<{ value: ScheduleIntervalUnit; label: string }>>(
+    () => [
+      { value: "hours", label: t("watchlists:overview.pipelineSetup.intervalUnits.hours", "Hours") },
+      { value: "minutes", label: t("watchlists:overview.pipelineSetup.intervalUnits.minutes", "Minutes") }
+    ],
+    [t]
+  )
+  const speakerCountOptions = useMemo(
+    () => [1, 2, 3, 4].map((count) => ({
+      value: count,
+      label: t(
+        "watchlists:overview.pipelineSetup.speaker.count",
+        `${count} speaker${count === 1 ? "" : "s"}`,
+        { count }
+      )
+    })),
+    [t]
+  )
+
+  const reviewSummaryCopy = useMemo(() => ({
+    newFeed: t("watchlists:overview.pipelineSetup.review.newFeed", "New feed"),
+    noFeedsSelected: t("watchlists:overview.pipelineSetup.review.noFeedsSelected", "No feeds selected"),
+    feedLabel: (id: number) => t("watchlists:overview.pipelineSetup.review.feedLabel", "Feed #{{id}}", { id }),
+    filters: t(
+      "watchlists:overview.pipelineSetup.review.filtersRefine",
+      "Monitor filters can be refined after creation"
+    ),
+    noTemplate: t("watchlists:overview.pipelineSetup.review.noTemplate", "No template"),
+    outputDigest: (templateName: string) =>
+      t("watchlists:overview.pipelineSetup.review.outputDigest", "{{templateName}} digest", { templateName }),
+    email: t("watchlists:overview.pipelineSetup.review.delivery.email", "Email"),
+    chatbook: t("watchlists:overview.pipelineSetup.review.delivery.chatbook", "Chatbook"),
+    inAppReports: t("watchlists:overview.pipelineSetup.review.delivery.inAppReports", "In-app reports"),
+    audioBriefing: (speakerCount: number) =>
+      t(
+        "watchlists:overview.pipelineSetup.review.audioBriefing",
+        `${speakerCount} speaker${speakerCount === 1 ? "" : "s"} audio briefing`,
+        { count: speakerCount }
+      ),
+    audioDisabled: t("watchlists:overview.pipelineSetup.review.audioDisabled", "Audio disabled"),
+    cadence: {
+      manual: t("watchlists:overview.pipelineSetup.schedule.manual", "Manual only"),
+      interval: (value: number, unit: ScheduleIntervalUnit) =>
+        unit === "minutes"
+          ? t(
+            "watchlists:overview.pipelineSetup.review.cadence.everyMinutes",
+            `Every ${value} minute${value === 1 ? "" : "s"}`,
+            { count: value }
+          )
+          : t(
+            "watchlists:overview.pipelineSetup.review.cadence.everyHours",
+            `Every ${value} hour${value === 1 ? "" : "s"}`,
+            { count: value }
+          ),
+      daily: (time: string) =>
+        t("watchlists:overview.pipelineSetup.review.cadence.daily", "Daily at {{time}}", { time }),
+      weekly: (weekday: string, time: string) =>
+        t(
+          "watchlists:overview.pipelineSetup.review.cadence.weekly",
+          "Weekly on {{weekday}} at {{time}}",
+          { weekday, time }
+        ),
+      weekdayLabels: weekdayLabelByToken
+    }
+  }), [t, weekdayLabelByToken])
+
   const summary = useMemo(
-    () => buildPipelineWizardReviewSummary(draft, sources),
-    [draft, sources]
+    () => buildPipelineWizardReviewSummary(draft, sources, reviewSummaryCopy),
+    [draft, reviewSummaryCopy, sources]
   )
 
   const stepItems = useMemo(
@@ -181,7 +259,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       if (currentStep === 0) {
         return draft.sourceMode === "new" ? ["sourceName", "sourceUrl"] : ["sourceIds"]
       }
-      if (currentStep === 1) return ["monitorName", "scheduleIntervalValue"]
+      if (currentStep === 1) {
+        return ["monitorName", "scheduleIntervalValue", "scheduleHour", "scheduleMinute"]
+      }
       if (currentStep === 2) return ["templateName", "emailRecipients"]
       if (currentStep === 3) {
         return [
@@ -209,7 +289,12 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       setStepErrors(validation.errors)
       const firstError = validation.errors[0]
       if (["sourceIds", "sourceName", "sourceUrl"].includes(firstError)) setCurrentStep(0)
-      else if (["monitorName", "scheduleIntervalValue"].includes(firstError)) setCurrentStep(1)
+      else if ([
+        "monitorName",
+        "scheduleIntervalValue",
+        "scheduleHour",
+        "scheduleMinute"
+      ].includes(firstError)) setCurrentStep(1)
       else if (["templateName", "emailRecipients"].includes(firstError)) setCurrentStep(2)
       else setCurrentStep(3)
       return
@@ -218,6 +303,10 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   }
 
   const currentSpeakerCount = Math.max(1, Math.min(4, draft.audioSpeakers.length || 1))
+  const intervalMin =
+    draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+  const intervalMax =
+    draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
 
   return (
     <Modal
@@ -360,7 +449,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
               <Select
                 aria-label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}
                 value={draft.scheduleMode}
-                options={SCHEDULE_OPTIONS}
+                options={scheduleOptions}
                 onChange={(value) => updateDraft({ scheduleMode: value })}
               />
             </Form.Item>
@@ -370,19 +459,21 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                   label={t("watchlists:overview.pipelineSetup.fields.intervalEvery", "Every")}
                   validateStatus={stepErrors.includes("scheduleIntervalValue") ? "error" : undefined}
                 >
-                  <Input
+                  <InputNumber
                     aria-label={t("watchlists:overview.pipelineSetup.fields.intervalEvery", "Every")}
-                    type="number"
-                    min={1}
+                    className="w-full"
+                    min={intervalMin}
+                    max={intervalMax}
+                    precision={0}
                     value={draft.scheduleIntervalValue}
-                    onChange={(event) => updateDraft({ scheduleIntervalValue: Number(event.target.value) })}
+                    onChange={(value) => updateDraft({ scheduleIntervalValue: Number(value) })}
                   />
                 </Form.Item>
                 <Form.Item label={t("watchlists:overview.pipelineSetup.fields.intervalUnit", "Interval unit")}>
                   <Select
                     aria-label={t("watchlists:overview.pipelineSetup.fields.intervalUnit", "Interval unit")}
                     value={draft.scheduleIntervalUnit}
-                    options={INTERVAL_UNIT_OPTIONS}
+                    options={intervalUnitOptions}
                     onChange={(value) => updateDraft({ scheduleIntervalUnit: value })}
                   />
                 </Form.Item>
@@ -395,29 +486,37 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                     <Select
                       aria-label={t("watchlists:overview.pipelineSetup.fields.weekday", "Weekday")}
                       value={draft.scheduleWeekday}
-                      options={WEEKDAY_OPTIONS}
+                      options={weekdayOptions}
                       onChange={(value) => updateDraft({ scheduleWeekday: value })}
                     />
                   </Form.Item>
                 )}
-                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")}>
-                  <Input
+                <Form.Item
+                  label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")}
+                  validateStatus={stepErrors.includes("scheduleHour") ? "error" : undefined}
+                >
+                  <InputNumber
                     aria-label={t("watchlists:overview.pipelineSetup.fields.hour", "Hour")}
-                    type="number"
+                    className="w-full"
                     min={0}
                     max={23}
+                    precision={0}
                     value={draft.scheduleHour}
-                    onChange={(event) => updateDraft({ scheduleHour: Number(event.target.value) })}
+                    onChange={(value) => updateDraft({ scheduleHour: Number(value) })}
                   />
                 </Form.Item>
-                <Form.Item label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")}>
-                  <Input
+                <Form.Item
+                  label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")}
+                  validateStatus={stepErrors.includes("scheduleMinute") ? "error" : undefined}
+                >
+                  <InputNumber
                     aria-label={t("watchlists:overview.pipelineSetup.fields.minute", "Minute")}
-                    type="number"
+                    className="w-full"
                     min={0}
                     max={59}
+                    precision={0}
                     value={draft.scheduleMinute}
-                    onChange={(event) => updateDraft({ scheduleMinute: Number(event.target.value) })}
+                    onChange={(value) => updateDraft({ scheduleMinute: Number(value) })}
                   />
                 </Form.Item>
               </div>
@@ -483,7 +582,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 checked={draft.audioEnabled}
                 onChange={(checked) => updateDraft({
                   audioEnabled: checked,
-                  audioSpeakers: checked ? createSpeakers(currentSpeakerCount, draft.audioSpeakers) : []
+                  audioSpeakers: checked
+                    ? createSpeakers(currentSpeakerCount, draft.audioSpeakers, getSpeakerLabel)
+                    : []
                 })}
               />
             </Form.Item>
@@ -494,8 +595,10 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                     <Select
                       aria-label={t("watchlists:overview.pipelineSetup.fields.speakerCount", "Speaker count")}
                       value={currentSpeakerCount}
-                      options={SPEAKER_COUNT_OPTIONS}
-                      onChange={(value) => updateDraft({ audioSpeakers: createSpeakers(value, draft.audioSpeakers) })}
+                      options={speakerCountOptions}
+                      onChange={(value) => updateDraft({
+                        audioSpeakers: createSpeakers(value, draft.audioSpeakers, getSpeakerLabel)
+                      })}
                     />
                   </Form.Item>
                   <Form.Item
@@ -517,16 +620,36 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                       key={speaker.id || index}
                       className="grid gap-3 rounded-md border border-border bg-surface p-3 sm:grid-cols-2"
                     >
-                      <Form.Item label={`Speaker ${index + 1} label`}>
+                      <Form.Item
+                        label={t(
+                          "watchlists:overview.pipelineSetup.speaker.labelField",
+                          "Speaker {{index}} label",
+                          { index: index + 1 }
+                        )}
+                      >
                         <Input
-                          aria-label={`Speaker ${index + 1} label`}
+                          aria-label={t(
+                            "watchlists:overview.pipelineSetup.speaker.labelField",
+                            "Speaker {{index}} label",
+                            { index: index + 1 }
+                          )}
                           value={speaker.label}
                           onChange={(event) => updateSpeaker(index, { label: event.target.value })}
                         />
                       </Form.Item>
-                      <Form.Item label={`Speaker ${index + 1} voice`}>
+                      <Form.Item
+                        label={t(
+                          "watchlists:overview.pipelineSetup.speaker.voiceField",
+                          "Speaker {{index}} voice",
+                          { index: index + 1 }
+                        )}
+                      >
                         <Select
-                          aria-label={`Speaker ${index + 1} voice`}
+                          aria-label={t(
+                            "watchlists:overview.pipelineSetup.speaker.voiceField",
+                            "Speaker {{index}} voice",
+                            { index: index + 1 }
+                          )}
                           value={speaker.voice}
                           options={DEFAULT_SPEAKER_VOICES.map((voice) => ({
                             value: voice,
@@ -549,12 +672,42 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
               className="rounded-md border border-border bg-surface p-3"
               data-testid="watchlists-pipeline-review-summary"
             >
-              <p><span className="font-medium">Sources:</span> {summary.sources}</p>
-              <p><span className="font-medium">Cadence:</span> {summary.cadence}</p>
-              <p><span className="font-medium">Filters:</span> {summary.filters}</p>
-              <p><span className="font-medium">Output:</span> {summary.output}</p>
-              <p><span className="font-medium">Delivery:</span> {summary.delivery}</p>
-              <p><span className="font-medium">Audio:</span> {summary.audio}</p>
+              <p>
+                <span className="font-medium">
+                  {t("watchlists:overview.pipelineSetup.review.sources", "Sources")}:
+                </span>{" "}
+                {summary.sources}
+              </p>
+              <p>
+                <span className="font-medium">
+                  {t("watchlists:overview.pipelineSetup.review.cadence", "Cadence")}:
+                </span>{" "}
+                {summary.cadence}
+              </p>
+              <p>
+                <span className="font-medium">
+                  {t("watchlists:overview.pipelineSetup.review.filters", "Filters")}:
+                </span>{" "}
+                {summary.filters}
+              </p>
+              <p>
+                <span className="font-medium">
+                  {t("watchlists:overview.pipelineSetup.review.output", "Output")}:
+                </span>{" "}
+                {summary.output}
+              </p>
+              <p>
+                <span className="font-medium">
+                  {t("watchlists:overview.pipelineSetup.review.delivery", "Delivery")}:
+                </span>{" "}
+                {summary.delivery}
+              </p>
+              <p>
+                <span className="font-medium">
+                  {t("watchlists:overview.pipelineSetup.review.audio", "Audio")}:
+                </span>{" "}
+                {summary.audio}
+              </p>
             </div>
             <div className="rounded-md border border-border bg-surface p-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
