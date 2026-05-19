@@ -51,7 +51,13 @@ After a managed server is running, the page shows **Use this in Chat**. This is 
 
 ## Managed Runtime Profiles
 
-The managed plane now stores durable llama.cpp runtime profiles. A profile is a backend-owned service definition, not just a saved browser form. It records the profile ID, name, enabled state, mode, selected GGUF asset or model path, optional mmproj projector, host/port policy, structured server arguments, autostart setting, bounded restart policy, provider alias, and tags.
+The managed plane now stores durable llama.cpp runtime profiles. A profile is a backend-owned service definition, not just a saved browser form. It records attributes such as:
+
+- Profile ID, name, and enabled state
+- Mode, selected GGUF asset or model path, and optional mmproj projector
+- Host/port policy and structured server arguments
+- Autostart setting and bounded restart policy
+- Provider alias and tags
 
 Profile state is persisted in `llamacpp_profiles.json` next to the active tldw config file resolved by setup configuration. Treat this as a server-owned file: use the Admin UI or `/api/v1/llamacpp/profiles*` endpoints instead of editing it while the API server is running.
 

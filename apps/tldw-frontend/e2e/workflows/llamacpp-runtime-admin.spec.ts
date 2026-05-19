@@ -14,6 +14,9 @@ const fulfillJson = async (
   });
 };
 
+const MB = 1_000_000;
+const GB = 1_000 * MB;
+
 const savedConfig = {
   enabled: true,
   executable_path: '/opt/llama-server',
@@ -41,7 +44,7 @@ const ggufAsset = {
   resolved_path: '/srv/models/toy-chat.gguf',
   display_name: 'Toy Chat GGUF',
   source: 'models_dir',
-  size_bytes: 2_200_000_000,
+  size_bytes: 2.2 * GB,
   modified_at: '2026-05-18T10:00:00Z',
   metadata: {
     quantization: 'Q4_K_M',
@@ -63,7 +66,7 @@ const mmprojAsset = {
   resolved_path: '/srv/models/toy-mmproj.gguf',
   display_name: 'Toy Vision Projector',
   source: 'models_dir',
-  size_bytes: 320_000_000,
+  size_bytes: 320 * MB,
   modified_at: '2026-05-18T10:05:00Z',
   metadata: {
     family_hint: 'toy',
@@ -275,7 +278,7 @@ async function mockManagedRuntimeAdmin(page: Page): Promise<{
           basename: 'toy-chat.gguf',
           source: 'models_dir',
           path: '/srv/models/toy-chat.gguf',
-          size_bytes: 2_200_000_000,
+          size_bytes: 2.2 * GB,
           modified_at: '2026-05-18T10:00:00Z',
           metadata: {
             quantization: 'Q4_K_M',
@@ -292,8 +295,8 @@ async function mockManagedRuntimeAdmin(page: Page): Promise<{
 
   await page.route('**/api/v1/llamacpp/hardware', (route) =>
     fulfillJson(route, {
-      ram_total_bytes: 16_000_000_000,
-      ram_available_bytes: 8_000_000_000,
+      ram_total_bytes: 16 * GB,
+      ram_available_bytes: 8 * GB,
       cpu_count: 8,
       gpus: [],
       warnings: ['GPU probe unavailable.'],
@@ -313,8 +316,25 @@ async function mockManagedRuntimeAdmin(page: Page): Promise<{
   );
 
   await page.route('**/api/v1/llamacpp/profiles/*/use-in-chat', (route) => {
-    const match = route.request().url().match(/\/llamacpp\/profiles\/([^/]+)\/use-in-chat$/);
-    useInChatProfileIds.push(decodeURIComponent(match?.[1] || ''));
+    if (route.request().method() !== 'POST') {
+      return fulfillJson(
+        route,
+        { error: 'Method not allowed in use-in-chat mock' },
+        405
+      );
+    }
+    const match = route
+      .request()
+      .url()
+      .match(/\/llamacpp\/profiles\/([^/]+)\/use-in-chat$/);
+    if (!match?.[1]) {
+      return fulfillJson(
+        route,
+        { error: 'Invalid profile ID in URL for use-in-chat mock' },
+        400
+      );
+    }
+    useInChatProfileIds.push(decodeURIComponent(match[1]));
     return fulfillJson(route, {
       provider: 'llamacpp',
       endpoint: 'http://127.0.0.1:8181',
@@ -378,8 +398,14 @@ test.describe('llama.cpp managed runtime admin smoke', () => {
       authedPage.getByRole('button', { name: 'Use Embedding runtime in Chat' })
     ).toHaveCount(0);
 
+    const useInChatResponse = authedPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().includes('/api/v1/llamacpp/profiles/chat-runtime/use-in-chat')
+    );
     await authedPage.getByRole('button', { name: 'Use Chat runtime in Chat' }).click();
-    expect(api.useInChatProfileIds).toEqual(['chat-runtime']);
+    await useInChatResponse;
+    await expect.poll(() => api.useInChatProfileIds).toEqual(['chat-runtime']);
 
     await assertNoCriticalErrors(diagnostics);
   });
