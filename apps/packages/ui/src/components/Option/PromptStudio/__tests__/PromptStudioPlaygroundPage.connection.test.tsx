@@ -25,9 +25,13 @@ const serviceMocks = vi.hoisted(() => ({
   getPromptStudioDefaults: vi.fn()
 }))
 
+const i18nMocks = vi.hoisted(() => ({
+  t: vi.fn((_key: string, fallback?: string) => fallback ?? _key)
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key
+    t: i18nMocks.t
   })
 }))
 
@@ -177,6 +181,10 @@ const expectDesignSystemAlertForText = (text: string) => {
   expect(alertText.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
 }
 
+const expectTranslation = (key: string, fallback: string) => {
+  expect(i18nMocks.t).toHaveBeenCalledWith(key, fallback)
+}
+
 describe("PromptStudioPlaygroundPage connection states", () => {
   beforeEach(() => {
     mocks.online = true
@@ -185,6 +193,7 @@ describe("PromptStudioPlaygroundPage connection states", () => {
     mocks.navigate.mockReset()
     serviceMocks.hasPromptStudio.mockReset()
     serviceMocks.getPromptStudioDefaults.mockReset()
+    i18nMocks.t.mockClear()
     serviceMocks.hasPromptStudio.mockResolvedValue(true)
     serviceMocks.getPromptStudioDefaults.mockResolvedValue({
       pageSize: 10,
@@ -202,6 +211,11 @@ describe("PromptStudioPlaygroundPage connection states", () => {
       screen.getByText("Add your credentials to use Prompt Studio")
     ).toBeInTheDocument()
     expectDesignSystemAlertForText("Add your credentials to use Prompt Studio")
+    expectTranslation("option:promptStudio.openSettings", "Open Settings")
+    expectTranslation(
+      "option:promptStudio.addCredentialsDesc",
+      "Prompt Studio needs a reachable tldw server plus valid credentials before projects, prompts, and evaluations can load."
+    )
     expect(
       screen.queryByText("Connect to your server to use Prompt Studio")
     ).not.toBeInTheDocument()
@@ -221,6 +235,11 @@ describe("PromptStudioPlaygroundPage connection states", () => {
       screen.getByText("Finish setup to use Prompt Studio")
     ).toBeInTheDocument()
     expectDesignSystemAlertForText("Finish setup to use Prompt Studio")
+    expectTranslation("option:promptStudio.finishSetupAction", "Finish Setup")
+    expectTranslation(
+      "option:promptStudio.finishSetupDesc",
+      "Prompt Studio depends on a configured tldw server before projects, prompts, and evaluations can load."
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/")
@@ -236,6 +255,15 @@ describe("PromptStudioPlaygroundPage connection states", () => {
       screen.getByText("Can't reach your tldw server right now")
     ).toBeInTheDocument()
     expectDesignSystemAlertForText("Can't reach your tldw server right now")
+    expectTranslation(
+      "option:promptStudio.healthDiagnostics",
+      "Health & diagnostics"
+    )
+    expectTranslation("option:promptStudio.openSettings", "Open Settings")
+    expectTranslation(
+      "option:promptStudio.unreachableDesc",
+      "Prompt Studio depends on a reachable tldw server. Review your server status and URL before trying again."
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/settings/health")

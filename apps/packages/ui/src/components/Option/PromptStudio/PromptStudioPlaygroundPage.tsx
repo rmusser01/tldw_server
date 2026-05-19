@@ -586,14 +586,19 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
     return (
       <DesignSystemAlert
         variant="warning"
-        title="Add your credentials to use Prompt Studio"
+        title={t(
+          "option:promptStudio.addCredentialsTitle",
+          "Add your credentials to use Prompt Studio"
+        )}
         action={{
-          label: "Open Settings",
+          label: t("option:promptStudio.openSettings", "Open Settings"),
           onClick: () => navigate("/settings/tldw"),
           variant: "primary"
         }}>
-        Prompt Studio needs a reachable tldw server plus valid credentials before
-        projects, prompts, and evaluations can load.
+        {t(
+          "option:promptStudio.addCredentialsDesc",
+          "Prompt Studio needs a reachable tldw server plus valid credentials before projects, prompts, and evaluations can load."
+        )}
       </DesignSystemAlert>
     )
   }
@@ -602,15 +607,22 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
     return (
       <DesignSystemAlert
         variant="warning"
-        title="Finish setup to use Prompt Studio"
+        title={t(
+          "option:promptStudio.finishSetupTitle",
+          "Finish setup to use Prompt Studio"
+        )}
         action={{
-          label: hasCompletedFirstRun ? "Open Settings" : "Finish Setup",
+          label: hasCompletedFirstRun
+            ? t("option:promptStudio.openSettings", "Open Settings")
+            : t("option:promptStudio.finishSetupAction", "Finish Setup"),
           onClick: () =>
             navigate(hasCompletedFirstRun ? "/settings/tldw" : "/"),
           variant: "primary"
         }}>
-        Prompt Studio depends on a configured tldw server before projects,
-        prompts, and evaluations can load.
+        {t(
+          "option:promptStudio.finishSetupDesc",
+          "Prompt Studio depends on a configured tldw server before projects, prompts, and evaluations can load."
+        )}
       </DesignSystemAlert>
     )
   }
@@ -619,18 +631,26 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
     return (
       <DesignSystemAlert
         variant="warning"
-        title="Can't reach your tldw server right now"
+        title={t(
+          "option:promptStudio.unreachableTitle",
+          "Can't reach your tldw server right now"
+        )}
         action={{
-          label: "Health & diagnostics",
+          label: t(
+            "option:promptStudio.healthDiagnostics",
+            "Health & diagnostics"
+          ),
           onClick: () => navigate("/settings/health"),
           variant: "primary"
         }}
         secondaryAction={{
-          label: "Open Settings",
+          label: t("option:promptStudio.openSettings", "Open Settings"),
           onClick: () => navigate("/settings/tldw")
         }}>
-        Prompt Studio depends on a reachable tldw server. Review your server
-        status and URL before trying again.
+        {t(
+          "option:promptStudio.unreachableDesc",
+          "Prompt Studio depends on a reachable tldw server. Review your server status and URL before trying again."
+        )}
       </DesignSystemAlert>
     )
   }
