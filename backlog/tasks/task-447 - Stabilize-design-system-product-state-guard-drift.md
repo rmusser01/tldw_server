@@ -2,23 +2,16 @@
 id: TASK-447
 title: Stabilize design-system product-state guard drift
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-05-20 01:50'
 labels:
-- design-system
-- product-state
-- ui
-modified_files:
-- apps/packages/ui/src/components/Option/Audio/AudioReadinessStrip.tsx
-- apps/packages/ui/src/components/Option/Audio/__tests__/AudioReadinessStrip.test.tsx
-- apps/packages/ui/src/components/Option/STT/SttPlaygroundPage.tsx
-- apps/packages/ui/src/components/Option/STT/__tests__/SttPlaygroundPage.test.tsx
-- apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx
-- apps/packages/ui/src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx
-- apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx
-- apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.first-class.test.tsx
-- apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.orientation-guidance.test.tsx
-- apps/packages/ui/scripts/design-system-product-state-baseline.json
+  - design-system
+  - product-state
+  - ui
+dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/pull/1873
+  - 'https://github.com/rmusser01/tldw_server/pull/1873'
 ---
 
 ## Description
@@ -29,13 +22,19 @@ Migrate the current blocked product-state guard findings on dev to canonical des
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Product-state guard reports no blocked findings for the migrated Speech, STT, Watchlists, and Audio readiness scope.
+- [x] #2 Focused Vitest coverage for the migrated Audio, STT, Speech, and Watchlists surfaces passes.
+- [x] #3 PR #1873 review feedback is addressed for Speech alert structure/i18n and Audio readiness registry-backed labels.
+- [x] #4 Verification results and known skips are recorded in the final summary.
 <!-- AC:END -->
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -45,10 +44,10 @@ Migrated the current Speech/STT/Watchlists guard drift to design-system Alert, r
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
