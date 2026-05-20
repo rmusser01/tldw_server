@@ -325,6 +325,25 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByTestId("watchlists-tab-alerts")).toBeInTheDocument()
   })
 
+  it("uses the canonical alert for container loading and error states", () => {
+    mocks.state.watchlists = []
+    mocks.state.selectedWatchlistId = null
+    mocks.state.watchlistsLoading = true
+
+    const view = render(<WatchlistsPlaygroundPage />)
+
+    const loadingTitle = screen.getByText("Loading Watchlists")
+    expect(loadingTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+
+    mocks.state.watchlistsLoading = false
+    mocks.state.watchlistsError = "Backend is offline"
+    view.rerender(<WatchlistsPlaygroundPage />)
+
+    const errorTitle = screen.getByText("Watchlists unavailable")
+    expect(errorTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(screen.getByText("Backend is offline")).toBeInTheDocument()
+  })
+
   it("creates a topic-only Watchlist from the shell wizard, selects it, and opens Feeds", async () => {
     const created = {
       ...container,

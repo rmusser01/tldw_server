@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { Trans, useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
-import { Alert, Button, Typography } from "antd"
+import { Button, Typography } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { PageShell } from "@/components/Common/PageShell"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useTranscriptionModelsCatalog } from "@/hooks/useTranscriptionModelsCatalog"
 import { RecordingStrip } from "./RecordingStrip"
@@ -439,32 +440,26 @@ export const SttPlaygroundPage: React.FC = () => {
           </p>
         )}
         {serverModelsError && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title={t("playground:stt.modelsLoadError", "Model load failed")}
-            description={serverModelsError}
-            action={
-              <Button
-                size="small"
-                onClick={() => {
-                  retryServerModels()
-                }}
-                disabled={serverModelsLoading}
-              >
-                {t("common:retry", "Retry")}
-              </Button>
-            }
-          />
+            action={{
+              label: t("common:retry", "Retry"),
+              onClick: retryServerModels,
+              disabled: serverModelsLoading
+            }}
+          >
+            {serverModelsError}
+          </DesignSystemAlert>
         )}
         {!serverModelsLoading && !serverModelsError && serverModels.length === 0 && (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             className="mb-4"
-            message={t("playground:stt.noModelsTitle", "No transcription models available")}
-            description={t("playground:stt.noModelsBody", "Configure STT models in your server settings. Check the Audio Setup Guide for instructions.")}
-          />
+            title={t("playground:stt.noModelsTitle", "No transcription models available")}
+          >
+            {t("playground:stt.noModelsBody", "Configure STT models in your server settings. Check the Audio Setup Guide for instructions.")}
+          </DesignSystemAlert>
         )}
         <div data-testid="stt-record-strip">
           <RecordingStrip

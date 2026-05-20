@@ -1,6 +1,7 @@
 import React from "react"
 import { Tag, Tooltip, Typography } from "antd"
 
+import { getDesignSystemStateLabel } from "@/design-system/states"
 import type { MetadataSource, ReadinessItem, ReadinessState } from "./audio-readiness"
 
 const { Text } = Typography
@@ -13,9 +14,9 @@ const STATE_COLOR: Record<ReadinessState, string | undefined> = {
 }
 
 const STATE_LABEL: Record<ReadinessState, string> = {
-  ready: "Ready",
+  ready: getDesignSystemStateLabel("ready", ""),
   warning: "Needs review",
-  blocked: "Blocked",
+  blocked: getDesignSystemStateLabel("blocked", ""),
   unknown: "Unknown"
 }
 

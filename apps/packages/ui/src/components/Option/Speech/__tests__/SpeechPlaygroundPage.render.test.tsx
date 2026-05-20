@@ -77,14 +77,15 @@ const {
     },
   }))
 
-const { storageValues, setSpeechModeMock, setSpeechHistoryMock } = vi.hoisted(() => ({
+const { storageValues, setSpeechModeMock, setSpeechHistoryMock, tMock } = vi.hoisted(() => ({
   storageValues: new Map<string, unknown>(),
   setSpeechModeMock: vi.fn(),
   setSpeechHistoryMock: vi.fn(),
+  tMock: vi.fn((_key: string, fallback?: string) => fallback || _key),
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback || _key,
+    t: tMock,
   }),
 }))
 
@@ -406,6 +407,7 @@ describe("SpeechPlaygroundPage", () => {
     storageValues.set("speechPlaygroundHistory", [])
     setSpeechModeMock.mockReset()
     setSpeechHistoryMock.mockReset()
+    tMock.mockClear()
   })
 
   it("renders without triggering a temporal dead zone error", (): void => {
@@ -584,9 +586,32 @@ describe("SpeechPlaygroundPage", () => {
       )
     ).toBeInTheDocument()
     expect(
+      screen
+        .getByText(
+          "Enter your ElevenLabs API key below to load voices and models. You can also manage it in Settings."
+        )
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(
       screen.getByRole("button", { name: "Test & Save" })
     ).toBeDisabled()
     expect(screen.queryByText("Set API key in Settings")).not.toBeInTheDocument()
+  })
+
+  it("uses the canonical alert when transcription model loading fails", async (): Promise<void> => {
+    getTranscriptionModelsMock.mockRejectedValueOnce(new Error("catalog unavailable"))
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    try {
+      render(<SpeechPlaygroundPage />)
+
+      const modelError = await screen.findByText(
+        "Unable to load transcription models. Retry or check server settings."
+      )
+      expect(modelError.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it("validates and saves the inline ElevenLabs API key to local TTS settings", async (): Promise<void> => {

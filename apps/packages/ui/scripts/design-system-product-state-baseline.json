@@ -2772,72 +2772,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Speech/SpeechPlaygroundPage.tsx:Alert#antd-alert-speechplaygroundpage-type-error-long-form-tts-1ot93bn",
-    "path": "src/components/Option/Speech/SpeechPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Speech/SpeechPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Speech/SpeechPlaygroundPage.tsx:Alert#antd-alert-speechplaygroundpage-type-error-streaming-err-z2c8os",
-    "path": "src/components/Option/Speech/SpeechPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Speech/SpeechPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Speech/SpeechPlaygroundPage.tsx:Alert#antd-alert-speechplaygroundpage-type-warning-line-2328-4ql4lv",
-    "path": "src/components/Option/Speech/SpeechPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Speech/SpeechPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Speech/SpeechPlaygroundPage.tsx:Alert#antd-alert-speechplaygroundpage-type-warning-line-2575-1rxjerz",
-    "path": "src/components/Option/Speech/SpeechPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Speech/SpeechPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/STT/SttPlaygroundPage.tsx:Alert#antd-alert-sttplaygroundpage-type-warning-line-354-hnht6x",
-    "path": "src/components/Option/STT/SttPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/STT/SttPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/STT/SttPlaygroundPage.tsx:Alert#antd-alert-sttplaygroundpage-type-warning-line-373-mdhcze",
-    "path": "src/components/Option/STT/SttPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/STT/SttPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/TTS/TtsPlaygroundPage.tsx:Alert#antd-alert-ttsplaygroundpage-type-info-line-548-1132c3s",
     "path": "src/components/Option/TTS/TtsPlaygroundPage.tsx",
     "rule": "antd-product-state-import",
@@ -3747,61 +3681,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/TemplatesTab/TemplateEditor.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx:Alert#antd-alert-watchlistsplaygroundpage-type-info-line-1903-1gxx9vr",
-    "path": "src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx:Alert#antd-alert-watchlistsplaygroundpage-type-error-line-1919-1240bbm",
-    "path": "src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx:Alert#antd-alert-watchlistsplaygroundpage-type-info-line-2225-1x102gx",
-    "path": "src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx:Alert#antd-alert-watchlistsplaygroundpage-type-info-line-2251-u6vdgi",
-    "path": "src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx:Alert#antd-alert-watchlistsplaygroundpage-type-success-line-22-1mzst3n",
-    "path": "src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx before the stable duplicate-id guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   }
