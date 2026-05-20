@@ -46,6 +46,7 @@ export type ServerCapabilities = {
   hasFeedbackImplicit: boolean
   hasSkills: boolean
   hasPersona: boolean
+  hasPersonaLiveControl: boolean
   hasPersonalization: boolean
   hasGuardian: boolean
   hasSelfMonitoring: boolean
@@ -97,6 +98,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasFeedbackImplicit: false,
   hasSkills: false,
   hasPersona: false,
+  hasPersonaLiveControl: false,
   hasPersonalization: false,
   hasGuardian: false,
   hasSelfMonitoring: false,
@@ -189,6 +191,7 @@ const fallbackSpec = {
       "/api/v1/skills/context",
       "/api/v1/persona/catalog",
       "/api/v1/persona/session",
+      "/api/v1/persona/live/sessions",
       "/api/v1/persona/stream",
       "/api/v1/personalization/profile",
       "/api/v1/personalization/opt-in",
@@ -400,6 +403,10 @@ const applyDocsInfoFeatureGates = (
     "hasKnowledgeQaMediaScope"
   )
   const personaFeatureEnabled = extractFeatureFlag(docsInfo, "persona")
+  const personaLiveControlFeatureEnabled = extractFeatureFlag(
+    docsInfo,
+    "hasPersonaLiveControl"
+  )
   const personalizationFeatureEnabled = extractFeatureFlag(
     docsInfo,
     "personalization"
@@ -473,6 +480,10 @@ const applyDocsInfoFeatureGates = (
       personaFeatureEnabled === null
         ? capabilities.hasPersona
         : capabilities.hasPersona && personaFeatureEnabled,
+    hasPersonaLiveControl:
+      personaLiveControlFeatureEnabled === null
+        ? capabilities.hasPersonaLiveControl
+        : capabilities.hasPersonaLiveControl && personaLiveControlFeatureEnabled,
     hasPersonalization:
       personalizationFeatureEnabled === null
         ? capabilities.hasPersonalization
@@ -543,6 +554,7 @@ const computeCapabilities = (
     has("/api/v1/ingestion-sources") ||
     has("/api/v1/ingestion-sources/{source_id}") ||
     has("/api/v1/ingestion-sources/{source_id}/items")
+  const hasPersonaLiveControl = has("/api/v1/persona/live/sessions")
 
   return {
     hasChat: has("/api/v1/chat/completions"),
@@ -606,7 +618,9 @@ const computeCapabilities = (
     hasPersona:
       has("/api/v1/persona/catalog") ||
       has("/api/v1/persona/session") ||
-      has("/api/v1/persona/stream"),
+      has("/api/v1/persona/stream") ||
+      hasPersonaLiveControl,
+    hasPersonaLiveControl,
     hasPersonalization:
       has("/api/v1/personalization/profile") ||
       has("/api/v1/personalization/opt-in") ||

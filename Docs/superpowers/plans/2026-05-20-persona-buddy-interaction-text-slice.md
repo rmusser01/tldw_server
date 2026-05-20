@@ -391,7 +391,7 @@ git commit -m "feat(persona): add Buddy live control API"
 - Modify: `apps/packages/ui/src/services/tldw/openapi-guard.ts`
 - Modify: `apps/packages/ui/src/services/tldw/server-capabilities.ts`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Create tests for:
 
@@ -405,7 +405,7 @@ it("calls focus and stop endpoints", ...)
 
 Expected first failure: module does not exist.
 
-- [ ] **Step 2: Run failing service tests**
+- [x] **Step 2: Run failing service tests**
 
 Run from `apps/packages/ui`:
 
@@ -415,7 +415,7 @@ bunx vitest run src/services/__tests__/persona-live-control.test.ts
 
 Expected: FAIL because the service does not exist.
 
-- [ ] **Step 3: Implement service types and normalizers**
+- [x] **Step 3: Implement service types and normalizers**
 
 Create `apps/packages/ui/src/services/persona-live-control.ts`.
 
@@ -462,7 +462,7 @@ export async function stopPersonaLiveSession(sessionId: string): Promise<Persona
 
 Use `tldwClient.fetchWithAuth()` and `toAllowedPath()` rather than hard-casting `as any` in new service code.
 
-- [ ] **Step 4: Update OpenAPI guard and capability detection**
+- [x] **Step 4: Update OpenAPI guard and capability detection**
 
 Add paths to `ClientPath`:
 
@@ -474,7 +474,7 @@ Add paths to `ClientPath`:
 
 In `server-capabilities.ts`, treat `/api/v1/persona/live/sessions` as enabling a `hasPersonaLiveControl` or equivalent existing capability field. If no typed field exists, add a narrow field and tests only where the capability object is already normalized.
 
-- [ ] **Step 5: Run service tests**
+- [x] **Step 5: Run service tests**
 
 Run:
 
@@ -484,7 +484,7 @@ bunx vitest run src/services/__tests__/persona-live-control.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit frontend service slice**
+- [x] **Step 6: Commit frontend service slice**
 
 ```bash
 git add \
