@@ -138,6 +138,53 @@ describe("CharacterChatSessionsPanel", () => {
     expect(selectServerChatMock).toHaveBeenCalledWith(nextMiraChat);
   });
 
+  it("uses character assistant identity when character_id is missing", () => {
+    const assistantBackedChat = makeChat("chat-assistant-backed", {
+      title: "Mira Assistant Identity",
+      character_id: null,
+      assistant_kind: "character",
+      assistant_id: "mira",
+    });
+    const personaBackedChat = makeChat("chat-persona", {
+      title: "Garden Helper",
+      character_id: null,
+      assistant_kind: "persona",
+      assistant_id: "mira",
+    });
+    historyHookMock.mockReturnValue({
+      data: [personaBackedChat, assistantBackedChat],
+      total: 2,
+      isLoading: false,
+      sidebarRefreshState: "ready",
+      hasUsableData: true,
+      isShowingStaleData: false,
+    });
+
+    render(
+      <CharacterChatSessionsPanel
+        activeCharacterId="mira"
+        activeCharacterName="Mira"
+        activeServerChatId={null}
+      />,
+    );
+
+    const currentCharacterList = screen.getByRole("list", {
+      name: "Recent sessions for Mira",
+    });
+    expect(
+      within(currentCharacterList).getByText("Mira Assistant Identity"),
+    ).toBeInTheDocument();
+    expect(
+      within(currentCharacterList).queryByText("Garden Helper"),
+    ).not.toBeInTheDocument();
+
+    expect(
+      within(
+        screen.getByRole("list", { name: "Other character sessions" }),
+      ).getByText("Garden Helper"),
+    ).toBeInTheDocument();
+  });
+
   it("shows local loading, empty, and refresh-error states distinct from saved setups", () => {
     historyHookMock.mockReturnValueOnce({
       data: [],
@@ -200,5 +247,31 @@ describe("CharacterChatSessionsPanel", () => {
     expect(
       screen.getByText("Unable to refresh character sessions right now."),
     ).toBeInTheDocument();
+  });
+
+  it("shows hard history load failures as an error instead of an empty state", () => {
+    historyHookMock.mockReturnValue({
+      data: [],
+      total: 0,
+      isLoading: false,
+      sidebarRefreshState: "hard-error",
+      hasUsableData: false,
+      isShowingStaleData: false,
+    });
+
+    render(
+      <CharacterChatSessionsPanel
+        activeCharacterId="mira"
+        activeCharacterName="Mira"
+        activeServerChatId={null}
+      />,
+    );
+
+    expect(
+      screen.getByText("Character sessions could not be loaded."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No character conversations yet."),
+    ).not.toBeInTheDocument();
   });
 });

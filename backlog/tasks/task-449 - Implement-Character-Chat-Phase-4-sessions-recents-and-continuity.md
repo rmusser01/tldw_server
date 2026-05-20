@@ -63,12 +63,19 @@ Verification:
 - Targeted ESLint could not produce a useful signal because shared package paths are outside the frontend ESLint base path and the repo root has no ESLint config.
 - Bandit skipped because this is a frontend-only TypeScript/React change.
 
+PR #1882 review follow-up:
+- Addressed Qodo and cubic hard-error findings by rendering `sidebarRefreshState: "hard-error"` with no usable data as an explicit load failure instead of the empty state.
+- Addressed Qodo character grouping feedback by deriving the session character identity from `character_id`, falling back to `assistant_kind: "character"` plus `assistant_id`, matching the server-chat resume identity path.
+- Added regression coverage for both cases. Focused Vitest now passes: 4 files, 51 tests.
+- `git diff --check` passes. Full frontend TypeScript remains blocked by existing baseline errors outside this slice.
+- Real backend/browser smoke after review fixes used FastAPI on `127.0.0.1:8000` and Next on `localhost:3000`; `/chat?mode=character` still rendered the sessions region, and `/chat?mode=character&characterId=2` rendered `Recent sessions for Helpful AI Assistant` with `Resume` and disabled `Current` actions.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Phase 4 sessions continuity slice is implemented for /chat Character Chat. Verification recorded: focused Vitest passed with 4 files and 49 tests, git diff --check passed, real FastAPI + Next browser inspection confirmed the panel on /chat?mode=character and /chat?mode=character&characterId=2, Bandit skipped as frontend-only, and full tsc remains blocked by existing baseline errors outside touched files.
+Phase 4 sessions continuity slice is implemented for /chat Character Chat. Verification recorded: focused Vitest passed with 4 files and 51 tests after PR review fixes, git diff --check passed, real FastAPI + Next browser inspection confirmed the panel on /chat?mode=character and /chat?mode=character&characterId=2, Bandit skipped as frontend-only, and full tsc remains blocked by existing baseline errors outside touched files.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

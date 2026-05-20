@@ -58,6 +58,15 @@ const getSessionUpdatedAt = (chat: ServerChatHistoryItem): string | null => {
   return null;
 };
 
+const getSessionCharacterIdentity = (
+  session: ServerChatHistoryItem,
+): string | null => {
+  const characterId = normalizeId(session.character_id);
+  if (characterId) return characterId;
+  if (session.assistant_kind !== "character") return null;
+  return normalizeId(session.assistant_id);
+};
+
 const partitionCharacterSessions = (
   sessions: ServerChatHistoryItem[],
   activeCharacterId: string | number | null | undefined,
@@ -77,7 +86,7 @@ const partitionCharacterSessions = (
   const otherCharacterSessions: ServerChatHistoryItem[] = [];
 
   for (const session of sessions) {
-    const sessionCharacterId = normalizeId(session.character_id);
+    const sessionCharacterId = getSessionCharacterIdentity(session);
     if (sessionCharacterId === normalizedActiveId) {
       currentCharacterSessions.push(session);
     } else {
@@ -248,6 +257,13 @@ export const CharacterChatSessionsPanel = ({
         "Recent character sessions",
       );
   const hasSessions = sessions.length > 0;
+  const hardErrorWithoutData =
+    sidebarRefreshState === "hard-error" && !hasUsableData;
+  const sessionBadgeTone = hasSessions
+    ? "success"
+    : hardErrorWithoutData
+      ? "danger"
+      : "muted";
 
   return (
     <section
@@ -275,11 +291,13 @@ export const CharacterChatSessionsPanel = ({
           </div>
           <span
             className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cockpitRailToneClass(
-              hasSessions ? "success" : "muted",
+              sessionBadgeTone,
             )}`}
           >
             {hasSessions
               ? t("characterChatSessions.available", "Available")
+              : hardErrorWithoutData
+                ? t("characterChatSessions.errorBadge", "Error")
               : t("characterChatSessions.emptyBadge", "None")}
           </span>
         </div>
@@ -296,6 +314,19 @@ export const CharacterChatSessionsPanel = ({
             {t(
               "characterChatSessions.refreshFailed",
               "Unable to refresh character sessions right now.",
+            )}
+          </div>
+        ) : hardErrorWithoutData ? (
+          <div
+            className={cn(
+              "mt-3",
+              cockpitRailStyles.emptyInset,
+              "border-danger/30 bg-danger/10 text-danger",
+            )}
+          >
+            {t(
+              "characterChatSessions.loadFailed",
+              "Character sessions could not be loaded.",
             )}
           </div>
         ) : hasSessions ? (
