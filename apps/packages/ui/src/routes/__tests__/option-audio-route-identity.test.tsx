@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react"
 import OptionTts from "../option-tts"
 import OptionStt from "../option-stt"
 import OptionSpeech from "../option-speech"
+import OptionAudiobookStudio from "../option-audiobook-studio"
 
 vi.mock("~/components/Layouts/Layout", () => ({
   __esModule: true,
@@ -66,6 +67,10 @@ vi.mock("@/components/Option/Speech/SpeechPlaygroundPage", () => ({
   )
 }))
 
+vi.mock("~/components/Option/AudiobookStudio/AudiobookStudioPage", () => ({
+  AudiobookStudioPage: () => <div data-testid="audiobook-studio-page">Audiobook Studio</div>
+}))
+
 describe("audio option routes", () => {
   it("routes /tts into the shared speech playground locked to TTS mode", async () => {
     render(<OptionTts />)
@@ -104,6 +109,20 @@ describe("audio option routes", () => {
     expect(boundary).toHaveAttribute("data-route-label", "Speech Playground")
     expect(speech).toBeVisible()
     expect(speech).toHaveAttribute("data-mode", "roundtrip")
+    expect(screen.queryByTestId("tts-playground")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("stt-playground")).not.toBeInTheDocument()
+  })
+
+  it("keeps /audiobook-studio route mapped to the long-form studio inside its route boundary", () => {
+    render(<OptionAudiobookStudio />)
+
+    const boundary = screen.getByTestId("route-boundary")
+
+    expect(screen.getByTestId("option-layout")).toBeVisible()
+    expect(boundary).toHaveAttribute("data-route-id", "audiobook-studio")
+    expect(boundary).toHaveAttribute("data-route-label", "Audiobook Studio")
+    expect(screen.getByTestId("audiobook-studio-page")).toBeVisible()
+    expect(screen.queryByTestId("speech-playground")).not.toBeInTheDocument()
     expect(screen.queryByTestId("tts-playground")).not.toBeInTheDocument()
     expect(screen.queryByTestId("stt-playground")).not.toBeInTheDocument()
   })

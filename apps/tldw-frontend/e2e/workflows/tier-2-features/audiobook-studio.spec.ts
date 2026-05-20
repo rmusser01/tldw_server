@@ -52,6 +52,7 @@ test.describe("Audiobook Studio", () => {
       await expect(studio.myProjectsButton).toBeVisible()
       await expect(studio.newProjectButton).toBeVisible()
       await expect(studio.saveButton).toBeVisible()
+      await expect(studio.saveStatus).toContainText(/draft not saved|unsaved changes|saved/i)
 
       await assertNoCriticalErrors(diagnostics)
     })
@@ -124,7 +125,7 @@ test.describe("Audiobook Studio", () => {
 
       // Either output controls or "No chapters" empty state should appear
       const outputPanel = authedPage.getByText("Output")
-      const noChapters = authedPage.getByText(/no chapters to export/i)
+      const noChapters = authedPage.getByText(/generated chapters appear here/i)
       const eitherVisible = await outputPanel.isVisible().catch(() => false) ||
         await noChapters.isVisible().catch(() => false)
 
