@@ -5193,12 +5193,14 @@ export class TldwApiClientBase {
 
   async persistCharacterCompletion(
     chat_id: string | number,
-    payload: Record<string, any>
+    payload: Record<string, any>,
+    options?: { scope?: ChatScope }
   ): Promise<any> {
     const cid = String(chat_id)
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     try {
       const res = await bgRequest<any>({
-        path: `/api/v1/chats/${cid}/completions/persist`,
+        path: appendPathQuery(`/api/v1/chats/${cid}/completions/persist`, query),
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: payload
@@ -5216,18 +5218,19 @@ export class TldwApiClientBase {
   async *streamCharacterChatCompletion(
     chat_id: string | number,
     payload?: Record<string, any>,
-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number }
+    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope }
   ): AsyncGenerator<any> {
     const cid = String(chat_id)
     const body = { ...(payload || {}), stream: true }
+    const query = this.buildQuery(toChatScopeParams(options?.scope))
     captureChatRequestDebugSnapshot({
-      endpoint: `/api/v1/chats/${cid}/complete-v2`,
+      endpoint: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
       method: "POST",
       mode: "stream",
       body
     })
     for await (const line of bgStream({
-      path: `/api/v1/chats/${cid}/complete-v2`,
+      path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,

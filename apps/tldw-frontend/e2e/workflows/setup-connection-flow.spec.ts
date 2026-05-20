@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect, assertNoCriticalErrors } from '../utils/fixtures';
-import { seedAuth } from '../utils/helpers';
+import { expectNoHorizontalOverflow, seedAuth } from '../utils/helpers';
 
 type ViewportTarget = {
   label: 'desktop' | 'mobile';
@@ -45,43 +45,6 @@ async function expectOnePageHeading(page: Page, label: string): Promise<void> {
     timeout: 15_000,
   });
   await expect(headings, `${label} should expose exactly one h1`).toHaveCount(1);
-}
-
-async function expectNoHorizontalOverflow(page: Page, label: string): Promise<void> {
-  const overflow = await page.evaluate(() => {
-    const viewportWidth = document.documentElement.clientWidth;
-    const scrollWidth = Math.max(
-      document.documentElement.scrollWidth,
-      document.body?.scrollWidth ?? 0
-    );
-    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const tag = element.tagName.toLowerCase();
-        const testId = element.getAttribute('data-testid');
-        return {
-          tag,
-          testId,
-          left: rect.left,
-          right: rect.right,
-          width: rect.width,
-        };
-      })
-      .filter((entry) => entry.width > 0 && (entry.left < -1 || entry.right > viewportWidth + 1))
-      .slice(0, 5);
-
-    return {
-      viewportWidth,
-      scrollWidth,
-      offenders,
-    };
-  });
-
-  expect(
-    overflow.scrollWidth,
-    `${label} overflowed viewport: ${JSON.stringify(overflow)}`
-  ).toBeLessThanOrEqual(overflow.viewportWidth + 1);
-  expect(overflow.offenders, `${label} overflow offenders`).toEqual([]);
 }
 
 test.describe('Setup and recovery route QA', () => {

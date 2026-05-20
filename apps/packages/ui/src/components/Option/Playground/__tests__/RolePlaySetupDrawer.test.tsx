@@ -290,6 +290,24 @@ describe("RolePlaySetupDrawer", () => {
     expect(screen.getByText(/2 pinned/)).toBeInTheDocument()
   })
 
+  it("announces scene setting loading as a status", async () => {
+    let resolveActor: (settings: ActorSettings) => void = () => {}
+    actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockReturnValueOnce(
+      new Promise<ActorSettings>((resolve) => {
+        resolveActor = resolve
+      })
+    )
+
+    renderDrawer()
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading scene settings..."
+    )
+
+    resolveActor(activeScene())
+    await screen.findByText(/1 detail/)
+  })
+
   it("does not crash when stored actor settings omit aspects", async () => {
     actorSettingsMocks.getActorSettingsForChatWithCharacterFallback.mockResolvedValueOnce(
       {
@@ -478,6 +496,12 @@ describe("RolePlaySetupDrawer", () => {
 
     await screen.findByText(/1 detail/)
     expect(screen.getByText("Saved role-play setups")).toBeInTheDocument()
+    expect(
+      screen.getByRole("list", { name: "Saved role-play setup list" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("listitem", { name: "Mira detective scene role-play setup" })
+    ).toBeInTheDocument()
     expect(screen.getByText("Mira detective scene")).toBeInTheDocument()
     expect(screen.queryByText("Generic writing template")).not.toBeInTheDocument()
 
