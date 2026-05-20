@@ -55,6 +55,12 @@ Implemented:
 - FastAPI live-control routes
 - WebSocket stream presence registry updates and `client_message_id` turn metadata
 
+Follow-up review fixes:
+- preserved bounded `client_message_id` metadata through manual and auto `voice_commit` paths
+- marked WebSocket stream presence when `voice_config` and `audio_chunk` resolve a known session
+- normalized omitted live-control create/resume surface to the default surface before reuse/idempotency lookup
+- added regressions for default-surface reuse and voice commit `client_message_id` propagation
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

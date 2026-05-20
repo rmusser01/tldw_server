@@ -137,6 +137,33 @@ def test_live_session_create_resume_compatible_reuses_active_session(monkeypatch
     assert live.json()["session"]["is_focused"] is True
 
 
+def test_live_session_create_resume_compatible_omitted_surface_uses_default_surface(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+
+    with _client_for_user(1, persona_db) as client:
+        companion = client.post(
+            "/api/v1/persona/session",
+            json={"persona_id": "research_assistant", "surface": "companion.conversation"},
+        )
+        assert companion.status_code == 200
+        companion_session_id = companion.json()["session_id"]
+
+        live = client.post(
+            "/api/v1/persona/live/sessions",
+            json={"persona_id": "research_assistant"},
+        )
+
+    assert live.status_code == 200
+    live_session_id = live.json()["session"]["session_id"]
+    assert live_session_id != companion_session_id
+    live_row = persona_db.get_persona_session(live_session_id, user_id="1", include_deleted=False)
+    assert live_row is not None
+    assert live_row["activity_surface"] == "api.persona"
+
+
 def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db: CharactersRAGDB):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
 
@@ -314,6 +341,21 @@ def test_live_session_rest_created_without_stream_is_idle(monkeypatch, persona_d
 
     assert created.status_code == 200
     assert created.json()["session"]["lifecycle"] == "idle"
+
+
+def test_voice_commit_message_preserves_bounded_client_message_id():
+    long_client_message_id = f" {'x' * 140} "
+
+    payload = persona_ep._persona_live_voice_commit_message(
+        session_id="sess-voice",
+        transcript="hello",
+        source="persona_live_voice",
+        commit_source="manual",
+        client_message_id=long_client_message_id,
+    )
+
+    assert payload["session_id"] == "sess-voice"
+    assert payload["client_message_id"] == "x" * 128
 
 
 def test_live_session_active_stream_presence_is_connected(monkeypatch, persona_db: CharactersRAGDB):

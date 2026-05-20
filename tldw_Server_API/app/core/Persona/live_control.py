@@ -254,7 +254,7 @@ def _find_session_by_idempotency_key(
     rows = db.list_persona_sessions(
         user_id=user_id,
         persona_id=persona_id,
-        activity_surface=normalize_persona_activity_surface(surface) if surface is not None else None,
+        activity_surface=normalize_persona_activity_surface(surface),
         include_deleted=False,
         limit=200,
         offset=0,
@@ -276,7 +276,7 @@ def _find_resume_compatible_session(
     rows = db.list_persona_sessions(
         user_id=user_id,
         persona_id=persona_id,
-        activity_surface=normalize_persona_activity_surface(surface) if surface is not None else None,
+        activity_surface=normalize_persona_activity_surface(surface),
         include_deleted=False,
         limit=100,
         offset=0,

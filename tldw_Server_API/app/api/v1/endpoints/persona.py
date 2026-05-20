@@ -1652,6 +1652,30 @@ def _normalize_ws_identifier(raw_value: Any, *, fallback: str, max_len: int = 12
     return safe[:max_len]
 
 
+def _bounded_client_message_id(raw_value: Any) -> str | None:
+    return str(raw_value or "").strip()[:128] or None
+
+
+def _persona_live_voice_commit_message(
+    *,
+    session_id: str,
+    transcript: str,
+    source: str,
+    commit_source: str,
+    client_message_id: Any = None,
+) -> dict[str, Any]:
+    msg: dict[str, Any] = {
+        "session_id": session_id,
+        "transcript": transcript,
+        "source": source,
+        "commit_source": commit_source,
+    }
+    bounded_client_message_id = _bounded_client_message_id(client_message_id)
+    if bounded_client_message_id:
+        msg["client_message_id"] = bounded_client_message_id
+    return msg
+
+
 def _memory_mode_allows_personalization_retrieval(runtime_mode: str, *, session_exists: bool) -> bool:
     normalized = str(runtime_mode or "").strip().lower()
     if normalized == "persistent_scoped":
@@ -8445,6 +8469,7 @@ async def persona_stream(
             transcript: str,
             commit_source: str,
             source: str,
+            client_message_id: Any = None,
         ) -> bool:
             state = persona_live_stt_state_by_session.get(session_id) or {}
             if bool(state.get("current_utterance_committed")):
@@ -8521,12 +8546,13 @@ async def persona_stream(
             _reset_persona_live_active_turn(session_id)
             _schedule_persona_live_processing_notice(session_id)
             await _handle_persona_live_turn(
-                msg={
-                    "session_id": session_id,
-                    "transcript": cleaned_transcript,
-                    "source": source,
-                    "commit_source": commit_source,
-                },
+                msg=_persona_live_voice_commit_message(
+                    session_id=session_id,
+                    transcript=cleaned_transcript,
+                    source=source,
+                    commit_source=commit_source,
+                    client_message_id=client_message_id,
+                ),
                 text=cleaned_transcript,
                 turn_type="voice_commit",
                 source=source,
@@ -9321,7 +9347,7 @@ async def persona_stream(
             )
             persona_exemplar_assembly = persona_exemplar_context.assembly
             persona_exemplar_selection = persona_exemplar_context.selection_metadata
-            client_message_id = str(msg.get("client_message_id") or "").strip()[:128] or None
+            client_message_id = _bounded_client_message_id(msg.get("client_message_id"))
             turn_metadata = {
                 "source": source,
                 "use_memory_context": use_memory_context,
@@ -9707,6 +9733,7 @@ async def persona_stream(
                     persona_id=runtime_persona_id,
                     resume_session_id=session_id,
                 )
+                _mark_live_control_stream_connected(session_id)
                 voice_runtime = _normalize_voice_runtime_config(msg)
                 session_manager.update_preferences(
                     session_id=session_id,
@@ -9859,6 +9886,7 @@ async def persona_stream(
                     commit_source="manual",
                     source=str(msg.get("source") or "persona_live_voice").strip()
                     or "persona_live_voice",
+                    client_message_id=msg.get("client_message_id"),
                 )
             elif mtype == "audio_chunk":
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
@@ -9868,6 +9896,7 @@ async def persona_stream(
                     user_id=authenticated_user_id,
                 )
                 runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
+                _mark_live_control_stream_connected(session_id)
                 runtime_mode = _bounded_label(
                     runtime_context.get("runtime_mode"),
                     allowed=_PERSONA_RUNTIME_MODES,
@@ -10017,6 +10046,7 @@ async def persona_stream(
                         transcript=_current_persona_live_transcript(session_id),
                         commit_source="vad_auto",
                         source="persona_live_voice_auto",
+                        client_message_id=msg.get("client_message_id"),
                     )
 
                 if "tts_text" not in msg:
