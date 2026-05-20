@@ -37,6 +37,8 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
     [setups]
   )
   const [renameDrafts, setRenameDrafts] = React.useState<Record<string, string>>({})
+  const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
+  const confirmDeleteButtonRefs = React.useRef<Record<string, HTMLElement | null>>({})
 
   const getRenameDraft = React.useCallback(
     (setup: StartupTemplateBundle) => renameDrafts[setup.id] ?? setup.name,
@@ -49,6 +51,25 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
       [id]: name
     }))
   }, [])
+
+  React.useEffect(() => {
+    if (!pendingDeleteId) return
+    if (rolePlaySetups.some((setup) => setup.id === pendingDeleteId)) return
+    setPendingDeleteId(null)
+  }, [pendingDeleteId, rolePlaySetups])
+
+  React.useEffect(() => {
+    if (!pendingDeleteId) return
+    confirmDeleteButtonRefs.current[pendingDeleteId]?.focus()
+  }, [pendingDeleteId])
+
+  const confirmDelete = React.useCallback(
+    (id: string) => {
+      onDeleteSetup(id)
+      setPendingDeleteId(null)
+    },
+    [onDeleteSetup]
+  )
 
   return (
     <section
@@ -100,6 +121,7 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
           {rolePlaySetups.map((setup) => {
             const preview = describeRolePlaySetupPreview(setup)
             const renameDraft = getRenameDraft(setup)
+            const deletePending = pendingDeleteId === setup.id
             return (
               <div
                 key={setup.id}
@@ -149,11 +171,50 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                         "Delete {{name}}",
                         { name: setup.name }
                       )}
-                      onClick={() => onDeleteSetup(setup.id)}>
+                      onClick={() => setPendingDeleteId(setup.id)}>
                       {t("common:delete", "Delete")}
                     </Button>
                   </div>
                 </div>
+                {deletePending ? (
+                  <div
+                    role="alert"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
+                    <span>
+                      {t(
+                        "playground:composer.confirmDeleteRolePlaySetup",
+                        "Delete {{name}}?",
+                        { name: setup.name }
+                      )}
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      <Button
+                        ref={(node) => {
+                          confirmDeleteButtonRefs.current[setup.id] = node
+                        }}
+                        size="small"
+                        danger
+                        aria-label={t(
+                          "playground:composer.confirmDeleteRolePlaySetupAction",
+                          "Confirm delete {{name}}",
+                          { name: setup.name }
+                        )}
+                        onClick={() => confirmDelete(setup.id)}>
+                        {t("common:confirm", "Confirm")}
+                      </Button>
+                      <Button
+                        size="small"
+                        aria-label={t(
+                          "playground:composer.cancelDeleteRolePlaySetup",
+                          "Cancel delete {{name}}",
+                          { name: setup.name }
+                        )}
+                        onClick={() => setPendingDeleteId(null)}>
+                        {t("common:cancel", "Cancel")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     aria-label={t(

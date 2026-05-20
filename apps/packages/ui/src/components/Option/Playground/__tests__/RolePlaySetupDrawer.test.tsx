@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -112,24 +112,25 @@ vi.mock("antd", () => ({
         {children}
       </section>
     ) : null,
-  Button: ({
-    children,
-    onClick,
-    htmlType,
-    "aria-label": ariaLabel
-  }: {
+  Button: React.forwardRef<HTMLButtonElement, {
     children: React.ReactNode
     onClick?: () => void
     htmlType?: string
     "aria-label"?: string
-  }) => (
+  }>(({
+    children,
+    onClick,
+    htmlType,
+    "aria-label": ariaLabel
+  }, ref) => (
     <button
+      ref={ref}
       type={htmlType === "submit" ? "submit" : "button"}
       aria-label={ariaLabel}
       onClick={onClick}>
       {children}
     </button>
-  ),
+  )),
   Checkbox: ({
     checked,
     onChange,
@@ -377,7 +378,7 @@ describe("RolePlaySetupDrawer", () => {
     await screen.findByText(/1 detail/)
     fireEvent.click(screen.getByRole("button", { name: "Choose behavior template" }))
     fireEvent.click(screen.getByRole("button", { name: "Use Detective" }))
-    fireEvent.click(screen.getByRole("button", { name: "Precise" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Precise" }))
     fireEvent.click(screen.getByRole("button", { name: "Apply" }))
 
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1))
@@ -484,6 +485,74 @@ describe("RolePlaySetupDrawer", () => {
     expect(onPreviewSavedSetup).toHaveBeenCalledWith("saved-role-play")
   })
 
+  it("requires confirmation before deleting a saved role-play setup", async () => {
+    const savedSetup = createStartupTemplateBundle(
+      {
+        name: "Mira detective scene",
+        selectedModel: "openai:gpt-4.1",
+        systemPrompt: "Observe everything.",
+        source: "role-play-setup",
+        character: {
+          id: "char-mira",
+          name: "Mira"
+        } as any,
+        rolePlay: {
+          source: "role-play-setup",
+          identity: {
+            kind: "character",
+            id: "char-mira",
+            name: "Mira"
+          },
+          behavior: null,
+          scene: activeScene(),
+          generation: null,
+          context: null
+        }
+      },
+      { id: "saved-role-play", now: 1 }
+    )
+    const onDeleteSavedSetup = vi.fn()
+
+    renderDrawer({
+      savedRolePlaySetups: [savedSetup],
+      savedSetupDraftName: "",
+      savedSetupNameFallback: "Mira setup",
+      onSavedSetupDraftNameChange: vi.fn(),
+      onSaveRolePlaySetup: vi.fn(),
+      onPreviewSavedSetup: vi.fn(),
+      onApplySavedSetup: vi.fn(),
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup
+    })
+
+    await screen.findByText(/1 detail/)
+    fireEvent.click(screen.getByRole("button", { name: "Delete Mira detective scene" }))
+
+    expect(onDeleteSavedSetup).not.toHaveBeenCalled()
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent(
+      "Delete Mira detective scene?"
+    )
+    const confirmButton = screen.getByRole("button", {
+      name: "Confirm delete Mira detective scene"
+    })
+    expect(confirmButton).toHaveFocus()
+
+    fireEvent.click(confirmButton)
+    expect(onDeleteSavedSetup).toHaveBeenCalledWith("saved-role-play")
+  })
+
+  it("exposes generation style choices as radios", async () => {
+    renderDrawer()
+
+    await screen.findByText(/1 detail/)
+    const group = screen.getByRole("radiogroup", { name: "Generation style" })
+    expect(within(group).getByRole("radio", { name: "Creative" })).toBeChecked()
+    expect(within(group).getByRole("radio", { name: "Balanced" })).not.toBeChecked()
+    expect(within(group).getByRole("radio", { name: "Precise" })).not.toBeChecked()
+    expect(within(group).getByRole("radio", { name: "Custom" })).not.toBeChecked()
+  })
+
   it("applies saved role-play setup scene through the actor settings save path", async () => {
     const savedSetup = createStartupTemplateBundle(
       {
@@ -559,7 +628,7 @@ describe("RolePlaySetupDrawer", () => {
     await screen.findByText(/1 detail/)
     fireEvent.click(screen.getByRole("button", { name: "Choose behavior template" }))
     fireEvent.click(screen.getByRole("button", { name: "Use Detective" }))
-    fireEvent.click(screen.getByRole("button", { name: "Precise" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Precise" }))
     fireEvent.click(screen.getByRole("button", { name: "Save setup" }))
 
     expect(onSaveRolePlaySetup).toHaveBeenCalledWith(
