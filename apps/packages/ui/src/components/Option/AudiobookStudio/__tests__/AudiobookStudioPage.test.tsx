@@ -128,6 +128,7 @@ describe("AudiobookStudioPage", () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     resetStore()
   })
 
@@ -241,6 +242,32 @@ describe("AudiobookStudioPage", () => {
     })
 
     await waitFor(() => expect(saveStatus).toHaveTextContent("Draft not saved"))
+  })
+
+  it("ages recently saved status back to a steady saved state", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    resetStore({
+      currentProjectId: "project-1",
+      rawContent: "Saved manuscript",
+      projectTitle: "Saved Project"
+    })
+
+    render(<AudiobookStudioPage />)
+
+    const saveStatus = screen.getByRole("status", {
+      name: "Project save status"
+    })
+
+    await waitFor(() => expect(saveStatus).toHaveTextContent("Unsaved changes"))
+    await user.click(screen.getByRole("button", { name: "Save project" }))
+    await waitFor(() => expect(saveStatus).toHaveTextContent("Saved just now"))
+
+    act(() => {
+      vi.advanceTimersByTime(60000)
+    })
+
+    await waitFor(() => expect(saveStatus).toHaveTextContent(/^Saved$/))
   })
 })
 

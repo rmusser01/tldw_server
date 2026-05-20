@@ -29,6 +29,7 @@ const { Title, Text } = Typography
 // Auto-save interval in milliseconds
 const AUTO_SAVE_INTERVAL = 30000 // 30 seconds
 const DEBOUNCE_SAVE_DELAY = 5000 // 5 seconds after changes
+const SAVED_JUST_NOW_WINDOW = 60000 // 1 minute
 
 export const AudiobookStudioPage: React.FC = () => {
   const { t } = useTranslation(["audiobook", "common"])
@@ -38,6 +39,7 @@ export const AudiobookStudioPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [hasUnsaved, setHasUnsaved] = useState(false)
+  const [saveStatusNow, setSaveStatusNow] = useState(() => Date.now())
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -64,17 +66,24 @@ export const AudiobookStudioPage: React.FC = () => {
   const pendingCount = chapters.filter(
     (ch) => ch.status === "pending" || ch.status === "error"
   ).length
+  const isRecentlySaved = useMemo(
+    () =>
+      lastSaved
+        ? saveStatusNow - lastSaved.getTime() < SAVED_JUST_NOW_WINDOW
+        : false,
+    [lastSaved, saveStatusNow]
+  )
   const saveStatusLabel = useMemo(() => {
     if (isSaving) return t("audiobook:saveStatus.saving", "Saving...")
     if (!projectId && !lastSaved) {
       return t("audiobook:saveStatus.draftNotSaved", "Draft not saved")
     }
     if (hasUnsaved) return t("audiobook:saveStatus.unsaved", "Unsaved changes")
-    if (lastSaved) {
+    if (isRecentlySaved) {
       return t("audiobook:saveStatus.savedJustNow", "Saved just now")
     }
     return t("audiobook:saveStatus.saved", "Saved")
-  }, [isSaving, projectId, lastSaved, hasUnsaved, t])
+  }, [isSaving, projectId, lastSaved, hasUnsaved, isRecentlySaved, t])
   const saveStatusType = useMemo<"warning" | "secondary">(
     () => (!projectId && !lastSaved) || hasUnsaved ? "warning" : "secondary",
     [projectId, lastSaved, hasUnsaved]
@@ -85,8 +94,14 @@ export const AudiobookStudioPage: React.FC = () => {
     setIsSaving(true)
     try {
       await saveProject()
-      setLastSaved(new Date())
+      const savedAt = new Date()
+      setLastSaved(savedAt)
+      setSaveStatusNow(savedAt.getTime())
       setHasUnsaved(false)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
       message.success(t("audiobook:saved", "Project saved"))
     } catch (err) {
       console.error("Save failed:", err)
@@ -95,6 +110,24 @@ export const AudiobookStudioPage: React.FC = () => {
       setIsSaving(false)
     }
   }, [saveProject, t])
+
+  useEffect(() => {
+    if (!lastSaved) return
+
+    const elapsed = Date.now() - lastSaved.getTime()
+    const timeoutDelay = Math.max(SAVED_JUST_NOW_WINDOW - elapsed, 0)
+
+    if (timeoutDelay === 0) {
+      setSaveStatusNow(Date.now())
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      setSaveStatusNow(Date.now())
+    }, timeoutDelay)
+
+    return () => clearTimeout(timeout)
+  }, [lastSaved])
 
   useEffect(() => {
     if (previousProjectIdRef.current === undefined) {
@@ -106,6 +139,7 @@ export const AudiobookStudioPage: React.FC = () => {
 
     previousProjectIdRef.current = projectId
     setLastSaved(null)
+    setSaveStatusNow(Date.now())
     setHasUnsaved(false)
     setIsSaving(false)
 
@@ -139,7 +173,9 @@ export const AudiobookStudioPage: React.FC = () => {
       debounceTimerRef.current = setTimeout(async () => {
         try {
           await saveProject()
-          setLastSaved(new Date())
+          const savedAt = new Date()
+          setLastSaved(savedAt)
+          setSaveStatusNow(savedAt.getTime())
           setHasUnsaved(false)
         } catch (err) {
           console.error("Auto-save failed:", err)
@@ -171,7 +207,9 @@ export const AudiobookStudioPage: React.FC = () => {
       if (hasUnsaved) {
         try {
           await saveProject()
-          setLastSaved(new Date())
+          const savedAt = new Date()
+          setLastSaved(savedAt)
+          setSaveStatusNow(savedAt.getTime())
           setHasUnsaved(false)
         } catch (err) {
           console.error("Periodic auto-save failed:", err)
