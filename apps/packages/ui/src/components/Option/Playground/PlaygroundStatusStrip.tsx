@@ -31,6 +31,7 @@ type PlaygroundStatusStripRuntimeState =
   | "streaming"
   | "loading"
   | "missing-model"
+  | "model-unavailable"
   | "degraded"
   | "ready";
 
@@ -60,6 +61,8 @@ export type PlaygroundStatusStripProps = {
   degradedChecks?: string[];
   errorMessage?: string | null;
   serverBlocked?: boolean;
+  modelUnavailable?: boolean;
+  modelUnavailableMessage?: string | null;
   compositionStatus?: PlaygroundStatusStripCompositionStatus;
   onStopStreaming?: () => void;
   onOpenSearchContext?: () => void;
@@ -89,6 +92,8 @@ export const PlaygroundStatusStrip = ({
   degradedChecks = [],
   errorMessage,
   serverBlocked = false,
+  modelUnavailable = false,
+  modelUnavailableMessage = null,
   compositionStatus = "idle",
   onStopStreaming,
   onOpenSearchContext,
@@ -107,6 +112,8 @@ export const PlaygroundStatusStrip = ({
         ? "streaming"
         : isContextLoading
           ? "loading"
+          : modelUnavailable
+            ? "model-unavailable"
           : !hasSelectedModel
             ? "missing-model"
             : isDegraded
@@ -129,6 +136,8 @@ export const PlaygroundStatusStrip = ({
             ? t("cockpit.loadingContext", `${LOADING_STATE_LABEL} context`)
             : runtimeState === "missing-model"
               ? t("cockpit.noModelSelected", "No model selected")
+              : runtimeState === "model-unavailable"
+                ? t("cockpit.modelUnavailable", "Model unavailable")
               : runtimeState === "degraded"
                 ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
                 : t("cockpit.ready", READY_STATE_LABEL);
@@ -156,6 +165,14 @@ export const PlaygroundStatusStrip = ({
       ? t(
           "cockpit.chooseModelBeforeSending",
           "Choose a model before sending.",
+        )
+      : null;
+  const modelUnavailableReason =
+    runtimeState === "model-unavailable"
+      ? modelUnavailableMessage ||
+        t(
+          "cockpit.reviewModelBeforeSending",
+          "Review model settings before sending.",
         )
       : null;
   const contextLoadingReason =
@@ -210,7 +227,8 @@ export const PlaygroundStatusStrip = ({
             runtimeState === "error" || runtimeState === "server-blocked"
               ? "border-error/40 bg-error/10 text-error"
               : runtimeState === "degraded" ||
-                  runtimeState === "missing-model"
+                  runtimeState === "missing-model" ||
+                  runtimeState === "model-unavailable"
                 ? "border-warning/40 bg-warning/10 text-warning"
                 : runtimeState === "streaming" || runtimeState === "loading"
                   ? "border-info/40 bg-info/10 text-info"
@@ -219,7 +237,8 @@ export const PlaygroundStatusStrip = ({
         >
           {runtimeState === "error" ||
           runtimeState === "server-blocked" ||
-          runtimeState === "missing-model" ? (
+          runtimeState === "missing-model" ||
+          runtimeState === "model-unavailable" ? (
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
           ) : runtimeState === "streaming" || runtimeState === "loading" ? (
             <Loader2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -264,6 +283,9 @@ export const PlaygroundStatusStrip = ({
             ) : null}
             {missingModelReason ? (
               <span className={pillClass}>{missingModelReason}</span>
+            ) : null}
+            {modelUnavailableReason ? (
+              <span className={pillClass}>{modelUnavailableReason}</span>
             ) : null}
             {contextLoadingReason ? (
               <span className={pillClass}>{contextLoadingReason}</span>
@@ -324,7 +346,9 @@ export const PlaygroundStatusStrip = ({
             <Settings2 className="h-3 w-3" aria-hidden="true" />
             {t("cockpit.reviewSettings", "Review settings")}
           </button>
-        ) : !hasSelectedModel && onOpenModelSettings ? (
+        ) : (runtimeState === "missing-model" ||
+            runtimeState === "model-unavailable") &&
+          onOpenModelSettings ? (
           <button
             type="button"
             className={actionClass}

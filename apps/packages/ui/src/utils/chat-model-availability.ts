@@ -12,12 +12,45 @@ type ModelDescriptor = {
   providerKey?: unknown
   api_provider?: unknown
   apiProvider?: unknown
+  is_configured?: unknown
+  isConfigured?: unknown
+  configured?: unknown
+  provider_is_configured?: unknown
+  providerIsConfigured?: unknown
+  provider_configured?: unknown
+  providerConfigured?: unknown
+  catalog_only?: unknown
+  catalogOnly?: unknown
+  is_catalog_only?: unknown
+  isCatalogOnly?: unknown
   details?: {
     provider?: unknown
     provider_key?: unknown
+    is_configured?: unknown
+    isConfigured?: unknown
+    configured?: unknown
+    provider_is_configured?: unknown
+    providerIsConfigured?: unknown
+    provider_configured?: unknown
+    providerConfigured?: unknown
+    catalog_only?: unknown
+    catalogOnly?: unknown
+    is_catalog_only?: unknown
+    isCatalogOnly?: unknown
   }
   metadata?: {
     provider?: unknown
+    is_configured?: unknown
+    isConfigured?: unknown
+    configured?: unknown
+    provider_is_configured?: unknown
+    providerIsConfigured?: unknown
+    provider_configured?: unknown
+    providerConfigured?: unknown
+    catalog_only?: unknown
+    catalogOnly?: unknown
+    is_catalog_only?: unknown
+    isCatalogOnly?: unknown
   }
 }
 
@@ -66,6 +99,10 @@ type CharacterChatReadinessInput = {
   selectedModel?: string | null
   availableModels?: ModelDescriptor[] | null
   isSendBlocked?: boolean
+}
+
+type BuildAvailableChatModelIdsOptions = {
+  requireConfiguredFlags?: boolean
 }
 
 type TranslationFn = (key: string, fallbackOrOptions?: any) => any
@@ -130,6 +167,84 @@ function normalizeProviderKey(model: ModelDescriptor): string | null {
   return provider && provider !== "unknown" ? provider : null
 }
 
+const toBooleanFlag = (value: unknown): boolean | null => {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "true") return true
+    if (normalized === "false") return false
+  }
+  return null
+}
+
+const CATALOG_ONLY_FLAG_KEYS = [
+  "catalog_only",
+  "catalogOnly",
+  "is_catalog_only",
+  "isCatalogOnly"
+] as const
+
+const CONFIGURED_FLAG_KEYS = [
+  "is_configured",
+  "isConfigured",
+  "configured",
+  "provider_is_configured",
+  "providerIsConfigured",
+  "provider_configured",
+  "providerConfigured"
+] as const
+
+function getChatModelDescriptorRecords(
+  model: ModelDescriptor
+): Record<string, unknown>[] {
+  return [model, model.details, model.metadata].filter(
+    (record): record is Record<string, unknown> =>
+      Boolean(record && typeof record === "object")
+  )
+}
+
+function readCatalogOnlyFlagFromRecords(
+  records: Record<string, unknown>[]
+): boolean | null {
+  let hasCatalogFlag = false
+  for (const record of records) {
+    for (const key of CATALOG_ONLY_FLAG_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const flag = toBooleanFlag(record[key])
+      if (flag === true) return true
+      if (flag === false) hasCatalogFlag = true
+    }
+  }
+
+  return hasCatalogFlag ? false : null
+}
+
+function isUsableChatModelDescriptor(
+  model: ModelDescriptor,
+  options: BuildAvailableChatModelIdsOptions = {}
+): boolean {
+  const records = getChatModelDescriptorRecords(model)
+  const catalogOnly = readCatalogOnlyFlagFromRecords(records)
+  if (catalogOnly === true) return false
+
+  let hasConfiguredFlag = false
+  for (const record of records) {
+    for (const key of CONFIGURED_FLAG_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const flag = toBooleanFlag(record[key])
+      if (flag == null) continue
+      hasConfiguredFlag = true
+      if (flag === false) return false
+    }
+  }
+
+  if (options.requireConfiguredFlags && !hasConfiguredFlag) {
+    return false
+  }
+
+  return true
+}
+
 function normalizeProviderQualifiedChatModelId(
   value: string | null | undefined
 ): string | null {
@@ -171,16 +286,29 @@ function normalizeBaseChatModelId(value: string | null | undefined): string {
 }
 
 export function buildAvailableChatModelIds(
-  models: ModelDescriptor[] | null | undefined
+  models: ModelDescriptor[] | null | undefined,
+  options: BuildAvailableChatModelIdsOptions = {}
 ): Set<string> {
   const ids = new Set<string>()
   for (const model of models || []) {
+    if (!isUsableChatModelDescriptor(model, options)) {
+      continue
+    }
+
     const modelId = normalizeAvailableModelId(model)
     if (modelId) {
       ids.add(modelId)
-      const provider = normalizeProviderKey(model)
+      const providerQualifiedModel = parseProviderQualifiedModelSelection(modelId)
+      const baseModelId = providerQualifiedModel.isProviderQualified
+        ? normalizeChatModelId(providerQualifiedModel.modelId)
+        : modelId
+      if (baseModelId && baseModelId !== modelId) {
+        ids.add(baseModelId)
+      }
+
+      const provider = normalizeProviderKey(model) ?? providerQualifiedModel.provider
       if (provider) {
-        ids.add(`${provider}:${modelId}`)
+        ids.add(`${provider}:${baseModelId || modelId}`)
       }
     }
   }
@@ -265,7 +393,9 @@ export function buildCharacterChatReadiness({
   }
 
   if (Array.isArray(availableModels)) {
-    const availableModelIds = buildAvailableChatModelIds(availableModels)
+    const availableModelIds = buildAvailableChatModelIds(availableModels, {
+      requireConfiguredFlags: true
+    })
     if (availableModelIds.size === 0) {
       return blockedCharacterChatReadiness(
         "chat-model",

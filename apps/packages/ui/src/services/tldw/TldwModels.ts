@@ -80,7 +80,7 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 3
+  private readonly CACHE_SCHEMA_VERSION = 4
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null

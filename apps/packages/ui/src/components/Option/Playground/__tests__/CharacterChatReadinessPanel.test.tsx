@@ -123,7 +123,7 @@ describe("CharacterChatReadinessPanel", () => {
           isServerConnected: true,
           selectedCharacter: { id: "ariadne", name: "Ariadne" },
           selectedModel: "gpt-4o-mini",
-          availableModels: [{ model: "gpt-4o-mini" }],
+          availableModels: [{ model: "gpt-4o-mini", is_configured: true }],
         })}
         characterName="Ariadne"
         onAction={vi.fn()}

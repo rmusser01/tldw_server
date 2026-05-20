@@ -42,6 +42,105 @@ describe("chat model availability utilities", () => {
     expect(findUnavailableChatModel(["openai:gpt-4o-mini"], ids)).toBeNull()
   })
 
+  it("adds base IDs when backend descriptors expose provider-qualified model fields", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        model: "openai:gpt-4.1-mini",
+        provider: "openai",
+        is_configured: true
+      } as any
+    ])
+
+    expect(ids.has("openai:gpt-4.1-mini")).toBe(true)
+    expect(ids.has("gpt-4.1-mini")).toBe(true)
+    expect(findUnavailableChatModel(["gpt-4.1-mini"], ids)).toBeNull()
+  })
+
+  it("excludes catalog-only and unconfigured backend models from readiness availability", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        provider: "openai",
+        is_configured: false,
+        provider_is_configured: false,
+        catalog_only: true
+      } as any,
+      {
+        id: "gemma3:1b",
+        model: "tldw:gemma3:1b",
+        provider: "ollama",
+        is_configured: true,
+        provider_is_configured: true
+      } as any
+    ])
+
+    expect(ids.has("gpt-4o")).toBe(false)
+    expect(ids.has("openai:gpt-4o")).toBe(false)
+    expect(ids.has("gemma3:1b")).toBe(true)
+    expect(ids.has("ollama:gemma3:1b")).toBe(true)
+  })
+
+  it("can fail closed on descriptors without explicit configuration flags", () => {
+    const ids = buildAvailableChatModelIds(
+      [
+        {
+          id: "gpt-4o",
+          model: "tldw:gpt-4o",
+          provider: "openai"
+        } as any,
+        {
+          id: "gemma3:1b",
+          model: "tldw:gemma3:1b",
+          provider: "ollama",
+          is_configured: true,
+          provider_is_configured: true
+        } as any
+      ],
+      { requireConfiguredFlags: true }
+    )
+
+    expect(ids.has("gpt-4o")).toBe(false)
+    expect(ids.has("openai:gpt-4o")).toBe(false)
+    expect(ids.has("gemma3:1b")).toBe(true)
+    expect(ids.has("ollama:gemma3:1b")).toBe(true)
+  })
+
+  it("does not count catalog-only false as a configured model flag", () => {
+    const ids = buildAvailableChatModelIds(
+      [
+        {
+          id: "gpt-4o",
+          model: "tldw:gpt-4o",
+          provider: "openai",
+          catalog_only: false
+        } as any
+      ],
+      { requireConfiguredFlags: true }
+    )
+
+    expect(ids.has("gpt-4o")).toBe(false)
+    expect(ids.has("openai:gpt-4o")).toBe(false)
+  })
+
+  it("treats any catalog-only true flag as unavailable", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        provider: "openai",
+        catalog_only: false,
+        is_configured: true,
+        details: {
+          catalog_only: true
+        }
+      } as any
+    ])
+
+    expect(ids.has("gpt-4o")).toBe(false)
+    expect(ids.has("openai:gpt-4o")).toBe(false)
+  })
+
   it("accepts provider-qualified selections when the available catalog only exposes the base model ID", () => {
     const ids = buildAvailableChatModelIds([
       {
@@ -170,7 +269,39 @@ describe("character chat readiness", () => {
         isServerConnected: true,
         selectedCharacter: { id: 1, name: "Ariadne" },
         selectedModel: "missing-model",
-        availableModels: [{ model: "gpt-4o-mini" }]
+        availableModels: [{ model: "gpt-4o-mini", is_configured: true }]
+      })
+    ).toMatchObject({
+      status: "blocked",
+      missingRequirement: "chat-model",
+      reason: "selected-model-unavailable",
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("blocks selected catalog-only models from the real backend model catalog", () => {
+    expect(
+      buildCharacterChatReadiness({
+        isServerConnected: true,
+        selectedCharacter: { id: 1, name: "Ariadne" },
+        selectedModel: "tldw:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false,
+            provider_is_configured: false,
+            catalog_only: true
+          } as any,
+          {
+            id: "gemma3:1b",
+            model: "tldw:gemma3:1b",
+            provider: "ollama",
+            is_configured: true,
+            provider_is_configured: true
+          } as any
+        ]
       })
     ).toMatchObject({
       status: "blocked",
@@ -186,7 +317,7 @@ describe("character chat readiness", () => {
         isServerConnected: true,
         selectedCharacter: { id: 1, name: "Ariadne" },
         selectedModel: "gpt-4o-mini",
-        availableModels: [{ model: "tldw:gpt-4o-mini" }]
+        availableModels: [{ model: "tldw:gpt-4o-mini", is_configured: true }]
       })
     ).toEqual({
       status: "ready",

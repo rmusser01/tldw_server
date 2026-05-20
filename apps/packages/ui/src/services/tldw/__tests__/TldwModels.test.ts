@@ -249,7 +249,7 @@ describe("TldwModelsService caching", () => {
 
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 3,
+      version: 4,
       timestamp: Date.now(),
       scope: "http://127.0.0.1:8000|single-user|key|none",
       models: [

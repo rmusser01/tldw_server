@@ -61,6 +61,8 @@ export type PlaygroundCompositionPreviewInput = {
   toolSummary: RuntimeToolSummary | null;
   compositionStatus: "idle" | "loading" | "ready" | "error";
   composition: ConversationContextComposition | null;
+  modelUnavailable?: boolean;
+  modelUnavailableDetail?: string | null;
 };
 
 export type PlaygroundCompositionPreviewSummary = {
@@ -130,6 +132,8 @@ export const buildPlaygroundCompositionPreviewSummary = ({
   toolSummary,
   compositionStatus,
   composition,
+  modelUnavailable = false,
+  modelUnavailableDetail = null,
 }: PlaygroundCompositionPreviewInput): PlaygroundCompositionPreviewSummary => {
   const settingsScopeLabel = providerRoute.providerRouteLabel;
   const promptEntry: PlaygroundCompositionPreviewEntry = {
@@ -158,8 +162,11 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     kind: "model",
     label: "Model",
     title: modelTitle,
-    detail: providerRoute.selectedProvider || null,
-    state: providerRoute.selectedModel ? "active" : "unavailable",
+    detail: modelUnavailableDetail || providerRoute.selectedProvider || null,
+    state:
+      providerRoute.selectedModel && !modelUnavailable
+        ? "active"
+        : "unavailable",
   };
   const settingsEntry: PlaygroundCompositionPreviewEntry = {
     id: "settings",
