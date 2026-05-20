@@ -38,6 +38,7 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
   )
   const [renameDrafts, setRenameDrafts] = React.useState<Record<string, string>>({})
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null)
+  const confirmDeleteButtonRefs = React.useRef<Record<string, HTMLElement | null>>({})
 
   const getRenameDraft = React.useCallback(
     (setup: StartupTemplateBundle) => renameDrafts[setup.id] ?? setup.name,
@@ -56,6 +57,11 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
     if (rolePlaySetups.some((setup) => setup.id === pendingDeleteId)) return
     setPendingDeleteId(null)
   }, [pendingDeleteId, rolePlaySetups])
+
+  React.useEffect(() => {
+    if (!pendingDeleteId) return
+    confirmDeleteButtonRefs.current[pendingDeleteId]?.focus()
+  }, [pendingDeleteId])
 
   const confirmDelete = React.useCallback(
     (id: string) => {
@@ -172,7 +178,7 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                 </div>
                 {deletePending ? (
                   <div
-                    role="status"
+                    role="alert"
                     className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
                     <span>
                       {t(
@@ -183,6 +189,9 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                     </span>
                     <div className="flex flex-wrap gap-1">
                       <Button
+                        ref={(node) => {
+                          confirmDeleteButtonRefs.current[setup.id] = node
+                        }}
                         size="small"
                         danger
                         aria-label={t(

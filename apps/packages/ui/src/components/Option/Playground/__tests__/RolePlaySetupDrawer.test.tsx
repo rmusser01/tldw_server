@@ -112,24 +112,25 @@ vi.mock("antd", () => ({
         {children}
       </section>
     ) : null,
-  Button: ({
-    children,
-    onClick,
-    htmlType,
-    "aria-label": ariaLabel
-  }: {
+  Button: React.forwardRef<HTMLButtonElement, {
     children: React.ReactNode
     onClick?: () => void
     htmlType?: string
     "aria-label"?: string
-  }) => (
+  }>(({
+    children,
+    onClick,
+    htmlType,
+    "aria-label": ariaLabel
+  }, ref) => (
     <button
+      ref={ref}
       type={htmlType === "submit" ? "submit" : "button"}
       aria-label={ariaLabel}
       onClick={onClick}>
       {children}
     </button>
-  ),
+  )),
   Checkbox: ({
     checked,
     onChange,
@@ -528,13 +529,16 @@ describe("RolePlaySetupDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Mira detective scene" }))
 
     expect(onDeleteSavedSetup).not.toHaveBeenCalled()
-    expect(screen.getByRole("status")).toHaveTextContent(
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent(
       "Delete Mira detective scene?"
     )
+    const confirmButton = screen.getByRole("button", {
+      name: "Confirm delete Mira detective scene"
+    })
+    expect(confirmButton).toHaveFocus()
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Confirm delete Mira detective scene" })
-    )
+    fireEvent.click(confirmButton)
     expect(onDeleteSavedSetup).toHaveBeenCalledWith("saved-role-play")
   })
 
