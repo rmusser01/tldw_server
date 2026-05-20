@@ -166,7 +166,7 @@ async def trigger_audio_briefing(
         db: The WatchlistsDB instance.
 
     Returns:
-        The workflow run_id if successfully enqueued, None otherwise.
+        The Scheduler task ID if successfully submitted, None otherwise.
     """
     if not output_prefs.get("generate_audio"):
         return None
@@ -213,33 +213,35 @@ async def trigger_audio_briefing(
 
     workflow_inputs = _build_workflow_inputs(items, output_prefs)
 
-    # Enqueue as a scheduler task
+    # Submit as a scheduler workflow task.
     try:
         from tldw_Server_API.app.core.Scheduler import get_global_scheduler
-        from tldw_Server_API.app.core.Scheduler.base.task import Task
 
         scheduler = await get_global_scheduler()
-        task = Task(
-            handler="workflow_run",
+        metadata = {
+            "source": "watchlist_audio_briefing",
+            "watchlist_job_id": job_id,
+            "watchlist_run_id": run_id,
+        }
+        scheduler_metadata = {**metadata, "user_id": str(user_id)}
+        task_id = await scheduler.submit(
+            "workflow_run",
             payload={
                 "user_id": user_id,
                 "definition_snapshot": AUDIO_BRIEFING_WORKFLOW_DEF,
                 "inputs": workflow_inputs,
                 "mode": "async",
-                "metadata": {
-                    "source": "watchlist_audio_briefing",
-                    "watchlist_job_id": job_id,
-                    "watchlist_run_id": run_id,
-                },
+                "metadata": metadata,
             },
-            timeout=3600,
-            max_retries=1,
+            queue_name="workflows",
+            idempotency_key=f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}",
+            metadata=scheduler_metadata,
         )
-        task_id = await scheduler.enqueue(task)
         logger.info(
-            f"Audio briefing workflow enqueued for watchlist run {run_id}, " f"task_id={task_id}, items={len(items)}"
+            f"Audio briefing workflow submitted for watchlist run {run_id}, "
+            f"task_id={task_id}, items={len(items)}"
         )
         return task_id
     except Exception as exc:
-        logger.warning(f"Audio briefing: failed to enqueue workflow for run {run_id}: {exc}")
+        logger.warning(f"Audio briefing: failed to submit workflow for run {run_id}: {exc}")
         return None

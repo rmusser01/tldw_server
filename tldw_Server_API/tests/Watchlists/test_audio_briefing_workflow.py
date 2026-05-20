@@ -6,6 +6,7 @@ Tests the trigger function, workflow input construction, and workflow definition
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -226,6 +227,20 @@ class TestBuildWorkflowInputs:
 class TestTriggerAudioBriefing:
     """Tests for trigger_audio_briefing."""
 
+    class SubmitOnlyScheduler:
+        """Scheduler double that exposes only the real submit API."""
+
+        def __init__(self, return_value: str) -> None:
+            self.return_value = return_value
+            self.submit = AsyncMock(side_effect=self._submit)
+
+        async def _submit(self, *args: Any, **kwargs: Any) -> str:
+            metadata = kwargs.get("metadata")
+            user_id = metadata.get("user_id") if isinstance(metadata, dict) else None
+            if not isinstance(user_id, str) or not user_id.strip():
+                raise ValueError("Task metadata must include a non-empty 'user_id'")
+            return self.return_value
+
     @pytest.mark.asyncio
     async def test_trigger_skips_when_generate_audio_false(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
@@ -260,8 +275,9 @@ class TestTriggerAudioBriefing:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_trigger_enqueues_workflow(self):
+    async def test_trigger_submits_workflow(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            AUDIO_BRIEFING_WORKFLOW_DEF,
             trigger_audio_briefing,
         )
 
@@ -274,8 +290,7 @@ class TestTriggerAudioBriefing:
             2,
         )
 
-        mock_scheduler = AsyncMock()
-        mock_scheduler.enqueue.return_value = "task_abc123"
+        mock_scheduler = self.SubmitOnlyScheduler("task_abc123")
 
         async def run_sync_in_test(fn, *args, **kwargs):
             return fn(*args, **kwargs)
@@ -310,21 +325,33 @@ class TestTriggerAudioBriefing:
             )
 
         assert result == "task_abc123"
-        mock_scheduler.enqueue.assert_called_once()
+        mock_scheduler.submit.assert_awaited_once()
 
-        # Verify the task payload
-        task = mock_scheduler.enqueue.call_args[0][0]
-        assert task.handler == "workflow_run"
-        assert task.payload["user_id"] == 1
-        assert task.payload["inputs"]["target_audio_minutes"] == 5
-        assert task.payload["inputs"]["voice_map"] == {"HOST": "af_bella"}
-        assert task.payload["inputs"]["background_audio_uri"] == "file:///tmp/bed.mp3"
-        assert task.payload["inputs"]["background_volume"] == 0.22
-        assert task.payload["inputs"]["persona_summarize"] is True
-        assert task.payload["inputs"]["persona_id"] == "host_style"
-        assert len(task.payload["inputs"]["items"]) == 2
-        assert task.payload["metadata"]["watchlist_job_id"] == 42
-        assert task.payload["metadata"]["watchlist_run_id"] == 7
+        # Verify the workflow submission payload
+        args = mock_scheduler.submit.call_args.args
+        kwargs = mock_scheduler.submit.call_args.kwargs
+        assert args == ("workflow_run",)
+        assert kwargs["queue_name"] == "workflows"
+        assert kwargs["idempotency_key"] == "watchlist-audio-briefing:1:42:7"
+        assert kwargs["metadata"] == {
+            "source": "watchlist_audio_briefing",
+            "watchlist_job_id": 42,
+            "watchlist_run_id": 7,
+            "user_id": "1",
+        }
+        payload = kwargs["payload"]
+        assert payload["user_id"] == 1
+        assert payload["definition_snapshot"] == AUDIO_BRIEFING_WORKFLOW_DEF
+        assert payload["mode"] == "async"
+        assert payload["inputs"]["target_audio_minutes"] == 5
+        assert payload["inputs"]["voice_map"] == {"HOST": "af_bella"}
+        assert payload["inputs"]["background_audio_uri"] == "file:///tmp/bed.mp3"
+        assert payload["inputs"]["background_volume"] == 0.22
+        assert payload["inputs"]["persona_summarize"] is True
+        assert payload["inputs"]["persona_id"] == "host_style"
+        assert len(payload["inputs"]["items"]) == 2
+        assert payload["metadata"]["watchlist_job_id"] == 42
+        assert payload["metadata"]["watchlist_run_id"] == 7
         mock_threadpool.assert_awaited_once()
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
 
@@ -376,7 +403,7 @@ class TestTriggerAudioBriefing:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_trigger_enqueues_with_object_rows(self):
+    async def test_trigger_submits_with_object_rows(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             trigger_audio_briefing,
         )
@@ -387,8 +414,7 @@ class TestTriggerAudioBriefing:
             1,
         )
 
-        mock_scheduler = AsyncMock()
-        mock_scheduler.enqueue.return_value = "task_object_row"
+        mock_scheduler = self.SubmitOnlyScheduler("task_object_row")
 
         with patch(
             "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
@@ -404,7 +430,7 @@ class TestTriggerAudioBriefing:
             )
 
         assert result == "task_object_row"
-        task = mock_scheduler.enqueue.call_args[0][0]
-        assert task.payload["inputs"]["items"] == [
+        payload = mock_scheduler.submit.call_args.kwargs["payload"]
+        assert payload["inputs"]["items"] == [
             {"title": "Story Obj", "summary": "Summary Obj", "url": "https://example.com/obj"}
         ]
