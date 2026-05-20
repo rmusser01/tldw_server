@@ -61,6 +61,11 @@ Follow-up review fixes:
 - normalized omitted live-control create/resume surface to the default surface before reuse/idempotency lookup
 - added regressions for default-surface reuse and voice commit `client_message_id` propagation
 
+Second follow-up coverage fixes:
+- added endpoint-level `/api/v1/persona/stream` regression coverage for `voice_commit` preserving bounded `client_message_id` in turn metadata
+- added endpoint-level stream-presence regressions for `user_message` and `voice_config` paths, including connected lifecycle while open and idle lifecycle after WebSocket cleanup
+- focused live-control test file now covers 20 tests
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

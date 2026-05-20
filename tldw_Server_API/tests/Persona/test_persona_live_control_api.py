@@ -1,3 +1,8 @@
+import json
+import queue
+import threading
+import time
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -6,6 +11,8 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
+from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
 from tldw_Server_API.app.core.Persona.live_control import persona_live_stream_registry
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
@@ -83,6 +90,77 @@ def _create_session(
 
 def _session_ids(payload: dict) -> list[str]:
     return [item["session_id"] for item in payload["sessions"]]
+
+
+def _recv_until(client, predicate, timeout=2.0):
+    start = time.time()
+    while time.time() - start < timeout:
+        inbox: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+
+        def _reader() -> None:
+            try:
+                inbox.put(("ok", client.receive_text()))
+            except Exception as exc:  # pragma: no cover - defensive test harness path
+                inbox.put(("err", exc))
+
+        thread = threading.Thread(target=_reader, daemon=True)
+        thread.start()
+        remaining = max(0.01, min(0.1, timeout - (time.time() - start)))
+        try:
+            status, payload = inbox.get(timeout=remaining)
+        except queue.Empty:
+            continue
+        if status == "err":
+            raise payload  # type: ignore[misc]
+        try:
+            data = json.loads(str(payload))
+        except Exception:
+            continue
+        if predicate(data):
+            return data
+    raise AssertionError("Expected event not received in time")
+
+
+def _install_persona_stream_test_stubs(
+    monkeypatch,
+    manager: SessionManager,
+    *,
+    user_id: str = "1",
+    persisted_turns: list[dict[str, object]] | None = None,
+) -> None:
+    async def _fake_resolve_authenticated_user_id(*args, **kwargs):
+        return user_id, True, True
+
+    def _fake_persist_persona_turn(**kwargs: object) -> bool:
+        if persisted_turns is not None:
+            persisted_turns.append(kwargs)
+        return True
+
+    async def _fake_resolve_persona_exemplar_runtime_context(**kwargs: object) -> PersonaExemplarRuntimeContext:
+        return PersonaExemplarRuntimeContext(
+            assembly=PersonaExemplarPromptAssembly(
+                sections=[],
+                selected_exemplars=[],
+                rejected_exemplars=[],
+            ),
+            selection_metadata={},
+        )
+
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve_authenticated_user_id)
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: None)
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
+    monkeypatch.setattr(persona_ep, "load_companion_context", lambda **kwargs: {})
+    monkeypatch.setattr(
+        persona_ep,
+        "resolve_persona_exemplar_runtime_context",
+        _fake_resolve_persona_exemplar_runtime_context,
+    )
+
+
+def _session_summary(payload: dict, session_id: str) -> dict:
+    return next(item for item in payload["sessions"] if item["session_id"] == session_id)
 
 
 def test_live_sessions_requires_auth():
@@ -358,6 +436,45 @@ def test_voice_commit_message_preserves_bounded_client_message_id():
     assert payload["client_message_id"] == "x" * 128
 
 
+def test_persona_stream_voice_commit_records_bounded_client_message_id(monkeypatch):
+    manager = SessionManager()
+    persisted_turns: list[dict[str, object]] = []
+    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
+    session_id = "sess-voice-commit-ws"
+
+    with TestClient(fastapi_app) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_commit",
+                        "session_id": session_id,
+                        "transcript": "Please summarize this session",
+                        "client_message_id": f" {'v' * 140} ",
+                    }
+                )
+            )
+            committed = _recv_until(
+                ws,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == "VOICE_TURN_COMMITTED"
+                and data.get("session_id") == session_id,
+            )
+            plan = _recv_until(
+                ws,
+                lambda data: data.get("event") == "tool_plan" and data.get("session_id") == session_id,
+            )
+
+    assert committed["transcript"] == "Please summarize this session"
+    assert plan["session_id"] == session_id
+    turns = manager.list_turns(session_id=session_id, user_id="1", limit=10)
+    voice_turn = next(turn for turn in turns if turn["type"] == "voice_commit")
+    assert voice_turn["metadata"]["client_message_id"] == "v" * 128
+    persisted_voice_turn = next(turn for turn in persisted_turns if turn["turn_type"] == "voice_commit")
+    assert persisted_voice_turn["metadata"]["client_message_id"] == "v" * 128
+
+
 def test_live_session_active_stream_presence_is_connected(monkeypatch, persona_db: CharactersRAGDB):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
@@ -369,6 +486,80 @@ def test_live_session_active_stream_presence_is_connected(monkeypatch, persona_d
 
     assert listed.status_code == 200
     assert listed.json()["sessions"][0]["lifecycle"] == "connected"
+
+
+def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    _install_persona_stream_test_stubs(monkeypatch, manager)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
+    session_id = "sess-user-message-ws"
+    _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
+
+    with _client_for_user(1, persona_db) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": session_id,
+                        "text": "What should I focus on next?",
+                    }
+                )
+            )
+            _recv_until(
+                ws,
+                lambda data: data.get("event") == "tool_plan" and data.get("session_id") == session_id,
+            )
+            listed = client.get("/api/v1/persona/live/sessions")
+
+        disconnected = client.get("/api/v1/persona/live/sessions")
+
+    assert listed.status_code == 200
+    assert _session_summary(listed.json(), session_id)["lifecycle"] == "connected"
+    assert disconnected.status_code == 200
+    assert _session_summary(disconnected.json(), session_id)["lifecycle"] == "idle"
+
+
+def test_persona_stream_voice_config_marks_live_session_connected_and_cleanup(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    _install_persona_stream_test_stubs(monkeypatch, manager)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
+    session_id = "sess-voice-config-ws"
+    _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
+
+    with _client_for_user(1, persona_db) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": session_id,
+                        "voice": {"trigger_phrases": []},
+                    }
+                )
+            )
+            _recv_until(
+                ws,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == "VOICE_CONFIG_UPDATED"
+                and data.get("session_id") == session_id,
+            )
+            listed = client.get("/api/v1/persona/live/sessions")
+
+        disconnected = client.get("/api/v1/persona/live/sessions")
+
+    assert listed.status_code == 200
+    assert _session_summary(listed.json(), session_id)["lifecycle"] == "connected"
+    assert disconnected.status_code == 200
+    assert _session_summary(disconnected.json(), session_id)["lifecycle"] == "idle"
 
 
 def test_live_session_terminal_status_excludes_send_text_action(monkeypatch, persona_db: CharactersRAGDB):
