@@ -45,7 +45,7 @@ Update the canonical first-class Character Chat PRD with the approved post-Phase
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Updated the canonical Character Chat PRD with the approved post-Phase-6 remediation plan. The PRD now distinguishes shipped Phase 0-6 foundation from remaining Phase 7-13 work, captures the latest real-backend UX findings, adds a model usability contract, and makes the recommended first fix readiness truth plus SEND gating. Verification: self-review pass completed; git diff --check passed. Bandit not applicable because this is a documentation-only change.
+Updated the canonical Character Chat PRD with the approved post-Phase-6 remediation plan, then completed a critique pass and hardened the design. The PRD now distinguishes historical Phase 0-6 problems from current post-Phase-6 gaps, treats shortcuts as lower-priority power-user improvements, requires real configured backend providers for successful-send proof, marks successful-send as blocked when no real provider exists, and clarifies that debug sidepanel coverage alone is not final extension parity evidence. Verification: self-review pass completed; git diff --check passed. Bandit not applicable because this is a documentation-only change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

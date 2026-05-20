@@ -27,16 +27,26 @@ As of the post-Phase-6 review, the foundation for Character Chat mode, role-play
 
 ## 2. Problem Statement
 
-The current UI has the parts needed for character role-play, but they are spread across generic chat controls:
+The original first-class Character Chat problem was that the product had the parts needed for character role-play, but they were spread across generic chat controls:
 
-- `/chat` routes into generic `Playground`.
-- The starter card opens the assistant picker but does not activate a durable role-play workspace.
-- The header "Character" button clears chat and opens selection only when needed.
-- The role-play setup surface is a drawer attached to composer controls.
-- Character conversations can be filtered by server metadata, but `/chat` does not expose this as a first-class character-session rail.
-- The extension sidepanel has character support, but it is buried under Conversation context rather than presented as a role-play mode.
+- `/chat` routed into generic `Playground`.
+- The starter card opened the assistant picker but did not activate a durable role-play workspace.
+- The header "Character" button could clear chat and open selection only when needed.
+- The role-play setup surface was a drawer attached to composer controls.
+- Character conversations could be filtered by server metadata, but `/chat` did not expose this as a first-class character-session rail.
+- The extension sidepanel had character support, but it was buried under Conversation context rather than presented as a role-play mode.
 
-This makes character chat feel secondary even though the backend and earlier product behavior treat it as a core feature.
+Phase 0-6 work materially improved that baseline. The remaining problem is narrower and should not be treated as a greenfield role-play redesign:
+
+- model/provider readiness can still disagree across status surfaces and allow invalid sends;
+- WebUI character sessions can still receive extension-specific fallback titles;
+- direct character-mode entry does not yet make last-used/session resume obvious enough;
+- first-time users still lack create/import affordances at the point of character-chat intent;
+- role-play setup is improved but still needs dependable primary desktop access;
+- sidepanel character chat is supported but not yet first-viewport first-class;
+- final confidence still requires real-backend signoff for the remaining failure and resume paths.
+
+These issues keep character chat from feeling fully trustworthy even though the core mode, setup surface, sessions panel, and backend runtime now exist.
 
 ## 3. Goals
 
@@ -105,6 +115,8 @@ The returning user enters `/chat`, toggles Character Chat, and can act quickly:
 The workflow should be denser for experienced users but predictable: the same controls stay in the same places, destructive state changes require confirmation or undo, and saved state is inspectable.
 
 ## 7. Product Requirements
+
+R1-R11 remain the canonical product requirements for first-class Character Chat. Some are already partially or fully satisfied by Phase 0-6. Section 8 summarizes the shipped foundation, and Section 11 defines the remaining post-Phase-6 remediation work. Implementation planning should not reopen a completed requirement unless the latest branch reproduces a regression.
 
 ### R1. Add Character Chat As A First-Class `/chat` Mode
 
@@ -265,8 +277,9 @@ Likely files:
 
 Requirements:
 
-- Add command palette actions for: switch character, open role-play setup, apply saved setup, resume last character chat, toggle scene, open prompt picker, open parameter preset picker.
-- Add keyboard shortcuts or configurable shortcuts for the most common actions, with no collisions against editor input.
+- Prioritize recents, focus order, resume, and quick-switch flows before adding new shortcuts.
+- Add command palette actions for: switch character, open role-play setup, apply saved setup, resume last character chat, toggle scene, open prompt picker, open parameter preset picker where the command palette infrastructure already supports route-local actions.
+- Add keyboard shortcuts or configurable shortcuts only after the target actions are stable and only if they do not collide with editor input.
 - Add recents and favorites for characters and saved role-play setups.
 - Add quick switcher search across character name, tags, description, and recent session titles.
 - Preserve state across refreshes, route changes, and session switches with clear precedence rules.
@@ -310,14 +323,14 @@ Requirements:
 
 - Core acceptance must run against the real FastAPI backend and real frontend.
 - Unit tests may mock components and API clients, but release signoff must include browser tests against a running backend.
-- Message-send verification must use either a configured local model provider or an OpenAI-compatible deterministic provider wired through the backend provider path. It must not rely on frontend-only interception as the only proof.
+- Message-send verification must use a real configured local/provider path wired through the backend provider path. It must not rely on frontend-only interception or simulated frontend responses as proof.
+- If no real callable provider is available in the verification environment, mark successful-send signoff blocked and continue verifying no-provider, model-unavailable, provider-failure, and send-gating behavior against the real backend.
 - Tests must verify that character context is included in the backend request/stream path.
 
 Likely files:
 
 - `apps/tldw-frontend/e2e/workflows/journeys/character-chat.spec.ts`
 - `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
-- `mock_openai_server`
 - `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 
 ### R11. Track Chat/Character Database Health As A Release Dependency
@@ -603,6 +616,7 @@ Scope:
 - Required scenarios: backend health, no-provider, configured-provider where available, character selection, send gating, successful or explicitly blocked completion, provider failure, resume, refresh, mobile setup, and sidepanel handoff.
 - Keep simulated/unit tests for coverage, but never use them as final proof.
 - Store screenshots, request logs, or concise browser artifacts with each signoff PR.
+- Sidepanel signoff should use the packaged extension when practical. The `/__debug__/sidepanel-chat` route is acceptable for component-level reproduction, but it is not sufficient by itself for final extension parity claims.
 
 Acceptance criteria:
 
@@ -618,6 +632,7 @@ Signoff matrix:
 | No provider | UI shows one consistent unavailable state. |
 | Character selected | Greeting appears and chat is saved with character metadata. |
 | Send blocked | No `/complete-v2` request is made. |
+| Successful completion | A real configured backend provider returns a character response, or this scenario is explicitly marked blocked because no real callable provider is available. |
 | Provider failure | Error copy maps to model/provider recovery. |
 | Resume | Recent session title is character-aware. |
 | Refresh | Character/session intent is preserved or explicitly recoverable. |
@@ -629,7 +644,7 @@ Signoff matrix:
 The following items are release dependencies for declaring Character Chat first-class. They should not be mixed into the post-Phase-6 UX remediation sequence unless they directly fail the current `/chat` flow.
 
 1. **ChaChaNotes DB health and recovery**: keep R11 as a backend release dependency with a dedicated owner and task. It is valid and important, but it should not block documenting or implementing the post-Phase-6 UX remediation phases unless the live backend health check fails.
-2. **Real callable provider availability**: successful message-send signoff requires a real configured local/provider path. If none is available, document that single scenario as blocked and continue verifying no-provider, model-unavailable, and send-gating behavior.
+2. **Real callable provider availability**: successful message-send signoff requires a real configured local/provider path. If none is available, document that single scenario as blocked and continue verifying no-provider, model-unavailable, provider-failure, and send-gating behavior.
 3. **No parallel runtime**: all remediation must reuse existing Character Chat runtime, stream, persist, and history contracts.
 4. **Sidepanel scope boundary**: extension parity means compact state and handoff, not a full sidepanel setup clone.
 
