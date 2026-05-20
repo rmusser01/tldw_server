@@ -4,7 +4,7 @@ title: Migrate QuickSaveWorkflow capture alert to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-20 06:43'
+updated_date: '2026-05-20 14:46'
 labels:
   - design-system
   - product-state
@@ -46,6 +46,20 @@ Verification recorded for this slice:
 - git diff --check passed.
 - Full bunx tsc --noEmit --pretty false still exits 2 from inherited baseline debt; filtered touched-file diagnostics for QuickSaveWorkflow/task-454/baseline matched 0 lines.
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
+
+Review follow-up for PR #1889:
+- Removed the duplicate final-summary end marker reported by Gemini, CodeRabbit, and cubic; marker-count verification now reports exactly one closing marker.
+- Stabilized the QuickSaveWorkflow product-state test by intercepting only the 500ms auto-advance timeout, leaving other timers available for React Testing Library polling.
+
+Review-fix verification:
+- bunx vitest run src/components/Common/Workflow/__tests__/QuickSaveWorkflow.product-state.test.tsx --reporter=dot passed: 1 test.
+- bunx vitest run src/components/Common/Workflow/__tests__/WizardShell.test.tsx src/components/Common/Workflow/__tests__/QuickSaveWorkflow.product-state.test.tsx --reporter=dot passed: 2 files, 2 tests.
+- bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed: 52 tests.
+- bun run verify:design-system-state passed; baseline exceptions remain 327.
+- git diff --check passed.
+- Final-summary marker-count check passed with exactly one closing marker.
+- Full bunx tsc --noEmit --pretty false still exits 2 from inherited baseline debt; filtered touched-file diagnostics for QuickSaveWorkflow/task-454/baseline matched 0 lines.
+- Bandit skipped because the review fixes touch TypeScript test code and Backlog metadata only; no Python code touched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -62,8 +76,6 @@ Verification:
 - git diff --check passed.
 - Full bunx tsc --noEmit --pretty false still exits 2 from inherited baseline debt; filtered touched-file diagnostics for QuickSaveWorkflow/task-454/baseline matched 0 lines.
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

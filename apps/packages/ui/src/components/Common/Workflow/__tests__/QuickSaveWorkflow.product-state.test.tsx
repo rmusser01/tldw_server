@@ -33,6 +33,16 @@ vi.mock("react-i18next", () => ({
 
 describe("QuickSaveWorkflow product-state UI", () => {
   beforeEach(() => {
+    const realSetTimeout = globalThis.setTimeout
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      (...args: Parameters<typeof setTimeout>) => {
+        if (args[1] === 500) {
+          return 0 as unknown as ReturnType<typeof setTimeout>
+        }
+        return realSetTimeout(...args)
+      }
+    )
+
     vi.stubGlobal("chrome", {
       tabs: {
         query: vi.fn().mockResolvedValue([
@@ -80,6 +90,7 @@ describe("QuickSaveWorkflow product-state UI", () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
     useWorkflowsStore.setState({
       activeWorkflow: null,
       isWizardOpen: false,
