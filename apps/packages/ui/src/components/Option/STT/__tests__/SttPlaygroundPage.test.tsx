@@ -257,7 +257,8 @@ describe("SttPlaygroundPage", () => {
     expect(recordingStripProps).toEqual(
       expect.objectContaining({
         disabled: true,
-        disabledReason: "Loading transcription model catalog."
+        disabledReason: "Loading transcription model catalog.",
+        disabledStatusType: "secondary"
       })
     )
   })
@@ -384,9 +385,35 @@ describe("SttPlaygroundPage", () => {
     expect(recordingStripProps).toEqual(
       expect.objectContaining({
         disabled: true,
-        disabledReason: "No transcription models are available. Configure STT models before recording."
+        disabledReason: "No transcription models are available. Configure STT models before recording.",
+        disabledStatusType: "danger"
       })
     )
+  })
+
+  it("only prevents Space scrolling when the recording strip handles the shortcut", () => {
+    render(<SttPlaygroundPage />)
+
+    const unhandledSpace = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      code: "Space"
+    })
+    window.dispatchEvent(unhandledSpace)
+
+    expect(unhandledSpace.defaultPrevented).toBe(false)
+
+    const handleToggle = (event: Event) => event.preventDefault()
+    window.addEventListener("stt-toggle-record", handleToggle, { once: true })
+
+    const handledSpace = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      code: "Space"
+    })
+    window.dispatchEvent(handledSpace)
+
+    expect(handledSpace.defaultPrevented).toBe(true)
   })
 
   it("preserves transcript text when saving to notes fails", async () => {

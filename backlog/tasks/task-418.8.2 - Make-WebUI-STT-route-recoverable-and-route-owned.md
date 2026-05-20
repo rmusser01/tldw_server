@@ -60,7 +60,7 @@ Verification:
 - Browser DOM QA at `http://localhost:8080/stt` observed `Speech to Text`, `STT readiness`, `Recording source: Audio source: no audio selected`, disabled `Transcribe All`, and the updated history empty state.
 - `bunx eslint extension/routes/option-stt.tsx extension/__tests__/audio-route-parity.guard.test.ts e2e/utils/page-objects/STTPage.ts` passed.
 - `bunx tsc --noEmit --pretty false -p ../packages/ui/tsconfig.json` failed on inherited repo-wide TypeScript debt outside the touched STT/route files; no reported errors referenced touched files.
-- Bandit on touched frontend paths completed with 0 findings and 0 Python LOC scanned.
+- Bandit: skipped (no Python code touched).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -11,6 +11,7 @@ export interface RecordingStripProps {
   onSettingsToggle?: () => void
   disabled?: boolean
   disabledReason?: string
+  disabledStatusType?: "secondary" | "warning" | "danger"
 }
 
 const { Text } = Typography
@@ -27,7 +28,8 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
   onBlobReady,
   onSettingsToggle,
   disabled = false,
-  disabledReason
+  disabledReason,
+  disabledStatusType = "danger"
 }) => {
   const { t } = useTranslation(["playground"])
   const notification = useAntdNotification()
@@ -86,8 +88,9 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
 
   // Listen for stt-toggle-record custom event (Space shortcut from parent)
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
       if (blocksNewCapture) return
+      event.preventDefault()
       if (isRecording) {
         recorder.stopRecording()
       } else {
@@ -166,10 +169,9 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
         </span>
 
         <Text
-          type={blocksNewCapture ? "danger" : "secondary"}
+          type={blocksNewCapture ? disabledStatusType : "secondary"}
           className="text-xs"
           role="status"
-          aria-label="Recording source"
         >
           {sourceStatus}
         </Text>
