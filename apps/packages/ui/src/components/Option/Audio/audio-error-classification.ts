@@ -4,6 +4,7 @@ export type AudioErrorCategory =
   | "engine_unavailable"
   | "unsupported_capability"
   | "microphone_blocked"
+  | "capture_busy"
   | "network"
   | "timeout"
   | "unknown"
@@ -67,6 +68,18 @@ export function classifyAudioError(error: unknown): AudioErrorClassification {
       category: "microphone_blocked",
       title: "Microphone access is blocked",
       recovery: "Allow microphone access in your browser permission settings, then try recording again.",
+      debugMessage
+    }
+  }
+
+  const captureBusyMatch = rawMessage.match(
+    /audio capture is already active for ([\w:-]+)/i
+  )
+  if (captureBusyMatch) {
+    return {
+      category: "capture_busy",
+      title: "Audio capture is already active",
+      recovery: `Audio capture is already active for ${captureBusyMatch[1]}`,
       debugMessage
     }
   }

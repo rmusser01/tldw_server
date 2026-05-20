@@ -55,11 +55,65 @@ const stubDocsInfo = async (page: Page) => {
 }
 
 const stubAudioSmokeBootstrapApis = async (page: Page) => {
+  await stubDocsInfo(page)
   await stubNotificationsApi(page)
+  await page.route("**/openapi.json", async (route) => {
+    await fulfillJson(route, 200, {
+      openapi: "3.0.0",
+      info: { title: "tldw e2e", version: "e2e" },
+      paths: {}
+    })
+  })
+  await page.route("**/api/v1/audio/providers**", async (route) => {
+    await fulfillJson(route, 200, {
+      providers: {
+        browser: {
+          provider_name: "browser",
+          formats: ["mp3"],
+          default_format: "mp3"
+        }
+      },
+      voices: {
+        browser: [{ id: "browser-default", name: "Browser default" }]
+      }
+    })
+  })
   await page.route("**/api/v1/audio/voices**", async (route) => {
     await fulfillJson(route, 200, {
       voices: [{ id: "af_heart", name: "AF Heart", provider: "kokoro" }]
     })
+  })
+  await page.route("**/api/v1/audio/transcriptions/capabilities**", async (route) => {
+    await fulfillJson(route, 200, {
+      formats: ["audio/webm"],
+      engines: ["whisper"],
+      limits: {}
+    })
+  })
+  await page.route("**/api/v1/audio/transcriptions/health**", async (route) => {
+    await fulfillJson(route, 200, {
+      status: "ok",
+      model: "whisper-1"
+    })
+  })
+  await page.route("**/api/v1/media/transcription-models**", async (route) => {
+    await fulfillJson(route, 200, {
+      all_models: ["whisper-1"]
+    })
+  })
+  await page.route("**/api/v1/audio/presets**", async (route) => {
+    await fulfillJson(route, 200, {
+      items: [],
+      total: 0
+    })
+  })
+  await page.route("**/api/v1/ingestion-sources/capabilities**", async (route) => {
+    await fulfillJson(route, 200, {
+      capabilities: {}
+    })
+  })
+  await page.route("**/api/v1/persona/profiles**", async (route) => {
+    await fulfillJson(route, 200, [])
   })
 }
 
@@ -239,7 +293,7 @@ test.describe("Stage 7 audio regression gate", () => {
 
     await page.goto("/tts", { waitUntil: "domcontentloaded", timeout: LOAD_TIMEOUT })
 
-    const timeoutAlert = page.locator(".ant-alert").filter({
+    const timeoutAlert = page.getByRole("alert").filter({
       hasText: /ElevenLabs voices unavailable/i
     })
     await expect(timeoutAlert).toBeVisible({ timeout: LOAD_TIMEOUT })
@@ -313,7 +367,7 @@ test.describe("Stage 7 audio regression gate", () => {
 
     await page.goto("/speech", { waitUntil: "domcontentloaded", timeout: LOAD_TIMEOUT })
 
-    const timeoutAlert = page.locator(".ant-alert").filter({
+    const timeoutAlert = page.getByRole("alert").filter({
       hasText: /ElevenLabs voices unavailable/i
     })
     await expect(timeoutAlert).toBeVisible({ timeout: LOAD_TIMEOUT })
