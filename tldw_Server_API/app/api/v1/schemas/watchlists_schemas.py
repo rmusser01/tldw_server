@@ -665,7 +665,7 @@ class RunDetail(BaseModel):
     status: str
     started_at: str | None = None
     finished_at: str | None = None
-    stats: dict[str, int] = Field(default_factory=lambda: {"items_found": 0, "items_ingested": 0})
+    stats: dict[str, Any] = Field(default_factory=lambda: {"items_found": 0, "items_ingested": 0})
     filter_tallies: dict[str, int] | None = None
     error_msg: str | None = None
     log_text: str | None = None

@@ -282,11 +282,11 @@ export const OverviewTab: React.FC = () => {
   }, [setActiveTab])
 
   const handleOpenFailedRuns = useCallback(() => {
-    if (typeof setRunsStatusFilter === "function") {
+    if (typeof setRunsStatusFilter === "function" && (data?.runs.failed ?? 0) > 0) {
       setRunsStatusFilter("failed")
     }
     setActiveTab("runs")
-  }, [setActiveTab, setRunsStatusFilter])
+  }, [data?.runs.failed, setActiveTab, setRunsStatusFilter])
 
   const handleOpenAttentionOutputs = useCallback(() => {
     setActiveTab("outputs")
@@ -1326,7 +1326,7 @@ export const OverviewTab: React.FC = () => {
             {data.systemHealth === "degraded"
               ? t(
                   "watchlists:overview.health.degradedDescription",
-                  "Some sources or recent runs show failures. Open failed runs to investigate."
+                  "Some sources, recent runs, or reports need review. Open the linked surface to investigate."
                 )
               : t(
                   "watchlists:overview.health.healthyDescription",
@@ -1431,7 +1431,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleOpenFailedRuns}
                     data-testid="watchlists-overview-attention-runs"
                   >
-                    {t("watchlists:overview.attention.runs", "Failed activity runs ({{count}})", {
+                    {t("watchlists:overview.attention.runs", "Activity needs review ({{count}})", {
                       count: overviewBadges.runs
                     })}
                   </Button>
@@ -1442,7 +1442,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleOpenAttentionOutputs}
                     data-testid="watchlists-overview-attention-outputs"
                   >
-                    {t("watchlists:overview.attention.outputs", "Reports with delivery issues ({{count}})", {
+                    {t("watchlists:overview.attention.outputs", "Reports need review ({{count}})", {
                       count: overviewBadges.outputs
                     })}
                   </Button>

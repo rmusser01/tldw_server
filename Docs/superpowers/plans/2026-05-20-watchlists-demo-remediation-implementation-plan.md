@@ -732,6 +732,8 @@ git commit -m "feat: surface watchlist audio briefing status"
 **Files:**
 - Modify: `tldw_Server_API/app/core/Watchlists/pipeline.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
+- Modify: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
+- Modify: `apps/packages/ui/src/types/watchlists.ts`
 - Modify: `apps/packages/ui/src/services/watchlists-overview.ts`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx`
@@ -739,7 +741,7 @@ git commit -m "feat: surface watchlist audio briefing status"
 - Test: `apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.health.test.tsx`
 
-- [ ] **Step 1: Write backend failing test for failed source with zero items**
+- [x] **Step 1: Write backend failing test for failed source with zero items**
 
 Create or extend `test_watchlists_operator_recovery.py` with a case where one active source returns `error:403`, the run ingests zero items, and run stats include source failure information:
 
@@ -751,7 +753,7 @@ assert run["stats"]["source_statuses"][0]["status"].startswith("error:")
 
 The exact run status may remain `completed` for backward compatibility, but stats must carry warning evidence.
 
-- [ ] **Step 2: Run backend test and confirm failure**
+- [x] **Step 2: Run backend test and confirm failure**
 
 Run:
 
@@ -762,7 +764,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_operator_recov
 
 Expected: FAIL if source failures are not persisted or exposed.
 
-- [ ] **Step 3: Persist source failure stats in pipeline**
+- [x] **Step 3: Persist source failure stats in pipeline**
 
 In `pipeline.py`, add source-level stats fields when fetch/extraction fails:
 
@@ -783,11 +785,11 @@ stats["source_errors"] = sum(
 
 Keep the error message safe: no secrets, tokens, or full credentials.
 
-- [ ] **Step 4: Expose stats without breaking existing run response shape**
+- [x] **Step 4: Expose stats without breaking existing run response shape**
 
 In `watchlists.py`, ensure list/detail endpoints include the persisted stats object already returned for runs. Add schema fields only if current schemas strip unknown stats keys.
 
-- [ ] **Step 5: Run backend tests**
+- [x] **Step 5: Run backend tests**
 
 Run:
 
@@ -796,12 +798,13 @@ source .venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py \
   tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py \
+  tldw_Server_API/tests/Watchlists/test_run_detail_filters_totals.py \
   -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 6: Write frontend health aggregation tests**
+- [x] **Step 6: Write frontend health aggregation tests**
 
 In `watchlists-overview.test.ts`, add cases:
 
@@ -815,7 +818,7 @@ expect(buildWatchlistsOverviewHealth({
 
 Also assert the title is not `System healthy`.
 
-- [ ] **Step 7: Implement health aggregation**
+- [x] **Step 7: Implement health aggregation**
 
 In `watchlists-overview.ts`, count:
 
@@ -825,11 +828,11 @@ In `watchlists-overview.ts`, count:
 - outputs with `audio_briefing_status` of `enqueue_failed` or `skipped` when audio was requested
 - delivery/output errors already exposed by current metadata
 
-- [ ] **Step 8: Render warning state**
+- [x] **Step 8: Render warning state**
 
 In `WatchlistsHealthBar.tsx` and `OverviewTab.tsx`, render warning/partial state with links to affected Source, Activity, or Reports tab. Preserve the existing healthy state when no unresolved warnings exist.
 
-- [ ] **Step 9: Run focused frontend tests**
+- [x] **Step 9: Run focused frontend tests**
 
 Run:
 
@@ -843,7 +846,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 Run:
 
@@ -851,7 +854,9 @@ Run:
 git add \
   tldw_Server_API/app/core/Watchlists/pipeline.py \
   tldw_Server_API/app/api/v1/endpoints/watchlists.py \
+  tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py \
   tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py \
+  apps/packages/ui/src/types/watchlists.ts \
   apps/packages/ui/src/services/watchlists-overview.ts \
   apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts \
   apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx \

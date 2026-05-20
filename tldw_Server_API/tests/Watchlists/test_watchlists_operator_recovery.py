@@ -8,8 +8,41 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.endpoints.watchlists import router as watchlists_router
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.config import API_V1_PREFIX
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.Watchlists import pipeline
+from tldw_Server_API.app.core.Watchlists.pipeline import _safe_source_error_text, run_watchlist_job
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _isolated_watchlists_db(monkeypatch, tmp_path):
+    base_dir = tmp_path / "watchlists_operator_recovery_dbs"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+
+@pytest.fixture()
+def client_with_user():
+    user_id = 9442
+
+    async def override_user():
+        return User(id=user_id, username="wluser", email=None, is_active=True)
+
+    app = FastAPI()
+    app.include_router(watchlists_router, prefix=f"{API_V1_PREFIX}")
+    app.dependency_overrides[get_request_user] = override_user
+    with TestClient(app) as client:
+        yield client, user_id
+    app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
@@ -422,3 +455,119 @@ async def test_run_diagnostics_uses_target_collections_db_for_delegated_user(mon
     assert result.outputs[0]["id"] == 55
     current_collections_db.list_output_artifacts.assert_not_called()
     target_collections_db.list_output_artifacts.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_stats_record_safe_source_error_when_active_source_fetch_fails(monkeypatch):
+    user_id = 9442
+    db = WatchlistsDatabase.for_user(user_id)
+    source = db.create_source(
+        name="Private Feed",
+        url="https://news.example/feed.xml?api_key=feed-secret&token=hidden-token",
+        source_type="rss",
+        active=True,
+        settings_json=json.dumps({"limit": 5}),
+        tags=["news"],
+        group_ids=[],
+    )
+    job = db.create_job(
+        name="Recovery Digest",
+        description=None,
+        scope_json=json.dumps({"sources": [source.id]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+
+    async def _forbidden_feed(*args, **kwargs):
+        return {
+            "status": 403,
+            "items": [],
+            "error": "403 forbidden for api_key=feed-secret token=hidden-token",
+        }
+
+    monkeypatch.setattr(pipeline, "fetch_rss_feed_history", _forbidden_feed)
+
+    result = await run_watchlist_job(user_id, job.id)
+
+    assert result["items_ingested"] == 0
+    run = db.get_run(result["run_id"])
+    assert run.status in {"completed", "succeeded", "partial", "warning"}
+    stats = json.loads(run.stats_json or "{}")
+    assert stats["source_errors"] >= 1
+    assert stats["source_statuses"][0]["source_id"] == source.id
+    assert stats["source_statuses"][0]["name"] == "Private Feed"
+    assert stats["source_statuses"][0]["status"].startswith("error:")
+    assert stats["source_statuses"][0]["items_found"] == 0
+    assert stats["source_statuses"][0]["items_ingested"] == 0
+    error_text = str(stats["source_statuses"][0].get("error") or "")
+    assert error_text
+    assert "feed-secret" not in error_text
+    assert "hidden-token" not in error_text
+    assert "api_key" not in error_text.lower()
+    assert "token=" not in error_text.lower()
+
+
+def test_safe_source_error_text_redacts_common_secret_formats():
+    text = _safe_source_error_text(
+        "Authorization: Bearer sk-test-secret password: hunter2 token=hidden "
+        "https://example.test/feed?api_key=feed-secret"
+    )
+
+    assert "sk-test-secret" not in text
+    assert "hunter2" not in text
+    assert "hidden" not in text
+    assert "feed-secret" not in text
+    assert "api_key" not in text.lower()
+    assert "password:" not in text.lower()
+    assert "token=" not in text.lower()
+    assert "Bearer [redacted]" in text
+
+
+def test_run_details_preserve_source_failure_stats(client_with_user):
+    client, user_id = client_with_user
+    db = WatchlistsDatabase.for_user(user_id)
+    job = db.create_job(
+        name="Detail Recovery Digest",
+        description=None,
+        scope_json=json.dumps({"sources": []}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+    run = db.create_run(job_id=job.id, status="succeeded")
+    db.update_run(
+        run.id,
+        stats_json=json.dumps(
+            {
+                "items_found": 0,
+                "items_ingested": 0,
+                "source_errors": 1,
+                "source_statuses": [
+                    {
+                        "source_id": 123,
+                        "name": "Blocked Feed",
+                        "status": "error:403",
+                        "error": "HTTP 403",
+                        "items_found": 0,
+                        "items_ingested": 0,
+                    }
+                ],
+            }
+        ),
+    )
+
+    response = client.get(f"/api/v1/watchlists/runs/{run.id}/details")
+
+    assert response.status_code == 200, response.text
+    stats = response.json()["stats"]
+    assert stats["source_errors"] == 1
+    assert stats["source_statuses"][0]["status"] == "error:403"
