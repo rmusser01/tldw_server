@@ -492,12 +492,7 @@ describe("VisualPackEditor", () => {
       if (path === "/api/v1/persona/visual-library" && method === "GET") {
         return okResponse({ items: [] })
       }
-      return Promise.resolve({
-        ok: false,
-        status: 404,
-        error: `Unhandled path: ${path}`,
-        json: async () => ({})
-      })
+      throw new Error(`Unhandled path: ${path}`)
     })
 
     render(
@@ -511,8 +506,8 @@ describe("VisualPackEditor", () => {
     await screen.findByTestId("persona-visual-management-header")
     const expectedSections = [
       ["persona-visual-section-pack-basics", "Rendered now"],
-      ["persona-visual-section-reuse-portability", "Create draft"],
-      ["persona-visual-library-panel", "Personal library"],
+      ["persona-visual-section-reuse-portability", "Reuse and portability"],
+      ["persona-visual-section-library", "Personal library"],
       ["persona-visual-section-assets", "Assets"],
       ["persona-visual-section-portable-actions", "Portable archive and duplicate actions"],
       ["persona-visual-section-state-mapping", "State mappings and fallbacks"],
@@ -527,6 +522,7 @@ describe("VisualPackEditor", () => {
     }
     expect(screen.getByTestId("persona-visual-upload-button")).toBeInTheDocument()
     expect(screen.getByTestId("persona-visual-activate-button")).toBeInTheDocument()
+    expect(screen.queryByText(/Unhandled path:/)).not.toBeInTheDocument()
   })
 
   it("does not show setup choices before active pack state is known", async () => {
@@ -2139,7 +2135,7 @@ describe("VisualPackEditor", () => {
     fireEvent.click(
       within(reusePanel).getByRole("button", { name: /use personal library/i })
     )
-    expect(screen.getByTestId("persona-visual-library-panel")).toHaveFocus()
+    expect(screen.getByTestId("persona-visual-section-library")).toHaveFocus()
 
     await waitFor(() =>
       expect(
@@ -3662,7 +3658,7 @@ describe("VisualPackEditor", () => {
       />
     )
 
-    const libraryPanel = await screen.findByTestId("persona-visual-library-panel")
+    const libraryPanel = await screen.findByTestId("persona-visual-section-library")
     expect(libraryPanel).toHaveTextContent("Personal library")
     expect(within(libraryPanel).getByText("Saved animated pack")).toBeInTheDocument()
     expect(within(libraryPanel).getByText("source changed")).toBeInTheDocument()
@@ -3750,7 +3746,7 @@ describe("VisualPackEditor", () => {
       />
     )
 
-    const libraryPanel = await screen.findByTestId("persona-visual-library-panel")
+    const libraryPanel = await screen.findByTestId("persona-visual-section-library")
     expect(libraryPanel).toHaveTextContent("Personal library")
     expect(within(libraryPanel).getByText("Reusable source pack")).toBeInTheDocument()
 

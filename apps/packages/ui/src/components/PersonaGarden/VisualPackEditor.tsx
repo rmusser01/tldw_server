@@ -3788,6 +3788,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         data-testid="persona-visual-section-reuse-portability"
         aria-label="Reuse and portability"
       >
+        <VisualWorkspaceSectionHeading
+          title="Reuse and portability"
+          description="Create drafts from existing packs or manage portability actions."
+        />
         <VisualPackReusePanel
           selectedPersonaName={selectedPersonaName || selectedPersonaId}
           hasSelectedPack={Boolean(selectedPack)}
@@ -3815,16 +3819,14 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
       {!showGuidedBuilder && !selectedPack ? firstRunImportPanel : null}
 
-      <div
+      <section
         ref={libraryPanelRef}
-        data-testid="persona-visual-library-panel"
+        data-testid="persona-visual-section-library"
         tabIndex={-1}
         className="rounded-lg border border-border bg-surface p-3"
+        aria-label="Personal library"
       >
-        <VisualWorkspaceSectionHeading
-          title="Personal library"
-          description="Manage reusable user-owned Persona Visual pack references."
-        />
+        <VisualWorkspaceSectionHeading title="Personal library" />
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="mt-1 text-xs text-text-muted">
@@ -3850,7 +3852,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {selectedPack ? (
         <>

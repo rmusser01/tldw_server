@@ -45,6 +45,13 @@ Verification:
 - `git diff --check` passed.
 - `bunx tsc --noEmit -p tsconfig.json` was attempted from `apps/packages/ui` and failed on existing package-wide TypeScript debt outside the touched PersonaGarden files; no errors referenced the touched files in the visible output.
 - Bandit is not applicable to this frontend-only TypeScript/Backlog slice.
+
+Review follow-up:
+- Added the missing reuse/portability section heading.
+- Converted the personal library container to a semantic section with a matching section test id and aria label.
+- Removed duplicate personal-library heading description text.
+- Hardened the new workspace-section test so unmocked API paths throw instead of rendering a silent error banner.
+- Verification after review fixes: `bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "workspace sections|management header"` passed with 2 focused tests; `bunx vitest run src/components/PersonaGarden/__tests__/personaVisualManagementSummary.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx` passed with 67 tests; `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
