@@ -3,7 +3,7 @@ import {
   parseProviderQualifiedModelSelection
 } from "./resolve-api-provider"
 
-type ModelDescriptor = {
+export type ModelDescriptor = {
   id?: unknown
   model?: unknown
   name?: unknown
@@ -77,6 +77,37 @@ export type CharacterChatReadinessAction =
   | "open-model-settings"
   | "retry"
 
+export type ChatModelUsabilityStatus =
+  | "loading"
+  | "no_server"
+  | "no_selection"
+  | "no_models"
+  | "selected_missing"
+  | "provider_unconfigured"
+  | "model_unavailable"
+  | "degraded"
+  | "ready"
+
+export type ChatModelUsability = {
+  status: ChatModelUsabilityStatus
+  canSend: boolean
+  selectedModelId: string | null
+  providerQualifiedModelId: string | null
+  matchedModelId: string | null
+  matchedProvider: string | null
+  recommendedAction: CharacterChatReadinessAction | null
+  detailReason: string | null
+}
+
+export type ChatModelUsabilityInput = {
+  isServerConnected?: boolean
+  selectedModel?: string | null
+  availableModels?: ModelDescriptor[] | null
+  modelsLoading?: boolean
+  allowDegradedSend?: boolean
+  serverDegraded?: boolean
+}
+
 export type CharacterChatReadiness =
   | {
       status: "ready"
@@ -137,6 +168,74 @@ export function normalizeChatModelId(value: string | null | undefined): string {
   return trimmed.replace(/^tldw:/i, "")
 }
 
+const PROVIDER_ALIASES: Record<string, string> = {
+  customopenai: "custom-openai-api",
+  custom_openai_api: "custom-openai-api",
+  custom_openai_api2: "custom-openai-api-2",
+  customopenai2: "custom-openai-api-2",
+  "custom-openai-api2": "custom-openai-api-2",
+  custom_openai_api_2: "custom-openai-api-2",
+  local: "local-llm",
+  local_llm: "local-llm",
+  localllm: "local-llm",
+  "llama-cpp": "llama.cpp",
+  llama_cpp: "llama.cpp",
+  llamacpp: "llama.cpp"
+}
+
+function normalizeProviderValue(value: unknown): string | null {
+  const provider = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+  if (!provider || provider === "unknown") return null
+  return PROVIDER_ALIASES[provider] ?? provider
+}
+
+const KNOWN_CHAT_PROVIDER_KEYS = new Set<string>([
+  "openai",
+  "anthropic",
+  "cohere",
+  "groq",
+  "qwen",
+  "openrouter",
+  "deepseek",
+  "mistral",
+  "google",
+  "gemini",
+  "huggingface",
+  "moonshot",
+  "zai",
+  "llama.cpp",
+  "kobold",
+  "ooba",
+  "tabbyapi",
+  "vllm",
+  "local-llm",
+  "ollama",
+  "aphrodite",
+  "mlx",
+  "custom-openai-api",
+  "custom-openai-api-2",
+  "custom",
+  "together",
+  "xai",
+  "siliconflow",
+  "volcengine",
+  "tencentcloud",
+  "alibabacloud",
+  "fireworks",
+  "novita",
+  "chutes",
+  "bedrock"
+])
+
+function normalizeKnownChatProviderKey(value: unknown): string | null {
+  const provider = normalizeProviderValue(value)
+  if (!provider || !KNOWN_CHAT_PROVIDER_KEYS.has(provider)) return null
+  return provider
+}
+
 function normalizeAvailableModelId(model: ModelDescriptor): string {
   const modelValue = String(model?.model ?? "").trim()
   const idValue = String(model?.id ?? "").trim()
@@ -150,7 +249,7 @@ function normalizeAvailableModelId(model: ModelDescriptor): string {
 }
 
 function normalizeProviderKey(model: ModelDescriptor): string | null {
-  const provider = String(
+  return normalizeProviderValue(
     model?.provider ??
       model?.provider_key ??
       model?.providerKey ??
@@ -161,10 +260,6 @@ function normalizeProviderKey(model: ModelDescriptor): string | null {
       model?.metadata?.provider ??
       ""
   )
-    .trim()
-    .toLowerCase()
-
-  return provider && provider !== "unknown" ? provider : null
 }
 
 const toBooleanFlag = (value: unknown): boolean | null => {
@@ -219,6 +314,23 @@ function readCatalogOnlyFlagFromRecords(
   return hasCatalogFlag ? false : null
 }
 
+function readConfiguredFlagFromRecords(
+  records: Record<string, unknown>[]
+): boolean | null {
+  let hasConfiguredFlag = false
+  for (const record of records) {
+    for (const key of CONFIGURED_FLAG_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue
+      const flag = toBooleanFlag(record[key])
+      if (flag == null) continue
+      hasConfiguredFlag = true
+      if (flag === false) return false
+    }
+  }
+
+  return hasConfiguredFlag ? true : null
+}
+
 function isUsableChatModelDescriptor(
   model: ModelDescriptor,
   options: BuildAvailableChatModelIdsOptions = {}
@@ -256,11 +368,13 @@ function normalizeProviderQualifiedChatModelId(
       return null
     }
 
-    const provider = normalized.slice(0, separatorIndex).trim().toLowerCase()
+    const provider = normalizeKnownChatProviderKey(
+      normalized.slice(0, separatorIndex)
+    )
     const modelId = normalizeChatModelId(
       normalized.slice(separatorIndex + 1).trim()
     )
-    if (!provider || provider === "http" || provider === "https" || !modelId) {
+    if (!provider || !modelId) {
       return null
     }
     return `${provider}:${modelId}`
@@ -272,17 +386,293 @@ function normalizeProviderQualifiedChatModelId(
 
 function normalizeBaseChatModelId(value: string | null | undefined): string {
   const normalized = normalizeChatModelId(value)
-  const separatorIndex = normalized.indexOf(":")
-  if (separatorIndex <= 0 || separatorIndex === normalized.length - 1) {
+  const providerQualified = normalizeProviderQualifiedChatModelId(normalized)
+  const separatorIndex = providerQualified?.indexOf(":") ?? -1
+  if (
+    !providerQualified ||
+    separatorIndex <= 0 ||
+    separatorIndex === providerQualified.length - 1
+  ) {
     return normalized
   }
 
-  const provider = normalized.slice(0, separatorIndex).trim().toLowerCase()
-  if (!provider || provider === "http" || provider === "https") {
-    return normalized
+  return normalizeChatModelId(providerQualified.slice(separatorIndex + 1).trim())
+}
+
+function providerFromQualifiedChatModelId(
+  value: string | null | undefined
+): string | null {
+  const qualified = normalizeProviderQualifiedChatModelId(value)
+  const separatorIndex = qualified?.indexOf(":") ?? -1
+  if (!qualified || separatorIndex <= 0) return null
+  return qualified.slice(0, separatorIndex)
+}
+
+type ChatModelDescriptorMatch = {
+  descriptor: ModelDescriptor
+  modelId: string
+  baseModelId: string
+  provider: string | null
+  providerQualifiedModelId: string | null
+}
+
+function describeChatModelDescriptor(
+  descriptor: ModelDescriptor
+): ChatModelDescriptorMatch | null {
+  const modelId = normalizeAvailableModelId(descriptor)
+  if (!modelId) return null
+
+  const provider =
+    normalizeProviderKey(descriptor) ??
+    providerFromQualifiedChatModelId(modelId)
+  const baseModelId = normalizeBaseChatModelId(modelId)
+  const providerQualifiedModelId =
+    provider && baseModelId ? `${provider}:${baseModelId}` : null
+
+  return {
+    descriptor,
+    modelId,
+    baseModelId,
+    provider,
+    providerQualifiedModelId
+  }
+}
+
+function selectedModelCandidateIds(
+  selectedModel: string | null | undefined
+): Set<string> {
+  const normalized = normalizeChatModelId(selectedModel)
+  const providerQualified = normalizeProviderQualifiedChatModelId(selectedModel)
+  const baseModelId = normalizeBaseChatModelId(selectedModel)
+
+  return new Set(
+    [normalized, providerQualified, baseModelId].filter(Boolean) as string[]
+  )
+}
+
+function findMatchingChatModelDescriptor(
+  selectedModel: string,
+  availableModels: ModelDescriptor[]
+): ChatModelDescriptorMatch | null {
+  const descriptors = availableModels
+    .map(describeChatModelDescriptor)
+    .filter((descriptor): descriptor is ChatModelDescriptorMatch =>
+      Boolean(descriptor)
+    )
+  const selectedProviderQualified =
+    normalizeProviderQualifiedChatModelId(selectedModel)
+  const selectedProvider = providerFromQualifiedChatModelId(selectedModel)
+  const selectedBaseModelId = normalizeBaseChatModelId(selectedModel)
+  const selectedCandidates = selectedModelCandidateIds(selectedModel)
+
+  const exactModelIdMatches = descriptors.filter(
+    (descriptor) => descriptor.modelId === selectedModel
+  )
+  if (exactModelIdMatches.length > 0) {
+    return (
+      exactModelIdMatches.find((descriptor) =>
+        isUsableChatModelDescriptor(descriptor.descriptor)
+      ) ??
+      exactModelIdMatches[0] ??
+      null
+    )
   }
 
-  return normalizeChatModelId(normalized.slice(separatorIndex + 1).trim())
+  if (selectedProvider && selectedProviderQualified) {
+    const exactProviderMatches = descriptors.filter(
+      (descriptor) =>
+        descriptor.provider === selectedProvider &&
+        descriptor.baseModelId === selectedBaseModelId
+    )
+    if (exactProviderMatches.length > 0) {
+      return (
+        exactProviderMatches.find((descriptor) =>
+          isUsableChatModelDescriptor(descriptor.descriptor)
+        ) ??
+        exactProviderMatches[0] ??
+        null
+      )
+    }
+
+    const providerSpecificConflict = descriptors.some(
+      (descriptor) =>
+        descriptor.baseModelId === selectedBaseModelId &&
+        Boolean(descriptor.provider)
+    )
+    if (providerSpecificConflict) return null
+
+    return (
+      descriptors.find(
+        (descriptor) =>
+          descriptor.baseModelId === selectedBaseModelId && !descriptor.provider
+      ) ?? null
+    )
+  }
+
+  const matchingDescriptors = descriptors.filter((descriptor) =>
+      [descriptor.modelId, descriptor.baseModelId, descriptor.providerQualifiedModelId]
+        .filter(Boolean)
+        .some((candidate) => selectedCandidates.has(candidate as string))
+  )
+  return (
+    matchingDescriptors.find((descriptor) =>
+      isUsableChatModelDescriptor(descriptor.descriptor)
+    ) ??
+    matchingDescriptors[0] ??
+    null
+  )
+}
+
+const buildChatModelUsabilityResult = (
+  status: ChatModelUsabilityStatus,
+  options: Partial<Omit<ChatModelUsability, "status">> = {}
+): ChatModelUsability => ({
+  status,
+  canSend: status === "ready" || status === "degraded",
+  selectedModelId: null,
+  providerQualifiedModelId: null,
+  matchedModelId: null,
+  matchedProvider: null,
+  recommendedAction: null,
+  detailReason: null,
+  ...options
+})
+
+export function buildChatModelUsability({
+  isServerConnected = true,
+  selectedModel,
+  availableModels,
+  modelsLoading = false,
+  allowDegradedSend = false,
+  serverDegraded = false
+}: ChatModelUsabilityInput): ChatModelUsability {
+  const normalizedSelectedModel = normalizeChatModelId(selectedModel)
+  const selectedModelId = normalizedSelectedModel || null
+  const providerQualifiedModelId =
+    normalizeProviderQualifiedChatModelId(selectedModel) ?? null
+
+  if (!isServerConnected) {
+    return buildChatModelUsabilityResult("no_server", {
+      canSend: false,
+      selectedModelId,
+      providerQualifiedModelId,
+      recommendedAction: "open-server-settings"
+    })
+  }
+
+  if (!selectedModelId) {
+    return buildChatModelUsabilityResult("no_selection", {
+      canSend: false,
+      recommendedAction: "open-model-settings"
+    })
+  }
+
+  if (modelsLoading || !Array.isArray(availableModels)) {
+    return buildChatModelUsabilityResult("loading", {
+      canSend: false,
+      selectedModelId,
+      providerQualifiedModelId,
+      recommendedAction: "retry"
+    })
+  }
+
+  const callableModels = availableModels.filter((model) =>
+    isUsableChatModelDescriptor(model)
+  )
+
+  if (
+    isAutoModelId(selectedModelId) ||
+    isAutoModelId(normalizeBaseChatModelId(selectedModelId))
+  ) {
+    if (callableModels.length === 0) {
+      return buildChatModelUsabilityResult("no_models", {
+        canSend: false,
+        selectedModelId,
+        providerQualifiedModelId,
+        recommendedAction: "open-model-settings"
+      })
+    }
+
+    if (serverDegraded) {
+      return buildChatModelUsabilityResult("degraded", {
+        canSend: allowDegradedSend,
+        selectedModelId,
+        providerQualifiedModelId,
+        recommendedAction: allowDegradedSend ? null : "retry",
+        detailReason: "server-degraded"
+      })
+    }
+
+    return buildChatModelUsabilityResult("ready", {
+      selectedModelId,
+      providerQualifiedModelId
+    })
+  }
+
+  const matchedDescriptor = findMatchingChatModelDescriptor(
+    selectedModelId,
+    availableModels
+  )
+
+  if (!matchedDescriptor) {
+    return buildChatModelUsabilityResult(
+      callableModels.length > 0 ? "selected_missing" : "no_models",
+      {
+        canSend: false,
+        selectedModelId,
+        providerQualifiedModelId,
+        recommendedAction: "open-model-settings"
+      }
+    )
+  }
+
+  const records = getChatModelDescriptorRecords(matchedDescriptor.descriptor)
+  const configured = readConfiguredFlagFromRecords(records)
+  const catalogOnly = readCatalogOnlyFlagFromRecords(records)
+  const matchedFields = {
+    selectedModelId,
+    providerQualifiedModelId,
+    matchedModelId: matchedDescriptor.baseModelId || matchedDescriptor.modelId,
+    matchedProvider: matchedDescriptor.provider
+  }
+
+  if (configured === false) {
+    return buildChatModelUsabilityResult("provider_unconfigured", {
+      ...matchedFields,
+      canSend: false,
+      recommendedAction: "open-model-settings",
+      detailReason: "provider-unconfigured"
+    })
+  }
+
+  if (
+    catalogOnly === true ||
+    !isUsableChatModelDescriptor(matchedDescriptor.descriptor)
+  ) {
+    return buildChatModelUsabilityResult("model_unavailable", {
+      ...matchedFields,
+      canSend: false,
+      recommendedAction: "open-model-settings",
+      detailReason: catalogOnly === true ? "catalog-only" : "model-unavailable"
+    })
+  }
+
+  if (serverDegraded) {
+    return allowDegradedSend
+      ? buildChatModelUsabilityResult("degraded", {
+          ...matchedFields,
+          canSend: true,
+          detailReason: "server-degraded"
+        })
+      : buildChatModelUsabilityResult("degraded", {
+          ...matchedFields,
+          canSend: false,
+          recommendedAction: "retry",
+          detailReason: "server-degraded"
+        })
+  }
+
+  return buildChatModelUsabilityResult("ready", matchedFields)
 }
 
 export function buildAvailableChatModelIds(

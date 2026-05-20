@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildCharacterChatReadiness,
   buildAvailableChatModelIds,
+  buildChatModelUsability,
   findUnavailableChatModel,
   getCharacterChatReadinessCopy,
   normalizeChatModelId
@@ -203,6 +204,587 @@ describe("chat model availability utilities", () => {
     )
 
     expect(unavailable).toBeNull()
+  })
+})
+
+describe("chat model usability", () => {
+  it("reports loading while model catalog data is hydrating", () => {
+    expect(
+      buildChatModelUsability({
+        isServerConnected: true,
+        selectedModel: "gpt-4o",
+        availableModels: null,
+        modelsLoading: true
+      })
+    ).toMatchObject({
+      status: "loading",
+      canSend: false,
+      selectedModelId: "gpt-4o",
+      recommendedAction: "retry"
+    })
+  })
+
+  it("reports no_server before evaluating model availability", () => {
+    expect(
+      buildChatModelUsability({
+        isServerConnected: false,
+        selectedModel: "gpt-4o",
+        availableModels: [{ model: "gpt-4o", is_configured: true }]
+      })
+    ).toMatchObject({
+      status: "no_server",
+      canSend: false,
+      selectedModelId: "gpt-4o",
+      recommendedAction: "open-server-settings"
+    })
+  })
+
+  it("reports no_selection for null and blank selected models", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: null,
+        availableModels: [{ model: "gpt-4o", is_configured: true }]
+      })
+    ).toMatchObject({
+      status: "no_selection",
+      canSend: false,
+      selectedModelId: null,
+      recommendedAction: "open-model-settings"
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "   ",
+        availableModels: [{ model: "gpt-4o", is_configured: true }]
+      })
+    ).toMatchObject({
+      status: "no_selection",
+      canSend: false,
+      selectedModelId: null
+    })
+  })
+
+  it("reports no_models when no callable model exists and the selected model has no specific descriptor", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gpt-4o",
+        availableModels: [
+          {
+            id: "claude-3-5-sonnet",
+            model: "tldw:claude-3-5-sonnet",
+            provider: "anthropic",
+            provider_is_configured: false
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "no_models",
+      canSend: false,
+      matchedModelId: null,
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("reports selected_missing when callable models exist but the selected model is absent", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "missing-model",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "selected_missing",
+      canSend: false,
+      matchedModelId: null,
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("reports provider_unconfigured for a known selected model whose provider flags are false", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "openai:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false,
+            provider_is_configured: false,
+            catalog_only: false
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "provider_unconfigured",
+      canSend: false,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai",
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("reports model_unavailable for a selected catalog-only model", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "openai:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true,
+            provider_is_configured: true,
+            catalog_only: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "model_unavailable",
+      canSend: false,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai",
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("reports ready for callable base and provider-qualified selections", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      selectedModelId: "gpt-4o",
+      providerQualifiedModelId: null,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai",
+      recommendedAction: null
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "openai:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      selectedModelId: "openai:gpt-4o",
+      providerQualifiedModelId: "openai:gpt-4o",
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai"
+    })
+  })
+
+  it("prefers a callable duplicate base descriptor over an earlier unusable descriptor", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false
+          } as any,
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "ollama",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "ollama"
+    })
+  })
+
+  it("prefers a callable same-provider duplicate for provider-qualified selections", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "openai:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false
+          } as any,
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai"
+    })
+  })
+
+  it("matches colon-tagged local model IDs without treating the family as a provider", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gemma3:1b",
+        availableModels: [
+          {
+            id: "gemma3:1b",
+            model: "tldw:gemma3:1b",
+            provider: "ollama",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gemma3:1b",
+      matchedProvider: "ollama"
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "ollama:gemma3:1b",
+        availableModels: [
+          {
+            id: "gemma3:1b",
+            model: "tldw:gemma3:1b",
+            provider: "ollama",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gemma3:1b",
+      matchedProvider: "ollama"
+    })
+  })
+
+  it("does not strip an unknown colon prefix from local model tags", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gemma3:1b",
+        availableModels: [
+          {
+            id: "1b",
+            model: "tldw:1b",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "selected_missing",
+      canSend: false,
+      matchedModelId: null
+    })
+  })
+
+  it("matches backend provider aliases against canonical provider-qualified selections", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "custom-openai-api:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "custom_openai_api",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "custom-openai-api"
+    })
+  })
+
+  it("matches selected provider aliases without treating local model tags as providers", () => {
+    const cases = [
+      {
+        selectedModel: "customopenai:gpt-4o",
+        descriptorProvider: "custom_openai_api",
+        expectedProvider: "custom-openai-api"
+      },
+      {
+        selectedModel: "localllm:mistral-7b",
+        descriptorProvider: "local_llm",
+        expectedProvider: "local-llm"
+      },
+      {
+        selectedModel: "llama_cpp:llama3.1:8b",
+        descriptorProvider: "llama-cpp",
+        expectedProvider: "llama.cpp"
+      }
+    ]
+
+    for (const testCase of cases) {
+      expect(
+        buildChatModelUsability({
+          selectedModel: testCase.selectedModel,
+          availableModels: [
+            {
+              id: testCase.selectedModel.slice(
+                testCase.selectedModel.indexOf(":") + 1
+              ),
+              provider: testCase.descriptorProvider,
+              is_configured: true
+            } as any
+          ]
+        })
+      ).toMatchObject({
+        status: "ready",
+        canSend: true,
+        matchedProvider: testCase.expectedProvider
+      })
+    }
+  })
+
+  it("allows unknown provider-qualified selections to match an unqualified base descriptor only when no provider-specific descriptor conflicts", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "local:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      matchedModelId: "gpt-4o",
+      matchedProvider: null
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "local:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "selected_missing",
+      canSend: false,
+      matchedModelId: null
+    })
+  })
+
+  it("preserves auto model sentinel readiness semantics", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "auto",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "ready",
+      canSend: true,
+      selectedModelId: "auto",
+      matchedModelId: null
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "auto",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "no_models",
+      canSend: false
+    })
+  })
+
+  it("applies degraded send policy to auto model selection", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "auto",
+        serverDegraded: true,
+        allowDegradedSend: true,
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "degraded",
+      canSend: true,
+      selectedModelId: "auto",
+      detailReason: "server-degraded"
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "auto",
+        serverDegraded: true,
+        allowDegradedSend: false,
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "degraded",
+      canSend: false,
+      selectedModelId: "auto",
+      recommendedAction: "retry",
+      detailReason: "server-degraded"
+    })
+  })
+
+  it("only allows degraded sends when explicitly configured", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gpt-4o",
+        serverDegraded: true,
+        allowDegradedSend: true,
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "degraded",
+      canSend: true,
+      detailReason: "server-degraded"
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "gpt-4o",
+        serverDegraded: true,
+        allowDegradedSend: false,
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "degraded",
+      canSend: false,
+      matchedModelId: "gpt-4o",
+      recommendedAction: "retry",
+      detailReason: "server-degraded"
+    })
+  })
+
+  it("keeps model-specific blockers ahead of degraded server policy", () => {
+    expect(
+      buildChatModelUsability({
+        selectedModel: "openai:gpt-4o",
+        serverDegraded: true,
+        allowDegradedSend: false,
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "provider_unconfigured",
+      canSend: false,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai",
+      detailReason: "provider-unconfigured"
+    })
+
+    expect(
+      buildChatModelUsability({
+        selectedModel: "openai:gpt-4o",
+        serverDegraded: true,
+        allowDegradedSend: true,
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: true,
+            catalog_only: true
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "model_unavailable",
+      canSend: false,
+      matchedModelId: "gpt-4o",
+      matchedProvider: "openai",
+      detailReason: "catalog-only"
+    })
   })
 })
 

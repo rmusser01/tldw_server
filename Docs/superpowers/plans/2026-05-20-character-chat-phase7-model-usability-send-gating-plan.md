@@ -107,7 +107,7 @@ When a selected model matches a descriptor, return the descriptor-specific statu
 - Read: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
 - Update: existing Backlog task for the implementation slice
 
-- [ ] **Step 1: Confirm branch and task scope**
+- [x] **Step 1: Confirm branch and task scope**
 
 Run:
 
@@ -117,11 +117,11 @@ git status --short --branch
 
 Expected: implementation branch is based on latest `dev`; unrelated untracked files are left untouched.
 
-- [ ] **Step 2: Create or update the implementation Backlog task**
+- [x] **Step 2: Create or update the implementation Backlog task**
 
 Use Backlog MCP or CLI. Reference this plan and the PRD. The task scope is production implementation, not this planning task.
 
-- [ ] **Step 3: Run focused baseline tests**
+- [x] **Step 3: Run focused baseline tests**
 
 Run from `apps/tldw-frontend`:
 
@@ -143,7 +143,7 @@ Expected current behavior to verify before implementation: a contradictory model
 - Modify: `apps/packages/ui/src/utils/chat-model-availability.ts`
 - Test: `apps/packages/ui/src/utils/__tests__/chat-model-availability.test.ts`
 
-- [ ] **Step 1: Write failing tests for every usability status**
+- [x] **Step 1: Write failing tests for every usability status**
 
 Add a new `describe("chat model usability", () => { ... })` block:
 
@@ -186,7 +186,7 @@ Also add tests for:
 - Provider-qualified fallback: `openai:gpt-4o` matches a descriptor with base `gpt-4o` and provider `openai`.
 - Unknown provider-qualified fallback: `local:gpt-4o` can match base `gpt-4o` only when no provider-specific descriptor conflicts.
 
-- [ ] **Step 2: Run the focused utility test and verify red**
+- [x] **Step 2: Run the focused utility test and verify red**
 
 Run from `apps/tldw-frontend`:
 
@@ -196,7 +196,7 @@ bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.
 
 Expected: fails because `buildChatModelUsability` is not implemented.
 
-- [ ] **Step 3: Implement descriptor matching helpers**
+- [x] **Step 3: Implement descriptor matching helpers**
 
 In `chat-model-availability.ts`, keep the existing normalization helpers and add small private helpers:
 
@@ -225,7 +225,7 @@ function selectedModelCandidateIds(selectedModel: string | null | undefined): Se
 
 Keep these helpers private unless tests need a public contract. Do not duplicate ID parsing in React components.
 
-- [ ] **Step 4: Implement `buildChatModelUsability`**
+- [x] **Step 4: Implement `buildChatModelUsability`**
 
 Add an exported function with this input shape:
 
@@ -248,7 +248,7 @@ Implementation notes:
 - Preserve `AUTO_CHAT_MODEL_ID` semantics. If the selected model is `auto`, return `ready` when at least one callable model exists; return `no_models` when none exists.
 - The function must never make network calls.
 
-- [ ] **Step 5: Run utility tests and verify green**
+- [x] **Step 5: Run utility tests and verify green**
 
 Run:
 
@@ -258,7 +258,7 @@ bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.
 
 Expected: all tests in this file pass.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add apps/packages/ui/src/utils/chat-model-availability.ts apps/packages/ui/src/utils/__tests__/chat-model-availability.test.ts
