@@ -270,12 +270,20 @@ export type RunStatus =
   | "failed"
   | "cancelled"
 
+export type RunStatsValue =
+  | number
+  | string
+  | boolean
+  | null
+  | Record<string, unknown>
+  | unknown[]
+
 export interface RunStats {
   items_found?: number
   items_ingested?: number
   items_filtered?: number
   items_errored?: number
-  [key: string]: number | undefined
+  [key: string]: RunStatsValue | undefined
 }
 
 export interface WatchlistRun {
@@ -295,7 +303,7 @@ export interface RunDetailResponse {
   status: string
   started_at?: string | null
   finished_at?: string | null
-  stats: Record<string, number>
+  stats: Record<string, RunStatsValue>
   filter_tallies?: Record<string, number> | null
   error_msg?: string | null
   log_text?: string | null

@@ -80,6 +80,18 @@ describe("watchlists overview service", () => {
         created_at: "2026-02-18T00:00:00Z"
       })
     ).toBe("unknown")
+    expect(
+      classifySourceHealth({
+        id: 5,
+        name: "E",
+        url: "https://e.example",
+        source_type: "rss",
+        active: true,
+        tags: [],
+        status: "error:403",
+        created_at: "2026-02-18T00:00:00Z"
+      })
+    ).toBe("degraded")
   })
 
   it("picks earliest next run from active jobs only", () => {
@@ -165,6 +177,7 @@ describe("watchlists overview service", () => {
         ],
         total: 1
       })
+      .mockResolvedValueOnce({ items: [], total: 0 })
     mocks.fetchWatchlistOutputs.mockResolvedValueOnce({
       items: [
         {
@@ -216,10 +229,13 @@ describe("watchlists overview service", () => {
     expect(result.runs.running).toBe(1)
     expect(result.runs.pending).toBe(2)
     expect(result.runs.failed).toBe(1)
+    expect(result.runs.sourceErrors).toBe(0)
+    expect(result.runs.zeroItemSourceErrors).toBe(0)
     expect(result.outputs).toEqual({
       total: 2,
       expired: 1,
       deliveryIssues: 1,
+      audioIssues: 0,
       attention: 2
     })
     expect(result.health.attention).toEqual({
@@ -243,6 +259,128 @@ describe("watchlists overview service", () => {
         status: "failed"
       })
     ])
+    expect(result.systemHealth).toBe("degraded")
+  })
+
+  it("marks source-error zero-item runs and failed audio outputs as attention", async () => {
+    mocks.fetchWatchlistSources.mockResolvedValueOnce({
+      items: [
+        {
+          id: 1,
+          name: "Blocked Source",
+          url: "https://blocked.example/rss",
+          source_type: "rss",
+          active: true,
+          tags: [],
+          status: "error:403",
+          created_at: "2026-02-18T00:00:00Z"
+        }
+      ],
+      total: 1,
+      has_more: false
+    })
+    mocks.fetchWatchlistJobs.mockResolvedValueOnce({
+      items: [
+        {
+          id: 10,
+          name: "Digest",
+          scope: {},
+          active: true,
+          created_at: "2026-02-18T00:00:00Z",
+          next_run_at: "2026-02-20T08:00:00Z"
+        }
+      ],
+      total: 1,
+      has_more: false
+    })
+    mocks.fetchScrapedItems.mockResolvedValueOnce({ items: [], total: 0 })
+    mocks.fetchWatchlistContentAlerts.mockResolvedValueOnce({ items: [], total: 0 })
+    mocks.fetchWatchlistRuns
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: 101,
+            job_id: 10,
+            status: "succeeded",
+            started_at: "2026-02-18T10:00:00Z",
+            finished_at: "2026-02-18T10:01:00Z",
+            stats: {
+              items_found: 0,
+              items_ingested: 0,
+              source_errors: 1,
+              source_statuses: [
+                {
+                  source_id: 1,
+                  name: "Blocked Source",
+                  status: "error:403",
+                  error: "HTTP 403",
+                  items_found: 0,
+                  items_ingested: 0
+                }
+              ]
+            } as any
+          }
+        ],
+        total: 1,
+        has_more: false
+      })
+    mocks.fetchWatchlistOutputs.mockResolvedValueOnce({
+      items: [
+        {
+          id: 701,
+          run_id: 101,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "enqueue_failed"
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:05:00Z"
+        },
+        {
+          id: 702,
+          run_id: 101,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio: {
+              requested: true,
+              status: "skipped"
+            }
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:06:00Z"
+        }
+      ],
+      total: 2,
+      has_more: false
+    })
+
+    const result = await fetchWatchlistsOverviewData({ watchlist_id: 42 })
+
+    expect(result.sources.degraded).toBe(1)
+    expect(result.runs.failed).toBe(0)
+    expect(result.runs.sourceErrors).toBe(1)
+    expect(result.runs.zeroItemSourceErrors).toBe(1)
+    expect(result.outputs.audioIssues).toBe(2)
+    expect(result.health.statuses.sources).toBe("attention")
+    expect(result.health.statuses.runs).toBe("attention")
+    expect(result.health.statuses.outputs).toBe("attention")
+    expect(result.health.attention).toEqual({
+      total: 4,
+      sources: 1,
+      jobs: 0,
+      runs: 1,
+      outputs: 2
+    })
     expect(result.systemHealth).toBe("degraded")
   })
 
@@ -315,6 +453,11 @@ describe("watchlists overview service", () => {
       q: "failed",
       page: 1,
       size: 5
+    })
+    expect(mocks.fetchWatchlistRuns).toHaveBeenNthCalledWith(4, {
+      watchlist_id: 42,
+      page: 1,
+      size: 10
     })
     expect(mocks.fetchWatchlistOutputs).toHaveBeenCalledWith({
       watchlist_id: 42,

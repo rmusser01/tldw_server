@@ -94,12 +94,15 @@ export interface WatchlistsOverviewData {
     running: number
     pending: number
     failed: number
+    sourceErrors?: number
+    zeroItemSourceErrors?: number
     recentFailed: WatchlistsOverviewFailedRun[]
   }
   outputs: {
     total: number
     expired: number
     deliveryIssues: number
+    audioIssues?: number
     attention: number
   }
   health: WatchlistsOverviewHealthModel
@@ -176,6 +179,48 @@ const hasDeliveryIssue = (metadata: unknown): boolean => {
   return false
 }
 
+const hasAudioOutputIssue = (metadata: unknown): boolean => {
+  const record = asRecord(metadata)
+  if (!record) return false
+  const audio = asRecord(record.audio)
+  const requested =
+    record.audio_briefing_requested === true ||
+    record.generate_audio === true ||
+    audio?.requested === true ||
+    audio?.enabled === true
+  if (!requested) return false
+  const normalized = normalizeStatus(
+    (record.audio_briefing_status as string | null | undefined) ||
+      (record.audio_status as string | null | undefined) ||
+      (audio?.status as string | null | undefined)
+  )
+  return (
+    normalized === "enqueue failed" ||
+    normalized === "skipped" ||
+    normalized === "failed" ||
+    normalized === "error"
+  )
+}
+
+const getSourceErrorCount = (run: Pick<WatchlistRun, "stats">): number => {
+  const stats = asRecord(run.stats)
+  if (!stats) return 0
+  const explicitCount = asFiniteNumber(stats.source_errors, 0)
+  if (explicitCount > 0) return explicitCount
+  const statuses = stats.source_statuses
+  if (!Array.isArray(statuses)) return 0
+  return statuses.filter((entry) => {
+    const normalized = String(asRecord(entry)?.status || "").trim().toLowerCase()
+    return normalized.startsWith("error")
+  }).length
+}
+
+const isZeroItemSourceErrorRun = (run: Pick<WatchlistRun, "stats">): boolean => {
+  if (getSourceErrorCount(run) <= 0) return false
+  const stats = asRecord(run.stats)
+  return asFiniteNumber(stats?.items_ingested, 0) <= 0
+}
+
 const fetchAllPages = async <T>(
   fetchPage: (params: { page: number; size: number }) => Promise<PaginatedResponse<T>>
 ): Promise<{ items: T[]; total: number }> => {
@@ -210,6 +255,7 @@ export const classifySourceHealth = (source: WatchlistSource): SourceHealthBucke
   if (!source.active) return "inactive"
   const normalized = normalizeStatus(source.status)
   if (!normalized) return "unknown"
+  if (normalized.startsWith("error")) return "degraded"
   if (HEALTHY_SOURCE_STATUSES.has(normalized)) return "healthy"
   if (DEGRADED_SOURCE_STATUSES.has(normalized)) return "degraded"
   return "unknown"
@@ -236,9 +282,10 @@ export const getEarliestNextRunAt = (
 
 const classifyOutputsAttention = (
   outputs: Pick<WatchlistOutput, "id" | "expired" | "metadata">[]
-): { expired: number; deliveryIssues: number; attention: number } => {
+): { expired: number; deliveryIssues: number; audioIssues: number; attention: number } => {
   let expired = 0
   let deliveryIssues = 0
+  let audioIssues = 0
   const attentionIds = new Set<number>()
 
   outputs.forEach((output) => {
@@ -263,11 +310,16 @@ const classifyOutputsAttention = (
       deliveryIssues += 1
       attentionIds.add(output.id)
     }
+    if (hasAudioOutputIssue(output.metadata)) {
+      audioIssues += 1
+      attentionIds.add(output.id)
+    }
   })
 
   return {
     expired,
     deliveryIssues,
+    audioIssues,
     attention: attentionIds.size
   }
 }
@@ -275,7 +327,7 @@ const classifyOutputsAttention = (
 export const buildOverviewHealthModel = (params: {
   sources: { total: number; degraded: number; inactive: number }
   jobs: { total: number; active: number; attention: number }
-  runs: { running: number; pending: number; failed: number }
+  runs: { running: number; pending: number; failed: number; attention?: number }
   outputs: { total: number; attention: number }
 }): WatchlistsOverviewHealthModel => {
   const sourcesStatus: OverviewHealthStatus =
@@ -297,7 +349,7 @@ export const buildOverviewHealthModel = (params: {
           : "unknown"
 
   const runsStatus: OverviewHealthStatus =
-    params.runs.failed > 0
+    (params.runs.attention ?? params.runs.failed) > 0
       ? "attention"
       : params.runs.running + params.runs.pending > 0
         ? "healthy"
@@ -313,7 +365,7 @@ export const buildOverviewHealthModel = (params: {
   const attention: WatchlistsOverviewAttention = {
     sources: Math.max(0, params.sources.degraded),
     jobs: Math.max(0, params.jobs.attention),
-    runs: Math.max(0, params.runs.failed),
+    runs: Math.max(0, params.runs.attention ?? params.runs.failed),
     outputs: Math.max(0, params.outputs.attention),
     total: 0
   }
@@ -365,6 +417,7 @@ export const fetchWatchlistsOverviewData = async (
     runningResult,
     pendingResult,
     failedResult,
+    recentRunsResult,
     outputsResult
   ] = await Promise.all([
     fetchAllPages((pageParams) => fetchWatchlistSources({ ...scopedParams, ...pageParams })),
@@ -374,6 +427,7 @@ export const fetchWatchlistsOverviewData = async (
     fetchWatchlistRuns({ ...scopedParams, q: "running", page: 1, size: 1 }),
     fetchWatchlistRuns({ ...scopedParams, q: "pending", page: 1, size: 1 }),
     fetchWatchlistRuns({ ...scopedParams, q: "failed", page: 1, size: 5 }),
+    fetchWatchlistRuns({ ...scopedParams, page: 1, size: 10 }),
     fetchWatchlistOutputs({ ...scopedParams, page: 1, size: 100 })
   ])
 
@@ -410,6 +464,12 @@ export const fetchWatchlistsOverviewData = async (
   const runningTotal = asFiniteNumber(runningResult.total, 0)
   const pendingTotal = asFiniteNumber(pendingResult.total, 0)
   const failedTotal = asFiniteNumber(failedResult.total, recentFailed.length)
+  const recentRuns = Array.isArray(recentRunsResult.items) ? recentRunsResult.items : []
+  const sourceErrorRuns = recentRuns.filter((run) => getSourceErrorCount(run) > 0)
+  const zeroItemSourceErrorRuns = sourceErrorRuns.filter(isZeroItemSourceErrorRun)
+  const sourceErrorRunAttention = sourceErrorRuns.filter(
+    (run) => normalizeStatus(run.status) !== "failed"
+  ).length
   const outputs = Array.isArray(outputsResult.items) ? outputsResult.items : []
   const outputsTotals = classifyOutputsAttention(outputs)
   const outputsTotal = asFiniteNumber(outputsResult.total, outputs.length)
@@ -428,7 +488,8 @@ export const fetchWatchlistsOverviewData = async (
     runs: {
       running: runningTotal,
       pending: pendingTotal,
-      failed: failedTotal
+      failed: failedTotal,
+      attention: failedTotal + sourceErrorRunAttention
     },
     outputs: {
       total: outputsTotal,
@@ -464,12 +525,15 @@ export const fetchWatchlistsOverviewData = async (
       running: runningTotal,
       pending: pendingTotal,
       failed: failedTotal,
+      sourceErrors: sourceErrorRuns.length,
+      zeroItemSourceErrors: zeroItemSourceErrorRuns.length,
       recentFailed
     },
     outputs: {
       total: outputsTotal,
       expired: outputsTotals.expired,
       deliveryIssues: outputsTotals.deliveryIssues,
+      audioIssues: outputsTotals.audioIssues,
       attention: outputsTotals.attention
     },
     health,

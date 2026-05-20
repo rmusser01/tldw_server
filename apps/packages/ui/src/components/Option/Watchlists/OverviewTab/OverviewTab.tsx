@@ -1326,7 +1326,7 @@ export const OverviewTab: React.FC = () => {
             {data.systemHealth === "degraded"
               ? t(
                   "watchlists:overview.health.degradedDescription",
-                  "Some sources or recent runs show failures. Open failed runs to investigate."
+                  "Some sources, recent runs, or reports need review. Open the linked surface to investigate."
                 )
               : t(
                   "watchlists:overview.health.healthyDescription",

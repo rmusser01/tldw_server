@@ -104,6 +104,9 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
 
   const feedsCount = data?.sources.total ?? 0
   const monitorsActive = data?.jobs.active ?? 0
+  const failedRuns = data?.runs.failed ?? 0
+  const sourceErrorRuns = data?.runs.sourceErrors ?? 0
+  const zeroItemSourceErrorRuns = data?.runs.zeroItemSourceErrors ?? 0
   const lastCheckedAt = data?.runs.running > 0
     ? t("watchlists:healthBar.runningNow", "running now")
     : data?.jobs.nextRunAt
@@ -125,6 +128,20 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
     summaryParts.push(
       t("watchlists:healthBar.monitorsActive", "{{count}} monitors active", {
         count: monitorsActive
+      })
+    )
+  }
+  if (failedRuns > 0) {
+    summaryParts.push(
+      t("watchlists:healthBar.runsFailed", "{{count}} failed", {
+        count: failedRuns
+      })
+    )
+  }
+  if (sourceErrorRuns > 0) {
+    summaryParts.push(
+      t("watchlists:healthBar.sourceErrorRuns", "{{count}} source-error runs", {
+        count: sourceErrorRuns
       })
     )
   }
@@ -268,6 +285,10 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                     ? t("watchlists:healthBar.runsFailed", "{{count}} failed", {
                         count: data.runs.failed
                       })
+                    : sourceErrorRuns > 0
+                      ? t("watchlists:healthBar.runsSourceErrors", "{{count}} source errors", {
+                          count: sourceErrorRuns
+                        })
                     : t("watchlists:healthBar.runsOk", "OK")
               }
               status={overviewHealth?.statuses.runs}
@@ -276,6 +297,12 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                   ? t("watchlists:healthBar.runsFailedDetail", "{{count}} recent failures", {
                       count: data.runs.failed
                     })
+                  : zeroItemSourceErrorRuns > 0
+                    ? t(
+                        "watchlists:healthBar.runsZeroItemSourceErrors",
+                        "{{count}} zero-item source-error runs",
+                        { count: zeroItemSourceErrorRuns }
+                      )
                   : undefined
               }
               onClick={() => goToTab("runs")}
@@ -308,7 +335,7 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                   variant="danger"
                   onClick={() => goToTab("runs")}
                 >
-                  {t("watchlists:overview.attention.runs", "Failed activity runs ({{count}})", {
+                  {t("watchlists:healthBar.openActivityFailures", "Open Activity ({{count}} need review)", {
                     count: overviewHealth?.attention?.runs ?? 0
                   })}
                 </AttentionBadgeButton>
@@ -318,7 +345,7 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                   variant="warning"
                   onClick={() => goToTab("outputs")}
                 >
-                  {t("watchlists:overview.attention.outputs", "Reports with delivery issues ({{count}})", {
+                  {t("watchlists:overview.attention.outputs", "Reports need review ({{count}})", {
                     count: overviewHealth?.attention?.outputs ?? 0
                   })}
                 </AttentionBadgeButton>

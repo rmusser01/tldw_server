@@ -35,6 +35,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -142,6 +143,33 @@ async def _maybe_await(value):
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+_SENSITIVE_ERROR_TOKEN_RE = re.compile(
+    r"(?i)\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s&]+"
+)
+_AUTHORIZATION_BEARER_RE = re.compile(
+    r"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+"
+)
+_BEARER_SECRET_RE = re.compile(
+    r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"
+)
+
+
+def _safe_source_error_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = _AUTHORIZATION_BEARER_RE.sub("Authorization: Bearer [redacted]", text)
+    text = _BEARER_SECRET_RE.sub("Bearer [redacted]", text)
+    text = _SENSITIVE_ERROR_TOKEN_RE.sub("[redacted]", text)
+    try:
+        parsed = urlparse(text)
+        if parsed.scheme and parsed.netloc:
+            text = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+        pass
+    return text[:500]
 
 
 def _ingest_watchlist_media(
@@ -750,9 +778,14 @@ async def run_watchlist_job(
         history_pages_total = 0
         history_any_stop = False
         history_used = False
+        source_statuses: list[dict[str, Any]] = []
 
         for src in sources:
             source_companion_events: list[dict[str, Any]] = []
+            source_items_found_start = items_found
+            source_items_ingested_start = items_ingested
+            source_status = "ok"
+            source_error: str | None = None
             if _run_is_cancelled(db, run.id):
                 logger.info(f"watchlists.run_cancelled: stopping run {run.id} before source {getattr(src, 'id', '?')}")
                 break
@@ -762,6 +795,7 @@ async def run_watchlist_job(
                     if not _forums_enabled():
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="forum_disabled")
+                        source_status = "forum_disabled"
                         continue
                     if not test_mode:
                         await asyncio.sleep(_forum_delay_seconds())
@@ -773,6 +807,7 @@ async def run_watchlist_job(
                         defer_dt = _dt.fromisoformat(str(src.defer_until))
                         if now_utc < defer_dt:
                             # still deferred
+                            source_status = "deferred"
                             continue
                         # past due: clear defer
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
@@ -956,6 +991,7 @@ async def run_watchlist_job(
                                 defer_until=defer_until_val,
                                 consec_not_modified=new_count,
                             )
+                        source_status = "not_modified" if defer_until_val is None else f"not_modified_backoff:{secs}"
                         continue
                     if status == 429:
                         # Defer per Retry-After
@@ -965,9 +1001,12 @@ async def run_watchlist_job(
                             until = (datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(seconds=ra)).isoformat()
                             with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                                 db.update_source_scrape_meta(int(src.id), status="deferred", defer_until=until)
+                        source_status = "deferred"
                         continue
                     if status // 100 != 2:
                         # error path — track consecutive errors and apply backoff
+                        source_status = f"error:{status}"
+                        source_error = f"HTTP {status}"
                         with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                             prev_errors = int(getattr(src, "consec_errors", 0) or 0)
                             new_errors = prev_errors + 1
@@ -1308,6 +1347,7 @@ async def run_watchlist_job(
                             urls_to_fetch = [src.url]
 
                     if not urls_to_fetch:
+                        source_status = "skipped:no_urls"
                         continue
 
                     skip_article_fetch = bool(scrape_rules.get("skip_article_fetch")) if isinstance(scrape_rules, dict) else False
@@ -1358,6 +1398,8 @@ async def run_watchlist_job(
                             if prefetch.get("author") and not article.get("author"):
                                 article["author"] = prefetch.get("author")
                         if not article:
+                            source_status = "error:extraction"
+                            source_error = source_error or "No article content extracted"
                             _record_scraped(
                                 status="error",
                                 url=page_url,
@@ -1553,9 +1595,12 @@ async def run_watchlist_job(
                     _apply_feed_retention(collections_db, collections_origin, src)
                 else:
                     # Unknown type - skip
+                    source_status = "skipped:unknown_type"
                     continue
             except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Source processing failed (id={getattr(src, 'id', '?')}): {e}")
+                source_status = "error"
+                source_error = _safe_source_error_text(e) or type(e).__name__
                 with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                     prev_errors = int(getattr(src, "consec_errors", 0) or 0)
                     new_errors = prev_errors + 1
@@ -1572,6 +1617,16 @@ async def run_watchlist_job(
                     if auto_disable:
                         logger.warning(f"watchlists.health: auto-disabled source {src.id} after {new_errors} consecutive errors")
             finally:
+                source_statuses.append(
+                    {
+                        "source_id": int(getattr(src, "id", 0) or 0),
+                        "name": getattr(src, "name", None),
+                        "status": source_status,
+                        "error": source_error,
+                        "items_found": max(0, items_found - source_items_found_start),
+                        "items_ingested": max(0, items_ingested - source_items_ingested_start),
+                    }
+                )
                 if companion_activity_db is not None and source_companion_events:
                     try:
                         companion_activity_db.insert_companion_activity_events_bulk(
@@ -1585,7 +1640,17 @@ async def run_watchlist_job(
                             exc,
                         )
 
-        stats = {"items_found": items_found, "items_ingested": items_ingested}
+        source_errors = sum(
+            1
+            for source_status_entry in source_statuses
+            if str(source_status_entry.get("status") or "").startswith("error")
+        )
+        stats = {
+            "items_found": items_found,
+            "items_ingested": items_ingested,
+            "source_statuses": source_statuses,
+            "source_errors": source_errors,
+        }
         try:
             if filter_stats["filters_matched"]:
                 stats["filters_matched"] = int(filter_stats["filters_matched"])  # type: ignore[assignment]

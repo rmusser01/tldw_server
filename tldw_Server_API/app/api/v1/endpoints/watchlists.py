@@ -4543,14 +4543,15 @@ async def get_run_details(
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             log_text = None
             truncated = False
-    # Build stats for detail view, including filter totals when present
-    detail_stats: dict[str, int] = {
+    # Build stats for detail view, preserving raw stats while adding filter totals when present.
+    detail_stats: dict[str, Any] = dict(stats)
+    detail_stats.update({
         "items_found": items_found,
         "items_ingested": items_ingested,
         "filters_include": 0,
         "filters_exclude": 0,
         "filters_flag": 0,
-    }
+    })
     try:
         if isinstance(stats.get("filters_matched"), int):
             detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
