@@ -32,16 +32,6 @@ import {
 } from "@/utils/quick-ingest-open"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
-import {
-  SELECTED_ASSISTANT_STORAGE_KEY,
-  selectedAssistantStorage,
-  selectedAssistantSyncStorage
-} from "@/utils/selected-assistant-storage"
-import {
-  SELECTED_CHARACTER_STORAGE_KEY,
-  selectedCharacterStorage,
-  selectedCharacterSyncStorage
-} from "@/utils/selected-character-storage"
 import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
@@ -365,23 +355,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   }, [selectedAssistant?.kind])
   const clearRolePlaySelection = React.useCallback(() => {
     setSelectedCharacterId(null)
-    void (async () => {
-      await Promise.all([
-        selectedCharacterStorage
-          .remove(SELECTED_CHARACTER_STORAGE_KEY)
-          .catch(() => {}),
-        selectedCharacterSyncStorage
-          .remove(SELECTED_CHARACTER_STORAGE_KEY)
-          .catch(() => {}),
-        selectedAssistantSyncStorage
-          .remove(SELECTED_ASSISTANT_STORAGE_KEY)
-          .catch(() => {})
-      ])
-      await setSelectedAssistant(null)
-      await selectedAssistantStorage
-        .remove(SELECTED_ASSISTANT_STORAGE_KEY)
-        .catch(() => {})
-    })()
+    void setSelectedAssistant(null)
   }, [setSelectedAssistant, setSelectedCharacterId])
 
   const openQuickIngest = async () => {
