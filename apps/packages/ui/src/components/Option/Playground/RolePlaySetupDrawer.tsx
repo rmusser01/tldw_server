@@ -535,24 +535,32 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
             className="grid gap-2 sm:grid-cols-4">
             {PRESETS.map((preset) => {
               const selected = activeGenerationKey === preset.key
+              const label = String(
+                t(
+                  `playground:presets.${preset.key}.label`,
+                  preset.label
+                )
+              )
               return (
-                <button
+                <label
                   key={preset.key}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => selectGenerationPreset(preset.key)}
-                  className={`rounded-md border px-3 py-2 text-left text-xs transition ${
+                  className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-left text-xs transition ${
                     selected
                       ? "border-primary bg-primary/10 text-primaryStrong"
                       : "border-border bg-surface2 text-text-muted hover:border-primary/50 hover:text-text"
                   }`}>
+                  <input
+                    type="radio"
+                    name="role-play-generation-style"
+                    value={preset.key}
+                    checked={selected}
+                    onChange={() => selectGenerationPreset(preset.key)}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
                   <span className="font-medium">
-                    {t(
-                      `playground:presets.${preset.key}.label`,
-                      preset.label
-                    )}
+                    {label}
                   </span>
-                </button>
+                </label>
               )
             })}
           </div>
