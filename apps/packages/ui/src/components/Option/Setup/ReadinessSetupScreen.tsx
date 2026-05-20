@@ -1,10 +1,8 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
-  Empty,
   Radio,
   Space,
   Tag,
@@ -26,6 +24,7 @@ import type {
   SetupReadinessLane,
   SetupReadinessProfile
 } from "@/services/tldw/setup-readiness"
+import { Alert as DesignSystemAlert, EmptyState } from "@/components/ui"
 
 const { Paragraph, Text, Title } = Typography
 
@@ -250,25 +249,23 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
   if (guard === "remote_setup_blocked") {
     return (
       <section className="mx-auto w-full max-w-5xl px-4 py-6">
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t("setupReadiness.errors.localSetupRequiredTitle", "Local setup required")}
-          description={
-            <Space orientation="vertical" size="small">
-              <span>
-                {error ||
-                  t(
-                    "setupReadiness.errors.localSetupRequiredDescription",
-                    "First-run setup is restricted to local requests."
-                  )}
-              </span>
-              <Button href={fallbackUrl} icon={<ExternalLink className="h-4 w-4" />}>
-                {t("setupReadiness.actions.openBackendSetup", "Open backend setup")}
-              </Button>
-            </Space>
-          }
-        />
+        >
+          <Space orientation="vertical" size="small">
+            <span>
+              {error ||
+                t(
+                  "setupReadiness.errors.localSetupRequiredDescription",
+                  "First-run setup is restricted to local requests."
+                )}
+            </span>
+            <Button href={fallbackUrl} icon={<ExternalLink className="h-4 w-4" />}>
+              {t("setupReadiness.actions.openBackendSetup", "Open backend setup")}
+            </Button>
+          </Space>
+        </DesignSystemAlert>
       </section>
     )
   }
@@ -299,16 +296,16 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
         </div>
 
         {error && (
-          <Alert
-            type={guard === "admin_required" ? "warning" : "error"}
-            showIcon
+          <DesignSystemAlert
+            variant={guard === "admin_required" ? "warning" : "error"}
             title={
               guard === "admin_required"
                 ? t("setupReadiness.errors.adminRequiredTitle", "Admin access required")
                 : t("setupReadiness.errors.requestFailedTitle", "Readiness request failed")
             }
-            description={errorDescription}
-          />
+          >
+            {errorDescription}
+          </DesignSystemAlert>
         )}
 
         <Card loading={loading} size="small">
@@ -353,8 +350,10 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 </Space>
               </Radio.Group>
             ) : (
-              <Empty
-                description={t(
+              <EmptyState
+                variant="inline"
+                size="sm"
+                title={t(
                   "setupReadiness.profile.empty",
                   "No setup readiness profiles are available."
                 )}
@@ -422,55 +421,53 @@ export const ReadinessSetupScreen: React.FC<ReadinessSetupScreenProps> = ({
                 </div>
               </div>
             ) : (
-              <Alert
-                type="info"
-                showIcon
+              <DesignSystemAlert
+                variant="info"
                 title={t("setupReadiness.preview.reviewTitle", "Review before provisioning")}
-                description={t(
+              >
+                {t(
                   "setupReadiness.preview.reviewDescription",
                   "Select a profile or preview the current selection before running Provision now."
                 )}
-              />
+              </DesignSystemAlert>
             )}
 
             {consequences.length > 0 && (
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 title={t("setupReadiness.consequences.title", "Skipped-lane consequences")}
-                description={renderList(consequences)}
-              />
+              >
+                {renderList(consequences)}
+              </DesignSystemAlert>
             )}
 
             {provisionResult && (
-              <Alert
-                type="success"
-                showIcon
+              <DesignSystemAlert
+                variant="success"
                 title={t("setupReadiness.provision.statusTitle", "Provision status: {{status}}", {
                   status: t(
                     statusKey(provisionResult.operation_status || provisionResult.status),
                     formatStatus(provisionResult.operation_status || provisionResult.status)
                   )
                 })}
-                description={t(
+              >
+                {t(
                   "setupReadiness.provision.description",
                   "Readiness provisioning has started. Refresh or watch the status cards for progress."
                 )}
-              />
+              </DesignSystemAlert>
             )}
 
             {verification && (
-              <Alert
-                type="info"
-                showIcon
+              <DesignSystemAlert
+                variant="info"
                 title={t("setupReadiness.verification.statusTitle", "Verification: {{status}}", {
                   status: t(statusKey(verification.status), formatStatus(verification.status))
                 })}
-                description={
-                  verification.verified_at ||
-                  t("setupReadiness.verification.description", "Verification completed.")
-                }
-              />
+              >
+                {verification.verified_at ||
+                  t("setupReadiness.verification.description", "Verification completed.")}
+              </DesignSystemAlert>
             )}
 
             <Space wrap>

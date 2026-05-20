@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -57,6 +56,7 @@ import {
   toQuickSetupSourcePayload
 } from "./quick-setup"
 import type { JobPreviewResult } from "@/types/watchlists"
+import { Alert as DesignSystemAlert } from "@/components/ui"
 import {
   toPipelineJobCreatePayload,
   toPipelineOutputCreatePayload
@@ -1185,7 +1185,7 @@ export const OverviewTab: React.FC = () => {
       </div>
 
       {error && (
-        <Alert type="error" showIcon title={error} />
+        <DesignSystemAlert variant="error" title={error} />
       )}
 
       {data && (
@@ -1314,26 +1314,24 @@ export const OverviewTab: React.FC = () => {
             </Card>
           )}
 
-          <Alert
-            showIcon
-            type={data.systemHealth === "degraded" ? "warning" : "success"}
+          <DesignSystemAlert
+            variant={data.systemHealth === "degraded" ? "warning" : "success"}
             title={
               data.systemHealth === "degraded"
                 ? t("watchlists:overview.health.degradedTitle", "System requires attention")
                 : t("watchlists:overview.health.healthyTitle", "System healthy")
             }
-            description={
-              data.systemHealth === "degraded"
-                ? t(
-                    "watchlists:overview.health.degradedDescription",
-                    "Some sources or recent runs show failures. Open failed runs to investigate."
-                  )
-                : t(
-                    "watchlists:overview.health.healthyDescription",
-                    "No recent failed runs and source health is stable."
-                  )
-            }
-          />
+          >
+            {data.systemHealth === "degraded"
+              ? t(
+                  "watchlists:overview.health.degradedDescription",
+                  "Some sources or recent runs show failures. Open failed runs to investigate."
+                )
+              : t(
+                  "watchlists:overview.health.healthyDescription",
+                  "No recent failed runs and source health is stable."
+                )}
+          </DesignSystemAlert>
 
           <Card
             size="small"
@@ -1463,28 +1461,25 @@ export const OverviewTab: React.FC = () => {
           )}
 
           {data.sources.total > 0 && data.jobs.total > 0 && (
-            <Alert
-              showIcon
-              type="info"
+            <DesignSystemAlert
+              variant="info"
               title={t("watchlists:overview.setupComplete.title", "Setup complete")}
-              description={
-                data.jobs.nextRunAt
-                  ? t(
-                      "watchlists:overview.setupComplete.nextRunDescription",
-                      "Your next monitor run is {{time}}. New content will appear in Updates and Activity.",
-                      { time: formatRelativeTime(data.jobs.nextRunAt, t) }
-                    )
-                  : t(
-                      "watchlists:overview.setupComplete.runNowDescription",
-                      "Run a monitor from Monitors to generate your first Updates and Activity entries."
-                    )
-              }
-              action={
-                <Button size="small" onClick={handleOpenRuns}>
-                  {t("watchlists:overview.setupComplete.openActivity", "Open Activity")}
-                </Button>
-              }
-            />
+              action={{
+                label: t("watchlists:overview.setupComplete.openActivity", "Open Activity"),
+                onClick: handleOpenRuns
+              }}
+            >
+              {data.jobs.nextRunAt
+                ? t(
+                    "watchlists:overview.setupComplete.nextRunDescription",
+                    "Your next monitor run is {{time}}. New content will appear in Updates and Activity.",
+                    { time: formatRelativeTime(data.jobs.nextRunAt, t) }
+                  )
+                : t(
+                    "watchlists:overview.setupComplete.runNowDescription",
+                    "Run a monitor from Monitors to generate your first Updates and Activity entries."
+                  )}
+            </DesignSystemAlert>
           )}
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
