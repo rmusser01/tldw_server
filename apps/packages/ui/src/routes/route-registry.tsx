@@ -407,6 +407,7 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   { kind: "options", path: "/prompts", element: <OptionPromptsWorkspace /> },
   // Legacy route - redirect to unified Prompts page
   { kind: "options", path: "/prompt-studio", element: <Navigate to="/prompts?tab=studio" replace /> },
+  { kind: "options", path: "/audio", element: <RouteAliasNavigate to="/speech" /> },
   { kind: "options", path: "/tts", element: <OptionTts /> },
   { kind: "options", path: "/stt", element: <OptionStt /> },
   { kind: "options", path: "/speech", element: <OptionSpeech /> },
