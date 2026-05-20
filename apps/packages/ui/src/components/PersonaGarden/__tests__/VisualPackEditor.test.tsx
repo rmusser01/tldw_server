@@ -462,6 +462,73 @@ describe("VisualPackEditor", () => {
     expect(screen.getByTestId("persona-visual-pack-select")).toBeInTheDocument()
   })
 
+  it("groups post-setup Persona Visual controls into workspace sections", async () => {
+    const activePack = makeVisualPack({
+      id: "active-pack",
+      title: "Rendered now",
+      status: "active"
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [activePack], active_pack: activePack })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 404,
+        error: `Unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await screen.findByTestId("persona-visual-management-header")
+    const expectedSections = [
+      ["persona-visual-section-pack-basics", "Rendered now"],
+      ["persona-visual-section-reuse-portability", "Create draft"],
+      ["persona-visual-library-panel", "Personal library"],
+      ["persona-visual-section-assets", "Assets"],
+      ["persona-visual-section-portable-actions", "Portable archive and duplicate actions"],
+      ["persona-visual-section-state-mapping", "State mappings and fallbacks"],
+      ["persona-visual-section-animations", "Animations"],
+      ["persona-visual-section-authored-triggers", "Authored triggers"],
+      ["persona-visual-section-validation-activation", "Validation and activation"],
+      ["persona-visual-section-jobs-review", "Jobs and review"]
+    ]
+
+    for (const [testId, label] of expectedSections) {
+      expect(screen.getByTestId(testId)).toHaveTextContent(label)
+    }
+    expect(screen.getByTestId("persona-visual-upload-button")).toBeInTheDocument()
+    expect(screen.getByTestId("persona-visual-activate-button")).toBeInTheDocument()
+  })
+
   it("does not show setup choices before active pack state is known", async () => {
     const activePack = makeVisualPack({ status: "active" })
     const packsDeferred = deferredResponse<any>()
