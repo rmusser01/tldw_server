@@ -19,7 +19,6 @@ import asyncio
 import contextlib
 import os
 import re
-import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -28,7 +27,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import urljoin
 
-from defusedxml import ElementTree as DET
+from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 import regex
 from loguru import logger
@@ -1749,7 +1748,7 @@ async def fetch_rss_feed(
             return {"status": status, "items": []}
 
         try:
-            root = DET.fromstring(text)
+            root = ET.fromstring(text)
         except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS:
             return {
                 "status": status,
@@ -1869,7 +1868,7 @@ def discover_hub_url(
 
     # Phase 2: Parse XML for <link rel="hub"> and <link rel="self">
     try:
-        root = DET.fromstring(xml_text)
+        root = ET.fromstring(xml_text)
         atom_link_tag = "{http://www.w3.org/2005/Atom}link"
         # Search both direct children and descendants (RSS puts atom:link inside <channel>)
         for ln in list(root.findall(atom_link_tag)) + list(root.findall(".//" + atom_link_tag)) + list(root.findall("link")) + list(root.findall(".//link")):
