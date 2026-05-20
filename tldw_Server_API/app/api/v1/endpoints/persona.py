@@ -9927,6 +9927,19 @@ async def persona_stream(
                         reason_code="TRANSCRIPT_REQUIRED",
                     )
                     continue
+                runtime_context = _load_persona_policy_rules_for_session(
+                    persona_scope_db,
+                    session_id=session_id,
+                    user_id=authenticated_user_id,
+                )
+                if bool(runtime_context.get("session_terminal", False)):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Persona session is stopped.",
+                        reason_code="SESSION_TERMINAL",
+                    )
+                    continue
                 await _commit_persona_live_turn(
                     session_id=session_id,
                     transcript=transcript,

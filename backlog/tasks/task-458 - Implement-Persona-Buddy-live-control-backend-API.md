@@ -96,6 +96,16 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control_app.json` -> passed
 - `git diff --check` -> passed
 
+Sixth follow-up review fixes:
+- derived `/persona/live/sessions` `focused_session_id` from the full owned filtered session set instead of only the returned page
+- blocked manual `voice_commit` on terminal sessions before voice commit side effects run
+- added regressions for focused sessions outside the returned page and terminal voice commits avoiding commit-side effects
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_sessions.py -q` -> 42 passed, 5 warnings
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control_app.json` -> passed
+- `git diff --check` -> passed
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -651,6 +651,42 @@ def test_live_session_focus_only_touches_target_and_previously_focused(
     assert untouched_after["last_modified"] == untouched_before["last_modified"]
 
 
+def test_live_session_list_reports_focus_outside_returned_page(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    focused_session_id = "sess-old-focused"
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id=focused_session_id,
+        preferences={
+            "persona_live_control": {
+                "focus": {
+                    "focused": True,
+                    "focused_at": "2026-05-20T00:00:00+00:00",
+                    "focus_generation": 999,
+                }
+            }
+        },
+    )
+    for idx in range(5):
+        _create_session(
+            persona_db,
+            user_id="1",
+            persona_id="persona_a",
+            session_id=f"sess-newer-{idx}",
+        )
+
+    with _client_for_user(1, persona_db) as client:
+        listed = client.get("/api/v1/persona/live/sessions?limit=3")
+
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["focused_session_id"] == focused_session_id
+    assert focused_session_id not in {item["session_id"] for item in payload["sessions"]}
+
+
 def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
     monkeypatch,
     persona_db: CharactersRAGDB,
@@ -728,6 +764,43 @@ def test_persona_stream_user_message_rejects_stopped_session(
     assert notice["level"] == "error"
     assert manager.list_turns(session_id=session_id, user_id="1", limit=10) == []
     assert persisted_turns == []
+
+
+def test_persona_stream_voice_commit_rejects_stopped_session_before_commit_side_effects(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    persisted_turns: list[dict[str, object]] = []
+    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
+    session_id = "sess-stopped-voice-commit"
+    _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id, status="closed")
+
+    with _client_for_user(1, persona_db) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_commit",
+                        "session_id": session_id,
+                        "transcript": "This should not commit.",
+                    }
+                )
+            )
+            notice = _recv_until(
+                ws,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == "SESSION_TERMINAL"
+                and data.get("session_id") == session_id,
+            )
+
+    assert notice["level"] == "error"
+    assert not any(turn.get("turn_type") == "voice_commit" for turn in persisted_turns)
+    preferences = manager.get_preferences(session_id=session_id, user_id="1")
+    assert preferences.get("last_turn_type") != "voice_commit"
 
 
 def test_persona_stream_user_message_preserves_private_live_control_preferences(

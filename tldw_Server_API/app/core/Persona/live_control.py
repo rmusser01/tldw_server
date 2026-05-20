@@ -284,7 +284,13 @@ def list_live_session_summaries(
         limit=limit,
         offset=0,
     )
-    focused_id = _focused_session_id(rows)
+    focus_rows = _iter_persona_session_rows(
+        db,
+        user_id=user_id,
+        persona_id=persona_id,
+        surface=normalized_surface,
+    )
+    focused_id = _focused_session_id(focus_rows)
     return {
         "sessions": [
             build_live_session_summary(
