@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AudiobookStudioPage } from "../AudiobookStudioPage"
 import { OutputPanel } from "../Output/OutputPanel"
@@ -213,6 +213,34 @@ describe("AudiobookStudioPage", () => {
 
     expect(mocks.saveProject).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(saveStatus).toHaveTextContent("Saved just now"))
+  })
+
+  it("clears stale saved status when switching away from a saved project", async () => {
+    const user = userEvent.setup()
+    resetStore({
+      currentProjectId: "project-1",
+      rawContent: "Saved manuscript",
+      projectTitle: "Saved Project"
+    })
+
+    render(<AudiobookStudioPage />)
+
+    const saveStatus = screen.getByRole("status", {
+      name: "Project save status"
+    })
+
+    await waitFor(() => expect(saveStatus).toHaveTextContent("Unsaved changes"))
+    await user.click(screen.getByRole("button", { name: "Save project" }))
+    await waitFor(() => expect(saveStatus).toHaveTextContent("Saved just now"))
+
+    act(() => {
+      useAudiobookStudioStore.setState({
+        ...baseState,
+        currentProjectId: null
+      })
+    })
+
+    await waitFor(() => expect(saveStatus).toHaveTextContent("Draft not saved"))
   })
 })
 

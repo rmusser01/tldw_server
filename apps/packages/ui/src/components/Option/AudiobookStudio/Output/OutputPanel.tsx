@@ -239,7 +239,7 @@ export const OutputPanel: React.FC = () => {
       dataIndex: "order",
       key: "order",
       width: 50,
-      render: (_value: unknown, _record: unknown, index: number) => index + 1
+      render: (_value: number, _record: AudioChapter, index: number) => index + 1
     },
     {
       title: t("audiobook:output.columnTitle", "Title"),
@@ -285,7 +285,7 @@ export const OutputPanel: React.FC = () => {
       title: t("audiobook:output.actions", "Actions"),
       key: "actions",
       width: 150,
-      render: (_value: unknown, record: AudioChapter) => (
+      render: (_value: undefined, record: AudioChapter) => (
         <Space size="small">
           {record.status === "completed" && record.audioUrl && (
             <>

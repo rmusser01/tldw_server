@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react"
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { Tabs, Typography, Input, Space, Tag, Button, message, Tooltip } from "antd"
 import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
 import { useTranslation } from "react-i18next"
@@ -41,6 +41,7 @@ export const AudiobookStudioPage: React.FC = () => {
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const previousProjectIdRef = useRef<string | null | undefined>(undefined)
 
   const chapters = useAudiobookStudioStore((s) => s.chapters)
   const rawContent = useAudiobookStudioStore((s) => s.rawContent)
@@ -63,7 +64,7 @@ export const AudiobookStudioPage: React.FC = () => {
   const pendingCount = chapters.filter(
     (ch) => ch.status === "pending" || ch.status === "error"
   ).length
-  const saveStatusLabel = (() => {
+  const saveStatusLabel = useMemo(() => {
     if (isSaving) return t("audiobook:saveStatus.saving", "Saving...")
     if (!projectId && !lastSaved) {
       return t("audiobook:saveStatus.draftNotSaved", "Draft not saved")
@@ -73,9 +74,11 @@ export const AudiobookStudioPage: React.FC = () => {
       return t("audiobook:saveStatus.savedJustNow", "Saved just now")
     }
     return t("audiobook:saveStatus.saved", "Saved")
-  })()
-  const saveStatusType =
-    !projectId && !lastSaved ? "warning" : hasUnsaved ? "danger" : "secondary"
+  }, [isSaving, projectId, lastSaved, hasUnsaved, t])
+  const saveStatusType = useMemo<"warning" | "secondary">(
+    () => (!projectId && !lastSaved) || hasUnsaved ? "warning" : "secondary",
+    [projectId, lastSaved, hasUnsaved]
+  )
 
   // Manual save
   const handleSave = useCallback(async () => {
@@ -92,6 +95,25 @@ export const AudiobookStudioPage: React.FC = () => {
       setIsSaving(false)
     }
   }, [saveProject, t])
+
+  useEffect(() => {
+    if (previousProjectIdRef.current === undefined) {
+      previousProjectIdRef.current = projectId
+      return
+    }
+
+    if (previousProjectIdRef.current === projectId) return
+
+    previousProjectIdRef.current = projectId
+    setLastSaved(null)
+    setHasUnsaved(false)
+    setIsSaving(false)
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+    }
+  }, [projectId])
 
   // Auto-save when content changes (debounced)
   useEffect(() => {
