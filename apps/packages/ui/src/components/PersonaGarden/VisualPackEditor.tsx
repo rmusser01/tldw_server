@@ -360,6 +360,20 @@ const VisualManagementHeader: React.FC<{
   )
 }
 
+const VisualWorkspaceSectionHeading: React.FC<{
+  title: string
+  description?: string
+}> = ({ title, description }) => (
+  <div className="mb-3">
+    <h3 className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+      {title}
+    </h3>
+    {description ? (
+      <div className="mt-1 text-xs text-text-muted">{description}</div>
+    ) : null}
+  </div>
+)
+
 const getGenerationReadinessCopy = (
   view: PersonaVisualGenerationReadinessView,
   t: VisualPackTranslate
@@ -3605,7 +3619,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         </div>
       </Modal>
 
-      <div className="rounded-lg border border-border bg-surface p-3">
+      <section
+        data-testid="persona-visual-section-pack-basics"
+        className="rounded-lg border border-border bg-surface p-3"
+        aria-label="Pack basics and active status"
+      >
         {showManagementHeader ? (
           <VisualManagementHeader
             personaName={selectedPersonaName || selectedPersonaId}
@@ -3764,20 +3782,29 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             <div>{packHealthDiagnostic.message}</div>
           </div>
         ) : null}
-      </div>
+      </section>
 
-      <VisualPackReusePanel
-        selectedPersonaName={selectedPersonaName || selectedPersonaId}
-        hasSelectedPack={Boolean(selectedPack)}
-        canImport
-        libraryItemCount={libraryItems.length}
-        hasDuplicateTargets={availableDuplicateTargets.length > 0}
-        duplicateTargetsLoading={duplicateTargetsLoading}
-        onCreateDraft={focusDraftTitleInput}
-        onOpenLibrary={focusLibraryPanel}
-        onOpenImport={openImportArchivePicker}
-        onOpenDuplicate={focusDuplicateControls}
-      />
+      <section
+        data-testid="persona-visual-section-reuse-portability"
+        aria-label="Reuse and portability"
+      >
+        <VisualWorkspaceSectionHeading
+          title="Reuse and portability"
+          description="Create drafts from existing packs or manage portability actions."
+        />
+        <VisualPackReusePanel
+          selectedPersonaName={selectedPersonaName || selectedPersonaId}
+          hasSelectedPack={Boolean(selectedPack)}
+          canImport
+          libraryItemCount={libraryItems.length}
+          hasDuplicateTargets={availableDuplicateTargets.length > 0}
+          duplicateTargetsLoading={duplicateTargetsLoading}
+          onCreateDraft={focusDraftTitleInput}
+          onOpenLibrary={focusLibraryPanel}
+          onOpenImport={openImportArchivePicker}
+          onOpenDuplicate={focusDuplicateControls}
+        />
+      </section>
 
       {error ? (
         <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
@@ -3792,19 +3819,18 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
       {!showGuidedBuilder && !selectedPack ? firstRunImportPanel : null}
 
-      <div
+      <section
         ref={libraryPanelRef}
-        data-testid="persona-visual-library-panel"
+        data-testid="persona-visual-section-library"
         tabIndex={-1}
         className="rounded-lg border border-border bg-surface p-3"
+        aria-label="Personal library"
       >
+        <VisualWorkspaceSectionHeading title="Personal library" />
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              Personal library
-            </div>
             <div className="mt-1 text-xs text-text-muted">
-              Save reusable Persona Buddy visual packs as user-owned references.
+              Save reusable Persona Visual packs as user-owned references.
               Using one creates a draft on the target persona.
             </div>
           </div>
@@ -3826,11 +3852,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {selectedPack ? (
         <>
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <section
+            data-testid="persona-visual-section-assets"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="Assets"
+          >
+            <VisualWorkspaceSectionHeading
+              title="Assets"
+              description="Upload and review the image assets referenced by this pack."
+            />
             <div className="flex flex-wrap items-end gap-2">
               <label className="text-xs text-text-muted">
                 <span className="mb-1 block">Asset role</span>
@@ -3886,12 +3920,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </div>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border bg-surface p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              Portability
-            </div>
+          <section
+            data-testid="persona-visual-section-portable-actions"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="Portable archive and duplicate actions"
+          >
+            <VisualWorkspaceSectionHeading
+              title="Portable archive and duplicate actions"
+              description="Export, import, or duplicate this pack as a draft for review."
+            />
             <div
               data-testid="persona-visual-portability-copy"
               className="mt-2 rounded-md border border-border bg-bg px-3 py-2 text-xs leading-5 text-text-muted"
@@ -4039,12 +4078,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
 
               {!showGuidedBuilder ? importPreviewPanel : null}
             </div>
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border bg-surface p-3">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              State Mapping
-            </div>
+          <section
+            data-testid="persona-visual-section-state-mapping"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="State mappings and fallbacks"
+          >
+            <VisualWorkspaceSectionHeading
+              title="State mappings and fallbacks"
+              description="Map runtime Persona Visual states to animations and define fallback chains."
+            />
             <div className="grid gap-2 md:grid-cols-2">
               {[...REQUIRED_VISUAL_STATES, ...OPTIONAL_VISUAL_STATES].map((state) => (
                 <label key={state} className="text-xs text-text-muted">
@@ -4109,9 +4153,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </label>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <section
+            data-testid="persona-visual-section-animations"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="Animations"
+          >
+            <VisualWorkspaceSectionHeading
+              title="Animations"
+              description="Edit animation timing, frame order, sprite regions, and looping behavior."
+            />
             <div className="mb-2 flex flex-wrap items-end gap-2">
               <label className="min-w-[180px] text-xs text-text-muted">
                 <span className="mb-1 block">Animation</span>
@@ -4340,12 +4392,17 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 No animations in this pack.
               </div>
             )}
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border bg-surface p-3">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-              Authored Triggers
-            </div>
+          <section
+            data-testid="persona-visual-section-authored-triggers"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="Authored triggers"
+          >
+            <VisualWorkspaceSectionHeading
+              title="Authored triggers"
+              description="Bind explicit trigger matches to visual states without changing runtime defaults."
+            />
             <div className="grid gap-2 md:grid-cols-[130px_minmax(160px,1fr)_130px_100px_90px_auto]">
               <select
                 data-testid="persona-visual-trigger-source-select"
@@ -4435,12 +4492,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 ))}
               </div>
             ) : null}
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <section
+            data-testid="persona-visual-section-validation-activation"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="Validation and activation"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <Typography.Text strong>Validation</Typography.Text>
+                <VisualWorkspaceSectionHeading
+                  title="Validation and activation"
+                  description="Save manifest changes and explicitly activate only valid packs."
+                />
                 {validationErrors.length ? (
                   <div
                     data-testid="persona-visual-validation-errors"
@@ -4487,13 +4551,18 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </Button>
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="rounded-lg border border-border bg-surface p-3">
+          <section
+            data-testid="persona-visual-section-jobs-review"
+            className="rounded-lg border border-border bg-surface p-3"
+            aria-label="Jobs and review"
+          >
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
-                Generated Candidates
-              </div>
+              <VisualWorkspaceSectionHeading
+                title="Jobs and review"
+                description="Queue generation jobs and review generated candidates before applying them."
+              />
               <Button
                 data-testid="persona-visual-candidates-refresh-button"
                 size="small"
@@ -4651,7 +4720,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                 </div>
               )}
             </div>
-          </div>
+          </section>
         </>
       ) : null}
     </div>
