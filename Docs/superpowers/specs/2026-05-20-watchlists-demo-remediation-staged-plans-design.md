@@ -89,6 +89,9 @@ Goal: create a repeatable live verification contract for the demonstration path.
 
 Scope:
 - Document the exact test setup: backend mode, API key, WebUI deployment mode, demo source URLs, and extension route verification.
+- Select demo source URLs through preflight, not convenience. Local loopback fixtures are not valid demo sources unless the backend SSRF/loopback policy explicitly allows them; otherwise use a stable external RSS/source fixture and verify it through `/watchlists/sources/test`.
+- Decide whether the demo runs in quickstart/same-origin mode or advanced API-base mode. Quickstart/same-origin is the default for the demo until advanced API-base routing is separately verified.
+- If final audio playback is part of the demo, preflight the required Scheduler, workflow handler, LLM/script provider, TTS provider, and voice configuration before the demo script claims final audio output.
 - Define the expected user path: create source, create monitor, run scrape, generate digest, request audio, inspect Activity and Reports.
 - Capture expected success, acceptable degradation, and hard-fail conditions.
 
@@ -98,6 +101,9 @@ Fixes covered:
 
 Gate:
 - One command list and one browser script/path can reproduce the demo.
+- Demo source URLs pass source-test preflight and have a named fallback source.
+- The selected WebUI deployment mode is verified before the demo. Advanced API-base mode cannot be used for the demo unless `/watchlists` requests hit the configured API origin rather than falling back to broken relative API paths.
+- If final audio playback is in scope, provider and voice readiness is verified separately from Scheduler enqueue readiness.
 - Each observed failure has exact expected/actual output.
 - Demo owners know which features are safe to show and which must be avoided until fixed.
 
@@ -117,7 +123,7 @@ Fixes covered:
 
 Gate:
 - UI-created output requests use `briefing_markdown`.
-- Backend-created reports appear in Reports after pipeline test generation.
+- Reports show the output created by pipeline test generation.
 - Invalid template names render a recoverable in-app error with the failing template name and next step.
 
 ### A2. Audio Enqueue Hotfix
@@ -212,7 +218,7 @@ Goal: make optional audio credible inside `/watchlists`.
 
 Scope:
 - Keep 1-4 speaker cast controls.
-- Persist or surface script, per-speaker script/audio states, final mix state, fallback reason, and final playable/downloadable audio.
+- Persist script, per-speaker script/audio states, final mix state, fallback reason, and final playable/downloadable audio so Reports, Activity, retry, and diagnostics can all reference the same artifacts.
 - Avoid requiring users to leave `/watchlists` for MVP creation or review.
 - Keep advanced handoffs available for deeper editing later.
 
@@ -233,6 +239,7 @@ Scope:
 - Preserve batch item/source controls.
 - Preserve source seen/dedupe inspection and reset controls.
 - Preserve run diagnostics and CSV/diagnostic exports.
+- Preserve template listing/editing, output regeneration, and report preview/download flows.
 - Preserve command palette access and full-view tabs.
 
 Gate:
@@ -414,10 +421,10 @@ Backend:
 - Bandit on touched Python paths.
 
 Browser/live:
-- WebUI `/watchlists` live walkthrough in quickstart/same-origin mode.
-- External RSS source scrape.
+- WebUI `/watchlists` live walkthrough in the selected, preflighted deployment mode.
+- External or allowlisted demo RSS/source scrape that has passed `/watchlists/sources/test`.
 - Digest generation.
-- Audio request and status/artifact check.
+- Audio request and status/artifact check. If final playback is claimed, the check must verify a playable/downloadable artifact, not only a queued task.
 - Reports and Activity verification.
 
 ### Demo Readiness Gate
@@ -425,17 +432,19 @@ Browser/live:
 The demo is green only if:
 
 1. WebUI `/watchlists` loads without API fallback errors in the selected deployment mode.
-2. Creating a source and monitor works from the guided path.
-3. Running the monitor ingests real external RSS items.
-4. Running test generation produces a visible digest report.
-5. Audio enqueue plumbing is proven: a valid `generate_audio=true` request creates a Scheduler `workflow_run` task id and `/runs/{run_id}/audio` returns visible pending/running/completed/failed status. Provider, voice, or model unavailability may degrade only after the task/status plumbing is proven.
-6. Reports and Activity agree about output/audio status.
-7. Source fetch errors and zero-item runs cannot appear as clean success or `System healthy`.
-8. If the demo uses quick setup, quick setup must support the demonstrated cadence, including every 5 hours or weekly when shown, and its review step must show the correct feed count and non-contradictory audio copy. If the demo intentionally uses the pipeline builder instead, quick setup cadence/review cleanup is explicitly excluded from the initial demo script and remains in Track B.
-9. Extension readiness is explicit. If the extension is part of the demo, pass an extension-path smoke covering the Watchlists shared route, guided setup or equivalent creation path, output generation error handling, Activity/Reports status, and no runtime overlay. If the extension is not part of the demo, label it mount-only and do not claim extension workflow readiness.
-10. Existing advanced workflows touched by the rescue work still pass a preservation smoke: full-view tabs, raw cron, OPML import/export, raw JSON/settings preservation, batch source/item controls, source seen/dedupe controls, diagnostics/export, and command palette access.
+2. Demo source URLs pass source-test preflight and have a fallback source. Local loopback sources are excluded unless explicitly allowed by backend policy.
+3. Creating a source and monitor works from the guided path.
+4. Running the monitor ingests real external or allowlisted demo-source items.
+5. Running test generation produces a visible digest report.
+6. Audio enqueue plumbing is proven: a valid `generate_audio=true` request creates a Scheduler `workflow_run` task id and `/runs/{run_id}/audio` returns visible pending/running/completed/failed status. Provider, voice, or model unavailability may degrade only after the task/status plumbing is proven.
+7. Final audio playback is claimed only if provider/voice readiness is preflighted and a playable/downloadable artifact is verified.
+8. Reports and Activity agree about output/audio status.
+9. Source fetch errors and zero-item runs cannot appear as clean success or `System healthy`.
+10. If the demo uses quick setup, quick setup must support the demonstrated cadence, including every 5 hours or weekly when shown, and its review step must show the correct feed count and non-contradictory audio copy. If the demo intentionally uses the pipeline builder instead, quick setup cadence/review cleanup is explicitly excluded from the initial demo script and remains in Track B.
+11. Extension readiness is explicit. If the extension is part of the demo, pass an extension-path smoke covering the Watchlists shared route, guided setup or equivalent creation path, output generation error handling, Activity/Reports status, and no runtime overlay. If the extension is not part of the demo, label it mount-only and do not claim extension workflow readiness.
+12. Existing advanced workflows touched by the rescue work still pass a preservation smoke: full-view tabs, raw cron, OPML import/export, raw JSON/settings preservation, batch source/item controls, source seen/dedupe controls, template listing/editing, report preview/download, diagnostics/export, and command palette access.
 
-If item 5 is not green, the demo script must omit final podcast/audio claims.
+If item 6 is not green, the demo script must omit all audio claims. If item 7 is not green, the demo script may show audio task status but must omit final podcast/playback claims.
 
 ## 10. Non-Goals
 
