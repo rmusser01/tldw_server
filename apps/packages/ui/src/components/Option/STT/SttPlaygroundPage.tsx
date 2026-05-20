@@ -208,6 +208,39 @@ export const SttPlaygroundPage: React.FC = () => {
       }),
     [modelOptions, serverModelsError, serverModelsLoading]
   )
+  const recordingDisabledState = useMemo<{
+    reason: string
+    statusType: "secondary" | "warning" | "danger"
+  } | undefined>(() => {
+    if (serverModelsLoading) {
+      return {
+        reason: t(
+          "playground:stt.recordingDisabledLoading",
+          "Loading transcription model catalog."
+        ),
+        statusType: "secondary"
+      }
+    }
+    if (serverModelsError) {
+      return {
+        reason: t(
+          "playground:stt.recordingDisabledModelError",
+          "Unable to load transcription models. Retry before recording."
+        ),
+        statusType: "warning"
+      }
+    }
+    if (serverModels.length === 0) {
+      return {
+        reason: t(
+          "playground:stt.recordingDisabledNoModels",
+          "No transcription models are available. Configure STT models before recording."
+        ),
+        statusType: "danger"
+      }
+    }
+    return undefined
+  }, [serverModels.length, serverModelsError, serverModelsLoading, t])
 
   // ── History (persisted via Plasmo storage) ────────────────────────
   const [history, setHistory] = useStorage<SttHistoryEntry[]>(
@@ -380,8 +413,13 @@ export const SttPlaygroundPage: React.FC = () => {
       ) {
         return
       }
-      e.preventDefault()
-      window.dispatchEvent(new CustomEvent("stt-toggle-record"))
+      const toggleEvent = new CustomEvent("stt-toggle-record", {
+        cancelable: true
+      })
+      window.dispatchEvent(toggleEvent)
+      if (toggleEvent.defaultPrevented) {
+        e.preventDefault()
+      }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
@@ -465,6 +503,9 @@ export const SttPlaygroundPage: React.FC = () => {
           <RecordingStrip
             onBlobReady={handleBlobReady}
             onSettingsToggle={toggleSettings}
+            disabled={Boolean(recordingDisabledState)}
+            disabledReason={recordingDisabledState?.reason}
+            disabledStatusType={recordingDisabledState?.statusType}
           />
         </div>
         <p className="text-[11px] text-text-subtle text-center mt-1">

@@ -84,7 +84,12 @@ describe("audio option routes", () => {
 
   it("renders dedicated STT playground on /stt route component", async () => {
     render(<OptionStt />)
+
+    const boundary = screen.getByTestId("route-boundary")
+
     expect(screen.getByTestId("option-layout")).toBeVisible()
+    expect(boundary).toHaveAttribute("data-route-id", "stt")
+    expect(boundary).toHaveAttribute("data-route-label", "STT Playground")
     expect(await screen.findByTestId("stt-playground")).toBeVisible()
     expect(screen.queryByTestId("speech-playground")).not.toBeInTheDocument()
   })

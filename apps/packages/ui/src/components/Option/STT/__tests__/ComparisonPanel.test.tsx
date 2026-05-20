@@ -162,6 +162,42 @@ describe("ComparisonPanel", () => {
     )
   })
 
+  it("keeps successful transcripts visible when another selected model fails", () => {
+    hookReturnRef.current = {
+      ...hookReturnRef.current,
+      results: [
+        {
+          id: "result-success",
+          model: "whisper-1",
+          text: "Successful transcript remains available",
+          status: "done"
+        },
+        {
+          id: "result-error",
+          model: "distil-v3",
+          text: "",
+          status: "error",
+          error: "Model unavailable",
+          errorRecovery: "Choose a different model and retry."
+        }
+      ]
+    }
+
+    render(
+      <ComparisonPanel
+        blob={new Blob(["audio"], { type: "audio/webm" })}
+        availableModels={["whisper-1", "distil-v3"]}
+        sttOptions={{}}
+        onSaveToNotes={vi.fn()}
+      />
+    )
+
+    expect(screen.getByLabelText("Transcript from whisper-1"))
+      .toHaveValue("Successful transcript remains available")
+    expect(screen.getByText("Model unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Choose a different model and retry.")).toBeInTheDocument()
+  })
+
   it("shows STT provenance metadata and repeat controls", () => {
     hookReturnRef.current = {
       ...hookReturnRef.current,

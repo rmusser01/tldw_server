@@ -77,7 +77,9 @@ describe("HistoryPanel", () => {
     render(<HistoryPanel {...defaultProps} />)
 
     expect(
-      screen.getByText("Start a recording to see transcripts here.")
+      screen.getByText(
+        "Completed transcriptions will appear here after you run a comparison."
+      )
     ).toBeInTheDocument()
   })
 

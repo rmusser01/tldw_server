@@ -15,6 +15,9 @@ describe("audio route parity", () => {
 
     expect(webRoute).toContain("SttPlaygroundPage")
     expect(extRoute).toContain("SttPlaygroundPage")
+    expect(extRoute).toContain("RouteErrorBoundary")
+    expect(extRoute).toContain('routeId="stt"')
+    expect(extRoute).toContain('routeLabel="STT Playground"')
     expect(extRoute).not.toContain("SpeechPlaygroundPage")
     expect(extRoute).not.toContain('initialMode="speak"')
   })

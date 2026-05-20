@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react"
-import { Button, Card, Tooltip, Upload } from "antd"
+import { Button, Card, Tooltip, Typography, Upload } from "antd"
 import { Mic, Settings, Square, Trash2, Upload as UploadIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
@@ -9,7 +9,12 @@ import { classifyAudioError } from "@/components/Option/Audio/audio-error-classi
 export interface RecordingStripProps {
   onBlobReady: (blob: Blob, durationMs: number) => void
   onSettingsToggle?: () => void
+  disabled?: boolean
+  disabledReason?: string
+  disabledStatusType?: "secondary" | "warning" | "danger"
 }
+
+const { Text } = Typography
 
 /** Convert milliseconds to `mm:ss` display string. */
 export function formatDuration(ms: number): string {
@@ -21,7 +26,10 @@ export function formatDuration(ms: number): string {
 
 export const RecordingStrip: React.FC<RecordingStripProps> = ({
   onBlobReady,
-  onSettingsToggle
+  onSettingsToggle,
+  disabled = false,
+  disabledReason,
+  disabledStatusType = "danger"
 }) => {
   const { t } = useTranslation(["playground"])
   const notification = useAntdNotification()
@@ -30,6 +38,22 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
 
   const isRecording = recorder.status === "recording"
   const hasBlob = recorder.blob != null && !isRecording
+  const blocksNewCapture = disabled && !isRecording
+  const recordingUnavailableText =
+    disabledReason ||
+    t("playground:stt.recordingUnavailable", "Recording is unavailable.")
+  const sourceStatus = blocksNewCapture
+    ? recordingUnavailableText
+    : isRecording
+      ? t("playground:stt.sourceRecording", "Audio source: microphone recording")
+      : hasBlob
+        ? t("playground:stt.sourceSelected", "Audio source: audio selected")
+        : t("playground:stt.sourceEmpty", "Audio source: no audio selected")
+  const recordTooltip = blocksNewCapture
+    ? recordingUnavailableText
+    : isRecording
+      ? t("playground:stt.stopTooltip", "Stop recording")
+      : t("playground:stt.startTooltip", "Start recording")
 
   // Notify parent when blob changes
   useEffect(() => {
@@ -64,7 +88,9 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
 
   // Listen for stt-toggle-record custom event (Space shortcut from parent)
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
+      if (blocksNewCapture) return
+      event.preventDefault()
       if (isRecording) {
         recorder.stopRecording()
       } else {
@@ -82,9 +108,10 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
     return () => {
       window.removeEventListener("stt-toggle-record", handler)
     }
-  }, [isRecording, recorder, notification, t])
+  }, [blocksNewCapture, isRecording, recorder, notification, t])
 
   const handleRecordClick = useCallback(() => {
+    if (blocksNewCapture) return
     if (isRecording) {
       recorder.stopRecording()
     } else {
@@ -97,27 +124,22 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
         })
       })
     }
-  }, [isRecording, recorder, notification, t])
+  }, [blocksNewCapture, isRecording, recorder, notification, t])
 
   const handleUpload = useCallback(
     (file: File) => {
+      if (blocksNewCapture) return false
       recorder.loadBlob(file, 0)
       return false // prevent auto-upload
     },
-    [recorder]
+    [blocksNewCapture, recorder]
   )
 
   return (
     <Card size="small">
       <div className="flex flex-wrap items-center gap-3">
         {/* Record / Stop button */}
-        <Tooltip
-          title={
-            isRecording
-              ? t("playground:stt.stopTooltip", "Stop recording")
-              : t("playground:stt.startTooltip", "Start recording")
-          }
-        >
+        <Tooltip title={recordTooltip}>
           <Button
             type={isRecording ? "default" : "primary"}
             danger={isRecording}
@@ -126,6 +148,7 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
                 ? t("playground:stt.stopRecording", "Stop recording (Space)")
                 : t("playground:stt.startRecording", "Start recording (Space)")
             }
+            disabled={blocksNewCapture}
             icon={
               isRecording ? (
                 <Square className="h-4 w-4" />
@@ -144,6 +167,14 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
         >
           {formatDuration(recorder.durationMs)}
         </span>
+
+        <Text
+          type={blocksNewCapture ? disabledStatusType : "secondary"}
+          className="text-xs"
+          role="status"
+        >
+          {sourceStatus}
+        </Text>
 
         {/* Audio level indicator — visible only while recording */}
         {isRecording && (
@@ -189,6 +220,7 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
         <Upload
           accept="audio/*"
           showUploadList={false}
+          disabled={blocksNewCapture}
           beforeUpload={handleUpload}
         >
           <Tooltip title={t("playground:stt.uploadAudio", "Upload audio file")}>
@@ -196,6 +228,7 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
               type="text"
               icon={<UploadIcon className="h-4 w-4" />}
               aria-label={t("playground:stt.uploadAudio", "Upload audio file")}
+              disabled={blocksNewCapture}
             />
           </Tooltip>
         </Upload>
