@@ -41,7 +41,8 @@ Verification:
 - At inspection time, Gemini and cubic reported no issues; CodeRabbit had completed, and most CI checks were pending with no failure requiring code changes yet.
 
 Known remaining PR status:
-- Push/review-thread resolution pending until this review-fix commit is pushed.
+- Review-fix commit was pushed to PR #1896 and the Qodo inline review thread was replied to and resolved.
+- CI re-ran after the push and was pending at closeout; `gh pr checks` did not report a failing job at that time.
 - Bandit is not applicable because the touched scope is frontend TypeScript tests and Backlog markdown only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
