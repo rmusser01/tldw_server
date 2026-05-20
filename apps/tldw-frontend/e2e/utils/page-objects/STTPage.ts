@@ -6,7 +6,7 @@
  * - Comparison panel (model selection, transcription results)
  * - History panel (past comparison entries)
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -25,14 +25,14 @@ export class STTPage extends BasePage {
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
     // Wait for the page heading to appear
-    const heading = this.page.getByText("STT Playground")
+    const heading = this.page.getByText("Speech to Text")
     await heading.first().waitFor({ state: "visible", timeout: 20_000 }).catch(() => {})
   }
 
   // -- Locators: Page-level ---------------------------------------------------
 
   get heading(): Locator {
-    return this.page.getByRole("heading", { name: /stt playground/i })
+    return this.page.getByRole("heading", { name: /speech to text/i })
   }
 
   get subtitle(): Locator {

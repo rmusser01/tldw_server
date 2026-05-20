@@ -21,6 +21,7 @@ const storageValues: Record<string, unknown> = {
 }
 
 let comparisonPanelProps: Record<string, unknown> | null = null
+let recordingStripProps: Record<string, unknown> | null = null
 const {
   getTranscriptionModelsMock,
   getTranscriptionModelHealthMock,
@@ -95,9 +96,10 @@ vi.mock("@/utils/request-timeout", () => ({
 
 // Mock the sub-components to keep tests focused
 vi.mock("../RecordingStrip", () => ({
-  RecordingStrip: (_props: Record<string, unknown>) => (
-    <div data-testid="recording-strip" />
-  )
+  RecordingStrip: (props: Record<string, unknown>) => {
+    recordingStripProps = props
+    return <div data-testid="recording-strip" />
+  }
 }))
 
 vi.mock("../InlineSettingsPanel", () => ({
@@ -164,6 +166,7 @@ describe("SttPlaygroundPage", () => {
 
   beforeEach(() => {
     comparisonPanelProps = null
+    recordingStripProps = null
     getTranscriptionModelsMock.mockReset()
     getTranscriptionModelsMock.mockResolvedValue({
       categories: {
@@ -235,6 +238,28 @@ describe("SttPlaygroundPage", () => {
         availability: "ready"
       })
     ])
+  })
+
+  it("keeps the route landmark visible while the model catalog is loading", () => {
+    getTranscriptionModelsMock.mockImplementationOnce(
+      () => new Promise(() => {})
+    )
+
+    render(<SttPlaygroundPage />)
+
+    expect(screen.getByTestId("page-shell")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Speech to Text" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("status", { name: "STT readiness" })
+    ).toHaveTextContent("STT models: Unknown")
+    expect(recordingStripProps).toEqual(
+      expect.objectContaining({
+        disabled: true,
+        disabledReason: "Loading transcription model catalog."
+      })
+    )
   })
 
   it("renders all 3 zones (recording-strip, comparison-panel, history-panel)", () => {
@@ -351,5 +376,50 @@ describe("SttPlaygroundPage", () => {
 
     const noModelsAlert = await screen.findByText("No transcription models available")
     expect(noModelsAlert.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Configure STT models in your server settings. Check the Audio Setup Guide for instructions."
+      )
+    ).toBeInTheDocument()
+    expect(recordingStripProps).toEqual(
+      expect.objectContaining({
+        disabled: true,
+        disabledReason: "No transcription models are available. Configure STT models before recording."
+      })
+    )
+  })
+
+  it("preserves transcript text when saving to notes fails", async () => {
+    createNoteMock.mockRejectedValueOnce(new Error("Notes database unavailable"))
+    render(<SttPlaygroundPage />)
+
+    await waitFor(() => expect(comparisonPanelProps).not.toBeNull())
+    await act(async () => {
+      await (
+        comparisonPanelProps?.onSaveToNotes as (
+          text: string,
+          model: string
+        ) => Promise<void>
+      )(
+        "Transcript text to preserve",
+        "whisper-1"
+      )
+    })
+
+    expect(createNoteMock).toHaveBeenCalledWith(
+      "Transcript text to preserve",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          origin: "stt-playground",
+          stt_model: "whisper-1"
+        })
+      })
+    )
+    expect(notificationErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Error",
+        description: "Notes database unavailable"
+      })
+    )
   })
 })

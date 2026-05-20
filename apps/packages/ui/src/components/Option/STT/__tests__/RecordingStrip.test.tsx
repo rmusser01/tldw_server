@@ -62,6 +62,28 @@ describe("RecordingStrip", () => {
     expect(uploadBtn).toBeInTheDocument()
   })
 
+  it("shows the current audio source state before recording starts", () => {
+    render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
+
+    expect(screen.getByRole("status", { name: "Recording source" }))
+      .toHaveTextContent("Audio source: no audio selected")
+  })
+
+  it("disables recording and upload when route readiness blocks transcription", () => {
+    render(
+      <RecordingStrip
+        onBlobReady={mockOnBlobReady}
+        disabled
+        disabledReason="No transcription models are available."
+      />
+    )
+
+    expect(screen.getByRole("button", { name: /start recording/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Upload audio file" })).toBeDisabled()
+    expect(screen.getByRole("status", { name: "Recording source" }))
+      .toHaveTextContent("No transcription models are available.")
+  })
+
   it("shows settings toggle button when prop provided", () => {
     render(
       <RecordingStrip

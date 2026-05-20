@@ -172,7 +172,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
           <Text type="secondary">
             {t(
               "stt.history.empty",
-              "Start a recording to see transcripts here."
+              "Completed transcriptions will appear here after you run a comparison."
             )}
           </Text>
         ) : (

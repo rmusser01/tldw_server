@@ -208,6 +208,27 @@ export const SttPlaygroundPage: React.FC = () => {
       }),
     [modelOptions, serverModelsError, serverModelsLoading]
   )
+  const recordingDisabledReason = useMemo(() => {
+    if (serverModelsLoading) {
+      return t(
+        "playground:stt.recordingDisabledLoading",
+        "Loading transcription model catalog."
+      )
+    }
+    if (serverModelsError) {
+      return t(
+        "playground:stt.recordingDisabledModelError",
+        "Unable to load transcription models. Retry before recording."
+      )
+    }
+    if (serverModels.length === 0) {
+      return t(
+        "playground:stt.recordingDisabledNoModels",
+        "No transcription models are available. Configure STT models before recording."
+      )
+    }
+    return undefined
+  }, [serverModels.length, serverModelsError, serverModelsLoading, t])
 
   // ── History (persisted via Plasmo storage) ────────────────────────
   const [history, setHistory] = useStorage<SttHistoryEntry[]>(
@@ -465,6 +486,8 @@ export const SttPlaygroundPage: React.FC = () => {
           <RecordingStrip
             onBlobReady={handleBlobReady}
             onSettingsToggle={toggleSettings}
+            disabled={Boolean(recordingDisabledReason)}
+            disabledReason={recordingDisabledReason}
           />
         </div>
         <p className="text-[11px] text-text-subtle text-center mt-1">
