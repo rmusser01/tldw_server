@@ -213,9 +213,9 @@ describe("CharacterChatSessionsPanel", () => {
     expect(
       screen.getByText("Loading character sessions..."),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("status", { name: "Loading character sessions" }),
-    ).toHaveTextContent("Loading character sessions...");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading character sessions...",
+    );
 
     historyHookMock.mockReturnValueOnce({
       data: [],
@@ -285,10 +285,9 @@ describe("CharacterChatSessionsPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: "Character session refresh" }))
-      .toHaveTextContent(
-        "Showing character sessions from the last successful refresh.",
-      );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Showing character sessions from the last successful refresh.",
+    );
 
     historyHookMock.mockReturnValueOnce({
       data: [],

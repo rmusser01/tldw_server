@@ -12,7 +12,11 @@ import {
   skipIfServerUnavailable,
   test,
 } from "../../utils/fixtures"
-import { waitForConnection, waitForVisualSettle } from "../../utils/helpers"
+import {
+  expectNoHorizontalOverflow,
+  waitForConnection,
+  waitForVisualSettle,
+} from "../../utils/helpers"
 
 type ViewportTarget = {
   label: "desktop" | "tablet" | "mobile"
@@ -26,57 +30,20 @@ const VIEWPORTS: ViewportTarget[] = [
   { label: "mobile", width: 390, height: 844 },
 ]
 
-async function expectNoHorizontalOverflow(
-  page: Page,
-  label: string,
-): Promise<void> {
-  const overflow = await page.evaluate(() => {
-    const viewportWidth = document.documentElement.clientWidth
-    const scrollWidth = Math.max(
-      document.documentElement.scrollWidth,
-      document.body?.scrollWidth ?? 0,
-    )
-    const offenders = Array.from(
-      document.body.querySelectorAll<HTMLElement>("*"),
-    )
-      .map((element) => {
-        const rect = element.getBoundingClientRect()
-        return {
-          tag: element.tagName.toLowerCase(),
-          testId: element.getAttribute("data-testid"),
-          role: element.getAttribute("role"),
-          label: element.getAttribute("aria-label"),
-          left: rect.left,
-          right: rect.right,
-          width: rect.width,
-        }
-      })
-      .filter(
-        (entry) =>
-          entry.width > 0 &&
-          (entry.left < -1 || entry.right > viewportWidth + 1),
-      )
-      .slice(0, 5)
-
-    return {
-      viewportWidth,
-      scrollWidth,
-      offenders,
-    }
-  })
-
-  expect(
-    overflow.scrollWidth,
-    `${label} overflowed viewport: ${JSON.stringify(overflow)}`,
-  ).toBeLessThanOrEqual(overflow.viewportWidth + 1)
-  expect(overflow.offenders, `${label} overflow offenders`).toEqual([])
-}
-
 async function openRolePlaySetup(page: Page): Promise<void> {
-  const directSetup = page.getByTestId("composer-role-play-setup").first()
-  if (await directSetup.isVisible().catch(() => false)) {
-    await directSetup.click()
-  } else {
+  const directSetupButtons = page.getByTestId("composer-role-play-setup")
+  const directSetupCount = await directSetupButtons.count()
+  let openedDirectly = false
+  for (let index = 0; index < directSetupCount; index += 1) {
+    const button = directSetupButtons.nth(index)
+    if (await button.isVisible().catch(() => false)) {
+      await button.click()
+      openedDirectly = true
+      break
+    }
+  }
+
+  if (!openedDirectly) {
     await page.getByRole("button", { name: "More options" }).first().click()
     await page
       .getByRole("button", { name: "Role-play setup", exact: true })

@@ -300,9 +300,9 @@ describe("RolePlaySetupDrawer", () => {
 
     renderDrawer()
 
-    expect(
-      screen.getByRole("status", { name: "Loading scene settings" })
-    ).toHaveTextContent("Loading scene settings...")
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading scene settings..."
+    )
 
     resolveActor(activeScene())
     await screen.findByText(/1 detail/)

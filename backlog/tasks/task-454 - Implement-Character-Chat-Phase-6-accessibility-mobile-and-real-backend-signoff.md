@@ -30,12 +30,15 @@ modified_files:
 - apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx
 - apps/packages/ui/src/components/Option/Playground/SavedRolePlaySetupsPanel.tsx
 - apps/packages/ui/src/components/Option/Playground/__tests__/CharacterChatSessionsPanel.test.tsx
+- apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.role-play-mobile.test.tsx
 - apps/packages/ui/src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx
 - apps/packages/ui/src/components/Option/Playground/__tests__/RolePlaySetupDrawer.test.tsx
 - apps/packages/ui/src/services/tldw/TldwApiClient.ts
 - apps/packages/ui/src/services/__tests__/tldw-api-client.character-persist.test.ts
 - apps/packages/ui/src/services/__tests__/tldw-api-client.chat-debug.test.ts
+- apps/tldw-frontend/e2e/utils/helpers.ts
 - apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase6.spec.ts
+- apps/tldw-frontend/e2e/workflows/setup-connection-flow.spec.ts
 ---
 
 ## Description
@@ -60,12 +63,14 @@ Implement Phase 6 from the first-class Character Chat PRD: close the release-qua
 Created Phase 6 implementation plan after verifying latest origin/dev includes PR #1888 and existing PRD phases 0-5. Current focus is release-quality accessibility, responsive/mobile signoff, and real-backend evidence rather than redoing already completed role-play remediation stages.
 
 Implemented Phase 6 by adding screen-reader status/alert semantics to Character Chat sessions and setup loading/error states, adding saved setup list/listitem semantics, allowing the dense composer toolbar to wrap on non-desktop widths, adding desktop/tablet/mobile real-backend Playwright signoff for `/chat?mode=character`, and aligning monolithic `TldwApiClient` character stream/persist methods with the scoped domain client for real backend workspace-scoped calls.
+
+Review follow-up addressed PR #1892 comments by removing live-region `aria-label` overrides that hid visible or sr-only status text from assistive tech, moving the duplicated Playwright `expectNoHorizontalOverflow` helper into `e2e/utils/helpers.ts`, importing it from both the Phase 6 and setup recovery specs, and making the role-play setup opener choose the first visible duplicate toolbar control before falling back to the overflow menu.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Verification recorded: focused Vitest suite passed 62 tests across Character Chat panels, composer toolbar, character mode contract, and TldwApiClient stream/persist regression coverage; real-backend Playwright passed 4/4 across character-chat-phase6.spec.ts and character-chat.spec.ts against http://127.0.0.1:8000; git diff --check passed. TypeScript checks were run for apps/packages/ui and apps/tldw-frontend and still fail on inherited baseline files, but the touched files and the previously in-scope useCharacterChatMode errors are absent from the fresh logs. Bandit was not run because no Python files were touched.
+Verification recorded: focused Vitest suite passed 62 tests across Character Chat panels, composer toolbar, character mode contract, and TldwApiClient stream/persist regression coverage; real-backend Playwright passed 6/6 across character-chat-phase6.spec.ts, character-chat.spec.ts, and the setup-adjacent recovery overflow helper path against http://127.0.0.1:8000; git diff --check passed. TypeScript checks were run for apps/packages/ui and apps/tldw-frontend and still fail on inherited baseline files, but the touched files and the previously in-scope useCharacterChatMode errors are absent from the fresh logs. Bandit was not run because no Python files were touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

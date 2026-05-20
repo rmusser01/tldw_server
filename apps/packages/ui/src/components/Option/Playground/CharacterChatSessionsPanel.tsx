@@ -307,10 +307,6 @@ export const CharacterChatSessionsPanel = ({
           <div
             role="status"
             aria-live="polite"
-            aria-label={t(
-              "characterChatSessions.loadingStatusLabel",
-              "Loading character sessions",
-            )}
             className={cn("mt-3", cockpitRailStyles.emptyInset)}
           >
             {t(
@@ -345,10 +341,6 @@ export const CharacterChatSessionsPanel = ({
               <p
                 role="status"
                 aria-live="polite"
-                aria-label={t(
-                  "characterChatSessions.refreshStatusLabel",
-                  "Character session refresh",
-                )}
                 className="mt-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-text-subtle"
               >
                 {t(

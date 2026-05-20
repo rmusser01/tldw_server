@@ -1,7 +1,7 @@
 /**
  * Common test helpers for E2E tests
  */
-import { type Locator, type Page, type Route } from '@playwright/test';
+import { expect, type Locator, type Page, type Route } from '@playwright/test';
 
 /**
  * Environment configuration for tests
@@ -574,6 +574,46 @@ export async function waitForElement(
   const { timeout = 10000, state = 'visible' } = options;
   const element = page.locator(selector);
   await element.waitFor({ state, timeout });
+}
+
+/**
+ * Assert that the document and visible elements fit within the current viewport.
+ */
+export async function expectNoHorizontalOverflow(page: Page, label: string): Promise<void> {
+  const overflow = await page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollWidth = Math.max(
+      document.documentElement.scrollWidth,
+      document.body?.scrollWidth ?? 0
+    );
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          testId: element.getAttribute('data-testid'),
+          role: element.getAttribute('role'),
+          ariaLabel: element.getAttribute('aria-label'),
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+        };
+      })
+      .filter((entry) => entry.width > 0 && (entry.left < -1 || entry.right > viewportWidth + 1))
+      .slice(0, 5);
+
+    return {
+      viewportWidth,
+      scrollWidth,
+      offenders,
+    };
+  });
+
+  expect(
+    overflow.scrollWidth,
+    `${label} overflowed viewport: ${JSON.stringify(overflow)}`
+  ).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+  expect(overflow.offenders, `${label} overflow offenders`).toEqual([]);
 }
 
 /**

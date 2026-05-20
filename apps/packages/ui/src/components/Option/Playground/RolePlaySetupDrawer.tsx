@@ -468,13 +468,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       title={t("playground:composer.rolePlaySetup", "Role-play setup")}>
       <div className="space-y-4" data-testid="role-play-setup-drawer">
         {loading && !sceneDraft ? (
-          <div
-            role="status"
-            aria-live="polite"
-            aria-label={t(
-              "playground:composer.sceneLoadingStatus",
-              "Loading scene settings"
-            )}>
+          <div role="status" aria-live="polite">
             <Skeleton active />
             <span className="sr-only">
               {t(
