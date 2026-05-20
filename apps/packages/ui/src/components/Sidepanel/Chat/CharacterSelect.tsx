@@ -46,8 +46,7 @@ import type {
 import type { MessageSteeringPromptTemplates } from "@/types/message-steering"
 import {
   characterToAssistantSelection,
-  personaToAssistantSelection,
-  type AssistantSelection
+  personaToAssistantSelection
 } from "@/types/assistant-selection"
 
 type Props = {
@@ -55,6 +54,10 @@ type Props = {
   setSelectedCharacterId: (id: string | null) => void
   className?: string
   iconClassName?: string
+  openRequest?: {
+    id: number
+    tab?: SidepanelAssistantSelectTab
+  }
 }
 
 type ImportCharacterResponse = {
@@ -65,6 +68,12 @@ type ImportCharacterResponse = {
 } & Partial<CharacterApiResponse>
 
 type CharacterSortMode = "favorites" | "az"
+
+export type SidepanelAssistantSelectTab = "character" | "persona"
+
+export type SidepanelAssistantSelectOpenDetail = {
+  tab?: SidepanelAssistantSelectTab
+}
 
 type FavoriteCharacter = {
   id?: string
@@ -112,7 +121,8 @@ export const CharacterSelect: React.FC<Props> = ({
   selectedCharacterId,
   setSelectedCharacterId,
   className = "text-text-muted",
-  iconClassName = "size-4"
+  iconClassName = "size-4",
+  openRequest
 }) => {
   const { t } = useTranslation(["sidepanel", "common", "settings"])
   const notification = useAntdNotification()
@@ -212,6 +222,42 @@ export const CharacterSelect: React.FC<Props> = ({
       setActiveTab("character")
     }
   }, [activeTab, hasPersona])
+
+  const openAssistantSelect = React.useCallback(
+    (tab?: SidepanelAssistantSelectTab) => {
+      if (tab === "persona" && hasPersona) {
+        setActiveTab("persona")
+      } else {
+        setActiveTab("character")
+      }
+      setDropdownOpen(true)
+    },
+    [hasPersona]
+  )
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleOpenAssistantSelect = (event: Event) => {
+      const detail = (event as CustomEvent<SidepanelAssistantSelectOpenDetail>)
+        .detail
+      openAssistantSelect(detail?.tab)
+    }
+    window.addEventListener(
+      "tldw:open-sidepanel-assistant-select",
+      handleOpenAssistantSelect
+    )
+    return () => {
+      window.removeEventListener(
+        "tldw:open-sidepanel-assistant-select",
+        handleOpenAssistantSelect
+      )
+    }
+  }, [openAssistantSelect])
+
+  useEffect(() => {
+    if (!openRequest) return
+    openAssistantSelect(openRequest.tab)
+  }, [openAssistantSelect, openRequest])
 
   const { data: characters = [], isLoading, refetch } = useQuery<
     CharacterApiResponse[]

@@ -8,7 +8,9 @@ import {
   Image as ImageIcon,
   UploadCloud,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  MessageSquare,
+  X
 } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -28,6 +30,18 @@ import {
   requestQuickIngestOpen,
   type QuickIngestOpenDetail
 } from "@/utils/quick-ingest-open"
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
+import {
+  SELECTED_ASSISTANT_STORAGE_KEY,
+  selectedAssistantStorage,
+  selectedAssistantSyncStorage
+} from "@/utils/selected-assistant-storage"
+import {
+  SELECTED_CHARACTER_STORAGE_KEY,
+  selectedCharacterStorage,
+  selectedCharacterSyncStorage
+} from "@/utils/selected-character-storage"
 import type { ToolChoice } from "@/store/option"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { ConversationContextComposition } from "@/types/conversation-context"
@@ -93,6 +107,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   isConnected
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
+  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const [moreOpen, setMoreOpen] = React.useState(false)
   const [systemPromptOverride, setSystemPromptOverride] = React.useState<
     string | undefined
@@ -296,6 +311,78 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     playlistImportEnabled && activePlaylistDetail
       ? t("sidepanel:controlRow.importPlaylist", "Import playlist to tldw")
       : t("sidepanel:controlRow.quickIngest", "Quick Ingest")
+  const rolePlayKind =
+    selectedAssistant?.kind === "persona"
+      ? "persona"
+      : selectedAssistant?.kind === "character" || selectedCharacterId
+        ? "character"
+        : null
+  const rolePlayActive = Boolean(rolePlayKind)
+  const rolePlayKindLabel =
+    rolePlayKind === "persona"
+      ? t("sidepanel:controlRow.persona", "Persona")
+      : t("sidepanel:controlRow.character", "Character")
+  const rolePlayName =
+    selectedAssistant?.name?.trim() ||
+    (selectedCharacterId
+      ? t("sidepanel:controlRow.characterById", "Character {{id}}", {
+          id: selectedCharacterId
+        })
+      : "")
+  const rolePlayChipTitle = rolePlayActive
+    ? t(
+        "sidepanel:controlRow.characterChatChip",
+        "Character Chat: {{kind}} {{name}}",
+        {
+          kind: rolePlayKindLabel,
+          name: rolePlayName
+        }
+      )
+    : ""
+  const fullAppChatPath = React.useMemo(
+    () =>
+      buildSidepanelFullAppChatPath({
+        selectedAssistant,
+        selectedCharacterId
+      }),
+    [selectedAssistant, selectedCharacterId]
+  )
+  const fullAppButtonLabel = rolePlayActive
+    ? t(
+        "sidepanel:controlRow.openCharacterChatInFullUI",
+        "Open Character Chat in full app"
+      )
+    : t("sidepanel:controlRow.openInFullUI", "Open full app")
+  const openRolePlayPicker = React.useCallback(() => {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-sidepanel-assistant-select", {
+        detail: {
+          tab: selectedAssistant?.kind === "persona" ? "persona" : "character"
+        }
+      })
+    )
+  }, [selectedAssistant?.kind])
+  const clearRolePlaySelection = React.useCallback(() => {
+    setSelectedCharacterId(null)
+    void (async () => {
+      await Promise.all([
+        selectedCharacterStorage
+          .remove(SELECTED_CHARACTER_STORAGE_KEY)
+          .catch(() => {}),
+        selectedCharacterSyncStorage
+          .remove(SELECTED_CHARACTER_STORAGE_KEY)
+          .catch(() => {}),
+        selectedAssistantSyncStorage
+          .remove(SELECTED_ASSISTANT_STORAGE_KEY)
+          .catch(() => {})
+      ])
+      await setSelectedAssistant(null)
+      await selectedAssistantStorage
+        .remove(SELECTED_ASSISTANT_STORAGE_KEY)
+        .catch(() => {})
+    })()
+  }, [setSelectedAssistant, setSelectedCharacterId])
 
   const openQuickIngest = async () => {
     const detail =
@@ -308,16 +395,18 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   }
 
   const openFullApp = () => {
+    const path = `/options.html#${fullAppChatPath}`
     try {
-      const url = browser.runtime.getURL("/options.html#/")
-      if (browser.tabs?.create) {
+      const runtime = browser.runtime
+      const url = runtime?.id && runtime.getURL ? runtime.getURL(path) : null
+      if (url && browser.tabs?.create) {
         browser.tabs.create({ url })
         setMoreOpen(false)
         requestAnimationFrame(() => moreBtnRef.current?.focus())
         return
       }
     } catch {}
-    window.open("/options.html#/", "_blank")
+    window.open(fullAppChatPath, "_blank")
     setMoreOpen(false)
     requestAnimationFrame(() => moreBtnRef.current?.focus())
   }
@@ -707,10 +796,10 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         onClick={openFullApp}
         data-testid="chat-open-full-app"
         className="w-full text-left text-sm px-3 py-2 rounded flex items-center gap-2 hover:bg-surface2"
-        title={t("sidepanel:controlRow.openInFullUI", "Open full app")}
+        title={fullAppButtonLabel}
       >
         <ExternalLink className="size-4 text-text-subtle" />
-        {t("sidepanel:controlRow.openInFullUI", "Open full app")}
+        {fullAppButtonLabel}
       </button>
 
     </div>
@@ -718,6 +807,48 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
 
   return (
     <div data-testid="control-row" className="flex items-center gap-2 flex-wrap">
+        {rolePlayActive && (
+          <div
+            data-testid="sidepanel-character-chat-chip"
+            className="flex min-h-[32px] max-w-full items-center overflow-hidden rounded-md border border-primary/30 bg-primary/10 text-xs text-text"
+            title={rolePlayChipTitle}
+          >
+            <button
+              type="button"
+              data-testid="sidepanel-character-chat-switch"
+              onClick={openRolePlayPicker}
+              className="flex min-w-0 items-center gap-1.5 px-2 py-1.5 text-left hover:bg-primary/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={t(
+                "sidepanel:controlRow.switchCharacterChat",
+                "Switch Character Chat assistant"
+              )}
+            >
+              <MessageSquare className="size-3.5 shrink-0 text-primary" />
+              <span className="shrink-0 font-semibold">
+                {t("sidepanel:controlRow.characterChat", "Character Chat")}
+              </span>
+              <span className="min-w-0 truncate text-text-muted">
+                {rolePlayKindLabel}: {rolePlayName}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-testid="sidepanel-character-chat-clear"
+              onClick={clearRolePlaySelection}
+              className="flex h-8 w-8 shrink-0 items-center justify-center border-l border-primary/20 text-text-muted hover:bg-primary/15 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={t(
+                "sidepanel:controlRow.clearCharacterChat",
+                "Clear Character Chat selection"
+              )}
+              title={t(
+                "sidepanel:controlRow.clearCharacterChat",
+                "Clear Character Chat selection"
+              )}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         {/* Prompt, Model & Character selectors */}
         <PromptSelect
           selectedSystemPrompt={selectedSystemPrompt}
