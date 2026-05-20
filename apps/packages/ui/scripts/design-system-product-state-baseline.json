@@ -99,28 +99,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Common/Workflow/WorkflowRunInspector.tsx:Empty",
-    "path": "src/components/Common/Workflow/WorkflowRunInspector.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/Common/Workflow/WorkflowRunInspector.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Common/Workflow/WorkflowRunInspector.tsx:Tag",
-    "path": "src/components/Common/Workflow/WorkflowRunInspector.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Tag",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Tag product-state UI in src/components/Common/Workflow/WorkflowRunInspector.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentPickerModal.tsx:Alert#antd-alert-documentpickermodal-type-error-line-573-1sibda5",
     "path": "src/components/DocumentWorkspace/DocumentPickerModal.tsx",
     "rule": "antd-product-state-import",
