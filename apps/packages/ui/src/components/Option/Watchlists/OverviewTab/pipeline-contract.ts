@@ -7,6 +7,7 @@ import {
   resolveQuickSetupSchedule,
   type QuickSetupSchedulePreset
 } from "./quick-setup"
+import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 
 export interface BriefingPipelineDraft {
   monitorName: string
@@ -90,7 +91,7 @@ export const toPipelineJobCreatePayload = (
       }
     : resolveQuickSetupSchedule(draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
-  const normalizedTemplateName = String(draft.templateName || "").trim()
+  const normalizedTemplateName = normalizeWatchlistTemplateName(draft.templateName)
   const templateVersionNum = Number(draft.templateVersion)
   const normalizedTemplateVersion =
     Number.isFinite(templateVersionNum) && templateVersionNum > 0
@@ -167,7 +168,7 @@ export const toPipelineOutputCreatePayload = (
     item_ids: itemIds,
     type: "briefing_markdown",
     ...(templateFormat ? { format: templateFormat } : {}),
-    template_name: String(draft.templateName || "").trim()
+    template_name: normalizeWatchlistTemplateName(draft.templateName)
   }
 
   if (Number.isFinite(Number(draft.templateVersion)) && Number(draft.templateVersion) > 0) {

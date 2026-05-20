@@ -60,7 +60,8 @@ describe("watchlists pipeline contract", () => {
           }) as Intl.DateTimeFormat
       )
 
-    expect(toPipelineJobCreatePayload(baseDraft)).toEqual(
+    const jobPayload = toPipelineJobCreatePayload(baseDraft)
+    expect(jobPayload).toEqual(
       expect.objectContaining({
         name: "Morning Brief",
         scope: { sources: [10, 11] },
@@ -71,10 +72,13 @@ describe("watchlists pipeline contract", () => {
             enabled: true,
             type: "briefing_markdown",
             format: "md",
-            template_name: "briefing_md",
+            template_name: "briefing_markdown",
             template_version: 2
           },
-          template_name: "briefing_md",
+          template_name: "briefing_markdown",
+          template: expect.objectContaining({
+            default_name: "briefing_markdown"
+          }),
           generate_audio: true,
           audio_voice: "alloy",
           target_audio_minutes: 8,
@@ -85,13 +89,18 @@ describe("watchlists pipeline contract", () => {
         })
       })
     )
+    expect(jobPayload.output_prefs).toMatchObject({
+      template_name: "briefing_markdown",
+      template: { default_name: "briefing_markdown" }
+    })
 
-    expect(toPipelineOutputCreatePayload(9001, baseDraft, [1, 2])).toEqual({
+    const outputPayload = toPipelineOutputCreatePayload(9001, baseDraft, [1, 2])
+    expect(outputPayload).toEqual({
       run_id: 9001,
       item_ids: [1, 2],
       type: "briefing_markdown",
       format: "md",
-      template_name: "briefing_md",
+      template_name: "briefing_markdown",
       template_version: 2,
       generate_audio: true,
       audio_voice: "alloy",
@@ -108,6 +117,7 @@ describe("watchlists pipeline contract", () => {
         chatbook: { enabled: true, title: "Morning Intel" }
       }
     })
+    expect(outputPayload.template_name).toBe("briefing_markdown")
 
     timezoneSpy.mockRestore()
   })

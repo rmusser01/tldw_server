@@ -3,6 +3,7 @@ import type {
   WatchlistSourceCreate,
   SourceType
 } from "@/types/watchlists"
+import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 
 export type QuickSetupSchedulePreset = "none" | "hourly" | "daily" | "weekdays"
 export type QuickSetupGoal = "briefing" | "triage"
@@ -89,8 +90,12 @@ export const toQuickSetupJobPayload = (
   }
 
   if ((values.setupGoal || "briefing") === "briefing") {
+    const templateName = normalizeWatchlistTemplateName("briefing_md")
     payload.output_prefs = {
-      template_name: "briefing_md",
+      template_name: templateName,
+      template: {
+        default_name: templateName
+      },
       generate_audio: Boolean(values.includeAudioBriefing)
     }
   }

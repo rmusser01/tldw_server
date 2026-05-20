@@ -113,7 +113,10 @@ describe("watchlists overview quick setup helpers", () => {
       schedule_expr: "0 8 * * *",
       timezone: "UTC",
       output_prefs: {
-        template_name: "briefing_md",
+        template_name: "briefing_markdown",
+        template: {
+          default_name: "briefing_markdown"
+        },
         generate_audio: true
       }
     })
