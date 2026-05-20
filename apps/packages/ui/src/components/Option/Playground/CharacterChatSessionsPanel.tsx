@@ -41,19 +41,19 @@ const getSessionUpdatedAt = (chat: ServerChatHistoryItem): string | null => {
     typeof chat.updated_at === "string" &&
     chat.updated_at.trim().length > 0
   ) {
-    return chat.updated_at;
+    return chat.updated_at.trim();
   }
   if (
     typeof chat.last_active === "string" &&
     chat.last_active.trim().length > 0
   ) {
-    return chat.last_active;
+    return chat.last_active.trim();
   }
   if (
     typeof chat.created_at === "string" &&
     chat.created_at.trim().length > 0
   ) {
-    return chat.created_at;
+    return chat.created_at.trim();
   }
   return null;
 };
@@ -182,7 +182,7 @@ const CharacterSessionList = ({
                 type="button"
                 disabled={isActive}
                 onClick={() => {
-                  if (!isActive) onSelectSession(session);
+                  onSelectSession(session);
                 }}
                 aria-label={
                   isActive
@@ -290,27 +290,28 @@ export const CharacterChatSessionsPanel = ({
             </p>
           </div>
           <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cockpitRailToneClass(
-              sessionBadgeTone,
-            )}`}
+            className={cn(
+              "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+              cockpitRailToneClass(sessionBadgeTone),
+            )}
           >
             {hasSessions
               ? t("characterChatSessions.available", "Available")
               : hardErrorWithoutData
                 ? t("characterChatSessions.errorBadge", "Error")
-              : t("characterChatSessions.emptyBadge", "None")}
+                : t("characterChatSessions.emptyBadge", "None")}
           </span>
         </div>
 
         {isLoading && !hasUsableData ? (
-          <div className={`mt-3 ${cockpitRailStyles.emptyInset}`}>
+          <div className={cn("mt-3", cockpitRailStyles.emptyInset)}>
             {t(
               "characterChatSessions.loading",
               "Loading character sessions...",
             )}
           </div>
         ) : sidebarRefreshState === "recoverable-error" && !hasUsableData ? (
-          <div className={`mt-3 ${cockpitRailStyles.emptyInset}`}>
+          <div className={cn("mt-3", cockpitRailStyles.emptyInset)}>
             {t(
               "characterChatSessions.refreshFailed",
               "Unable to refresh character sessions right now.",
@@ -356,7 +357,7 @@ export const CharacterChatSessionsPanel = ({
             />
           </>
         ) : (
-          <div className={`mt-3 ${cockpitRailStyles.emptyInset}`}>
+          <div className={cn("mt-3", cockpitRailStyles.emptyInset)}>
             {t(
               "characterChatSessions.empty",
               "No character conversations yet.",

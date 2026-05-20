@@ -134,6 +134,10 @@ type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
 
+const isPlaygroundContextSource = (
+  item: PlaygroundContextSource | null,
+): item is PlaygroundContextSource => Boolean(item);
+
 const UNAVAILABLE_DESIGN_STATE_LABEL =
   getDesignSystemState("unavailable").label;
 
@@ -2293,7 +2297,7 @@ export const Playground = () => {
         ),
       })),
     ] satisfies Array<PlaygroundContextSource | null>
-  ).filter(Boolean) as PlaygroundContextSource[];
+  ).filter(isPlaygroundContextSource);
   const activeScopedModelSettings =
     activeSettingsScope && scopedSettingsByModelKey
       ? scopedSettingsByModelKey[activeSettingsScope]

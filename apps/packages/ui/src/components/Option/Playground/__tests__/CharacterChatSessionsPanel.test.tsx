@@ -8,6 +8,9 @@ import { CharacterChatSessionsPanel } from "../CharacterChatSessionsPanel";
 
 const historyHookMock = vi.hoisted(() => vi.fn());
 const selectServerChatMock = vi.hoisted(() => vi.fn());
+const formatRelativeTimeMock = vi.hoisted(() =>
+  vi.fn((value: string) => `relative:${value}`),
+);
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -41,6 +44,11 @@ vi.mock("@/hooks/chat/useSelectServerChat", () => ({
   useSelectServerChat: () => selectServerChatMock,
 }));
 
+vi.mock("@/utils/dateFormatters", () => ({
+  formatRelativeTime: (...args: Parameters<typeof formatRelativeTimeMock>) =>
+    formatRelativeTimeMock(...args),
+}));
+
 const makeChat = (
   id: string,
   overrides: Partial<ServerChatHistoryItem> = {},
@@ -60,6 +68,7 @@ describe("CharacterChatSessionsPanel", () => {
   beforeEach(() => {
     historyHookMock.mockReset();
     selectServerChatMock.mockReset();
+    formatRelativeTimeMock.mockClear();
     historyHookMock.mockReturnValue({
       data: [],
       total: 0,
@@ -246,6 +255,39 @@ describe("CharacterChatSessionsPanel", () => {
     );
     expect(
       screen.getByText("Unable to refresh character sessions right now."),
+    ).toBeInTheDocument();
+  });
+
+  it("normalizes timestamps before rendering relative session age", () => {
+    const chatWithPaddedTimestamp = makeChat("chat-padded", {
+      title: "Padded Timestamp",
+      character_id: "mira",
+      updated_at: "  2026-05-20T00:10:00.000Z  ",
+    });
+    historyHookMock.mockReturnValue({
+      data: [chatWithPaddedTimestamp],
+      total: 1,
+      isLoading: false,
+      sidebarRefreshState: "ready",
+      hasUsableData: true,
+      isShowingStaleData: false,
+    });
+
+    render(
+      <CharacterChatSessionsPanel
+        activeCharacterId="mira"
+        activeCharacterName="Mira"
+        activeServerChatId={null}
+      />,
+    );
+
+    expect(formatRelativeTimeMock).toHaveBeenCalledWith(
+      "2026-05-20T00:10:00.000Z",
+      expect.any(Function),
+      { compact: true },
+    );
+    expect(
+      screen.getByText("relative:2026-05-20T00:10:00.000Z"),
     ).toBeInTheDocument();
   });
 
