@@ -270,6 +270,34 @@ describe("audio readiness helpers", () => {
     )
   })
 
+  it("reports missing ffmpeg for ElevenLabs output processing", () => {
+    const items = buildTtsReadinessItems({
+      provider: "elevenlabs",
+      hasAudio: false,
+      providersInfo: null,
+      elevenLabsApiKey: "sk_test_key",
+      elevenLabsData: {
+        voices: [{ voice_id: "voice-1" }],
+        models: [{ model_id: "model-1" }]
+      },
+      ffmpegAvailable: false
+    })
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "elevenlabs-catalog",
+          state: "ready"
+        }),
+        expect.objectContaining({
+          id: "ffmpeg-output",
+          label: "Output processing",
+          state: "warning"
+        })
+      ])
+    )
+  })
+
   it("reports missing ffmpeg as degraded output capability", () => {
     const items = buildTtsReadinessItems({
       provider: "kitten_tts",

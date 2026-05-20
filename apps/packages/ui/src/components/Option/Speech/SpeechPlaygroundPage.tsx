@@ -2120,11 +2120,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     tldwVoiceOptions.length === 0
   const elevenLabsCatalogEmpty =
     provider === "elevenlabs" &&
-    Boolean(elevenLabsData) &&
-    (!Array.isArray(elevenLabsData?.voices) ||
-      elevenLabsData.voices.length === 0 ||
-      !Array.isArray(elevenLabsData?.models) ||
-      elevenLabsData.models.length === 0)
+    !!elevenLabsData &&
+    (!elevenLabsData.voices?.length || !elevenLabsData.models?.length)
 
   const playDisabledReason = (() => {
     if (isTtsDisabled) {

@@ -343,7 +343,7 @@ export function buildTtsReadinessItems({
       state: "blocked",
       detail: "API key required before generation."
     })
-    return items
+    return appendFfmpegWarning()
   }
 
   if (provider === "elevenlabs") {
@@ -362,7 +362,7 @@ export function buildTtsReadinessItems({
         detail: "Loading ElevenLabs voices and models.",
         source: "provider"
       })
-      return items
+      return appendFfmpegWarning()
     }
     if (elevenLabsError) {
       items.push({
@@ -372,7 +372,7 @@ export function buildTtsReadinessItems({
         detail: "Unable to load ElevenLabs voices or models. Retry before generation.",
         source: "provider"
       })
-      return items
+      return appendFfmpegWarning()
     }
     if (elevenLabsData) {
       const hasVoices = Array.isArray(elevenLabsData.voices) && elevenLabsData.voices.length > 0
@@ -388,7 +388,7 @@ export function buildTtsReadinessItems({
         source: "provider"
       })
     }
-    return items
+    return appendFfmpegWarning()
   }
 
   if (!hasAudio) {

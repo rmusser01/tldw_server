@@ -43,13 +43,13 @@ Execute WP11A Task 4 from the WebUI audio routes implementation plan. Make /tts 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Kept /tts routed through SpeechPlaygroundPage lockedMode=listen and tightened route-level synthesis recovery. Added readiness inputs for ElevenLabs catalog state and ffmpeg availability, labeled browser synthesis as local browser output, passed inferred server provider keys into TTS readiness, and gated Play with actionable recovery reasons for missing server audio, missing provider metadata, missing voice catalogs, ElevenLabs missing credentials/loading/timeout/error/empty catalogs. Updated focused render/helper/E2E coverage around these states without adding backend APIs or a second route surface.
+Kept /tts routed through SpeechPlaygroundPage lockedMode=listen and tightened route-level synthesis recovery. Added readiness inputs for ElevenLabs catalog state and ffmpeg availability, labeled browser synthesis as local browser output, passed inferred server provider keys into TTS readiness, and gated Play with actionable recovery reasons for missing server audio, missing provider metadata, missing voice catalogs, ElevenLabs missing credentials/loading/timeout/error/empty catalogs. PR review follow-up made ffmpeg degraded output reporting consistent for ElevenLabs and simplified the ElevenLabs empty-catalog guard without adding backend APIs or a second route surface.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed WP11A Task 4 for /tts route readiness. Focused tests passed: component suite 73/73, route contract 8/8, and TTS E2E 2 passed with 1 backend-dependent speech API test skipped. ESLint reported 0 errors with existing warnings in the large Speech page/test files. Broad frontend/UI TypeScript checks still fail on inherited unrelated debt outside this slice. Bandit was not applicable because no Python files were touched.
+Completed WP11A Task 4 for /tts route readiness and addressed PR #1885 review comments. Focused tests passed: component suite 74/74, route contract 8/8, and TTS E2E 3/3. ESLint reported 0 errors with existing warnings in the large Speech page/test files. Broad frontend/UI TypeScript checks still fail on inherited unrelated debt outside this slice. Bandit was not applicable because no Python files were touched.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
