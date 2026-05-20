@@ -595,6 +595,26 @@ describe("Playground cockpit shell", () => {
     expect(chatStatus).not.toHaveTextContent("Ready");
   });
 
+  it("keeps empty character chat model selection in the missing-model status", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.selectedModel = "";
+
+    render(<Playground />);
+
+    expect(
+      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
+        "Choose a chat model before chatting as Ariadne",
+      ),
+    ).toBeInTheDocument();
+    const chatStatus = screen.getByRole("status", { name: "Chat status" });
+    expect(chatStatus).toHaveTextContent("No model selected");
+    expect(chatStatus).not.toHaveTextContent("Model unavailable");
+  });
+
   it("does not treat catalog-only backend models as ready for character chat", async () => {
     storageState.values.set("playgroundChatWorkflowMode", "character");
     messageOptionState.value.selectedCharacter = {

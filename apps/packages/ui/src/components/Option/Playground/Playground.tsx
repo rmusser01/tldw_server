@@ -2066,9 +2066,10 @@ export const Playground = () => {
   );
   const characterChatBlocked =
     characterWorkflowActive && characterChatReadiness.status === "blocked";
-  const characterChatModelBlocked =
+  const characterChatModelUnavailable =
     characterChatBlocked &&
-    characterChatReadiness.missingRequirement === "chat-model";
+    (characterChatReadiness.reason === "selected-model-unavailable" ||
+      characterChatReadiness.reason === "no-models-available");
   const characterChatReadinessCopy = React.useMemo(
     () =>
       characterChatBlocked
@@ -2428,7 +2429,7 @@ export const Playground = () => {
     toolSummary: cockpitToolSummary,
     compositionStatus,
     composition: null,
-    modelUnavailable: characterChatModelBlocked,
+    modelUnavailable: characterChatModelUnavailable,
     modelUnavailableDetail: characterChatReadinessCopy?.title ?? null,
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
@@ -2577,7 +2578,7 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
       runtimeStatus={
-        characterChatModelBlocked || serverReadinessState === "blocked"
+        characterChatModelUnavailable || serverReadinessState === "blocked"
           ? "error"
           : streaming
           ? "streaming"
@@ -2627,7 +2628,7 @@ export const Playground = () => {
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
       serverBlocked={serverReadinessState === "blocked"}
-      modelUnavailable={characterChatModelBlocked}
+      modelUnavailable={characterChatModelUnavailable}
       modelUnavailableMessage={characterChatReadinessCopy?.title ?? null}
       compositionStatus={compositionStatus}
       onStopStreaming={() => stopStreamingRequest()}

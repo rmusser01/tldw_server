@@ -43,6 +43,8 @@ Review follow-up verification: the 9-file focused Vitest suite still passed with
 Cubic review follow-up: fixed catalog-only conflict precedence, kept catalog-only false from satisfying requireConfiguredFlags, and narrowed runtime-rail error mapping so streaming/send-blocked character readiness remains Streaming instead of Error.
 
 Cubic follow-up verification: the 9-file focused Vitest suite passed with 116 tests after adding regressions for catalog-only precedence, configured-flag enforcement, and streaming runtime status.
+
+Qodo review follow-up: narrowed the Character Chat model-unavailable flag to selected-model-unavailable and no-models-available reasons so an empty model selection remains in the existing missing-model status path.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -53,6 +55,8 @@ Fixed Character Chat readiness so catalog-only or explicitly unconfigured backen
 PR #1871 review follow-up removed repeated per-flag descriptor record allocation in the model availability helper and simplified equivalent runtime-status branching in Playground.
 
 PR #1871 cubic follow-up now treats any catalog-only true descriptor flag as unavailable, requires actual configured/provider flags for fail-closed Character Chat readiness, and avoids presenting active streaming as a runtime error.
+
+PR #1871 Qodo follow-up keeps "no selected model" distinct from "selected model unavailable" in the cockpit status strip and composition/runtime wiring.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
