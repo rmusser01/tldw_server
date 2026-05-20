@@ -213,6 +213,9 @@ describe("CharacterChatSessionsPanel", () => {
     expect(
       screen.getByText("Loading character sessions..."),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: "Loading character sessions" }),
+    ).toHaveTextContent("Loading character sessions...");
 
     historyHookMock.mockReturnValueOnce({
       data: [],
@@ -256,6 +259,56 @@ describe("CharacterChatSessionsPanel", () => {
     expect(
       screen.getByText("Unable to refresh character sessions right now."),
     ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unable to refresh character sessions right now.",
+    );
+  });
+
+  it("announces stale and hard-failure session states", () => {
+    const staleChat = makeChat("chat-stale", {
+      title: "Stale Mira",
+      character_id: "mira",
+    });
+    historyHookMock.mockReturnValueOnce({
+      data: [staleChat],
+      total: 1,
+      isLoading: false,
+      sidebarRefreshState: "ready",
+      hasUsableData: true,
+      isShowingStaleData: true,
+    });
+    const { rerender } = render(
+      <CharacterChatSessionsPanel
+        activeCharacterId="mira"
+        activeCharacterName="Mira"
+        activeServerChatId={null}
+      />,
+    );
+
+    expect(screen.getByRole("status", { name: "Character session refresh" }))
+      .toHaveTextContent(
+        "Showing character sessions from the last successful refresh.",
+      );
+
+    historyHookMock.mockReturnValueOnce({
+      data: [],
+      total: 0,
+      isLoading: false,
+      sidebarRefreshState: "hard-error",
+      hasUsableData: false,
+      isShowingStaleData: false,
+    });
+    rerender(
+      <CharacterChatSessionsPanel
+        activeCharacterId="mira"
+        activeCharacterName="Mira"
+        activeServerChatId={null}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Character sessions could not be loaded.",
+    );
   });
 
   it("normalizes timestamps before rendering relative session age", () => {

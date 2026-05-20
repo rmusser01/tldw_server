@@ -467,7 +467,23 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       onClose={closeAndReturnFocus}
       title={t("playground:composer.rolePlaySetup", "Role-play setup")}>
       <div className="space-y-4" data-testid="role-play-setup-drawer">
-        {loading && !sceneDraft ? <Skeleton active /> : null}
+        {loading && !sceneDraft ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label={t(
+              "playground:composer.sceneLoadingStatus",
+              "Loading scene settings"
+            )}>
+            <Skeleton active />
+            <span className="sr-only">
+              {t(
+                "playground:composer.sceneLoading",
+                "Loading scene settings..."
+              )}
+            </span>
+          </div>
+        ) : null}
         {sceneLoadError ? (
           <p role="alert" className="rounded-md border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
             {sceneLoadError}

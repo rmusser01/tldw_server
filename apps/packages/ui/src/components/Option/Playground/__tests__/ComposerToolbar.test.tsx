@@ -440,16 +440,16 @@ describe("ComposerToolbar web search", () => {
     ).toBeNull()
   })
 
-  it("keeps casual controls in a single non-wrapping horizontal row", () => {
+  it("wraps casual controls below desktop while keeping the dense desktop row", () => {
     render(<ComposerToolbar {...createProps()} />)
 
     const actionsRow = document.querySelector<HTMLElement>(
       '[data-playground-toolbar-row="actions"]'
     )
     expect(actionsRow).not.toBeNull()
-    expect(actionsRow?.className).toContain("flex-nowrap")
-    expect(actionsRow?.className).toContain("overflow-x-auto")
-    expect(actionsRow?.className).not.toContain("flex-wrap")
+    expect(actionsRow?.className).toContain("flex-wrap")
+    expect(actionsRow?.className).toContain("lg:flex-nowrap")
+    expect(actionsRow?.className).toContain("lg:overflow-x-auto")
   })
 
   it("keeps MCP in the casual actions row when advanced controls are expanded", () => {

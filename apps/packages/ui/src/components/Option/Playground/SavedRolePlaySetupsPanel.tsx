@@ -117,14 +117,24 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
           )}
         </p>
       ) : (
-        <div className="space-y-2">
+        <ul
+          aria-label={t(
+            "playground:composer.savedRolePlaySetupList",
+            "Saved role-play setup list"
+          )}
+          className="space-y-2">
           {rolePlaySetups.map((setup) => {
             const preview = describeRolePlaySetupPreview(setup)
             const renameDraft = getRenameDraft(setup)
             const deletePending = pendingDeleteId === setup.id
             return (
-              <div
+              <li
                 key={setup.id}
+                aria-label={t(
+                  "playground:composer.savedRolePlaySetupListItem",
+                  "{{name}} role-play setup",
+                  { name: setup.name }
+                )}
                 className="space-y-2 rounded-md border border-border bg-surface2 p-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -239,10 +249,10 @@ export const SavedRolePlaySetupsPanel: React.FC<SavedRolePlaySetupsPanelProps> =
                     {t("common:rename", "Rename")}
                   </Button>
                 </div>
-              </div>
+              </li>
             )
           })}
-        </div>
+        </ul>
       )}
     </section>
   )

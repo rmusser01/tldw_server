@@ -304,14 +304,22 @@ export const CharacterChatSessionsPanel = ({
         </div>
 
         {isLoading && !hasUsableData ? (
-          <div className={cn("mt-3", cockpitRailStyles.emptyInset)}>
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label={t(
+              "characterChatSessions.loadingStatusLabel",
+              "Loading character sessions",
+            )}
+            className={cn("mt-3", cockpitRailStyles.emptyInset)}
+          >
             {t(
               "characterChatSessions.loading",
               "Loading character sessions...",
             )}
           </div>
         ) : sidebarRefreshState === "recoverable-error" && !hasUsableData ? (
-          <div className={cn("mt-3", cockpitRailStyles.emptyInset)}>
+          <div role="alert" className={cn("mt-3", cockpitRailStyles.emptyInset)}>
             {t(
               "characterChatSessions.refreshFailed",
               "Unable to refresh character sessions right now.",
@@ -319,6 +327,7 @@ export const CharacterChatSessionsPanel = ({
           </div>
         ) : hardErrorWithoutData ? (
           <div
+            role="alert"
             className={cn(
               "mt-3",
               cockpitRailStyles.emptyInset,
@@ -333,7 +342,15 @@ export const CharacterChatSessionsPanel = ({
         ) : hasSessions ? (
           <>
             {isShowingStaleData ? (
-              <p className="mt-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-text-subtle">
+              <p
+                role="status"
+                aria-live="polite"
+                aria-label={t(
+                  "characterChatSessions.refreshStatusLabel",
+                  "Character session refresh",
+                )}
+                className="mt-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-text-subtle"
+              >
                 {t(
                   "characterChatSessions.stale",
                   "Showing character sessions from the last successful refresh.",
