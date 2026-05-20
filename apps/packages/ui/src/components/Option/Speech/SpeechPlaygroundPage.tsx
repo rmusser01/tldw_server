@@ -3,7 +3,6 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
 import {
   Button,
-  Alert,
   Card,
   Input,
   List,
@@ -26,6 +25,7 @@ import {
 } from "@/audio"
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
 import { PageShell } from "@/components/Common/PageShell"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import WaveformCanvas from "@/components/Common/WaveformCanvas"
 import { inferTldwProviderFromModel, resolveTtsProviderContext } from "@/services/tts-provider"
 import { getTtsProviderLabel } from "@/services/tts-providers"
@@ -2615,20 +2615,17 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       )}
                     </div>
                     {serverModelsError && (
-                      <Alert
-                        type="warning"
-                        showIcon
-                        title={serverModelsError}
-                        action={
-                          <Button
-                            size="small"
-                            onClick={retryServerModels}
-                            disabled={serverModelsLoading}
-                          >
-                            {t("common:retry", "Retry")}
-                          </Button>
-                        }
-                      />
+                      <DesignSystemAlert
+                        variant="warning"
+                        title={t("playground:stt.modelsLoadError", "Model load failed")}
+                        action={{
+                          label: t("common:retry", "Retry"),
+                          onClick: retryServerModels,
+                          disabled: serverModelsLoading
+                        }}
+                      >
+                        {serverModelsError}
+                      </DesignSystemAlert>
                     )}
                   </div>
                   <div className="flex flex-col gap-3">
@@ -2876,103 +2873,100 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
                     {/* Error banners */}
                     {isTldw && !hasAudio && (
-                      <Alert
-                        type="warning"
-                        showIcon
+                      <DesignSystemAlert
+                        variant="warning"
                         title={t(
                           "playground:tts.tldwWarningTitle",
                           "tldw audio/speech API not detected"
                         )}
-                        description={t(
+                      >
+                        {t(
                           "playground:tts.tldwWarningBody",
                           "Ensure your tldw_server version includes /api/v1/audio/speech and that your extension is connected with a valid API key."
                         )}
-                      />
+                      </DesignSystemAlert>
                     )}
 
                     {showElevenLabsHint && (
-                      <Alert
-                        type={hasElevenLabsKey ? "warning" : "info"}
-                        showIcon
+                      <DesignSystemAlert
+                        variant={hasElevenLabsKey ? "warning" : "info"}
                         title={elevenLabsHintTitle}
-                        description={
-                          <div className="space-y-3">
-                            <span>
-                              {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
-                                ? elevenLabsTimeoutBody
-                                : elevenLabsHintBody}
-                            </span>
-                            {hasElevenLabsKey ? (
-                              <div>
-                                <Button
-                                  size="small"
-                                  type="link"
-                                  onClick={() => {
-                                    void refetchElevenLabs()
-                                  }}
-                                >
-                                  {t("common:retry", "Retry")}
-                                </Button>
-                              </div>
-                            ) : (
-                              <details
-                                open={inlineElevenLabsDetailsOpen}
-                                onToggle={(event) => {
-                                  setInlineElevenLabsDetailsOpen(event.currentTarget.open)
+                      >
+                        <div className="space-y-3">
+                          <span>
+                            {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
+                              ? elevenLabsTimeoutBody
+                              : elevenLabsHintBody}
+                          </span>
+                          {hasElevenLabsKey ? (
+                            <div>
+                              <Button
+                                size="small"
+                                type="link"
+                                onClick={() => {
+                                  void refetchElevenLabs()
                                 }}
-                                className="rounded-md border border-border bg-background/60 px-3 py-2"
                               >
-                                <summary className="cursor-pointer text-sm font-medium text-text">
-                                  {t(
-                                    "playground:tts.elevenLabsInlineKeySummary",
-                                    "Enter API key"
-                                  )}
-                                </summary>
-                                <div className="mt-3 space-y-2">
-                                  <Space.Compact className="w-full max-w-xl">
-                                    <Input.Password
-                                      id="elevenlabs-api-key"
-                                      aria-label={t(
-                                        "playground:tts.elevenLabsInlineKeyLabel",
-                                        "ElevenLabs API key"
-                                      ) as string}
-                                      placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                                      value={inlineElevenLabsApiKey}
-                                      onChange={(event) => {
-                                        setInlineElevenLabsApiKey(event.target.value)
-                                        setInlineElevenLabsResult(null)
-                                      }}
-                                      onPressEnter={() => {
-                                        void handleInlineElevenLabsSave()
-                                      }}
-                                    />
-                                    <Button
-                                      type="primary"
-                                      loading={inlineElevenLabsSaving}
-                                      disabled={!inlineElevenLabsApiKey.trim()}
-                                      onClick={() => {
-                                        void handleInlineElevenLabsSave()
-                                      }}
-                                    >
-                                      {t(
-                                        "playground:tts.elevenLabsInlineKeySave",
-                                        "Test & Save"
-                                      )}
-                                    </Button>
-                                  </Space.Compact>
-                                  {inlineElevenLabsResult && (
-                                    <Alert
-                                      type={inlineElevenLabsResult.ok ? "success" : "error"}
-                                      showIcon
-                                      title={inlineElevenLabsResult.message}
-                                    />
-                                  )}
-                                </div>
-                              </details>
-                            )}
-                          </div>
-                        }
-                      />
+                                {t("common:retry", "Retry")}
+                              </Button>
+                            </div>
+                          ) : (
+                            <details
+                              open={inlineElevenLabsDetailsOpen}
+                              onToggle={(event) => {
+                                setInlineElevenLabsDetailsOpen(event.currentTarget.open)
+                              }}
+                              className="rounded-md border border-border bg-background/60 px-3 py-2"
+                            >
+                              <summary className="cursor-pointer text-sm font-medium text-text">
+                                {t(
+                                  "playground:tts.elevenLabsInlineKeySummary",
+                                  "Enter API key"
+                                )}
+                              </summary>
+                              <div className="mt-3 space-y-2">
+                                <Space.Compact className="w-full max-w-xl">
+                                  <Input.Password
+                                    id="elevenlabs-api-key"
+                                    aria-label={t(
+                                      "playground:tts.elevenLabsInlineKeyLabel",
+                                      "ElevenLabs API key"
+                                    ) as string}
+                                    placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                                    value={inlineElevenLabsApiKey}
+                                    onChange={(event) => {
+                                      setInlineElevenLabsApiKey(event.target.value)
+                                      setInlineElevenLabsResult(null)
+                                    }}
+                                    onPressEnter={() => {
+                                      void handleInlineElevenLabsSave()
+                                    }}
+                                  />
+                                  <Button
+                                    type="primary"
+                                    loading={inlineElevenLabsSaving}
+                                    disabled={!inlineElevenLabsApiKey.trim()}
+                                    onClick={() => {
+                                      void handleInlineElevenLabsSave()
+                                    }}
+                                  >
+                                    {t(
+                                      "playground:tts.elevenLabsInlineKeySave",
+                                      "Test & Save"
+                                    )}
+                                  </Button>
+                                </Space.Compact>
+                                {inlineElevenLabsResult && (
+                                  <DesignSystemAlert
+                                    variant={inlineElevenLabsResult.ok ? "success" : "error"}
+                                    title={inlineElevenLabsResult.message}
+                                  />
+                                )}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      </DesignSystemAlert>
                     )}
 
                     {/* Text input area */}
@@ -3182,20 +3176,20 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       />
                     )}
                     {ttsJobStatus === "error" && ttsJobError && (
-                      <Alert
-                        type="error"
-                        showIcon
-                        title="Long-form TTS error"
-                        description={ttsJobError}
-                      />
+                      <DesignSystemAlert
+                        variant="error"
+                        title={t("playground:tts.longFormError", "Long-form TTS error")}
+                      >
+                        {ttsJobError}
+                      </DesignSystemAlert>
                     )}
                     {activeStreamError && (
-                      <Alert
-                        type="error"
-                        showIcon
-                        title="Streaming error"
-                        description={activeStreamError}
-                      />
+                      <DesignSystemAlert
+                        variant="error"
+                        title={t("playground:tts.streamingError", "Streaming error")}
+                      >
+                        {activeStreamError}
+                      </DesignSystemAlert>
                     )}
 
                     {/* Waveform + Segments */}

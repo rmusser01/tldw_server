@@ -257,6 +257,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:orientation-dismissed:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
+    localStorage.removeItem("watchlists:teach-points:v1")
   })
 
   afterEach(() => {
@@ -266,6 +267,7 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     localStorage.removeItem("watchlists:ia-experiment:v1")
     localStorage.removeItem("watchlists:orientation-dismissed:v1")
     localStorage.removeItem("watchlists:secondary-expanded:v1")
+    localStorage.removeItem("watchlists:teach-points:v1")
   })
 
   it("shows per-tab orientation and explicit Activity to Reports next action", () => {
@@ -273,10 +275,29 @@ describe("WatchlistsPlaygroundPage orientation guidance", () => {
     render(<WatchlistsPlaygroundPage />)
 
     expect(screen.getByTestId("watchlists-orientation-title")).toHaveTextContent("Activity")
+    expect(
+      screen
+        .getByTestId("watchlists-orientation-title")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-orientation-description")).toHaveTextContent("Reports")
 
     fireEvent.click(screen.getByTestId("watchlists-orientation-action-open-reports"))
     expect(mocks.state.setActiveTab).toHaveBeenCalledWith("outputs")
+  })
+
+  it("uses the canonical alert for tab teach points", () => {
+    mocks.state.activeTab = "jobs"
+    render(<WatchlistsPlaygroundPage />)
+
+    expect(screen.getByTestId("watchlists-teach-point-title")).toHaveTextContent(
+      "Monitor setup tip"
+    )
+    expect(
+      screen
+        .getByTestId("watchlists-teach-point-title")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
   })
 
   it("supports the primary workflow journey from overview through reports", () => {

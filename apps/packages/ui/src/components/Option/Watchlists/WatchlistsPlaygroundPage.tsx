@@ -1,6 +1,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef } from "react"
-import { Alert, Button, Drawer, Input, Modal, Select, Switch, Tabs, Tag, Tooltip } from "antd"
+import { Button, Drawer, Input, Modal, Select, Switch, Tabs, Tag, Tooltip } from "antd"
 import { DismissibleBetaAlert } from "@/components/Common/DismissibleBetaAlert"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type { TabsProps } from "antd"
 import {
   BellRing,
@@ -1956,35 +1957,34 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const renderWatchlistContainerShell = (): React.ReactNode => {
     if (watchlistsLoading && (!Array.isArray(watchlists) || watchlists.length === 0)) {
       return (
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           className="mb-4"
           data-testid="watchlists-container-loading"
           title={t("watchlists:containers.loading", "Loading Watchlists")}
-          description={t(
+        >
+          {t(
             "watchlists:containers.loadingDescription",
             "Preparing your monitoring workspaces."
           )}
-        />
+        </DesignSystemAlert>
       )
     }
 
     if (watchlistsError && (!Array.isArray(watchlists) || watchlists.length === 0)) {
       return (
-        <Alert
-          type="error"
-          showIcon
+        <DesignSystemAlert
+          variant="error"
           className="mb-4"
           data-testid="watchlists-container-error"
           title={t("watchlists:containers.errorTitle", "Watchlists unavailable")}
-          description={watchlistsError}
-          action={(
-            <Button size="small" onClick={() => void loadWatchlists()}>
-              {t("watchlists:errors.retry", "Retry")}
-            </Button>
-          )}
-        />
+          action={{
+            label: t("watchlists:errors.retry", "Retry"),
+            onClick: () => void loadWatchlists()
+          }}
+        >
+          {watchlistsError}
+        </DesignSystemAlert>
       )
     }
 
@@ -2307,43 +2307,43 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
               </Button>
             </div>
           ) : (
-            <Alert
-              type="info"
-              showIcon
+            <DesignSystemAlert
+              variant="info"
               className="mb-4"
               data-testid="watchlists-orientation-alert"
               title={<span data-testid="watchlists-orientation-title">{activeTabOrientation.title}</span>}
-              description={(
-                <div className="space-y-3">
-                  <span data-testid="watchlists-orientation-description">{activeTabOrientation.description}</span>
-                  <div className="flex flex-wrap gap-2">
-                    {activeTabOrientation.actions.map((action) => (
-                      <Button
-                        key={action.key}
-                        size="small"
-                        data-testid={`watchlists-orientation-action-${action.key}`}
-                        onClick={() => navigateToTab(action.target)}
-                      >
-                        {action.label}
-                      </Button>
-                    ))}
-                  </div>
+              dismissible
+              onDismiss={dismissOrientationForActiveTab}
+            >
+              <div className="space-y-3">
+                <span data-testid="watchlists-orientation-description">{activeTabOrientation.description}</span>
+                <div className="flex flex-wrap gap-2">
+                  {activeTabOrientation.actions.map((action) => (
+                    <Button
+                      key={action.key}
+                      size="small"
+                      data-testid={`watchlists-orientation-action-${action.key}`}
+                      onClick={() => navigateToTab(action.target)}
+                    >
+                      {action.label}
+                    </Button>
+                  ))}
                 </div>
-              )}
-              closable
-              onClose={dismissOrientationForActiveTab}
-            />
+              </div>
+            </DesignSystemAlert>
           )}
 
           {activeTeachPoint && (
-            <Alert
-              type="info"
-              showIcon
+            <DesignSystemAlert
+              variant="info"
               className="mb-4"
               data-testid="watchlists-teach-point-alert"
               title={<span data-testid="watchlists-teach-point-title">{activeTeachPoint.title}</span>}
-              description={<span data-testid="watchlists-teach-point-description">{activeTeachPoint.description}</span>}
-              action={(
+              dismissible
+              onDismiss={() => dismissTeachPoint(activeTeachPoint.key)}
+            >
+              <div className="space-y-3">
+                <span data-testid="watchlists-teach-point-description">{activeTeachPoint.description}</span>
                 <Button
                   size="small"
                   data-testid={`watchlists-teach-point-action-${activeTeachPoint.key}`}
@@ -2351,25 +2351,27 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                 >
                   {activeTeachPoint.actionLabel}
                 </Button>
-              )}
-              closable
-              onClose={() => dismissTeachPoint(activeTeachPoint.key)}
-            />
+              </div>
+            </DesignSystemAlert>
           )}
         </>
       )}
 
       {showGuidedTourCompletion && (
-        <Alert
-          type="success"
-          showIcon
+        <DesignSystemAlert
+          variant="success"
           className="mb-4"
           title={t("watchlists:guide.completedTitle", "Guided tour complete")}
-          description={t(
-            "watchlists:guide.completedDescription",
-            "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings."
-          )}
-          action={(
+          dismissible
+          onDismiss={() => setShowGuidedTourCompletion(false)}
+        >
+          <div className="space-y-3">
+            <span>
+              {t(
+                "watchlists:guide.completedDescription",
+                "Next: monitor Activity for monitor health, review Updates for captured content, and open Reports for generated briefings."
+              )}
+            </span>
             <div className="flex flex-wrap gap-2">
               <Button size="small" onClick={() => navigateToTab("runs")}>
                 {t("watchlists:guide.openActivity", "Open Activity")}
@@ -2378,10 +2380,8 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
                 {t("watchlists:guide.openArticles", "Open Updates")}
               </Button>
             </div>
-          )}
-          closable
-          onClose={() => setShowGuidedTourCompletion(false)}
-        />
+          </div>
+        </DesignSystemAlert>
       )}
 
       <DismissibleBetaAlert

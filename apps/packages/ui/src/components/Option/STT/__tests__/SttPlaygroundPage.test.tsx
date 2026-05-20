@@ -327,6 +327,9 @@ describe("SttPlaygroundPage", () => {
 
     render(<SttPlaygroundPage />)
 
+    const loadingErrorAlert = await screen.findByText("Model load failed")
+    expect(loadingErrorAlert.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+
     const retryButton = await screen.findByRole("button", { name: "Retry" })
     fireEvent.click(retryButton)
 
@@ -336,5 +339,17 @@ describe("SttPlaygroundPage", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
     })
+  })
+
+  it("uses the canonical alert for an empty server model catalog", async () => {
+    getTranscriptionModelsMock.mockResolvedValue({
+      categories: {},
+      all_models: []
+    })
+
+    render(<SttPlaygroundPage />)
+
+    const noModelsAlert = await screen.findByText("No transcription models available")
+    expect(noModelsAlert.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   })
 })
