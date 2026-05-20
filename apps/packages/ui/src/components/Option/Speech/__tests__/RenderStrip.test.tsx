@@ -50,7 +50,7 @@ describe("RenderStrip", () => {
       />
     )
 
-    expect(screen.getByText("Browser preview")).toBeInTheDocument()
+    expect(screen.getByText("Browser local output")).toBeInTheDocument()
     expect(screen.queryByText("browser")).not.toBeInTheDocument()
   })
 

@@ -104,6 +104,13 @@ export type BuildTtsReadinessItemsArgs = {
   hasAudio: boolean
   providersInfo?: TldwTtsProvidersInfo | null
   elevenLabsApiKey?: string | null
+  elevenLabsData?: {
+    voices?: unknown[]
+    models?: unknown[]
+  } | null
+  elevenLabsLoading?: boolean
+  elevenLabsError?: unknown
+  ffmpegAvailable?: boolean | null
 }
 
 const UNKNOWN_CAPABILITIES: SttModelOption["capabilities"] = {
@@ -293,7 +300,11 @@ export function buildTtsReadinessItems({
   provider,
   hasAudio,
   providersInfo,
-  elevenLabsApiKey
+  elevenLabsApiKey,
+  elevenLabsData,
+  elevenLabsLoading = false,
+  elevenLabsError,
+  ffmpegAvailable
 }: BuildTtsReadinessItemsArgs): ReadinessItem[] {
   const hasElevenLabsApiKey =
     typeof elevenLabsApiKey === "string"
@@ -302,11 +313,24 @@ export function buildTtsReadinessItems({
   const items: ReadinessItem[] = [
     {
       id: "browser-preview",
-      label: "Browser preview",
+      label: "Browser local output",
       state: "ready",
       detail: "Available in this browser without server setup."
     }
   ]
+  const appendFfmpegWarning = () => {
+    if (provider !== "browser" && ffmpegAvailable === false) {
+      items.push({
+        id: "ffmpeg-output",
+        label: "Output processing",
+        state: "warning",
+        detail:
+          "ffmpeg is not detected. Basic speech generation can continue, but output conversion features may be degraded.",
+        source: "health"
+      })
+    }
+    return items
+  }
 
   if (provider === "browser") {
     return items
@@ -319,7 +343,7 @@ export function buildTtsReadinessItems({
       state: "blocked",
       detail: "API key required before generation."
     })
-    return items
+    return appendFfmpegWarning()
   }
 
   if (provider === "elevenlabs") {
@@ -330,7 +354,41 @@ export function buildTtsReadinessItems({
       detail: "API key saved. Voices and models load directly from ElevenLabs.",
       source: "provider"
     })
-    return items
+    if (elevenLabsLoading) {
+      items.push({
+        id: "elevenlabs-catalog",
+        label: "ElevenLabs catalog",
+        state: "unknown",
+        detail: "Loading ElevenLabs voices and models.",
+        source: "provider"
+      })
+      return appendFfmpegWarning()
+    }
+    if (elevenLabsError) {
+      items.push({
+        id: "elevenlabs-catalog",
+        label: "ElevenLabs catalog",
+        state: "warning",
+        detail: "Unable to load ElevenLabs voices or models. Retry before generation.",
+        source: "provider"
+      })
+      return appendFfmpegWarning()
+    }
+    if (elevenLabsData) {
+      const hasVoices = Array.isArray(elevenLabsData.voices) && elevenLabsData.voices.length > 0
+      const hasModels = Array.isArray(elevenLabsData.models) && elevenLabsData.models.length > 0
+      items.push({
+        id: "elevenlabs-catalog",
+        label: "ElevenLabs catalog",
+        state: hasVoices && hasModels ? "ready" : "blocked",
+        detail:
+          hasVoices && hasModels
+            ? "Voices and models loaded from ElevenLabs."
+            : "No ElevenLabs voices or models were returned.",
+        source: "provider"
+      })
+    }
+    return appendFfmpegWarning()
   }
 
   if (!hasAudio) {
@@ -340,7 +398,7 @@ export function buildTtsReadinessItems({
       state: "blocked",
       detail: "tldw audio/speech API not detected."
     })
-    return items
+    return appendFfmpegWarning()
   }
 
   const providerInfo = providersInfo?.providers?.[provider]
@@ -357,5 +415,5 @@ export function buildTtsReadinessItems({
     source: providerInfo ? "provider" : "unknown"
   })
 
-  return items
+  return appendFfmpegWarning()
 }

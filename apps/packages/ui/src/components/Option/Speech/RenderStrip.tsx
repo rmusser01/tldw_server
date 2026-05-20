@@ -130,7 +130,7 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
 
   const providerLabel =
     config.provider === "browser"
-      ? "Browser preview"
+      ? "Browser local output"
       : config.provider === "tldw"
         ? (config.model || "tldw")
         : config.provider
