@@ -23,29 +23,27 @@ Resolve actionable review feedback on PR #1888 for the Character Chat Phase 5 si
 - [x] Add focused regression coverage for the legacy-mirror clear ordering.
 - [x] Use the resolved extension URL when full-app handoff falls back to `window.open`.
 - [x] Replace newly added source-string contract tests with behavior-level coverage or remove redundant brittle guards.
+- [x] Prevent CharacterSelect from replaying the same open request when server capabilities update asynchronously.
 - [x] Verify the fix with focused tests and a real backend/WebUI browser check.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-- Moved the null-selection clear ordering into `useSelectedAssistant`, so legacy `selectedCharacter` mirrors are cleared before the hook writes and broadcasts a null assistant selection.
-- Simplified `ControlRow.clearRolePlaySelection` back to the hook-level API: clear the local selected character id and call `setSelectedAssistant(null)`.
-- Updated the ControlRow contract test so it prevents direct storage imports from returning to the component.
-- Replaced the ControlRow source-string contract with a render-level behavior test for clear handling, extension fallback, and `tabs.create` routing.
-- Replaced the ConversationContextPopover source-string contract with a render-level event test.
-- Removed the source-string route guard for the command-palette handoff; the route utility behavior remains covered by `sidepanel-full-app-route.test.ts`.
-- Fixed `openFullApp` to call `window.open(url, "_blank")` when `runtime.getURL(path)` succeeds and `browser.tabs.create` is unavailable.
-- Browser verification used the real FastAPI backend on `127.0.0.1:8000` and Next.js WebUI on `localhost:8080/__debug__/sidepanel-chat`.
+- Moved the null-selection clear ordering into useSelectedAssistant, so legacy selectedCharacter mirrors are cleared before the hook writes and broadcasts a null assistant selection.
+- Simplified ControlRow.clearRolePlaySelection back to the hook-level API: clear the local selected character id and call setSelectedAssistant(null).
+- Replaced source-string contract tests with render-level behavior coverage for ControlRow and ConversationContextPopover, and removed the redundant source-only route guard.
+- Fixed openFullApp to call window.open(url, "_blank") when runtime.getURL(path) succeeds and browser.tabs.create is unavailable.
+- Added request-id dedupe in CharacterSelect so an already handled openRequest is not replayed when useServerCapabilities updates hasPersona asynchronously.
+- Browser verification used the real FastAPI backend on 127.0.0.1:8000 and Next.js WebUI on localhost:8080/__debug__/sidepanel-chat.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-- Addressed PR #1888 review feedback by centralizing race-safe role-play clearing in `useSelectedAssistant` and removing direct storage manipulation from `ControlRow`.
-- Added a regression test that fails when legacy character mirrors are cleared after the null assistant broadcast.
-- Verification: focused vitest suite passed (6 files, 20 tests), targeted eslint exited 0, `git diff --check` passed, and real-browser clear flow removed the Character Chat chip and legacy `selectedCharacter` state.
-- Known inherited baseline: `bunx tsc --noEmit --pretty false --project tsconfig.json` still fails outside touched files in MediaReadAlongPopover, EmbeddingsModelSelectionConfig, WorkspacePlayground StudioPane, useShortcutConfig, and admin llama.cpp e2e fixtures.
+- Addressed all live PR #1888 review feedback found in inline threads and the Qodo top-level summary: role-play clearing now lives in useSelectedAssistant, extension handoff preserves runtime.getURL fallbacks, brittle source-string tests were replaced, and CharacterSelect dedupes open requests across async capability updates.
+- Verification: focused vitest suite passed (6 files, 21 tests), targeted eslint exited 0 with only the existing Next pages-directory notice, git diff --check passed, and real-browser clear flow removed the Character Chat chip and legacy selectedCharacter state.
+- Known inherited baseline: bunx tsc --noEmit --pretty false --project tsconfig.json still fails outside touched files in MediaReadAlongPopover, EmbeddingsModelSelectionConfig, WorkspacePlayground StudioPane, useShortcutConfig, and admin llama.cpp e2e fixtures.
 - Bandit skipped: touched files are TypeScript/React and Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 

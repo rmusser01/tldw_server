@@ -174,6 +174,7 @@ export const CharacterSelect: React.FC<Props> = ({
   const pendingMoodUploadRef = useRef<CharacterMoodLabel | null>(null)
   const isMountedRef = useRef(true)
   const greetingRetryAbortRef = useRef<AbortController | null>(null)
+  const handledOpenRequestIdRef = useRef<number | null>(null)
   const selectedCharacterIdRef = useRef<string | null>(
     selectedCharacterId ?? null
   )
@@ -255,7 +256,12 @@ export const CharacterSelect: React.FC<Props> = ({
   }, [openAssistantSelect])
 
   useEffect(() => {
-    if (!openRequest) return
+    if (!openRequest) {
+      handledOpenRequestIdRef.current = null
+      return
+    }
+    if (handledOpenRequestIdRef.current === openRequest.id) return
+    handledOpenRequestIdRef.current = openRequest.id
     openAssistantSelect(openRequest.tab)
   }, [openAssistantSelect, openRequest])
 
@@ -1702,7 +1708,7 @@ export const CharacterSelect: React.FC<Props> = ({
       if (canceled) return
       if (searchInputRef.current) {
         try {
-          searchInputRef.current.focus({ preventScroll: true } as any)
+          searchInputRef.current.focus({ preventScroll: true })
         } catch {
           searchInputRef.current.focus()
         }
