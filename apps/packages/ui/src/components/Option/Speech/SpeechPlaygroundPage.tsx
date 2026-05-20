@@ -61,7 +61,7 @@ import { markdownToText } from "@/utils/markdown-to-text"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 import { withTemplateFallback } from "@/utils/template-guards"
 import { listCustomVoices, type TldwCustomVoice } from "@/services/tldw/voice-cloning"
-import { normalizeTtsProviderKey, toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
+import { normalizeTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 import { TtsJobProgress } from "@/components/Common/TtsJobProgress"
 import { LongformDraftEditor } from "@/components/Common/LongformDraftEditor"
 import { CharacterProgressBar } from "@/components/Common/CharacterProgressBar"
@@ -870,6 +870,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   }, [isTldw, tldwModel, ttsSettings?.tldwTtsModel])
   const {
     hasAudio,
+    ffmpegAvailable,
     providersInfo,
     tldwTtsModels,
     tldwVoiceCatalog,
@@ -957,15 +958,29 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     tldwVoice,
     ttsSettings
   ])
+  const readinessProvider = isTldw && inferredProviderKey ? inferredProviderKey : provider
   const ttsReadinessItems = React.useMemo(
     () =>
       buildTtsReadinessItems({
-        provider,
+        provider: readinessProvider,
         hasAudio,
         providersInfo,
-        elevenLabsApiKey: ttsSettings?.elevenLabsApiKey
+        elevenLabsApiKey: ttsSettings?.elevenLabsApiKey,
+        elevenLabsData,
+        elevenLabsLoading,
+        elevenLabsError,
+        ffmpegAvailable
       }),
-    [hasAudio, provider, providersInfo, ttsSettings?.elevenLabsApiKey]
+    [
+      elevenLabsData,
+      elevenLabsError,
+      elevenLabsLoading,
+      ffmpegAvailable,
+      hasAudio,
+      providersInfo,
+      readinessProvider,
+      ttsSettings?.elevenLabsApiKey
+    ]
   )
 
   React.useEffect(() => {
@@ -2089,6 +2104,28 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   }
   const [showSegmentsPreview, setShowSegmentsPreview] = React.useState(false)
 
+  const hasElevenLabsKey = Boolean(ttsSettings?.elevenLabsApiKey)
+  const selectedTldwProviderLabel =
+    activeProviderCaps?.caps.provider_name || inferredProviderKey || providerLabel
+  const selectedTldwProviderMissing =
+    isTldw &&
+    hasAudio &&
+    Boolean(providersInfo) &&
+    Boolean(inferredProviderKey) &&
+    !activeProviderCaps
+  const selectedTldwVoiceCatalogMissing =
+    isTldw &&
+    hasAudio &&
+    Boolean(activeProviderCaps) &&
+    tldwVoiceOptions.length === 0
+  const elevenLabsCatalogEmpty =
+    provider === "elevenlabs" &&
+    Boolean(elevenLabsData) &&
+    (!Array.isArray(elevenLabsData?.voices) ||
+      elevenLabsData.voices.length === 0 ||
+      !Array.isArray(elevenLabsData?.models) ||
+      elevenLabsData.models.length === 0)
+
   const playDisabledReason = (() => {
     if (isTtsDisabled) {
       return t(
@@ -2099,6 +2136,57 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     if (!(useDraftEditor ? transcriptDraft : ttsText).trim()) {
       return t("playground:tts.playDisabledNoText", "Enter text to enable Play.")
     }
+    if (provider !== "browser" && provider !== "elevenlabs" && !hasAudio) {
+      return t(
+        "playground:tts.playDisabledServerAudioUnavailable",
+        "Open Settings -> Speech to connect the tldw audio/speech API before generating server TTS."
+      )
+    }
+    if (selectedTldwProviderMissing) {
+      return t(
+        "playground:tts.playDisabledProviderMissing",
+        "The selected TTS provider is not reported by the server. Open Settings -> Speech and choose a configured provider."
+      )
+    }
+    if (selectedTldwVoiceCatalogMissing) {
+      return withTemplateFallback(
+        t(
+          "playground:tts.playDisabledVoiceCatalogMissing",
+          "No voices reported for {{provider}}. Configure voices in Settings -> Speech before generating.",
+          { provider: selectedTldwProviderLabel } as any
+        ),
+        `No voices reported for ${selectedTldwProviderLabel}. Configure voices in Settings -> Speech before generating.`
+      )
+    }
+    if (provider === "elevenlabs" && !hasElevenLabsKey) {
+      return t(
+        "playground:tts.playDisabledElevenLabsKeyMissing",
+        "Enter an ElevenLabs API key before generating audio."
+      )
+    }
+    if (provider === "elevenlabs" && elevenLabsLoading) {
+      return t(
+        "playground:tts.playDisabledElevenLabsLoading",
+        "Loading ElevenLabs voices and models before generation."
+      )
+    }
+    if (provider === "elevenlabs" && elevenLabsError) {
+      return isTimeoutLikeError(elevenLabsError)
+        ? t(
+            "playground:tts.playDisabledElevenLabsTimeout",
+            "Retry ElevenLabs voice/model loading; the last request timed out."
+          )
+        : t(
+            "playground:tts.playDisabledElevenLabsError",
+            "Retry ElevenLabs voice/model loading before generating audio."
+          )
+    }
+    if (elevenLabsCatalogEmpty) {
+      return t(
+        "playground:tts.playDisabledElevenLabsCatalogEmpty",
+        "No ElevenLabs voices or models are available. Check your ElevenLabs account or API key."
+      )
+    }
     if (voiceRoleError) return voiceRoleError
     return draftErrors.outline || draftErrors.transcript || null
   })()
@@ -2108,7 +2196,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const canStop = Boolean(segments.length || audioRef.current || isStreamingActive || isTtsJobRunning)
   const stopDisabledReason =
     !canStop && t("playground:tts.stopDisabled", "Stop activates after audio starts.")
-  const hasElevenLabsKey = Boolean(ttsSettings?.elevenLabsApiKey)
   const showElevenLabsHint =
     provider === "elevenlabs" &&
     !elevenLabsData &&

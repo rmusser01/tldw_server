@@ -179,7 +179,7 @@ describe("audio readiness helpers", () => {
     })
   })
 
-  it("builds TTS readiness that treats Browser preview as a no-setup fallback", () => {
+  it("builds TTS readiness that treats Browser local output as a no-setup fallback", () => {
     const items = buildTtsReadinessItems({
       provider: "browser",
       hasAudio: false,
@@ -190,7 +190,7 @@ describe("audio readiness helpers", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "browser-preview",
-          label: "Browser preview",
+          label: "Browser local output",
           state: "ready",
           detail: "Available in this browser without server setup."
         })
@@ -240,6 +240,61 @@ describe("audio readiness helpers", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "tts-server-audio"
+        })
+      ])
+    )
+  })
+
+  it("reports ElevenLabs catalog loading separately from saved credentials", () => {
+    const items = buildTtsReadinessItems({
+      provider: "elevenlabs",
+      hasAudio: true,
+      providersInfo: null,
+      elevenLabsApiKey: "sk_test_key",
+      elevenLabsLoading: true
+    })
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "elevenlabs-credentials",
+          state: "ready"
+        }),
+        expect.objectContaining({
+          id: "elevenlabs-catalog",
+          label: "ElevenLabs catalog",
+          state: "unknown",
+          detail: "Loading ElevenLabs voices and models."
+        })
+      ])
+    )
+  })
+
+  it("reports missing ffmpeg as degraded output capability", () => {
+    const items = buildTtsReadinessItems({
+      provider: "kitten_tts",
+      hasAudio: true,
+      providersInfo: {
+        providers: {
+          kitten_tts: {
+            provider_name: "KittenTTS",
+            formats: ["mp3"]
+          }
+        },
+        voices: {}
+      },
+      ffmpegAvailable: false
+    })
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "ffmpeg-output",
+          label: "Output processing",
+          state: "warning",
+          detail:
+            "ffmpeg is not detected. Basic speech generation can continue, but output conversion features may be degraded.",
+          source: "health"
         })
       ])
     )
