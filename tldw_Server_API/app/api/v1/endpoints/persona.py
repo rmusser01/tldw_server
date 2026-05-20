@@ -49,6 +49,10 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaExemplarReviewRequest,
     PersonaExemplarUpdate,
     PersonaInfo,
+    PersonaLiveSessionCreateRequest,
+    PersonaLiveSessionFocusResponse,
+    PersonaLiveSessionListResponse,
+    PersonaLiveSessionStopResponse,
     PersonaLiveVoiceAnalyticsSummary,
     PersonaLiveVoiceSessionSummary,
     PersonaLiveVoiceSessionUpdateRequest,
@@ -239,6 +243,17 @@ from tldw_Server_API.app.core.Persona.runtime_explorer import (
     RuntimeScorer,
 )
 from tldw_Server_API.app.core.Persona.session_manager import get_session_manager
+from tldw_Server_API.app.core.Persona.session_materialization import (
+    materialize_persona_session,
+    scope_snapshot_id_from_snapshot,
+)
+from tldw_Server_API.app.core.Persona.live_control import (
+    create_or_resume_live_session,
+    focus_live_session,
+    list_live_session_summaries,
+    persona_live_stream_registry,
+    stop_live_session,
+)
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     normalize_persona_activity_surface,
     record_persona_session_started,
@@ -7359,20 +7374,21 @@ async def persona_session(
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
-    requested_persona_id = str(req.persona_id or "").strip() or _DEFAULT_PERSONA_ID
-    requested_activity_surface = normalize_persona_activity_surface(req.surface)
     session_manager = get_session_manager()
 
     try:
-        profile = db.get_persona_profile(requested_persona_id, user_id=user_id, include_deleted=False)
-        if profile is None:
-            logger.info(
-                "Unknown persona_id requested in API: {}; defaulting to {}",
-                requested_persona_id,
-                _DEFAULT_PERSONA_ID,
-            )
-            profile = _ensure_default_persona_profile(db, user_id=user_id)
-        persona_id = str(profile.get("id") or _DEFAULT_PERSONA_ID)
+        materialized = materialize_persona_session(
+            db,
+            session_manager=session_manager,
+            user_id=user_id,
+            persona_id=req.persona_id,
+            resume_session_id=req.resume_session_id,
+            project_id=req.project_id,
+            surface=req.surface,
+        )
+        profile = materialized.profile
+        persona_id = materialized.persona_id
+        session_row = materialized.session_row
         policy_rules = db.list_persona_policy_rules(persona_id=persona_id, user_id=user_id, include_deleted=False)
         persona = _persona_info_from_profile(
             profile,
@@ -7380,117 +7396,166 @@ async def persona_session(
             buddy_row=_load_persona_buddy_row_for_projection(db, profile=profile),
         )
 
-        # Preserve scaffold ownership/persona binding semantics for resume IDs in process-local session manager
-        # without creating new local entries before DB validation succeeds.
-        if req.resume_session_id:
-            local_session = session_manager.get(req.resume_session_id)
-            if local_session is not None:
-                if str(local_session.user_id) != user_id:
-                    raise HTTPException(status_code=403, detail="session ownership mismatch")
-                if str(local_session.persona_id) != persona_id:
-                    raise HTTPException(status_code=409, detail="session persona mismatch")
-
-        session_row: dict[str, Any] | None = None
-        if req.resume_session_id:
-            session_row = db.get_persona_session(req.resume_session_id, user_id=user_id, include_deleted=False)
-            if session_row is not None:
-                bound_persona_id = str(session_row.get("persona_id") or "").strip()
-                if bound_persona_id and bound_persona_id != persona_id:
-                    raise ConflictError(
-                        "resume_session_id is bound to a different persona_id.",
-                        entity="persona_sessions",
-                        entity_id=str(req.resume_session_id),
-                    )
-
-        created_new_session = session_row is None
-        if session_row is None:
-            scope_rules = db.list_persona_scope_rules(persona_id=persona_id, user_id=user_id, include_deleted=False)
-            scope_snapshot, scope_audit = _build_scope_snapshot(scope_rules)
-            create_data: dict[str, Any] = {
-                "persona_id": persona_id,
-                "user_id": user_id,
-                "conversation_id": req.project_id,
-                "mode": str(profile.get("mode") or "session_scoped"),
-                "scope_snapshot_json": scope_snapshot,
-                "preferences_json": _default_persisted_persona_session_preferences(profile),
-                "activity_surface": requested_activity_surface,
-            }
-            if req.resume_session_id:
-                create_data["id"] = str(req.resume_session_id)
-            session_id = db.create_persona_session(create_data)
-            session_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
-            if session_row is None:
-                raise HTTPException(status_code=500, detail="Failed to load created persona session")
-        else:
-            scope_audit = _scope_audit_from_snapshot(session_row.get("scope_snapshot") or {})
-            if req.surface is not None:
-                current_surface = normalize_persona_activity_surface(session_row.get("activity_surface"))
-                if current_surface != requested_activity_surface:
-                    _ = db.update_persona_session(
-                        session_id=str(session_row.get("id") or req.resume_session_id or ""),
-                        user_id=user_id,
-                        update_data={"activity_surface": requested_activity_surface},
-                    )
-                    refreshed_row = db.get_persona_session(
-                        str(session_row.get("id") or req.resume_session_id or ""),
-                        user_id=user_id,
-                        include_deleted=False,
-                    )
-                    if refreshed_row is not None:
-                        session_row = refreshed_row
-
-        session_id = str(session_row.get("id") or req.resume_session_id or "").strip()
-        if not session_id:
-            raise HTTPException(status_code=500, detail="Persona session missing session_id")
-
-        # Keep in-memory state synchronized for existing WS/tool-plan behavior.
-        try:
-            _ = session_manager.create(
-                user_id=user_id,
-                persona_id=persona_id,
-                resume_session_id=session_id,
-            )
-            if created_new_session or req.surface is not None:
-                session_manager.update_preferences(
-                    session_id=session_id,
-                    user_id=user_id,
-                    preferences={"companion_activity_surface": requested_activity_surface},
-                )
-        except ValueError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        _session_preferences, activity_surface = _get_session_preferences_with_activity_surface(
-            session_manager=session_manager,
-            session_id=session_id,
-            user_id=user_id,
-            persisted_preferences=session_row.get("preferences"),
-            persisted_activity_surface=session_row.get("activity_surface"),
-        )
-
         allow_export, allow_delete = _get_persona_rbac_flags()
         scopes = sorted(_get_persona_session_scopes(allow_export=allow_export, allow_delete=allow_delete))
         scope_snapshot = session_row.get("scope_snapshot") or {}
         response = PersonaSessionResponse(
-            session_id=session_id,
+            session_id=materialized.session_id,
             persona=persona,
             scopes=scopes,
             runtime_mode=str(session_row.get("mode") or profile.get("mode") or "session_scoped"),
-            scope_snapshot_id=_scope_snapshot_id_from_snapshot(scope_snapshot),
-            scope_audit=scope_audit,
+            scope_snapshot_id=scope_snapshot_id_from_snapshot(scope_snapshot),
+            scope_audit=materialized.scope_audit,
         )
-        if created_new_session:
+        if materialized.created_new_session:
             record_persona_session_started(
                 user_id=_current_user.id,
                 session_id=response.session_id,
                 persona_id=response.persona.id,
                 runtime_mode=response.runtime_mode,
                 scope_snapshot_id=response.scope_snapshot_id,
-                surface=activity_surface,
+                surface=materialized.activity_surface,
             )
         return response
     except HTTPException:
         raise
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="create or resume persona session") from exc
+
+
+@router.get(
+    "/live/sessions",
+    response_model=PersonaLiveSessionListResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def persona_live_sessions(
+    persona_id: str | None = Query(default=None),
+    surface: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaLiveSessionListResponse:
+    """List user-scoped Persona Live control session summaries."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        payload = list_live_session_summaries(
+            db,
+            session_manager=get_session_manager(),
+            user_id=user_id,
+            persona_id=persona_id,
+            surface=surface,
+            limit=limit,
+        )
+        return PersonaLiveSessionListResponse.model_validate(payload)
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="list persona live sessions") from exc
+
+
+@router.post(
+    "/live/sessions",
+    response_model=PersonaLiveSessionFocusResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def persona_live_session_create(
+    req: PersonaLiveSessionCreateRequest = Body(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaLiveSessionFocusResponse:
+    """Create or resume a text-capable Persona Live session and focus it."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        session = create_or_resume_live_session(
+            db,
+            session_manager=get_session_manager(),
+            user_id=user_id,
+            persona_id=req.persona_id,
+            reuse_policy=req.reuse_policy,
+            idempotency_key=req.idempotency_key,
+            surface=req.surface,
+        )
+        return PersonaLiveSessionFocusResponse.model_validate({"session": session})
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="create persona live session") from exc
+
+
+@router.post(
+    "/live/sessions/{session_id}/focus",
+    response_model=PersonaLiveSessionFocusResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def persona_live_session_focus(
+    session_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaLiveSessionFocusResponse:
+    """Focus a Persona Live session as the current Buddy target."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        session = focus_live_session(
+            db,
+            session_manager=get_session_manager(),
+            user_id=user_id,
+            session_id=session_id,
+        )
+        return PersonaLiveSessionFocusResponse.model_validate({"session": session})
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="focus persona live session") from exc
+
+
+@router.post(
+    "/live/sessions/{session_id}/stop",
+    response_model=PersonaLiveSessionStopResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def persona_live_session_stop(
+    session_id: str,
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaLiveSessionStopResponse:
+    """Stop a Persona Live session and clear focus metadata."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    try:
+        session = stop_live_session(
+            db,
+            session_manager=get_session_manager(),
+            user_id=user_id,
+            session_id=session_id,
+        )
+        return PersonaLiveSessionStopResponse.model_validate({"session": session})
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="stop persona live session") from exc
 
 
 @router.get("/sessions", response_model=list[PersonaSessionSummary], tags=["persona"], status_code=status.HTTP_200_OK)
@@ -7607,6 +7672,8 @@ async def persona_stream(
     persona_live_stt_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_wake_state_by_session: dict[str, dict[str, Any]] = {}
     persona_live_summary_sessions_seen: set[str] = set()
+    observed_live_control_session_ids: set[str] = set()
+    live_control_stream_user_id = ""
     try:
         user_id, credentials_supplied, auth_ok = await _resolve_authenticated_user_id(ws, token=token, api_key=api_key)
         if not auth_ok:
@@ -7630,6 +7697,7 @@ async def persona_stream(
             with contextlib.suppress(RuntimeError, OSError):
                 await stream.ws.close(code=1008)
             return
+        live_control_stream_user_id = authenticated_user_id
         auth_watchdog_stop = asyncio.Event()
         auth_revoked_event = asyncio.Event()
 
@@ -7690,6 +7758,16 @@ async def persona_stream(
         default_session_id = uuid.uuid4().hex
         persona_id = "research_assistant"
         ws_event_seq_by_session: dict[str, int] = defaultdict(int)
+
+        def _mark_live_control_stream_connected(session_id: str) -> None:
+            sid = str(session_id or "").strip()
+            if not sid:
+                return
+            observed_live_control_session_ids.add(sid)
+            persona_live_stream_registry.mark_connected(
+                user_id=authenticated_user_id,
+                session_id=sid,
+            )
 
         def _api_key_scope_allows(required_scope: Any) -> bool:
             try:
@@ -9137,6 +9215,7 @@ async def persona_stream(
                 persona_id=runtime_persona_id,
                 resume_session_id=session_id,
             )
+            _mark_live_control_stream_connected(session_id)
             existing_preferences, activity_surface = _get_session_preferences_with_activity_surface(
                 session_manager=session_manager,
                 session_id=session_id,
@@ -9242,22 +9321,26 @@ async def persona_stream(
             )
             persona_exemplar_assembly = persona_exemplar_context.assembly
             persona_exemplar_selection = persona_exemplar_context.selection_metadata
+            client_message_id = str(msg.get("client_message_id") or "").strip()[:128] or None
+            turn_metadata = {
+                "source": source,
+                "use_memory_context": use_memory_context,
+                "use_companion_context": use_companion_context,
+                "use_persona_state_context": use_persona_state_context,
+                "memory_top_k": memory_top_k,
+                "session_policy_rule_count": len(session_policy_rules),
+                "runtime_mode": runtime_mode,
+                "session_exists": session_exists,
+                "persona_exemplar_selection": persona_exemplar_selection,
+            }
+            if client_message_id:
+                turn_metadata["client_message_id"] = client_message_id
             await _record_turn(
                 session_id=session_id,
                 role="user",
                 content=normalized_text,
                 turn_type=turn_type,
-                metadata={
-                    "source": source,
-                    "use_memory_context": use_memory_context,
-                    "use_companion_context": use_companion_context,
-                    "use_persona_state_context": use_persona_state_context,
-                    "memory_top_k": memory_top_k,
-                    "session_policy_rule_count": len(session_policy_rules),
-                    "runtime_mode": runtime_mode,
-                    "session_exists": session_exists,
-                    "persona_exemplar_selection": persona_exemplar_selection,
-                },
+                metadata=turn_metadata,
                 persist_as_memory=False,
                 persona_id_override=runtime_persona_id,
                 runtime_mode_override=runtime_mode,
@@ -10401,6 +10484,12 @@ async def persona_stream(
                 voice_runtime=None,
                 finalize=True,
             )
+        for session_id in list(observed_live_control_session_ids):
+            if live_control_stream_user_id:
+                persona_live_stream_registry.mark_disconnected(
+                    user_id=live_control_stream_user_id,
+                    session_id=session_id,
+                )
         for session_id in list(persona_live_stt_state_by_session.keys()):
             _cleanup_persona_live_stt_state(session_id)
         persona_live_wake_state_by_session.clear()

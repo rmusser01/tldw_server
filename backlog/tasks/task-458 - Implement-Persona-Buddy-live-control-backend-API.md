@@ -38,6 +38,22 @@ Docs/superpowers/plans/2026-05-20-persona-buddy-interaction-text-slice.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implemented backend live-control API slice in progress.
+
+Verification (using parent checkout venv because this worktree has no `.venv`):
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py -q` -> 15 passed, 5 warnings
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_sessions.py -q` -> 8 passed, 5 warnings
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/api/v1/schemas/persona.py tldw_Server_API/app/core/Persona/session_materialization.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control.json` -> passed, JSON written
+- `git diff --check` -> passed
+
+Note: exact command prefix `source .venv/bin/activate` fails in this worktree because `.venv/bin/activate` is absent; the reusable project venv exists at `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate`.
+
+Implemented:
+- live-control schemas and validators
+- shared session materialization helper reused by `/persona/session` and live-control create/resume
+- live-control service for list/create/focus/stop, stream presence, idempotency, focus metadata, lifecycle/actions/capabilities, and redacted summaries
+- FastAPI live-control routes
+- WebSocket stream presence registry updates and `client_message_id` turn metadata
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
