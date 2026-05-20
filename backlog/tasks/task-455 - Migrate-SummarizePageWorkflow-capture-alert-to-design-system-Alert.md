@@ -4,7 +4,7 @@ title: Migrate SummarizePageWorkflow capture alert to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-20 19:01'
+updated_date: '2026-05-20 20:04'
 labels:
   - design-system
   - product-state
@@ -46,6 +46,8 @@ Verification recorded for this slice:
 - git diff --check passed.
 - Full bunx tsc --noEmit --pretty false still exits 2 from inherited baseline debt; filtered touched-file diagnostics for SummarizePageWorkflow/task-455/baseline matched 0 lines.
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
+
+PR review follow-up: replaced the SummarizePageWorkflow test's manual setTimeout spy with Vitest fake timers plus vi.waitFor, and changed the content-length assertion to compute the exact localized length from the mocked captured content. Focused regression test remained green after the fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -62,6 +64,8 @@ Verification:
 - git diff --check passed.
 - Full bunx tsc --noEmit --pretty false still exits 2 from inherited baseline debt; filtered touched-file diagnostics for SummarizePageWorkflow/task-455/baseline matched 0 lines.
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
+
+PR review follow-up addressed the timer and locale-fragility comments in the SummarizePageWorkflow product-state test.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
