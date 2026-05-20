@@ -3,16 +3,10 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
-const getDesignSystemStateLabelMock = vi.hoisted(() =>
-  vi.fn((key: string, fallback: string) => {
-    if (key === "ready") return "Registry ready"
-    if (key === "blocked") return "Registry blocked"
-    return fallback
-  })
-)
-
 vi.mock("@/design-system/states", () => ({
-  getDesignSystemStateLabel: getDesignSystemStateLabelMock
+  READY_STATE_LABEL: "Registry ready",
+  DEGRADED_STATE_LABEL: "Registry degraded",
+  BLOCKED_STATE_LABEL: "Registry blocked"
 }))
 
 import { AudioReadinessStrip } from "../AudioReadinessStrip"
@@ -36,6 +30,20 @@ describe("AudioReadinessStrip", () => {
             state: "blocked",
             detail: "Missing API credentials",
             source: "provider"
+          },
+          {
+            id: "warning",
+            label: "Server catalog",
+            state: "warning",
+            detail: "Server returned partial metadata",
+            source: "response_schema"
+          },
+          {
+            id: "unknown",
+            label: "Provider",
+            state: "unknown",
+            detail: "No provider metadata yet",
+            source: "unknown"
           }
         ]}
       />
@@ -47,6 +55,12 @@ describe("AudioReadinessStrip", () => {
     expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent(
       "Streaming: Registry blocked"
     )
+    expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent(
+      "Server catalog: Registry degraded"
+    )
+    expect(screen.getByRole("status", { name: "STT readiness" })).toHaveTextContent(
+      "Provider: Unknown"
+    )
     expect(
       screen.getByLabelText(
         "STT models: Registry ready. 2 listed, 1 ready, 1 unknown Source: model health."
@@ -55,6 +69,16 @@ describe("AudioReadinessStrip", () => {
     expect(
       screen.getByLabelText(
         "Streaming: Registry blocked. Missing API credentials Source: provider metadata."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByLabelText(
+        "Server catalog: Registry degraded. Server returned partial metadata Source: response schema."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByLabelText(
+        "Provider: Unknown. No provider metadata yet Source: unknown source."
       )
     ).toBeInTheDocument()
   })

@@ -2617,13 +2617,15 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                     {serverModelsError && (
                       <DesignSystemAlert
                         variant="warning"
-                        title={serverModelsError}
+                        title={t("playground:stt.modelsLoadError", "Model load failed")}
                         action={{
                           label: t("common:retry", "Retry"),
                           onClick: retryServerModels,
                           disabled: serverModelsLoading
                         }}
-                      />
+                      >
+                        {serverModelsError}
+                      </DesignSystemAlert>
                     )}
                   </div>
                   <div className="flex flex-col gap-3">
@@ -3176,7 +3178,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                     {ttsJobStatus === "error" && ttsJobError && (
                       <DesignSystemAlert
                         variant="error"
-                        title="Long-form TTS error"
+                        title={t("playground:tts.longFormError", "Long-form TTS error")}
                       >
                         {ttsJobError}
                       </DesignSystemAlert>
@@ -3184,7 +3186,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                     {activeStreamError && (
                       <DesignSystemAlert
                         variant="error"
-                        title="Streaming error"
+                        title={t("playground:tts.streamingError", "Streaming error")}
                       >
                         {activeStreamError}
                       </DesignSystemAlert>

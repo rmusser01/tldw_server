@@ -608,7 +608,9 @@ describe("SpeechPlaygroundPage", () => {
       const modelError = await screen.findByText(
         "Unable to load transcription models. Retry or check server settings."
       )
-      expect(modelError.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+      const modelAlert = modelError.closest('[data-ds-component="Alert"]')
+      expect(modelAlert).toBeInTheDocument()
+      expect(modelAlert).toHaveTextContent("Model load failed")
     } finally {
       warnSpy.mockRestore()
     }
