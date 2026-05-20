@@ -34,6 +34,7 @@ Task 3 for the bulk conference ingestion workflow plan. Add shared conference me
 - Updated direct and background Quick Ingest submission paths to create collections/items, attach planned item IDs to job fields, and patch item status on submit/progress/failure.
 - Verification: focused Vitest suite passed, 74 tests across wizard integration/session, conference collection service, and batch submission. `git diff --check` passed. Shared UI `tsc` still fails on the existing repo-wide baseline; a touched-file filter for Quick Ingest/conference/background paths produced no matches.
 - Bandit was not run because this slice only touched TypeScript/TSX, plan docs, and Backlog task files.
+- Backlog hygiene follow-up on 2026-05-19: moved this already-completed Quick Ingest record from `backlog/tasks` to `backlog/completed` by exact path so active-board checks do not mistake it for remaining sprint work. ID-based completion was intentionally avoided because unrelated `TASK-403` records also exist.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
