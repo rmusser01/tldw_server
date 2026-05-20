@@ -63,6 +63,19 @@ export const AudiobookStudioPage: React.FC = () => {
   const pendingCount = chapters.filter(
     (ch) => ch.status === "pending" || ch.status === "error"
   ).length
+  const saveStatusLabel = (() => {
+    if (isSaving) return t("audiobook:saveStatus.saving", "Saving...")
+    if (!projectId && !lastSaved) {
+      return t("audiobook:saveStatus.draftNotSaved", "Draft not saved")
+    }
+    if (hasUnsaved) return t("audiobook:saveStatus.unsaved", "Unsaved changes")
+    if (lastSaved) {
+      return t("audiobook:saveStatus.savedJustNow", "Saved just now")
+    }
+    return t("audiobook:saveStatus.saved", "Saved")
+  })()
+  const saveStatusType =
+    !projectId && !lastSaved ? "warning" : hasUnsaved ? "danger" : "secondary"
 
   // Manual save
   const handleSave = useCallback(async () => {
@@ -286,7 +299,7 @@ export const AudiobookStudioPage: React.FC = () => {
             )}
           </Text>
         </div>
-        <Space>
+        <Space wrap>
           <Button
             icon={<FolderOpen className="h-4 w-4" />}
             onClick={() => setShowProjectList(true)}
@@ -305,13 +318,14 @@ export const AudiobookStudioPage: React.FC = () => {
                 ? t("audiobook:lastSaved", "Last saved: {{time}}", {
                     time: lastSaved.toLocaleTimeString()
                   })
-                : t("audiobook:notSavedYet", "Not saved yet")
+                : saveStatusLabel
             }
           >
             <Button
-              type={hasUnsaved ? "primary" : "default"}
+              type={hasUnsaved || !projectId ? "primary" : "default"}
+              aria-label={t("audiobook:saveProject", "Save project")}
               icon={
-                hasUnsaved ? (
+                hasUnsaved || !projectId ? (
                   <Save className="h-4 w-4" />
                 ) : (
                   <Check className="h-4 w-4" />
@@ -320,13 +334,23 @@ export const AudiobookStudioPage: React.FC = () => {
               onClick={handleSave}
               loading={isSaving}
             >
-              {hasUnsaved
-                ? t("audiobook:save", "Save")
-                : t("audiobook:saved", "Saved")}
+              {t("audiobook:save", "Save")}
             </Button>
           </Tooltip>
         </Space>
       </div>
+
+      <Text
+        role="status"
+        aria-label={t(
+          "audiobook:saveStatus.ariaLabel",
+          "Project save status"
+        )}
+        className="mb-3 block text-sm"
+        type={saveStatusType}
+      >
+        {saveStatusLabel}
+      </Text>
 
       <DismissibleBetaAlert
         storageKey="beta-dismissed:audiobookStudio"

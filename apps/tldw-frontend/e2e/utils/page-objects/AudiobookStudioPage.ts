@@ -1,7 +1,7 @@
 /**
  * Page Object for Audiobook Studio workflow
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -55,7 +55,11 @@ export class AudiobookStudioPage extends BasePage {
   }
 
   get saveButton(): Locator {
-    return this.page.getByRole("button", { name: /save|saved/i }).first()
+    return this.page.getByRole("button", { name: /save project/i })
+  }
+
+  get saveStatus(): Locator {
+    return this.page.getByRole("status", { name: /project save status/i })
   }
 
   get projectTitleInput(): Locator {
@@ -99,7 +103,7 @@ export class AudiobookStudioPage extends BasePage {
   async waitForApiCall(
     urlPattern: string | RegExp,
     method: string = "GET"
-  ): Promise<{ status: number; body: any }> {
+  ): Promise<{ status: number; body: unknown }> {
     const response = await this.page.waitForResponse(
       (res) =>
         (typeof urlPattern === "string"
