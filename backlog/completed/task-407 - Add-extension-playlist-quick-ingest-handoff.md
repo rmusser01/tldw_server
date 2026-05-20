@@ -31,6 +31,7 @@ Implement Task 7 from the bulk conference ingest plan: typed Quick Ingest open d
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented typed Quick Ingest open detail and active-tab YouTube playlist detection in the sidepanel quick action. The shared Quick Ingest event/session path now persists the detail, hydrates it into wizard state, and seeds the existing playlist preflight path. background.ts was reviewed but left unchanged because active-tab resolution happens in ControlRow at click time and existing background runtime metadata handling already covers queued batch processing. Verification: focused quick-ingest-open, sidepanel form contract, QuickIngestWizardModal integration, and sidepanel route registry Vitest suites pass; git diff --check passes; TypeScript still fails only on unrelated baseline files.
+Backlog hygiene follow-up on 2026-05-19: moved this already-completed Quick Ingest record from `backlog/tasks` to `backlog/completed` by exact path so active-board checks do not mistake it for remaining sprint work. ID-based completion was intentionally avoided because unrelated `TASK-407` records also exist.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
