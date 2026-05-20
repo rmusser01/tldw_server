@@ -187,17 +187,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/LeftSidebar/PagesTab.tsx:Alert",
-    "path": "src/components/DocumentWorkspace/LeftSidebar/PagesTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/DocumentWorkspace/LeftSidebar/PagesTab.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/DocumentWorkspace/LeftSidebar/ReferencesTab.tsx:Empty#antd-empty-errorstate-line-413-wx7ci2",
     "path": "src/components/DocumentWorkspace/LeftSidebar/ReferencesTab.tsx",
     "rule": "antd-product-state-import",
