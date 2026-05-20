@@ -73,6 +73,16 @@ Third follow-up code-quality fixes:
 - stopped persisting `companion_activity_surface` into `preferences_json`; the surface remains in the `activity_surface` column and runtime manager preferences
 - added regressions for multi-WebSocket presence, not-owned focus/stop, focus/stop preference preservation, materialized policy normalization, and `/persona/sessions` persisted preference surface leakage
 
+Fourth follow-up review fixes:
+- redacted `/persona/sessions` and `/persona/sessions/{session_id}` preferences through the public persisted-preference normalizer so live-control focus/idempotency metadata and runtime activity-surface state are not exposed
+- resolved live-control requested persona IDs before idempotency/resume lookup so unknown persona fallback reuses the default-backed session consistently
+- removed unused live-control `session_manager` parameters from list/focus/stop helpers and route call sites
+- added regressions for public session preference redaction, unknown persona idempotency/resume reuse, and WebSocket `user_message` bounded `client_message_id` persistence
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_sessions.py -q` -> 35 passed, 5 warnings
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control_app.json` -> passed
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

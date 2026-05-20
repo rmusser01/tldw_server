@@ -9,6 +9,7 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.Persona.session_materialization import (
+    DEFAULT_PERSONA_ID,
     ensure_default_persona_profile,
     materialize_persona_session,
 )
@@ -157,13 +158,23 @@ def _load_owned_session_or_raise(db: CharactersRAGDB, *, user_id: str, session_i
 def _persona_name_for_row(db: CharactersRAGDB, *, row: dict[str, Any], user_id: str) -> str:
     persona_id = str(row.get("persona_id") or "").strip()
     profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
-    if profile is None and persona_id == "research_assistant":
+    if profile is None and persona_id == DEFAULT_PERSONA_ID:
         profile = ensure_default_persona_profile(db, user_id=user_id)
     if isinstance(profile, dict):
         name = str(profile.get("name") or "").strip()
         if name:
             return name
     return persona_id
+
+
+def _resolve_live_control_persona_id(db: CharactersRAGDB, *, user_id: str, persona_id: str | None) -> str:
+    requested_persona_id = str(persona_id or "").strip()
+    profile = None
+    if requested_persona_id:
+        profile = db.get_persona_profile(requested_persona_id, user_id=user_id, include_deleted=False)
+    if profile is None:
+        profile = ensure_default_persona_profile(db, user_id=user_id)
+    return str((profile or {}).get("id") or DEFAULT_PERSONA_ID).strip() or DEFAULT_PERSONA_ID
 
 
 def build_live_session_summary(
@@ -228,7 +239,6 @@ def _focused_session_id(rows: list[dict[str, Any]]) -> str | None:
 def list_live_session_summaries(
     db: CharactersRAGDB,
     *,
-    session_manager: SessionManager,
     user_id: str,
     persona_id: str | None = None,
     surface: str | None = None,
@@ -315,7 +325,7 @@ def create_or_resume_live_session(
     surface: str | None = None,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
-    requested_persona_id = str(persona_id or "").strip()
+    resolved_persona_id = _resolve_live_control_persona_id(db, user_id=user_id, persona_id=persona_id)
     requested_key = str(idempotency_key or "").strip() or None
     row: dict[str, Any] | None = None
 
@@ -323,7 +333,7 @@ def create_or_resume_live_session(
         row = _find_session_by_idempotency_key(
             db,
             user_id=user_id,
-            persona_id=requested_persona_id,
+            persona_id=resolved_persona_id,
             surface=surface,
             idempotency_key=requested_key,
         )
@@ -332,7 +342,7 @@ def create_or_resume_live_session(
         row = _find_resume_compatible_session(
             db,
             user_id=user_id,
-            persona_id=requested_persona_id,
+            persona_id=resolved_persona_id,
             surface=surface,
         )
 
@@ -341,7 +351,7 @@ def create_or_resume_live_session(
             db,
             session_manager=session_manager,
             user_id=user_id,
-            persona_id=requested_persona_id,
+            persona_id=resolved_persona_id,
             surface=surface,
         )
         row = materialized.session_row
@@ -350,7 +360,7 @@ def create_or_resume_live_session(
             db,
             session_manager=session_manager,
             user_id=user_id,
-            persona_id=requested_persona_id,
+            persona_id=resolved_persona_id,
             resume_session_id=str(row.get("id") or ""),
             surface=surface,
         )
@@ -367,7 +377,6 @@ def create_or_resume_live_session(
 
     return focus_live_session(
         db,
-        session_manager=session_manager,
         user_id=user_id,
         session_id=str(row.get("id") or ""),
         stream_registry=stream_registry,
@@ -377,7 +386,6 @@ def create_or_resume_live_session(
 def focus_live_session(
     db: CharactersRAGDB,
     *,
-    session_manager: SessionManager,
     user_id: str,
     session_id: str,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
@@ -415,7 +423,6 @@ def focus_live_session(
 def stop_live_session(
     db: CharactersRAGDB,
     *,
-    session_manager: SessionManager,
     user_id: str,
     session_id: str,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,

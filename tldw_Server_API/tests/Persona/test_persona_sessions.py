@@ -170,6 +170,15 @@ def test_persona_sessions_created_with_surface_do_not_persist_surface_preference
         assert created.status_code == 200
         session_id = created.json()["session_id"]
 
+        active_list = client.get("/api/v1/persona/sessions?surface=companion.conversation")
+        active_detail = client.get(f"/api/v1/persona/sessions/{session_id}")
+
+    assert active_list.status_code == 200
+    active_matched = next(item for item in active_list.json() if item["session_id"] == session_id)
+    assert "companion_activity_surface" not in active_matched["preferences"]
+    assert active_detail.status_code == 200
+    assert "companion_activity_surface" not in active_detail.json()["preferences"]
+
     row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
     assert row is not None
     assert row["activity_surface"] == "companion.conversation"
@@ -183,6 +192,44 @@ def test_persona_sessions_created_with_surface_do_not_persist_surface_preference
     assert listed.status_code == 200
     matched = next(item for item in listed.json() if item["session_id"] == session_id)
     assert "companion_activity_surface" not in matched["preferences"]
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_persona_sessions_redact_live_control_preferences(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "research_assistant",
+                "reuse_policy": "create_new",
+                "idempotency_key": "sensitive-create-key",
+                "surface": "companion.conversation",
+            },
+        )
+        assert created.status_code == 200
+        session_id = created.json()["session"]["session_id"]
+
+        listed = client.get("/api/v1/persona/sessions?surface=companion.conversation")
+        detail = client.get(f"/api/v1/persona/sessions/{session_id}")
+
+    assert listed.status_code == 200
+    matched = next(item for item in listed.json() if item["session_id"] == session_id)
+    assert "persona_live_control" not in matched["preferences"]
+    assert "sensitive-create-key" not in str(matched)
+    assert "companion_activity_surface" not in matched["preferences"]
+
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert "persona_live_control" not in detail_payload["preferences"]
+    assert "sensitive-create-key" not in str(detail_payload)
+    assert "companion_activity_surface" not in detail_payload["preferences"]
 
     fastapi_app.dependency_overrides.clear()
 

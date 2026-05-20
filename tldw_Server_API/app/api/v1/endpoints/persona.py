@@ -3105,10 +3105,10 @@ def _persona_session_summary_from_db(
     manager_row: dict[str, Any] | None = None,
 ) -> PersonaSessionSummary:
     scope_snapshot = row.get("scope_snapshot") or {}
-    preferences = dict(row.get("preferences") or {})
-    runtime_preferences = (manager_row or {}).get("preferences")
-    if isinstance(runtime_preferences, dict):
-        preferences.update(runtime_preferences)
+    preferences = _merge_persisted_persona_session_preferences(
+        row.get("preferences"),
+        (manager_row or {}).get("preferences"),
+    )
     return PersonaSessionSummary(
         session_id=str(row.get("id") or ""),
         persona_id=str(row.get("persona_id") or ""),
@@ -3133,10 +3133,10 @@ def _persona_session_detail_from_db(
     scope_snapshot = row.get("scope_snapshot") or {}
     turns = list((manager_snapshot or {}).get("turns") or [])
     turn_count = int((manager_snapshot or {}).get("turn_count") or len(turns))
-    preferences = dict(row.get("preferences") or {})
-    runtime_preferences = (manager_snapshot or {}).get("preferences")
-    if isinstance(runtime_preferences, dict):
-        preferences.update(runtime_preferences)
+    preferences = _merge_persisted_persona_session_preferences(
+        row.get("preferences"),
+        (manager_snapshot or {}).get("preferences"),
+    )
     return PersonaSessionDetail(
         session_id=str(row.get("id") or ""),
         persona_id=str(row.get("persona_id") or ""),
@@ -7471,7 +7471,6 @@ async def persona_live_sessions(
     try:
         payload = list_live_session_summaries(
             db,
-            session_manager=get_session_manager(),
             user_id=user_id,
             persona_id=persona_id,
             surface=surface,
@@ -7536,7 +7535,6 @@ async def persona_live_session_focus(
     try:
         session = focus_live_session(
             db,
-            session_manager=get_session_manager(),
             user_id=user_id,
             session_id=session_id,
         )
@@ -7569,7 +7567,6 @@ async def persona_live_session_stop(
     try:
         session = stop_live_session(
             db,
-            session_manager=get_session_manager(),
             user_id=user_id,
             session_id=session_id,
         )

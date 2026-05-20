@@ -272,6 +272,68 @@ def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db:
     assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
 
 
+def test_live_session_create_new_unknown_persona_idempotency_reuses_default_session(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+
+    with _client_for_user(1, persona_db) as client:
+        first = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "missing_persona",
+                "reuse_policy": "create_new",
+                "idempotency_key": "unknown-create-key",
+                "surface": "companion.conversation",
+            },
+        )
+        second = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "missing_persona",
+                "reuse_policy": "create_new",
+                "idempotency_key": "unknown-create-key",
+                "surface": "companion.conversation",
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["session"]["persona_id"] == "research_assistant"
+    assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
+
+
+def test_live_session_resume_compatible_unknown_persona_reuses_default_session(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+
+    with _client_for_user(1, persona_db) as client:
+        first = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "missing_persona",
+                "reuse_policy": "resume_compatible",
+                "surface": "companion.conversation",
+            },
+        )
+        second = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "missing_persona",
+                "reuse_policy": "resume_compatible",
+                "surface": "companion.conversation",
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["session"]["persona_id"] == "research_assistant"
+    assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
+
+
 def test_live_session_create_uses_existing_session_materialization(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
@@ -533,7 +595,8 @@ def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
     persona_db: CharactersRAGDB,
 ):
     manager = SessionManager()
-    _install_persona_stream_test_stubs(monkeypatch, manager)
+    persisted_turns: list[dict[str, object]] = []
+    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
     session_id = "sess-user-message-ws"
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
@@ -547,6 +610,7 @@ def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
                         "type": "user_message",
                         "session_id": session_id,
                         "text": "What should I focus on next?",
+                        "client_message_id": f" {'u' * 140} ",
                     }
                 )
             )
@@ -562,6 +626,11 @@ def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
     assert _session_summary(listed.json(), session_id)["lifecycle"] == "connected"
     assert disconnected.status_code == 200
     assert _session_summary(disconnected.json(), session_id)["lifecycle"] == "idle"
+    turns = manager.list_turns(session_id=session_id, user_id="1", limit=10)
+    user_turn = next(turn for turn in turns if turn["type"] == "user_message")
+    assert user_turn["metadata"]["client_message_id"] == "u" * 128
+    persisted_user_turn = next(turn for turn in persisted_turns if turn["turn_type"] == "user_message")
+    assert persisted_user_turn["metadata"]["client_message_id"] == "u" * 128
 
 
 def test_persona_stream_voice_config_marks_live_session_connected_and_cleanup(
