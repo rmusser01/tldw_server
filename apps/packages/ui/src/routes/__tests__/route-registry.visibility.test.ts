@@ -183,6 +183,15 @@ describe("route registry visibility metadata", () => {
     }
   })
 
+  it("registers the legacy audio redirect alias in the shared WebUI router", () => {
+    expect(optionRegistryPaths).toContain("/audio")
+    expect(getRouteMetadata("/audio")).toMatchObject({
+      canonicalPath: "/speech",
+      redirectsTo: "/speech",
+      surface: "redirect"
+    })
+  })
+
   it("keeps internal QA and debug routes out of primary navigation", () => {
     for (const metadata of ROUTE_METADATA) {
       if (metadata.surface !== "internal_qa_debug") {

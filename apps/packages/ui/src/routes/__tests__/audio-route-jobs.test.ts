@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { AUDIO_ROUTE_JOBS } from "../audio-route-jobs"
+import { AUDIO_ROUTE_FINDINGS, AUDIO_ROUTE_JOBS } from "../audio-route-jobs"
+import { getRouteMetadata } from "../route-metadata"
 
 const routes = [
   "/audio",
@@ -9,14 +10,6 @@ const routes = [
   "/audiobook-studio"
 ] as const
 
-const findings = [
-  "F2 support",
-  "F9 support",
-  "F15 support",
-  "F18 support",
-  "F19 support"
-] as const
-
 describe("audio route jobs", () => {
   it("covers every WP11A root audio route once", () => {
     expect(AUDIO_ROUTE_JOBS.map((job) => job.route).sort()).toEqual(
@@ -24,11 +17,24 @@ describe("audio route jobs", () => {
     )
   })
 
-  it("keeps route labels and primary jobs usable", () => {
+  it("keeps route labels aligned with route metadata", () => {
     for (const job of AUDIO_ROUTE_JOBS) {
-      expect(job.label).not.toHaveLength(0)
-      expect(job.primaryJob).not.toHaveLength(0)
-      expect(job.primaryActionLabel).not.toHaveLength(0)
+      expect(job.copy.label.fallback).toBe(getRouteMetadata(job.route)?.label)
+    }
+  })
+
+  it("keeps route copy behind stable translation keys and fallbacks", () => {
+    for (const job of AUDIO_ROUTE_JOBS) {
+      const copyPrefix = `routes.audio.${job.concept}`
+
+      expect(job.copy.label.key).toBe(`${copyPrefix}.label`)
+      expect(job.copy.primaryJob.key).toBe(`${copyPrefix}.primaryJob`)
+      expect(job.copy.primaryActionLabel.key).toBe(
+        `${copyPrefix}.primaryActionLabel`
+      )
+      expect(job.copy.label.fallback).not.toHaveLength(0)
+      expect(job.copy.primaryJob.fallback).not.toHaveLength(0)
+      expect(job.copy.primaryActionLabel.fallback).not.toHaveLength(0)
       expect(job.canonicalComponent).not.toHaveLength(0)
     }
   })
@@ -36,7 +42,7 @@ describe("audio route jobs", () => {
   it("maps the audit findings into implementation coverage", () => {
     const covered = new Set(AUDIO_ROUTE_JOBS.flatMap((job) => job.findings))
 
-    for (const finding of findings) {
+    for (const finding of AUDIO_ROUTE_FINDINGS) {
       expect(covered.has(finding)).toBe(true)
     }
   })
@@ -47,8 +53,8 @@ describe("audio route jobs", () => {
         expect.objectContaining({
           route: "/audio",
           concept: "audio_alias",
-          routeOwner: "next_alias",
-          canonicalComponent: "RouteRedirect:/speech",
+          routeOwner: "shared_alias",
+          canonicalComponent: "RouteAliasNavigate:/speech",
           routeStatePolicy: "alias"
         }),
         expect.objectContaining({

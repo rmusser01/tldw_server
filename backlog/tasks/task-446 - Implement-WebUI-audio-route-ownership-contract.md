@@ -12,7 +12,9 @@ documentation:
 - Docs/superpowers/plans/2026-05-17-webui-audio-routes-implementation-plan.md
 modified_files:
 - apps/packages/ui/src/routes/audio-route-jobs.ts
+- apps/packages/ui/src/routes/route-registry.tsx
 - apps/packages/ui/src/routes/__tests__/audio-route-jobs.test.ts
+- apps/packages/ui/src/routes/__tests__/route-registry.visibility.test.ts
 - backlog/tasks/task-446 - Implement-WebUI-audio-route-ownership-contract.md
 ---
 
@@ -40,7 +42,7 @@ Red/green TDD cycle completed for the WP11A audio route-job contract. The initia
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the WP11A audio route ownership contract as a frontend metadata/test-only slice. Added AUDIO_ROUTE_JOBS and getAudioRouteJob in apps/packages/ui/src/routes/audio-route-jobs.ts, plus focused tests covering the five root audio routes, user-facing labels/jobs, audit finding coverage, and canonical ownership for overlapping /audio, /speech, /stt, /tts, and /audiobook-studio behavior. Verification passed: audio-route-jobs test 4/4, audio route identity plus route-job tests 7/7, and related hosted/metadata/visibility checks 9/9. Bandit is not applicable because this slice only touched frontend TypeScript tests/data and Backlog metadata; no Python code changed.
+Implemented PR #1870 review fixes for the WP11A audio route ownership contract. /audio is now registered in the shared WebUI route registry as a RouteAliasNavigate alias to /speech, preventing the previous 404 fallback for legacy audio links. AUDIO_ROUTE_JOBS now derives finding values from AUDIO_ROUTE_FINDINGS, removes the unused extension_route owner, uses typed translation-key copy records with metadata-aligned fallback labels, and reflects the actual /audio alias mechanism. Verification passed: red-focused Vitest failures reproduced before implementation; focused audio-route/registry tests passed 10/10; adjacent audio route, metadata, visibility, and RouteAliasNavigate tests passed 25/25; git diff --check passed. Direct package tsc still fails on existing unrelated TypeScript debt across tests/components, including a pre-existing OptionPublicShare prop issue in route-registry.tsx; no errors referenced audio-route-jobs or the new /audio alias line. Bandit is not applicable because only frontend TypeScript/tests and task metadata changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

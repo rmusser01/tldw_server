@@ -5,10 +5,7 @@ export type AudioRouteConcept =
   | "tts"
   | "audiobook"
 
-export type AudioRouteOwner =
-  | "next_alias"
-  | "shared_route"
-  | "extension_route"
+export type AudioRouteOwner = "shared_alias" | "shared_route"
 
 export type AudioRouteCapability =
   | "hosted_gate"
@@ -20,19 +17,37 @@ export type AudioRouteCapability =
   | "project_state"
   | "generation_state"
 
-export type AudioRouteFinding =
-  | "F2 support"
-  | "F9 support"
-  | "F15 support"
-  | "F18 support"
-  | "F19 support"
+export const AUDIO_ROUTE_FINDINGS = [
+  "F2 support",
+  "F9 support",
+  "F15 support",
+  "F18 support",
+  "F19 support"
+] as const
+
+export type AudioRouteFinding = (typeof AUDIO_ROUTE_FINDINGS)[number]
+export type AudioRouteCopyField =
+  | "label"
+  | "primaryJob"
+  | "primaryActionLabel"
+export type AudioRouteCopyKey =
+  `routes.audio.${AudioRouteConcept}.${AudioRouteCopyField}`
+
+export type AudioRouteCopyText = {
+  key: AudioRouteCopyKey
+  fallback: string
+}
+
+export type AudioRouteCopy = {
+  label: AudioRouteCopyText
+  primaryJob: AudioRouteCopyText
+  primaryActionLabel: AudioRouteCopyText
+}
 
 export type AudioRouteJob = {
   route: "/audio" | "/speech" | "/stt" | "/tts" | "/audiobook-studio"
   concept: AudioRouteConcept
-  label: string
-  primaryJob: string
-  primaryActionLabel: string
+  copy: AudioRouteCopy
   routeOwner: AudioRouteOwner
   canonicalComponent: string
   capabilities: AudioRouteCapability[]
@@ -40,15 +55,38 @@ export type AudioRouteJob = {
   findings: AudioRouteFinding[]
 }
 
+const audioRouteCopy = (
+  concept: AudioRouteConcept,
+  labelFallback: string,
+  primaryJobFallback: string,
+  primaryActionLabelFallback: string
+): AudioRouteCopy => ({
+  label: {
+    key: `routes.audio.${concept}.label`,
+    fallback: labelFallback
+  },
+  primaryJob: {
+    key: `routes.audio.${concept}.primaryJob`,
+    fallback: primaryJobFallback
+  },
+  primaryActionLabel: {
+    key: `routes.audio.${concept}.primaryActionLabel`,
+    fallback: primaryActionLabelFallback
+  }
+})
+
 export const AUDIO_ROUTE_JOBS: AudioRouteJob[] = [
   {
     route: "/audio",
     concept: "audio_alias",
-    label: "Audio",
-    primaryJob: "Open the canonical combined speech route from old links and bookmarks.",
-    primaryActionLabel: "Open Speech Playground",
-    routeOwner: "next_alias",
-    canonicalComponent: "RouteRedirect:/speech",
+    copy: audioRouteCopy(
+      "audio_alias",
+      "Audio",
+      "Open the canonical combined speech route from old links and bookmarks.",
+      "Open Speech"
+    ),
+    routeOwner: "shared_alias",
+    canonicalComponent: "RouteAliasNavigate:/speech",
     capabilities: [],
     routeStatePolicy: "alias",
     findings: ["F2 support", "F18 support", "F19 support"]
@@ -56,9 +94,12 @@ export const AUDIO_ROUTE_JOBS: AudioRouteJob[] = [
   {
     route: "/speech",
     concept: "speech_combined",
-    label: "Speech Playground",
-    primaryJob: "Record, transcribe, edit, and synthesize audio in one workspace.",
-    primaryActionLabel: "Start audio workflow",
+    copy: audioRouteCopy(
+      "speech_combined",
+      "Speech",
+      "Record, transcribe, edit, and synthesize audio in one workspace.",
+      "Start audio workflow"
+    ),
     routeOwner: "shared_route",
     canonicalComponent: "SpeechPlaygroundPage",
     capabilities: [
@@ -80,9 +121,12 @@ export const AUDIO_ROUTE_JOBS: AudioRouteJob[] = [
   {
     route: "/stt",
     concept: "stt",
-    label: "STT Playground",
-    primaryJob: "Transcribe audio and compare transcription results.",
-    primaryActionLabel: "Start transcription",
+    copy: audioRouteCopy(
+      "stt",
+      "Speech to Text",
+      "Transcribe audio and compare transcription results.",
+      "Start transcription"
+    ),
     routeOwner: "shared_route",
     canonicalComponent: "SttPlaygroundPage",
     capabilities: [
@@ -103,9 +147,12 @@ export const AUDIO_ROUTE_JOBS: AudioRouteJob[] = [
   {
     route: "/tts",
     concept: "tts",
-    label: "TTS Playground",
-    primaryJob: "Generate audio from text with provider, voice, and model controls.",
-    primaryActionLabel: "Generate speech",
+    copy: audioRouteCopy(
+      "tts",
+      "Text to Speech",
+      "Generate audio from text with provider, voice, and model controls.",
+      "Generate speech"
+    ),
     routeOwner: "shared_route",
     canonicalComponent: "SpeechPlaygroundPage:listen",
     capabilities: [
@@ -126,9 +173,12 @@ export const AUDIO_ROUTE_JOBS: AudioRouteJob[] = [
   {
     route: "/audiobook-studio",
     concept: "audiobook",
-    label: "Audiobook Studio",
-    primaryJob: "Create long-form audiobook projects from text and generated speech.",
-    primaryActionLabel: "Create project",
+    copy: audioRouteCopy(
+      "audiobook",
+      "Audiobook Studio",
+      "Create long-form audiobook projects from text and generated speech.",
+      "Create project"
+    ),
     routeOwner: "shared_route",
     canonicalComponent: "AudiobookStudioPage",
     capabilities: [
