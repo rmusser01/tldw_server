@@ -20,6 +20,7 @@ import {
   CharacterChatReadinessPanel,
   type MissingCharacterRecovery,
 } from "./CharacterChatReadinessPanel";
+import { CharacterChatSessionsPanel } from "./CharacterChatSessionsPanel";
 import {
   buildCockpitAssistantSummary,
   buildCockpitMcpSummary,
@@ -133,6 +134,10 @@ type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : String(value);
 
+const isPlaygroundContextSource = (
+  item: PlaygroundContextSource | null,
+): item is PlaygroundContextSource => Boolean(item);
+
 const UNAVAILABLE_DESIGN_STATE_LABEL =
   getDesignSystemState("unavailable").label;
 
@@ -170,10 +175,7 @@ const COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-const getRecordString = (
-  value: unknown,
-  keys: string[],
-): string | null => {
+const getRecordString = (value: unknown, keys: string[]): string | null => {
   if (!isRecord(value)) return null;
   for (const key of keys) {
     const fieldValue = value[key];
@@ -266,11 +268,10 @@ export const Playground = () => {
   }, []);
   const [characterModeIntentActive, setCharacterModeIntentActive] =
     React.useState(false);
-  const [chatLayoutMode, setChatLayoutMode] =
-    useStorage<PlaygroundCockpitMode>(
-      "playgroundChatLayoutMode",
-      defaultChatLayoutMode,
-    );
+  const [chatLayoutMode, setChatLayoutMode] = useStorage<PlaygroundCockpitMode>(
+    "playgroundChatLayoutMode",
+    defaultChatLayoutMode,
+  );
   const [cockpitContextRailVisible, setCockpitContextRailVisible] =
     useStorage<boolean>("playgroundChatContextRailVisible", true);
   const [cockpitRuntimeRailVisible, setCockpitRuntimeRailVisible] =
@@ -471,7 +472,7 @@ export const Playground = () => {
       ? selectedAssistant.name
       : selectedAssistant
         ? null
-        : selectedCharacter?.name ?? null;
+        : (selectedCharacter?.name ?? null);
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
@@ -520,7 +521,9 @@ export const Playground = () => {
     };
     const handleStarterSelected = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: unknown }>).detail;
-      const mode = String(detail?.mode || "").trim().toLowerCase();
+      const mode = String(detail?.mode || "")
+        .trim()
+        .toLowerCase();
       if (mode === "character") {
         setCharacterModeIntentActive(true);
         void setChatWorkflowMode("character");
@@ -613,11 +616,7 @@ export const Playground = () => {
         routeCharacterIntentRequestRef.current += 1;
       }
     };
-  }, [
-    routeCharacterIntentId,
-    routeCharacterRetryToken,
-    setSelectedCharacter,
-  ]);
+  }, [routeCharacterIntentId, routeCharacterRetryToken, setSelectedCharacter]);
 
   React.useEffect(() => {
     if (!routeCharacterIntentId) {
@@ -639,10 +638,12 @@ export const Playground = () => {
 
   React.useEffect(() => {
     const handleReadinessState = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        state?: string;
-        degradedChecks?: unknown;
-      }>).detail;
+      const detail = (
+        event as CustomEvent<{
+          state?: string;
+          degradedChecks?: unknown;
+        }>
+      ).detail;
       const nextState =
         detail?.state === "ready" ||
         detail?.state === "degraded" ||
@@ -1807,12 +1808,12 @@ export const Playground = () => {
     : selectedKnowledge
       ? 1
       : 0;
-  const ragMediaIdCount = Array.isArray(ragMediaIds)
-    ? ragMediaIds.length
-    : 0;
+  const ragMediaIdCount = Array.isArray(ragMediaIds) ? ragMediaIds.length : 0;
   const trimmedSystemPrompt = String(systemPrompt || "").trim();
   const hasPromptContext = Boolean(
-    selectedSystemPrompt || selectedQuickPrompt || trimmedSystemPrompt.length > 0,
+    selectedSystemPrompt ||
+    selectedQuickPrompt ||
+    trimmedSystemPrompt.length > 0,
   );
   const promptSummary: PlaygroundPromptSummary = buildCockpitPromptSummary({
     selectedSystemPrompt,
@@ -1964,25 +1965,25 @@ export const Playground = () => {
           ),
         )
       : serverReadinessState === "degraded"
-      ? serverDegradedChecks.length > 0
-        ? `${toText(
-            t("playground:cockpit.degraded", DEGRADED_STATE_LABEL),
-          )}: ${serverDegradedChecks.join(", ")}`
-        : toText(
-            t(
-              "playground:cockpit.degradedServerHealth",
-              "Server health is degraded",
-            ),
-          )
-      : null;
+        ? serverDegradedChecks.length > 0
+          ? `${toText(
+              t("playground:cockpit.degraded", DEGRADED_STATE_LABEL),
+            )}: ${serverDegradedChecks.join(", ")}`
+          : toText(
+              t(
+                "playground:cockpit.degradedServerHealth",
+                "Server health is degraded",
+              ),
+            )
+        : null;
   const hasChatContext = Boolean(
     attachedResearchContext ||
-      webSearch ||
-      contextFileCount > 0 ||
-      selectedKnowledgeCount > 0 ||
-      ragMediaIdCount > 0 ||
-      hasPromptContext ||
-      cockpitAssistantSummary.mode !== "none",
+    webSearch ||
+    contextFileCount > 0 ||
+    selectedKnowledgeCount > 0 ||
+    ragMediaIdCount > 0 ||
+    hasPromptContext ||
+    cockpitAssistantSummary.mode !== "none",
   );
   const sessionSummary = buildCockpitSessionSummary({
     temporaryChat,
@@ -2014,7 +2015,9 @@ export const Playground = () => {
       loadingStatusLabel: toText(
         t("playground:cockpit.sessionLoading", "Loading conversation"),
       ),
-      localChatLabel: toText(t("playground:cockpit.sessionLocal", "Local chat")),
+      localChatLabel: toText(
+        t("playground:cockpit.sessionLocal", "Local chat"),
+      ),
       localHistoryStatusLabel: toText(
         t("playground:cockpit.localHistory", "Local history"),
       ),
@@ -2077,12 +2080,7 @@ export const Playground = () => {
             characterName: activeCharacterModeLabel,
           })
         : null,
-    [
-      activeCharacterModeLabel,
-      characterChatBlocked,
-      characterChatReadiness,
-      t,
-    ],
+    [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
   );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2098,13 +2096,17 @@ export const Playground = () => {
   const ragMediaItems = Array.isArray(ragMediaIds) ? ragMediaIds : [];
   const removeContextFileAt = React.useCallback(
     (index: number) => {
-      setContextFiles(contextFileItems.filter((_, itemIndex) => itemIndex !== index));
+      setContextFiles(
+        contextFileItems.filter((_, itemIndex) => itemIndex !== index),
+      );
     },
     [contextFileItems, setContextFiles],
   );
   const removeRagMediaAt = React.useCallback(
     (index: number) => {
-      const nextIds = ragMediaItems.filter((_, itemIndex) => itemIndex !== index);
+      const nextIds = ragMediaItems.filter(
+        (_, itemIndex) => itemIndex !== index,
+      );
       setRagMediaIds(nextIds.length > 0 ? nextIds : null);
     },
     [ragMediaItems, setRagMediaIds],
@@ -2123,166 +2125,179 @@ export const Playground = () => {
     },
     [selectedKnowledge, selectedKnowledgeItems, setSelectedKnowledge],
   );
-  const contextSources = ([
-    webSearch
-      ? {
-          id: "web-search",
-          kind: "web" as const,
-          label: toText(t("playground:cockpit.web", "Web")),
-          title: toText(t("playground:cockpit.webSearch", "Web search")),
+  const contextSources = (
+    [
+      webSearch
+        ? {
+            id: "web-search",
+            kind: "web" as const,
+            label: toText(t("playground:cockpit.web", "Web")),
+            title: toText(t("playground:cockpit.webSearch", "Web search")),
+            detail: toText(
+              t(
+                "playground:cockpit.webSearchDetail",
+                "Enabled for the next reply.",
+              ),
+            ),
+            state: "active" as const,
+            onRemove: toggleWebSearchFromCockpit,
+            removeLabel: toText(
+              t("playground:cockpit.disableWebSearch", "Disable web search"),
+            ),
+          }
+        : null,
+      hasPromptContext
+        ? {
+            id: `prompt-${promptSummary.state}`,
+            kind: "prompt" as const,
+            label: toText(t("playground:cockpit.prompt", "Prompt")),
+            title: promptSummary.label,
+            detail: promptSummary.detail,
+            state: "active" as const,
+            onOpen: openPromptSelectorFromCockpit,
+            onRemove: clearPromptContextFromCockpit,
+            openLabel: toText(
+              t("playground:cockpit.selectPrompt", "Select a prompt"),
+            ),
+            removeLabel: toText(
+              t(
+                "playground:cockpit.clearPromptContext",
+                "Clear prompt context",
+              ),
+            ),
+          }
+        : null,
+      cockpitAssistantSummary.mode !== "none" && cockpitAssistantSummary.name
+        ? {
+            id: `assistant-${cockpitAssistantSummary.mode}-${cockpitAssistantSummary.name}`,
+            kind: "assistant" as const,
+            label:
+              cockpitAssistantSummary.mode === "persona"
+                ? toText(t("playground:cockpit.persona", "Persona"))
+                : toText(t("playground:cockpit.character", "Character")),
+            title: cockpitAssistantSummary.name,
+            detail: cockpitAssistantSummary.detail,
+            state: "active" as const,
+            onOpen: openAssistantSelectorFromCockpit,
+            onRemove: clearAssistantFromCockpit,
+            openLabel: toText(
+              t(
+                "playground:cockpit.selectCharacterPersona",
+                "Select character or persona",
+              ),
+            ),
+            removeLabel: toText(
+              t("playground:cockpit.clearAssistant", "Clear assistant"),
+            ),
+          }
+        : null,
+      attachedResearchContext
+        ? {
+            id: `research-${attachedResearchContext.run_id || "active"}`,
+            kind: "research" as const,
+            label: toText(t("playground:cockpit.research", "Research")),
+            title:
+              attachedResearchContext.query ||
+              attachedResearchContext.question ||
+              toText(
+                t("playground:cockpit.researchContext", "Research context"),
+              ),
+            detail: attachedResearchContext.run_id
+              ? toText(
+                  t("playground:cockpit.researchRun", "Run {{runId}}", {
+                    runId: attachedResearchContext.run_id,
+                  }),
+                )
+              : null,
+            state: "active" as const,
+            onOpen: () => openSearchAndContext({ tab: "context" }),
+            onRemove: handleRemoveAttachedResearchContext,
+            removeLabel: toText(
+              t(
+                "playground:cockpit.clearResearchContext",
+                "Clear research context",
+              ),
+            ),
+          }
+        : null,
+      ...contextFileItems.map((file, index) => {
+        const title =
+          getRecordString(file, ["name", "filename", "title", "id"]) ||
+          toText(
+            t("playground:cockpit.fileFallback", "File {{index}}", {
+              index: index + 1,
+            }),
+          );
+        return {
+          id: `file-${getRecordString(file, ["id"]) || index}`,
+          kind: "file" as const,
+          label: toText(t("playground:cockpit.file", "File")),
+          title,
           detail: toText(
-            t(
-              "playground:cockpit.webSearchDetail",
-              "Enabled for the next reply.",
-            ),
+            t("playground:cockpit.nextReply", "Used on next reply"),
           ),
           state: "active" as const,
-          onRemove: toggleWebSearchFromCockpit,
+          onRemove: () => removeContextFileAt(index),
           removeLabel: toText(
-            t("playground:cockpit.disableWebSearch", "Disable web search"),
+            t("playground:cockpit.removeFileSource", `Remove ${title}`, {
+              title,
+            }),
           ),
-        }
-      : null,
-    hasPromptContext
-      ? {
-          id: `prompt-${promptSummary.state}`,
-          kind: "prompt" as const,
-          label: toText(t("playground:cockpit.prompt", "Prompt")),
-          title: promptSummary.label,
-          detail: promptSummary.detail,
-          state: "active" as const,
-          onOpen: openPromptSelectorFromCockpit,
-          onRemove: clearPromptContextFromCockpit,
-          openLabel: toText(
-            t("playground:cockpit.selectPrompt", "Select a prompt"),
+        };
+      }),
+      ...selectedKnowledgeItems.map((knowledge, index) => {
+        const title =
+          getRecordString(knowledge, ["title", "name", "id"]) ||
+          toText(
+            t("playground:cockpit.knowledgeFallback", "Knowledge {{index}}", {
+              index: index + 1,
+            }),
+          );
+        return {
+          id: `knowledge-${getRecordString(knowledge, ["id"]) || index}`,
+          kind: "knowledge" as const,
+          label: toText(t("playground:cockpit.knowledge", "Knowledge")),
+          title,
+          detail: toText(
+            t("playground:cockpit.nextReply", "Used on next reply"),
           ),
-          removeLabel: toText(
-            t("playground:cockpit.clearPromptContext", "Clear prompt context"),
-          ),
-        }
-      : null,
-    cockpitAssistantSummary.mode !== "none" && cockpitAssistantSummary.name
-      ? {
-          id: `assistant-${cockpitAssistantSummary.mode}-${cockpitAssistantSummary.name}`,
-          kind: "assistant" as const,
-          label:
-            cockpitAssistantSummary.mode === "persona"
-              ? toText(t("playground:cockpit.persona", "Persona"))
-              : toText(t("playground:cockpit.character", "Character")),
-          title: cockpitAssistantSummary.name,
-          detail: cockpitAssistantSummary.detail,
-          state: "active" as const,
-          onOpen: openAssistantSelectorFromCockpit,
-          onRemove: clearAssistantFromCockpit,
-          openLabel: toText(
-            t(
-              "playground:cockpit.selectCharacterPersona",
-              "Select character or persona",
-            ),
-          ),
-          removeLabel: toText(
-            t("playground:cockpit.clearAssistant", "Clear assistant"),
-          ),
-        }
-      : null,
-    attachedResearchContext
-      ? {
-          id: `research-${attachedResearchContext.run_id || "active"}`,
-          kind: "research" as const,
-          label: toText(t("playground:cockpit.research", "Research")),
-          title:
-            attachedResearchContext.query ||
-            attachedResearchContext.question ||
-            toText(t("playground:cockpit.researchContext", "Research context")),
-          detail: attachedResearchContext.run_id
-            ? toText(
-                t("playground:cockpit.researchRun", "Run {{runId}}", {
-                  runId: attachedResearchContext.run_id,
-                }),
-              )
-            : null,
           state: "active" as const,
           onOpen: () => openSearchAndContext({ tab: "context" }),
-          onRemove: handleRemoveAttachedResearchContext,
-          removeLabel: toText(
-            t(
-              "playground:cockpit.clearResearchContext",
-              "Clear research context",
-            ),
+          onRemove: () => removeSelectedKnowledgeAt(index),
+          openLabel: toText(
+            t("playground:cockpit.openKnowledgeSource", `Open ${title}`, {
+              title,
+            }),
           ),
-        }
-      : null,
-    ...contextFileItems.map((file, index) => {
-      const title =
-        getRecordString(file, ["name", "filename", "title", "id"]) ||
-        toText(
-          t("playground:cockpit.fileFallback", "File {{index}}", {
-            index: index + 1,
+          removeLabel: toText(
+            t("playground:cockpit.removeKnowledgeSource", `Remove ${title}`, {
+              title,
+            }),
+          ),
+        };
+      }),
+      ...ragMediaItems.map((mediaId, index) => ({
+        id: `media-${mediaId}`,
+        kind: "media" as const,
+        label: toText(t("playground:cockpit.media", "Media")),
+        title: toText(
+          t("playground:cockpit.mediaScopeLabel", "Media scope {{id}}", {
+            id: mediaId,
           }),
-        );
-      return {
-        id: `file-${getRecordString(file, ["id"]) || index}`,
-        kind: "file" as const,
-        label: toText(t("playground:cockpit.file", "File")),
-        title,
-        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
-        state: "active" as const,
-        onRemove: () => removeContextFileAt(index),
-        removeLabel: toText(
-          t("playground:cockpit.removeFileSource", `Remove ${title}`, { title }),
         ),
-      };
-    }),
-    ...selectedKnowledgeItems.map((knowledge, index) => {
-      const title =
-        getRecordString(knowledge, ["title", "name", "id"]) ||
-        toText(
-          t("playground:cockpit.knowledgeFallback", "Knowledge {{index}}", {
-            index: index + 1,
-          }),
-        );
-      return {
-        id: `knowledge-${getRecordString(knowledge, ["id"]) || index}`,
-        kind: "knowledge" as const,
-        label: toText(t("playground:cockpit.knowledge", "Knowledge")),
-        title,
         detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
         state: "active" as const,
         onOpen: () => openSearchAndContext({ tab: "context" }),
-        onRemove: () => removeSelectedKnowledgeAt(index),
+        onRemove: () => removeRagMediaAt(index),
         openLabel: toText(
-          t("playground:cockpit.openKnowledgeSource", `Open ${title}`, { title }),
+          t("playground:cockpit.openMediaSource", "Open media scope"),
         ),
         removeLabel: toText(
-          t("playground:cockpit.removeKnowledgeSource", `Remove ${title}`, {
-            title,
-          }),
+          t("playground:cockpit.removeMediaSource", "Remove media scope"),
         ),
-      };
-    }),
-    ...ragMediaItems.map((mediaId, index) => ({
-      id: `media-${mediaId}`,
-      kind: "media" as const,
-      label: toText(t("playground:cockpit.media", "Media")),
-      title: toText(
-        t("playground:cockpit.mediaScopeLabel", "Media scope {{id}}", {
-          id: mediaId,
-        }),
-      ),
-      detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
-      state: "active" as const,
-      onOpen: () => openSearchAndContext({ tab: "context" }),
-      onRemove: () => removeRagMediaAt(index),
-      openLabel: toText(
-        t("playground:cockpit.openMediaSource", "Open media scope"),
-      ),
-      removeLabel: toText(
-        t("playground:cockpit.removeMediaSource", "Remove media scope"),
-      ),
-    })),
-  ] satisfies Array<PlaygroundContextSource | null>).filter(
-    Boolean,
-  ) as PlaygroundContextSource[];
+      })),
+    ] satisfies Array<PlaygroundContextSource | null>
+  ).filter(isPlaygroundContextSource);
   const activeScopedModelSettings =
     activeSettingsScope && scopedSettingsByModelKey
       ? scopedSettingsByModelKey[activeSettingsScope]
@@ -2291,7 +2306,10 @@ export const Playground = () => {
     key: keyof ChatModelSettings,
   ): RuntimeSettingSummary["source"] =>
     activeSettingsScope
-      ? Object.prototype.hasOwnProperty.call(activeScopedModelSettings || {}, key)
+      ? Object.prototype.hasOwnProperty.call(
+          activeScopedModelSettings || {},
+          key,
+        )
         ? "override"
         : "default"
       : undefined;
@@ -2340,8 +2358,8 @@ export const Playground = () => {
       : null,
   ];
   const runtimeSettingSummaries: RuntimeSettingSummary[] =
-    runtimeSettingSummaryItems.filter(
-      (item): item is RuntimeSettingSummary => Boolean(item),
+    runtimeSettingSummaryItems.filter((item): item is RuntimeSettingSummary =>
+      Boolean(item),
     );
   const cockpitToolSummary = buildCockpitMcpSummary({
     hasMcp: mcpHealthState !== "unavailable",
@@ -2400,10 +2418,7 @@ export const Playground = () => {
       ),
       toolsLabel: toText(t("playground:cockpit.mcpTools", "MCP tools")),
       unavailableDetail: toText(
-        t(
-          "playground:composer.mcpToolsUnavailable",
-          "MCP tools unavailable",
-        ),
+        t("playground:composer.mcpToolsUnavailable", "MCP tools unavailable"),
       ),
       unavailableLabel: toText(
         t("playground:composer.mcpUnavailable", "MCP unavailable"),
@@ -2490,7 +2505,9 @@ export const Playground = () => {
   }, []);
   const statusContextSummary = [
     hasPromptContext ? promptSummary.label : null,
-    webSearch ? toText(t("playground:cockpit.webSearchOn", "Web search on")) : null,
+    webSearch
+      ? toText(t("playground:cockpit.webSearchOn", "Web search on"))
+      : null,
     contextFileCount > 0
       ? contextFileCount === 1
         ? toText(t("playground:cockpit.contextFilesCountOne", "1 file"))
@@ -2505,7 +2522,10 @@ export const Playground = () => {
     selectedKnowledgeCount > 0
       ? selectedKnowledgeCount === 1
         ? toText(
-            t("playground:cockpit.contextKnowledgeCountOne", "1 knowledge item"),
+            t(
+              "playground:cockpit.contextKnowledgeCountOne",
+              "1 knowledge item",
+            ),
           )
         : toText(
             t(
@@ -2528,6 +2548,17 @@ export const Playground = () => {
       : null,
   ].filter((item): item is string => Boolean(item));
   const cockpitMessageCount = getCockpitMessageCount(messages, history);
+  const activeCharacterSessionId =
+    selectedAssistant?.kind === "character"
+      ? selectedAssistant.id
+      : selectedCharacter?.id;
+  const characterSessionsPanel = characterWorkflowActive ? (
+    <CharacterChatSessionsPanel
+      activeCharacterId={activeCharacterSessionId ?? null}
+      activeCharacterName={activeCharacterModeLabel}
+      activeServerChatId={serverChatId}
+    />
+  ) : null;
   const cockpitLeftRail = (
     <PlaygroundContextRail
       hasContext={hasChatContext}
@@ -2556,12 +2587,15 @@ export const Playground = () => {
           type="button"
           className="inline-flex min-h-[30px] items-center rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           data-cockpit-prompt-select-trigger
-          aria-label={toText(t("playground:cockpit.selectPrompt", "Select a prompt"))}
+          aria-label={toText(
+            t("playground:cockpit.selectPrompt", "Select a prompt"),
+          )}
           onClick={openPromptSelectorFromCockpit}
         >
           {toText(t("playground:cockpit.selectPrompt", "Select prompt"))}
         </button>
       }
+      characterSessionsPanel={characterSessionsPanel}
       onClearPrompt={clearPromptContextFromCockpit}
       onOpenSearchContext={() => openSearchAndContext({ tab: "search" })}
       onClearFiles={() => setContextFiles([])}
@@ -2581,12 +2615,14 @@ export const Playground = () => {
         characterChatModelUnavailable || serverReadinessState === "blocked"
           ? "error"
           : streaming
-          ? "streaming"
-          : serverReadinessState === "degraded"
-            ? "degraded"
-            : "ready"
+            ? "streaming"
+            : serverReadinessState === "degraded"
+              ? "degraded"
+              : "ready"
       }
-      runtimeStatusDetail={characterChatReadinessCopy?.title ?? runtimeStatusDetail}
+      runtimeStatusDetail={
+        characterChatReadinessCopy?.title ?? runtimeStatusDetail
+      }
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
       assistantSummary={cockpitAssistantSummary}
@@ -2705,469 +2741,482 @@ export const Playground = () => {
           statusStrip={cockpitStatusStrip}
         >
           <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          {parentMeta?.parentHistoryId && (
-            <div className="flex w-full justify-center px-5 pt-2">
-              <div className="inline-flex flex-wrap items-center justify-center gap-2">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-full border border-primary bg-surface2 px-3 py-1 text-[11px] font-medium text-primaryStrong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  title={t(
-                    "playground:composer.compareBreadcrumb",
-                    "Back to comparison chat",
-                  )}
-                  onClick={() => {
-                    window.dispatchEvent(
-                      new CustomEvent("tldw:open-history", {
-                        detail: { historyId: parentMeta.parentHistoryId },
-                      }),
-                    );
-                  }}
-                >
-                  <span aria-hidden="true">←</span>
-                  <span>
-                    {t(
+            {parentMeta?.parentHistoryId && (
+              <div className="flex w-full justify-center px-5 pt-2">
+                <div className="inline-flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-full border border-primary bg-surface2 px-3 py-1 text-[11px] font-medium text-primaryStrong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                    title={t(
                       "playground:composer.compareBreadcrumb",
                       "Back to comparison chat",
                     )}
-                  </span>
-                </button>
-                {branchForkPointLabel && (
-                  <span
-                    data-testid="playground-branch-fork-point"
-                    className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] text-text-muted"
+                    onClick={() => {
+                      window.dispatchEvent(
+                        new CustomEvent("tldw:open-history", {
+                          detail: { historyId: parentMeta.parentHistoryId },
+                        }),
+                      );
+                    }}
                   >
-                    {branchForkPointLabel}
-                  </span>
-                )}
-                {branchDepthLabel && (
+                    <span aria-hidden="true">←</span>
+                    <span>
+                      {t(
+                        "playground:composer.compareBreadcrumb",
+                        "Back to comparison chat",
+                      )}
+                    </span>
+                  </button>
+                  {branchForkPointLabel && (
+                    <span
+                      data-testid="playground-branch-fork-point"
+                      className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] text-text-muted"
+                    >
+                      {branchForkPointLabel}
+                    </span>
+                  )}
+                  {branchDepthLabel && (
+                    <span
+                      data-testid="playground-branch-depth"
+                      className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] text-text-muted"
+                    >
+                      {branchDepthLabel}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            <div className="px-4 pt-2">
+              <div className="mx-auto flex w-full max-w-[64rem] items-center justify-between text-[11px] text-text-muted">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span
-                    data-testid="playground-branch-depth"
-                    className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] text-text-muted"
+                    data-testid="playground-active-chat-mode"
+                    className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-medium ${
+                      characterWorkflowActive
+                        ? "border-primary/40 bg-primary/10 text-primaryStrong"
+                        : "border-border bg-surface2 text-text-muted"
+                    }`}
                   >
-                    {branchDepthLabel}
+                    {characterWorkflowActive
+                      ? toText(
+                          t(
+                            "playground:characterChat.modeLabel",
+                            "Character Chat",
+                          ),
+                        )
+                      : toText(
+                          t("playground:regions.standardChat", "Standard chat"),
+                        )}
+                    {characterWorkflowActive && activeCharacterModeLabel ? (
+                      <span className="ml-1 max-w-[14rem] truncate text-text">
+                        {activeCharacterModeLabel}
+                      </span>
+                    ) : null}
                   </span>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="px-4 pt-2">
-            <div className="mx-auto flex w-full max-w-[64rem] items-center justify-between text-[11px] text-text-muted">
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span
-                  data-testid="playground-active-chat-mode"
-                  className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-medium ${
-                    characterWorkflowActive
-                      ? "border-primary/40 bg-primary/10 text-primaryStrong"
-                      : "border-border bg-surface2 text-text-muted"
-                  }`}
-                >
-                  {characterWorkflowActive
-                    ? toText(
-                        t(
-                          "playground:characterChat.modeLabel",
-                          "Character Chat",
-                        ),
-                      )
-                    : toText(t("playground:regions.standardChat", "Standard chat"))}
-                  {characterWorkflowActive && activeCharacterModeLabel ? (
-                    <span className="ml-1 max-w-[14rem] truncate text-text">
-                      {activeCharacterModeLabel}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                  {t("playground:regions.timeline", "Conversation timeline")}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  ref={shortcutsTriggerRef}
-                  type="button"
-                  data-testid="playground-shortcuts-help-trigger"
-                  onClick={() => setShortcutsHelpOpen((previous) => !previous)}
-                  title={
-                    t(
-                      "playground:shortcuts.openHelp",
-                      "Open keyboard shortcuts (Shift+/)",
-                    ) as string
-                  }
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-text hover:bg-surface"
-                >
-                  <Keyboard className="h-3 w-3" aria-hidden="true" />
-                  {t("playground:shortcuts.title", "Shortcuts")}
-                </button>
-                <button
-                  ref={artifactsTriggerRef}
-                  type="button"
-                  data-testid="playground-artifacts-trigger"
-                  disabled={!activeArtifact && !artifactsOpen}
-                  onClick={() => {
-                    if (artifactsOpen) {
-                      closeArtifacts();
-                      return;
+                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                    {t("playground:regions.timeline", "Conversation timeline")}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    ref={shortcutsTriggerRef}
+                    type="button"
+                    data-testid="playground-shortcuts-help-trigger"
+                    onClick={() =>
+                      setShortcutsHelpOpen((previous) => !previous)
                     }
-                    if (!activeArtifact) {
-                      return;
+                    title={
+                      t(
+                        "playground:shortcuts.openHelp",
+                        "Open keyboard shortcuts (Shift+/)",
+                      ) as string
                     }
-                    setArtifactsOpen(true);
-                    markArtifactsRead();
-                  }}
-                  title={artifactBadgeLabel as string}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition ${
-                    !activeArtifact && !artifactsOpen
-                      ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-70"
-                      : "border-border bg-surface2 text-text hover:bg-surface"
-                  }`}
-                >
-                  <span>{artifactBadgeLabel}</span>
-                  {artifactUnreadCount > 0 && (
-                    <span
-                      data-testid="playground-artifacts-unread"
-                      className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-white"
-                    >
-                      {toText(
-                        t("playground:regions.artifactsNew", "New {{count}}", {
-                          count: artifactUnreadCount,
-                        } as any),
-                      )}
-                    </span>
-                  )}
-                  {artifactPinnedCount > 0 && (
-                    <span
-                      data-testid="playground-artifacts-pinned"
-                      className="rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-text-subtle"
-                    >
-                      {toText(
-                        t(
-                          "playground:regions.artifactsPinned",
-                          "Pinned {{count}}",
-                          {
-                            count: artifactPinnedCount,
-                          } as any,
-                        ),
-                      )}
-                    </span>
-                  )}
-                  {artifactHistoryCount > 0 && (
-                    <span
-                      data-testid="playground-artifacts-count"
-                      className="rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-subtle"
-                    >
-                      {toText(
-                        t(
-                          "playground:regions.artifactsCount",
-                          "{{count}} total",
-                          {
-                            count: artifactHistoryCount,
-                          } as any,
-                        ),
-                      )}
-                    </span>
-                  )}
-                </button>
-              </div>
-            </div>
-            {shortcutsHelpOpen && (
-              <div
-                data-testid="playground-shortcuts-help-panel"
-                role="dialog"
-                aria-modal="false"
-                aria-label={t("playground:shortcuts.title", "Shortcuts")}
-                className="mx-auto mt-1 w-full max-w-[64rem] rounded-md border border-border bg-surface2 px-2 py-1.5 text-[11px] text-text"
-              >
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="font-semibold">
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-text hover:bg-surface"
+                  >
+                    <Keyboard className="h-3 w-3" aria-hidden="true" />
                     {t("playground:shortcuts.title", "Shortcuts")}
+                  </button>
+                  <button
+                    ref={artifactsTriggerRef}
+                    type="button"
+                    data-testid="playground-artifacts-trigger"
+                    disabled={!activeArtifact && !artifactsOpen}
+                    onClick={() => {
+                      if (artifactsOpen) {
+                        closeArtifacts();
+                        return;
+                      }
+                      if (!activeArtifact) {
+                        return;
+                      }
+                      setArtifactsOpen(true);
+                      markArtifactsRead();
+                    }}
+                    title={artifactBadgeLabel as string}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition ${
+                      !activeArtifact && !artifactsOpen
+                        ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-70"
+                        : "border-border bg-surface2 text-text hover:bg-surface"
+                    }`}
+                  >
+                    <span>{artifactBadgeLabel}</span>
+                    {artifactUnreadCount > 0 && (
+                      <span
+                        data-testid="playground-artifacts-unread"
+                        className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                      >
+                        {toText(
+                          t(
+                            "playground:regions.artifactsNew",
+                            "New {{count}}",
+                            {
+                              count: artifactUnreadCount,
+                            } as any,
+                          ),
+                        )}
+                      </span>
+                    )}
+                    {artifactPinnedCount > 0 && (
+                      <span
+                        data-testid="playground-artifacts-pinned"
+                        className="rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-text-subtle"
+                      >
+                        {toText(
+                          t(
+                            "playground:regions.artifactsPinned",
+                            "Pinned {{count}}",
+                            {
+                              count: artifactPinnedCount,
+                            } as any,
+                          ),
+                        )}
+                      </span>
+                    )}
+                    {artifactHistoryCount > 0 && (
+                      <span
+                        data-testid="playground-artifacts-count"
+                        className="rounded-full border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-subtle"
+                      >
+                        {toText(
+                          t(
+                            "playground:regions.artifactsCount",
+                            "{{count}} total",
+                            {
+                              count: artifactHistoryCount,
+                            } as any,
+                          ),
+                        )}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+              {shortcutsHelpOpen && (
+                <div
+                  data-testid="playground-shortcuts-help-panel"
+                  role="dialog"
+                  aria-modal="false"
+                  aria-label={t("playground:shortcuts.title", "Shortcuts")}
+                  className="mx-auto mt-1 w-full max-w-[64rem] rounded-md border border-border bg-surface2 px-2 py-1.5 text-[11px] text-text"
+                >
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="font-semibold">
+                      {t("playground:shortcuts.title", "Shortcuts")}
+                    </span>
+                    <button
+                      ref={shortcutsCloseRef}
+                      type="button"
+                      data-testid="playground-shortcuts-help-close"
+                      onClick={() => {
+                        setShortcutsHelpOpen(false);
+                        requestAnimationFrame(() => {
+                          shortcutsTriggerRef.current?.focus();
+                        });
+                      }}
+                      className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
+                    >
+                      {t("common:close", "Close")}
+                    </button>
+                  </div>
+                  <div className="grid gap-1 sm:grid-cols-2">
+                    <p>
+                      <span className="font-medium">Shift+Esc</span>{" "}
+                      {t(
+                        "playground:shortcuts.focusComposer",
+                        "Focus composer",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">
+                        {t("playground:shortcuts.findCombo", "Cmd/Ctrl+F")}
+                      </span>{" "}
+                      {t(
+                        "playground:shortcuts.searchThread",
+                        "Search this thread",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">
+                        {t("playground:shortcuts.helpCombo", "Shift+/")}
+                      </span>{" "}
+                      {t(
+                        "playground:shortcuts.openHelp",
+                        "Open keyboard shortcuts (Shift+/)",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">Alt+Shift+A</span>{" "}
+                      {t(
+                        "playground:shortcuts.toggleArtifacts",
+                        "Toggle artifacts panel",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">Alt+Shift+C</span>{" "}
+                      {t(
+                        "playground:shortcuts.toggleCompare",
+                        "Toggle compare mode",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">Alt+Shift+M</span>{" "}
+                      {t(
+                        "playground:shortcuts.toggleModes",
+                        "Open mode launcher",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">Alt+Shift+← / →</span>{" "}
+                      {t(
+                        "playground:shortcuts.variantSwitch",
+                        "Switch response variant",
+                      )}
+                    </p>
+                    <p>
+                      <span className="font-medium">Alt+Shift+B / R</span>{" "}
+                      {t(
+                        "playground:shortcuts.branchRegenerate",
+                        "Fork branch / regenerate",
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
+              {threadSearchOpen && (
+                <div className="mx-auto mt-1 flex w-full max-w-[64rem] flex-wrap items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1">
+                  <div className="relative min-w-[200px] flex-1">
+                    <Search
+                      className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-subtle"
+                      aria-hidden="true"
+                    />
+                    <input
+                      ref={threadSearchInputRef}
+                      value={threadSearchQuery}
+                      onChange={(event) => {
+                        setThreadSearchQuery(event.target.value);
+                        setThreadSearchActiveIndex(0);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          stepThreadSearchMatch(event.shiftKey ? -1 : 1);
+                        }
+                      }}
+                      placeholder={t(
+                        "playground:search.placeholder",
+                        "Search messages in this conversation",
+                      )}
+                      className="h-7 w-full rounded border border-border bg-surface pl-7 pr-2 text-xs text-text placeholder:text-text-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                    />
+                  </div>
+                  <span
+                    className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-text-subtle"
+                    aria-live="polite"
+                  >
+                    {threadSearchMatches.length > 0
+                      ? toText(
+                          t(
+                            "playground:search.matchCount",
+                            "{{current}} / {{total}}",
+                            {
+                              current: Math.min(
+                                threadSearchActiveIndex + 1,
+                                threadSearchMatches.length,
+                              ),
+                              total: threadSearchMatches.length,
+                            } as any,
+                          ),
+                        )
+                      : toText(t("playground:search.noMatches", "No matches"))}
                   </span>
                   <button
-                    ref={shortcutsCloseRef}
                     type="button"
-                    data-testid="playground-shortcuts-help-close"
-                    onClick={() => {
-                      setShortcutsHelpOpen(false);
-                      requestAnimationFrame(() => {
-                        shortcutsTriggerRef.current?.focus();
-                      });
-                    }}
-                    className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
+                    onClick={() => stepThreadSearchMatch(-1)}
+                    disabled={threadSearchMatches.length === 0}
+                    className={`rounded border px-2 py-0.5 text-[10px] font-medium ${
+                      threadSearchMatches.length === 0
+                        ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-60"
+                        : "border-border bg-surface text-text hover:bg-surface2"
+                    }`}
                   >
+                    {t("common:previous", "Previous")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => stepThreadSearchMatch(1)}
+                    disabled={threadSearchMatches.length === 0}
+                    className={`rounded border px-2 py-0.5 text-[10px] font-medium ${
+                      threadSearchMatches.length === 0
+                        ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-60"
+                        : "border-border bg-surface text-text hover:bg-surface2"
+                    }`}
+                  >
+                    {t("common:next", "Next")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setThreadSearchOpen(false)}
+                    title={t("common:close", "Close") as string}
+                    className="inline-flex items-center rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
+                  >
+                    <X className="mr-1 h-3 w-3" aria-hidden="true" />
                     {t("common:close", "Close")}
                   </button>
                 </div>
-                <div className="grid gap-1 sm:grid-cols-2">
-                  <p>
-                    <span className="font-medium">Shift+Esc</span>{" "}
-                    {t("playground:shortcuts.focusComposer", "Focus composer")}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("playground:shortcuts.findCombo", "Cmd/Ctrl+F")}
-                    </span>{" "}
-                    {t(
-                      "playground:shortcuts.searchThread",
-                      "Search this thread",
-                    )}
-                  </p>
-                  <p>
-                    <span className="font-medium">
-                      {t("playground:shortcuts.helpCombo", "Shift+/")}
-                    </span>{" "}
-                    {t(
-                      "playground:shortcuts.openHelp",
-                      "Open keyboard shortcuts (Shift+/)",
-                    )}
-                  </p>
-                  <p>
-                    <span className="font-medium">Alt+Shift+A</span>{" "}
-                    {t(
-                      "playground:shortcuts.toggleArtifacts",
-                      "Toggle artifacts panel",
-                    )}
-                  </p>
-                  <p>
-                    <span className="font-medium">Alt+Shift+C</span>{" "}
-                    {t(
-                      "playground:shortcuts.toggleCompare",
-                      "Toggle compare mode",
-                    )}
-                  </p>
-                  <p>
-                    <span className="font-medium">Alt+Shift+M</span>{" "}
-                    {t(
-                      "playground:shortcuts.toggleModes",
-                      "Open mode launcher",
-                    )}
-                  </p>
-                  <p>
-                    <span className="font-medium">Alt+Shift+← / →</span>{" "}
-                    {t(
-                      "playground:shortcuts.variantSwitch",
-                      "Switch response variant",
-                    )}
-                  </p>
-                  <p>
-                    <span className="font-medium">Alt+Shift+B / R</span>{" "}
-                    {t(
-                      "playground:shortcuts.branchRegenerate",
-                      "Fork branch / regenerate",
-                    )}
-                  </p>
-                </div>
-              </div>
-            )}
-            {threadSearchOpen && (
-              <div className="mx-auto mt-1 flex w-full max-w-[64rem] flex-wrap items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1">
-                <div className="relative min-w-[200px] flex-1">
-                  <Search
-                    className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-subtle"
-                    aria-hidden="true"
-                  />
-                  <input
-                    ref={threadSearchInputRef}
-                    value={threadSearchQuery}
-                    onChange={(event) => {
-                      setThreadSearchQuery(event.target.value);
-                      setThreadSearchActiveIndex(0);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        stepThreadSearchMatch(event.shiftKey ? -1 : 1);
-                      }
-                    }}
-                    placeholder={t(
-                      "playground:search.placeholder",
-                      "Search messages in this conversation",
-                    )}
-                    className="h-7 w-full rounded border border-border bg-surface pl-7 pr-2 text-xs text-text placeholder:text-text-subtle focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  />
-                </div>
-                <span
-                  className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] text-text-subtle"
-                  aria-live="polite"
+              )}
+              {compactFeatureNoticeVisible && (
+                <div
+                  data-testid="playground-mobile-parity-notice"
+                  className="mx-auto mt-1 w-full max-w-[64rem] rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-[10px] text-warn"
                 >
-                  {threadSearchMatches.length > 0
-                    ? toText(
-                        t(
-                          "playground:search.matchCount",
-                          "{{current}} / {{total}}",
-                          {
-                            current: Math.min(
-                              threadSearchActiveIndex + 1,
-                              threadSearchMatches.length,
-                            ),
-                            total: threadSearchMatches.length,
-                          } as any,
-                        ),
-                      )
-                    : toText(t("playground:search.noMatches", "No matches"))}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => stepThreadSearchMatch(-1)}
-                  disabled={threadSearchMatches.length === 0}
-                  className={`rounded border px-2 py-0.5 text-[10px] font-medium ${
-                    threadSearchMatches.length === 0
-                      ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-60"
-                      : "border-border bg-surface text-text hover:bg-surface2"
-                  }`}
-                >
-                  {t("common:previous", "Previous")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => stepThreadSearchMatch(1)}
-                  disabled={threadSearchMatches.length === 0}
-                  className={`rounded border px-2 py-0.5 text-[10px] font-medium ${
-                    threadSearchMatches.length === 0
-                      ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-60"
-                      : "border-border bg-surface text-text hover:bg-surface2"
-                  }`}
-                >
-                  {t("common:next", "Next")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setThreadSearchOpen(false)}
-                  title={t("common:close", "Close") as string}
-                  className="inline-flex items-center rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
-                >
-                  <X className="mr-1 h-3 w-3" aria-hidden="true" />
-                  {t("common:close", "Close")}
-                </button>
-              </div>
-            )}
-            {compactFeatureNoticeVisible && (
-              <div
-                data-testid="playground-mobile-parity-notice"
-                className="mx-auto mt-1 w-full max-w-[64rem] rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-[10px] text-warn"
-              >
-                {t(
-                  "playground:regions.compactFeatureNotice",
-                  "Limited on this device: compare and branch workflows use compact controls. Use full-chat opens from model cards for detailed review.",
-                )}
-              </div>
-            )}
-            {characterWorkflowActive ? (
-              <CharacterChatReadinessPanel
-                readiness={characterChatReadiness}
-                characterName={activeCharacterModeLabel}
-                missingCharacter={routeCharacterRecovery}
-                onAction={handleCharacterChatReadinessAction}
-                onChooseCharacter={openCharacterSelectorFromReadiness}
-                onRetryMissingCharacter={retryRouteCharacterRecovery}
-              />
-            ) : null}
-          </div>
-          <div
-            ref={containerRef}
-            data-testid={
-              stickyChatInput ? "playground-chat-transcript" : undefined
-            }
-            role="log"
-            aria-live="polite"
-            aria-relevant="additions"
-            aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-            className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4"
-          >
-            <div className="mx-auto w-full max-w-[64rem] pb-6">
-              <ChatErrorBoundary>
-                <PlaygroundChat
-                  showStarterDeck={showStarterDeck}
-                  searchQuery={threadSearchQuery.trim()}
-                  matchedMessageIndices={threadSearchMatchSet}
-                  activeSearchMessageIndex={threadSearchActiveMessageIndex}
-                  onAttachResearchContext={handleAttachResearchContext}
-                  onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
-                  returnedResearchRunId={pendingReturnedResearchRunId}
-                  onDismissReturnedResearchRun={() => {
-                    if (!pendingReturnedResearchRunId) {
-                      return;
-                    }
-                    setDismissedReturnedResearchRunId(
-                      pendingReturnedResearchRunId,
-                    );
-                    setPendingReturnedResearchRunId(null);
-                  }}
-                />
-              </ChatErrorBoundary>
-            </div>
-          </div>
-          <div
-            ref={composerDockRef}
-            data-testid={
-              stickyChatInput ? "playground-chat-composer-dock" : undefined
-            }
-            className={`relative w-full shrink-0 ${
-              stickyChatInput
-                ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
-                : ""
-            }`}
-          >
-            <div className="mx-auto w-full max-w-[64rem] px-4 pt-2 text-[11px] text-text-muted">
-              <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                {t("playground:regions.composer", "Composer")}
-              </span>
-            </div>
-            {!isAutoScrollToBottom && (
-              <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
-                <button
-                  onClick={() => autoScrollToBottom()}
-                  aria-label={t(
-                    "playground:composer.scrollToLatest",
-                    "Scroll to latest messages",
+                  {t(
+                    "playground:regions.compactFeatureNotice",
+                    "Limited on this device: compare and branch workflows use compact controls. Use full-chat opens from model cards for detailed review.",
                   )}
-                  title={
-                    t(
+                </div>
+              )}
+              {characterWorkflowActive ? (
+                <CharacterChatReadinessPanel
+                  readiness={characterChatReadiness}
+                  characterName={activeCharacterModeLabel}
+                  missingCharacter={routeCharacterRecovery}
+                  onAction={handleCharacterChatReadinessAction}
+                  onChooseCharacter={openCharacterSelectorFromReadiness}
+                  onRetryMissingCharacter={retryRouteCharacterRecovery}
+                />
+              ) : null}
+            </div>
+            <div
+              ref={containerRef}
+              data-testid={
+                stickyChatInput ? "playground-chat-transcript" : undefined
+              }
+              role="log"
+              aria-live="polite"
+              aria-relevant="additions"
+              aria-label={t("playground:aria.chatTranscript", "Chat messages")}
+              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4"
+            >
+              <div className="mx-auto w-full max-w-[64rem] pb-6">
+                <ChatErrorBoundary>
+                  <PlaygroundChat
+                    showStarterDeck={showStarterDeck}
+                    searchQuery={threadSearchQuery.trim()}
+                    matchedMessageIndices={threadSearchMatchSet}
+                    activeSearchMessageIndex={threadSearchActiveMessageIndex}
+                    onAttachResearchContext={handleAttachResearchContext}
+                    onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
+                    returnedResearchRunId={pendingReturnedResearchRunId}
+                    onDismissReturnedResearchRun={() => {
+                      if (!pendingReturnedResearchRunId) {
+                        return;
+                      }
+                      setDismissedReturnedResearchRunId(
+                        pendingReturnedResearchRunId,
+                      );
+                      setPendingReturnedResearchRunId(null);
+                    }}
+                  />
+                </ChatErrorBoundary>
+              </div>
+            </div>
+            <div
+              ref={composerDockRef}
+              data-testid={
+                stickyChatInput ? "playground-chat-composer-dock" : undefined
+              }
+              className={`relative w-full shrink-0 ${
+                stickyChatInput
+                  ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
+                  : ""
+              }`}
+            >
+              <div className="mx-auto w-full max-w-[64rem] px-4 pt-2 text-[11px] text-text-muted">
+                <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                  {t("playground:regions.composer", "Composer")}
+                </span>
+              </div>
+              {!isAutoScrollToBottom && (
+                <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
+                  <button
+                    onClick={() => autoScrollToBottom()}
+                    aria-label={t(
                       "playground:composer.scrollToLatest",
                       "Scroll to latest messages",
-                    ) as string
-                  }
-                  className="pointer-events-auto rounded-full border border-border bg-surface p-2.5 text-text-subtle shadow-md transition-all duration-200 animate-in fade-in zoom-in-95 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                >
-                  <ChevronDown
-                    className="size-4 text-text-subtle"
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-            )}
-            <PlaygroundForm
-              droppedFiles={droppedFiles}
-              stickyDockEnabled={stickyChatInput}
-              onComposerLayoutChange={
-                stickyChatInput ? handleComposerLayoutChange : undefined
-              }
-              attachedResearchContext={attachedResearchContext}
-              attachedResearchContextBaseline={attachedResearchContextBaseline}
-              attachedResearchContextPinned={attachedResearchContextPinned}
-              attachedResearchContextHistory={attachedResearchContextHistory}
-              onApplyAttachedResearchContext={
-                handleApplyAttachedResearchContext
-              }
-              onResetAttachedResearchContext={
-                handleResetAttachedResearchContext
-              }
-              onRemoveAttachedResearchContext={
-                handleRemoveAttachedResearchContext
-              }
-              onPinAttachedResearchContext={handlePinAttachedResearchContext}
-              onPinAttachedResearchContextHistory={
-                handlePinAttachedResearchContextHistory
-              }
-              onUnpinAttachedResearchContext={
-                handleUnpinAttachedResearchContext
-              }
-              onRestorePinnedResearchContext={
-                handleRestorePinnedResearchContext
-              }
-              onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
-              onSelectAttachedResearchContextHistory={
-                handleSelectAttachedResearchContextHistory
-              }
-              onDraftPresenceChange={handleComposerDraftPresenceChange}
-            />
-          </div>
+                    )}
+                    title={
+                      t(
+                        "playground:composer.scrollToLatest",
+                        "Scroll to latest messages",
+                      ) as string
+                    }
+                    className="pointer-events-auto rounded-full border border-border bg-surface p-2.5 text-text-subtle shadow-md transition-all duration-200 animate-in fade-in zoom-in-95 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  >
+                    <ChevronDown
+                      className="size-4 text-text-subtle"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+              )}
+              <PlaygroundForm
+                droppedFiles={droppedFiles}
+                stickyDockEnabled={stickyChatInput}
+                onComposerLayoutChange={
+                  stickyChatInput ? handleComposerLayoutChange : undefined
+                }
+                attachedResearchContext={attachedResearchContext}
+                attachedResearchContextBaseline={
+                  attachedResearchContextBaseline
+                }
+                attachedResearchContextPinned={attachedResearchContextPinned}
+                attachedResearchContextHistory={attachedResearchContextHistory}
+                onApplyAttachedResearchContext={
+                  handleApplyAttachedResearchContext
+                }
+                onResetAttachedResearchContext={
+                  handleResetAttachedResearchContext
+                }
+                onRemoveAttachedResearchContext={
+                  handleRemoveAttachedResearchContext
+                }
+                onPinAttachedResearchContext={handlePinAttachedResearchContext}
+                onPinAttachedResearchContextHistory={
+                  handlePinAttachedResearchContextHistory
+                }
+                onUnpinAttachedResearchContext={
+                  handleUnpinAttachedResearchContext
+                }
+                onRestorePinnedResearchContext={
+                  handleRestorePinnedResearchContext
+                }
+                onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
+                onSelectAttachedResearchContextHistory={
+                  handleSelectAttachedResearchContextHistory
+                }
+                onDraftPresenceChange={handleComposerDraftPresenceChange}
+              />
+            </div>
           </div>
         </PlaygroundCockpitShell>
         {artifactsOpen && (

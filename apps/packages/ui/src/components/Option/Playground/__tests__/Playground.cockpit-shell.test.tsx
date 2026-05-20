@@ -93,11 +93,17 @@ const tldwServerState = vi.hoisted(() => ({
   ]),
 }));
 
+const characterSessionsPanelState = vi.hoisted(() => ({
+  props: [] as Array<Record<string, unknown>>,
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
       key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [key: string]: unknown },
+      fallbackOrOptions?:
+        | string
+        | { defaultValue?: string; [key: string]: unknown },
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
       const template = fallbackOrOptions?.defaultValue || key;
@@ -128,11 +134,7 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
-  PlaygroundChat: ({
-    showStarterDeck,
-  }: {
-    showStarterDeck?: boolean;
-  }) => {
+  PlaygroundChat: ({ showStarterDeck }: { showStarterDeck?: boolean }) => {
     cockpitChatRenderState.starterDeckSignals.push(showStarterDeck);
     const legacyWouldShowStarterDeck =
       messageOptionState.value.messages.length === 0;
@@ -178,6 +180,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/services/tldw-server", () => ({
   fetchChatModels: tldwServerState.fetchChatModels,
+}));
+
+vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({
+  CharacterChatSessionsPanel: (props: Record<string, unknown>) => {
+    characterSessionsPanelState.props.push(props);
+    return <section data-testid="character-chat-sessions-panel" />;
+  },
 }));
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -330,10 +339,13 @@ describe("Playground cockpit shell", () => {
         provider_is_configured: true,
       },
     ]);
-    tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({
-      id,
-      name: "Route Character",
-    }));
+    tldwClientState.getCharacter.mockImplementation(
+      async (id: string | number) => ({
+        id,
+        name: "Route Character",
+      }),
+    );
+    characterSessionsPanelState.props = [];
   });
 
   it("renders the cockpit rails, main chat surface, and status strip by default", async () => {
@@ -356,11 +368,36 @@ describe("Playground cockpit shell", () => {
     ).toHaveTextContent("Context and runtime rails visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("character-chat-sessions-panel"),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
         returnEmpty: true,
         forceRefresh: true,
       });
+    });
+  });
+
+  it("renders Character Chat recent sessions only for the active character workflow", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.serverChatId = "server-chat-1";
+
+    render(<Playground />);
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByTestId("character-chat-sessions-panel").length,
+      ).toBeGreaterThan(0);
+    });
+    expect(characterSessionsPanelState.props.at(-1)).toMatchObject({
+      activeCharacterId: "char-1",
+      activeCharacterName: "Ariadne",
+      activeServerChatId: "server-chat-1",
     });
   });
 
@@ -382,9 +419,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
-        "Character Chat",
-      );
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Character Chat");
     });
     await waitFor(() => {
       expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
@@ -410,7 +447,9 @@ describe("Playground cockpit shell", () => {
       expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           id: "char-route",
           name: "Route Character",
@@ -428,12 +467,14 @@ describe("Playground cockpit shell", () => {
     rerender(<Playground />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
-        "Manual Character",
-      );
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Manual Character");
     });
     expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
-    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+    expect(
+      messageOptionState.value.setSelectedCharacter,
+    ).not.toHaveBeenCalled();
   });
 
   it("uses a typed fallback when route character hydration returns no character", async () => {
@@ -447,7 +488,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     await waitFor(() => {
-      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith({
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).toHaveBeenCalledWith({
         id: "missing-character",
         name: "Character missing-character",
       });
@@ -462,13 +505,18 @@ describe("Playground cockpit shell", () => {
     );
     tldwClientState.getCharacter.mockResolvedValueOnce(null);
     const assistantSelectListener = vi.fn();
-    window.addEventListener("tldw:open-assistant-select", assistantSelectListener);
+    window.addEventListener(
+      "tldw:open-assistant-select",
+      assistantSelectListener,
+    );
 
     try {
       render(<Playground />);
 
       expect(
-        await screen.findByText("Character missing-character could not be loaded"),
+        await screen.findByText(
+          "Character missing-character could not be loaded",
+        ),
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Choose character" }));
@@ -500,7 +548,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     expect(
-      await screen.findByText("Character missing-character could not be loaded"),
+      await screen.findByText(
+        "Character missing-character could not be loaded",
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Choose a character to start character chat"),
@@ -522,7 +572,9 @@ describe("Playground cockpit shell", () => {
     );
 
     expect(
-      await screen.findByText("Character missing-character could not be loaded"),
+      await screen.findByText(
+        "Character missing-character could not be loaded",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -540,9 +592,9 @@ describe("Playground cockpit shell", () => {
       render(<Playground />);
 
       expect(
-        within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
-          "Choose a chat model before chatting as Ariadne",
-        ),
+        within(
+          await screen.findByTestId("character-chat-readiness-panel"),
+        ).getByText("Choose a chat model before chatting as Ariadne"),
       ).toBeInTheDocument();
 
       fireEvent.click(
@@ -553,12 +605,13 @@ describe("Playground cockpit shell", () => {
       );
 
       expect(modelSettingsListener).toHaveBeenCalledTimes(1);
-      expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).not.toHaveBeenCalled();
       expect(messageOptionState.value.selectedCharacter).toEqual({
         id: "char-1",
         name: "Ariadne",
       });
-
     } finally {
       window.removeEventListener(
         "tldw:open-model-settings",
@@ -586,9 +639,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     expect(
-      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
-        "Choose a chat model before chatting as Ariadne",
-      ),
+      within(
+        await screen.findByTestId("character-chat-readiness-panel"),
+      ).getByText("Choose a chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
     const chatStatus = screen.getByRole("status", { name: "Chat status" });
     expect(chatStatus).toHaveTextContent("Model unavailable");
@@ -606,9 +659,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     expect(
-      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
-        "Choose a chat model before chatting as Ariadne",
-      ),
+      within(
+        await screen.findByTestId("character-chat-readiness-panel"),
+      ).getByText("Choose a chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
     const chatStatus = screen.getByRole("status", { name: "Chat status" });
     expect(chatStatus).toHaveTextContent("No model selected");
@@ -643,9 +696,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     expect(
-      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
-        "Choose a chat model before chatting as Ariadne",
-      ),
+      within(
+        await screen.findByTestId("character-chat-readiness-panel"),
+      ).getByText("Choose a chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
   });
 
@@ -661,9 +714,9 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     expect(
-      within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
-        "Character chat is preparing",
-      ),
+      within(
+        await screen.findByTestId("character-chat-readiness-panel"),
+      ).getByText("Character chat is preparing"),
     ).toBeInTheDocument();
     const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
     expect(within(runtimeRail).getByText("Streaming")).toBeInTheDocument();
@@ -690,12 +743,14 @@ describe("Playground cockpit shell", () => {
       );
 
       expect(
-        within(await screen.findByTestId("character-chat-readiness-panel")).getByText(
-          "Connect to tldw_server before starting character chat",
-        ),
+        within(
+          await screen.findByTestId("character-chat-readiness-panel"),
+        ).getByText("Connect to tldw_server before starting character chat"),
       ).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Open server settings" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open server settings" }),
+      );
 
       const event = modelSettingsListener.mock.calls[0]?.[0] as CustomEvent;
       expect(event.detail).toMatchObject({
@@ -721,11 +776,13 @@ describe("Playground cockpit shell", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
-        "Character Chat",
-      );
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Character Chat");
     });
-    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+    expect(
+      messageOptionState.value.setSelectedCharacter,
+    ).not.toHaveBeenCalled();
   });
 
   it("resets character workflow for non-character starter modes", async () => {
@@ -745,9 +802,9 @@ describe("Playground cockpit shell", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
-        "Standard chat",
-      );
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Standard chat");
     });
     expect(storageState.values.get("playgroundChatWorkflowMode")).toBe(
       "standard",
