@@ -17,6 +17,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.first-class.test.tsx
 - apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.orientation-guidance.test.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+references:
+- https://github.com/rmusser01/tldw_server/pull/1873
 ---
 
 ## Description
@@ -38,7 +40,7 @@ Migrate the current blocked product-state guard findings on dev to canonical des
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the current Speech/STT/Watchlists guard drift to design-system Alert, registry-backed Audio readiness canonical labels, and pruned stale baseline entries. Verification: focused Vitest suite passed; verify:design-system-state passed; TypeScript full check still fails on existing repo-wide debt outside this slice; Bandit skipped because touched code is TypeScript/JSON/Backlog only.
+Migrated the current Speech/STT/Watchlists guard drift to design-system Alert, registry-backed Audio readiness canonical labels, and pruned stale baseline entries. Draft PR: https://github.com/rmusser01/tldw_server/pull/1873. Verification: focused Vitest suite passed; verify:design-system-state passed; git diff --check passed; TypeScript full check still fails on existing repo-wide debt outside this slice; Bandit skipped because touched code is TypeScript/JSON/Backlog only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
