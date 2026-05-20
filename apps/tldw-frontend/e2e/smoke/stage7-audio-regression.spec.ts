@@ -61,7 +61,17 @@ const stubAudioSmokeBootstrapApis = async (page: Page) => {
     await fulfillJson(route, 200, {
       openapi: "3.0.0",
       info: { title: "tldw e2e", version: "e2e" },
-      paths: {}
+      paths: {
+        "/api/v1/audio/transcriptions": {},
+        "/api/v1/audio/transcriptions/health": {},
+        "/api/v1/audio/stream/transcribe": {},
+        "/api/v1/audio/chat/stream": {},
+        "/api/v1/audio/speech": {},
+        "/api/v1/audio/health": {},
+        "/api/v1/audio/voices/catalog": {},
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
     })
   })
   await page.route("**/api/v1/audio/providers**", async (route) => {

@@ -79,7 +79,7 @@ export function classifyAudioError(error: unknown): AudioErrorClassification {
     return {
       category: "capture_busy",
       title: "Audio capture is already active",
-      recovery: `Audio capture is already active for ${captureBusyMatch[1]}`,
+      recovery: `Stop the active capture session in ${captureBusyMatch[1]} and try again.`,
       debugMessage
     }
   }

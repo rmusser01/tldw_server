@@ -141,9 +141,7 @@ describe("AudiobookStudioPage", () => {
     expect(screen.getByRole("button", { name: "New" })).toBeVisible()
     expect(screen.getByDisplayValue("Untitled Audiobook")).toBeVisible()
 
-    expect(
-      screen.getByRole("status", { name: "Project save status" })
-    ).toHaveTextContent("Draft not saved")
+    expect(screen.getByRole("status")).toHaveTextContent("Draft not saved")
     expect(
       screen.getByRole("button", { name: "Save project" })
     ).toBeVisible()
@@ -204,9 +202,7 @@ describe("AudiobookStudioPage", () => {
 
     render(<AudiobookStudioPage />)
 
-    const saveStatus = screen.getByRole("status", {
-      name: "Project save status"
-    })
+    const saveStatus = screen.getByRole("status")
 
     await waitFor(() => expect(saveStatus).toHaveTextContent("Unsaved changes"))
 
@@ -226,9 +222,7 @@ describe("AudiobookStudioPage", () => {
 
     render(<AudiobookStudioPage />)
 
-    const saveStatus = screen.getByRole("status", {
-      name: "Project save status"
-    })
+    const saveStatus = screen.getByRole("status")
 
     await waitFor(() => expect(saveStatus).toHaveTextContent("Unsaved changes"))
     await user.click(screen.getByRole("button", { name: "Save project" }))
@@ -255,9 +249,7 @@ describe("AudiobookStudioPage", () => {
 
     render(<AudiobookStudioPage />)
 
-    const saveStatus = screen.getByRole("status", {
-      name: "Project save status"
-    })
+    const saveStatus = screen.getByRole("status")
 
     await waitFor(() => expect(saveStatus).toHaveTextContent("Unsaved changes"))
     await user.click(screen.getByRole("button", { name: "Save project" }))
@@ -267,7 +259,7 @@ describe("AudiobookStudioPage", () => {
       vi.advanceTimersByTime(60000)
     })
 
-    await waitFor(() => expect(saveStatus).toHaveTextContent(/^Saved$/))
+    await waitFor(() => expect(saveStatus).toHaveTextContent(/Saved$/))
   })
 })
 

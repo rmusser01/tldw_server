@@ -403,14 +403,13 @@ export const AudiobookStudioPage: React.FC = () => {
       <span
         role="status"
         aria-live="polite"
-        aria-label={t(
-          "audiobook:saveStatus.ariaLabel",
-          "Project save status"
-        )}
         className={`mb-3 block text-sm ${
           saveStatusType === "warning" ? "text-warning" : "text-text-subtle"
         }`}
       >
+        <span className="sr-only">
+          {t("audiobook:saveStatus.ariaLabel", "Project save status")}:{" "}
+        </span>
         {saveStatusLabel}
       </span>
 

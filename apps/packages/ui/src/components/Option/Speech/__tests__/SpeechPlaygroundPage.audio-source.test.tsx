@@ -492,7 +492,9 @@ describe("SpeechPlaygroundPage audio source", () => {
     expect(mockGetUserMedia).not.toHaveBeenCalled()
     await waitFor(() => {
       expect(
-        screen.getAllByText("Audio capture is already active for live_voice").length
+        screen.getAllByText(
+          "Stop the active capture session in live_voice and try again."
+        ).length
       ).toBeGreaterThanOrEqual(1)
     })
   })

@@ -59,7 +59,7 @@ export class AudiobookStudioPage extends BasePage {
   }
 
   get saveStatus(): Locator {
-    return this.page.getByRole("status", { name: /project save status/i })
+    return this.page.getByRole("status")
   }
 
   get projectTitleInput(): Locator {

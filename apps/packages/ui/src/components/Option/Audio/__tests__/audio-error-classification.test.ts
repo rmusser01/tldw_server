@@ -40,7 +40,9 @@ describe("audio error classification", () => {
 
     expect(result.category).toBe("capture_busy")
     expect(result.title).toBe("Audio capture is already active")
-    expect(result.recovery).toBe("Audio capture is already active for live_voice")
+    expect(result.recovery).toBe(
+      "Stop the active capture session in live_voice and try again."
+    )
   })
 
   it("maps network and timeout errors separately", () => {
