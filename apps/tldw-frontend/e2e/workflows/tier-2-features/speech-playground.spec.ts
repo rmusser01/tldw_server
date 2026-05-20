@@ -50,7 +50,6 @@ test.describe("Speech Playground", () => {
 
       // Heading visible
       await expect(speech.heading).toBeVisible()
-      await expect(authedPage.getByRole("heading", { name: /^Speech Playground$/i })).toBeVisible()
       await expect(
         authedPage.getByText(
           /Record speech, edit transcripts, and synthesize audio in one place\./i

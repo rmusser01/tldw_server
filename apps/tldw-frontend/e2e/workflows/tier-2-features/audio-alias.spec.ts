@@ -6,7 +6,8 @@
  * Run: npx playwright test e2e/workflows/tier-2-features/audio-alias.spec.ts
  */
 import { assertNoCriticalErrors, expect, test } from "../../utils/fixtures"
-import { waitForAppShell } from "../../utils/helpers"
+import { SpeechPage } from "../../utils/page-objects/SpeechPage"
+import { waitForConnection } from "../../utils/helpers"
 
 const LOAD_TIMEOUT = 30_000
 
@@ -15,6 +16,8 @@ test.describe("Audio Alias", () => {
     authedPage,
     diagnostics,
   }) => {
+    const speech = new SpeechPage(authedPage)
+
     await authedPage.goto("/audio?source=e2e-alias#voice", {
       waitUntil: "domcontentloaded",
       timeout: LOAD_TIMEOUT,
@@ -27,14 +30,13 @@ test.describe("Audio Alias", () => {
         url.hash === "#voice",
       { timeout: LOAD_TIMEOUT }
     )
-    await waitForAppShell(authedPage, LOAD_TIMEOUT)
+    await waitForConnection(authedPage, LOAD_TIMEOUT)
+    await speech.assertPageReady()
 
-    await expect(authedPage.getByRole("heading", { name: /^Speech Playground$/i })).toBeVisible({
-      timeout: LOAD_TIMEOUT,
-    })
-    await expect(authedPage.getByRole("radio", { name: /^Round-trip$/i })).toBeVisible()
-    await expect(authedPage.getByRole("radio", { name: /^Speak$/i })).toBeVisible()
-    await expect(authedPage.getByRole("radio", { name: /^Listen$/i })).toBeVisible()
+    await expect(speech.heading).toBeVisible({ timeout: LOAD_TIMEOUT })
+    await expect(speech.roundTripOption).toBeVisible()
+    await expect(speech.speakOption).toBeVisible()
+    await expect(speech.listenOption).toBeVisible()
     await expect(authedPage.getByTestId("route-redirect-panel")).toHaveCount(0)
 
     await assertNoCriticalErrors(diagnostics)

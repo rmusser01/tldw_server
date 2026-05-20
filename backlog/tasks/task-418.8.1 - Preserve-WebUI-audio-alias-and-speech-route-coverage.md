@@ -36,13 +36,13 @@ Execute WP11A Task 2 from the WebUI audio routes implementation plan. Preserve /
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Added focused Tier 2 Playwright coverage for /audio as a UI-free alias to /speech. Extended /speech page-load coverage to assert first-screen route identity, combined workflow modes, input source readiness, TTS readiness status, and empty speech history state. No production UI, backend API, or unrelated route files changed.
+Added focused Tier 2 Playwright coverage for /audio as a UI-free alias to /speech. Extended /speech page-load coverage to assert first-screen route identity, combined workflow modes, input source readiness, TTS readiness status, and empty speech history state. Review fix pass for PR #1875 added the shared waitForConnection gate after the /audio redirect, reused SpeechPage locators in the alias test, and removed the redundant direct heading assertion from the speech page-load spec. No production UI, backend API, or unrelated route files changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation: added e2e/workflows/tier-2-features/audio-alias.spec.ts and extended speech-playground.spec.ts page-load assertions. Verification: bunx playwright test e2e/workflows/tier-2-features/audio-alias.spec.ts e2e/workflows/tier-2-features/speech-playground.spec.ts --reporter=line (3 passed, 1 skipped by existing TTS API guard); git diff --check (passed). Bandit skipped: touched files are frontend Playwright/Backlog markdown only.
+Implementation: added e2e/workflows/tier-2-features/audio-alias.spec.ts and extended speech-playground.spec.ts page-load assertions. Review fixes addressed PR #1875 feedback by adding waitForConnection to the alias path, reusing SpeechPage for alias route assertions, and removing a duplicate heading assertion. Verification: bunx playwright test e2e/workflows/tier-2-features/audio-alias.spec.ts e2e/workflows/tier-2-features/speech-playground.spec.ts --reporter=line (3 passed, 1 skipped by existing TTS API guard); git diff --check (passed). Bandit skipped: touched files are frontend Playwright/Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
