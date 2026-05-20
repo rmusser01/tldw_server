@@ -76,6 +76,7 @@ import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
+import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 import {
   trackWatchlistsOnboardingTelemetry,
   type WatchlistsQuickSetupStep
@@ -684,7 +685,7 @@ export const OverviewTab: React.FC = () => {
 
     try {
       const draft = toBriefingPipelineDraft(wizardDraft)
-      const templateName = String(draft.templateName || "").trim()
+      const templateName = normalizeWatchlistTemplateName(draft.templateName)
       if (!templateName) {
         setPipelinePreviewError(
           t(

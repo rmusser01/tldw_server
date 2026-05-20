@@ -7,6 +7,7 @@ import {
   resolveQuickSetupSchedule,
   type QuickSetupSchedulePreset
 } from "./quick-setup"
+import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 
 export interface BriefingPipelineDraft {
   monitorName: string
@@ -90,7 +91,6 @@ export const toPipelineJobCreatePayload = (
       }
     : resolveQuickSetupSchedule(draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
-  const normalizedTemplateName = String(draft.templateName || "").trim()
   const templateVersionNum = Number(draft.templateVersion)
   const normalizedTemplateVersion =
     Number.isFinite(templateVersionNum) && templateVersionNum > 0
@@ -102,6 +102,7 @@ export const toPipelineJobCreatePayload = (
       : undefined
   const shouldAutoOutput = Boolean(schedule.schedule_expr)
   const normalizedAudioVoice = String(draft.audioVoice || "").trim() || undefined
+  const templateName = normalizeWatchlistTemplateName(draft.templateName)
 
   return {
     name: String(draft.monitorName || "").trim(),
@@ -115,14 +116,14 @@ export const toPipelineJobCreatePayload = (
               enabled: true,
               type: "briefing_markdown",
               ...(templateFormat ? { format: templateFormat } : {}),
-              ...(normalizedTemplateName ? { template_name: normalizedTemplateName } : {}),
+              ...(templateName ? { template_name: templateName } : {}),
               ...(normalizedTemplateVersion ? { template_version: normalizedTemplateVersion } : {})
             }
           }
         : {}),
-      template_name: normalizedTemplateName,
+      template_name: templateName,
       template: {
-        default_name: normalizedTemplateName,
+        default_name: templateName,
         ...(templateFormat ? { default_format: templateFormat } : {}),
         default_version: normalizedTemplateVersion
       },
@@ -162,12 +163,13 @@ export const toPipelineOutputCreatePayload = (
     draft.templateFormat === "html" || draft.templateFormat === "md"
       ? draft.templateFormat
       : undefined
+  const templateName = normalizeWatchlistTemplateName(draft.templateName)
   const payload: WatchlistOutputCreate = {
     run_id: runId,
     item_ids: itemIds,
     type: "briefing_markdown",
     ...(templateFormat ? { format: templateFormat } : {}),
-    template_name: String(draft.templateName || "").trim()
+    template_name: templateName
   }
 
   if (Number.isFinite(Number(draft.templateVersion)) && Number(draft.templateVersion) > 0) {
