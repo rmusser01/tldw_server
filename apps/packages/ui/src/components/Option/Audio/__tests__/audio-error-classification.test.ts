@@ -33,6 +33,18 @@ describe("audio error classification", () => {
     expect(result.recovery).toContain("browser permission")
   })
 
+  it("preserves audio capture busy owner guidance", () => {
+    const result = classifyAudioError(
+      new Error("Audio capture is already active for live_voice")
+    )
+
+    expect(result.category).toBe("capture_busy")
+    expect(result.title).toBe("Audio capture is already active")
+    expect(result.recovery).toBe(
+      "Stop the active capture session in live_voice and try again."
+    )
+  })
+
   it("maps network and timeout errors separately", () => {
     expect(classifyAudioError(new Error("Failed to fetch")).category).toBe("network")
     expect(classifyAudioError(new Error("request timed out")).category).toBe("timeout")

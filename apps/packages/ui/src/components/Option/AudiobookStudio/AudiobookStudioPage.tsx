@@ -400,17 +400,18 @@ export const AudiobookStudioPage: React.FC = () => {
         </Space>
       </div>
 
-      <Text
+      <span
         role="status"
-        aria-label={t(
-          "audiobook:saveStatus.ariaLabel",
-          "Project save status"
-        )}
-        className="mb-3 block text-sm"
-        type={saveStatusType}
+        aria-live="polite"
+        className={`mb-3 block text-sm ${
+          saveStatusType === "warning" ? "text-warning" : "text-text-subtle"
+        }`}
       >
+        <span className="sr-only">
+          {t("audiobook:saveStatus.ariaLabel", "Project save status")}:{" "}
+        </span>
         {saveStatusLabel}
-      </Text>
+      </span>
 
       <DismissibleBetaAlert
         storageKey="beta-dismissed:audiobookStudio"
