@@ -7542,7 +7542,7 @@ async def persona_live_session_focus(
         )
         return PersonaLiveSessionFocusResponse.model_validate({"session": session})
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="Persona session not found") from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -7575,7 +7575,7 @@ async def persona_live_session_stop(
         )
         return PersonaLiveSessionStopResponse.model_validate({"session": session})
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="Persona session not found") from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
@@ -7786,6 +7786,8 @@ async def persona_stream(
         def _mark_live_control_stream_connected(session_id: str) -> None:
             sid = str(session_id or "").strip()
             if not sid:
+                return
+            if sid in observed_live_control_session_ids:
                 return
             observed_live_control_session_ids.add(sid)
             persona_live_stream_registry.mark_connected(

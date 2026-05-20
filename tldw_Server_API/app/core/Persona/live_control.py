@@ -26,7 +26,7 @@ class PersonaLiveStreamRegistry:
     """Process-local registry of active Persona Live WebSocket stream presence."""
 
     def __init__(self) -> None:
-        self._connected: set[tuple[str, str]] = set()
+        self._connected: dict[tuple[str, str], int] = {}
         self._lock = RLock()
 
     def mark_connected(self, *, user_id: str, session_id: str) -> None:
@@ -35,7 +35,8 @@ class PersonaLiveStreamRegistry:
         if not uid or not sid:
             return
         with self._lock:
-            self._connected.add((uid, sid))
+            key = (uid, sid)
+            self._connected[key] = self._connected.get(key, 0) + 1
 
     def mark_disconnected(self, *, user_id: str, session_id: str) -> None:
         uid = str(user_id or "").strip()
@@ -43,7 +44,12 @@ class PersonaLiveStreamRegistry:
         if not uid or not sid:
             return
         with self._lock:
-            self._connected.discard((uid, sid))
+            key = (uid, sid)
+            count = self._connected.get(key, 0) - 1
+            if count > 0:
+                self._connected[key] = count
+            else:
+                self._connected.pop(key, None)
 
     def is_connected(self, *, user_id: str, session_id: str) -> bool:
         uid = str(user_id or "").strip()
@@ -51,7 +57,7 @@ class PersonaLiveStreamRegistry:
         if not uid or not sid:
             return False
         with self._lock:
-            return (uid, sid) in self._connected
+            return self._connected.get((uid, sid), 0) > 0
 
     def clear(self) -> None:
         with self._lock:
@@ -121,17 +127,30 @@ def _update_preferences(db: CharactersRAGDB, *, row: dict[str, Any], user_id: st
     )
 
 
+def _update_live_control_preferences(
+    db: CharactersRAGDB,
+    *,
+    row: dict[str, Any],
+    user_id: str,
+    focus: dict[str, Any] | None = None,
+    idempotency_key: str | None | object = ...,
+) -> None:
+    session_id = str(row.get("id") or "").strip()
+    if not session_id:
+        return
+    fresh_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
+    _update_preferences(
+        db,
+        row=fresh_row,
+        user_id=user_id,
+        preferences=_live_preferences_patch(fresh_row, focus=focus, idempotency_key=idempotency_key),
+    )
+
+
 def _load_owned_session_or_raise(db: CharactersRAGDB, *, user_id: str, session_id: str) -> dict[str, Any]:
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
     if row is not None:
         return row
-    cursor = db.execute_query(
-        "SELECT user_id FROM persona_sessions WHERE id = ? AND deleted = 0",
-        (session_id,),
-    )
-    existing = cursor.fetchone()
-    if existing:
-        raise PermissionError("session ownership mismatch")
     raise FileNotFoundError("Persona session not found")
 
 
@@ -150,7 +169,6 @@ def _persona_name_for_row(db: CharactersRAGDB, *, row: dict[str, Any], user_id: 
 def build_live_session_summary(
     db: CharactersRAGDB,
     *,
-    session_manager: SessionManager,
     user_id: str,
     row: dict[str, Any],
     is_focused: bool = False,
@@ -231,7 +249,6 @@ def list_live_session_summaries(
         "sessions": [
             build_live_session_summary(
                 db,
-                session_manager=session_manager,
                 user_id=user_id,
                 row=row,
                 is_focused=str(row.get("id") or "").strip() == focused_id,
@@ -340,8 +357,12 @@ def create_or_resume_live_session(
         row = materialized.session_row
 
     if requested_key:
-        preferences = _live_preferences_patch(row, idempotency_key=requested_key)
-        _update_preferences(db, row=row, user_id=user_id, preferences=preferences)
+        _update_live_control_preferences(
+            db,
+            row=row,
+            user_id=user_id,
+            idempotency_key=requested_key,
+        )
         row = db.get_persona_session(str(row.get("id") or ""), user_id=user_id, include_deleted=False) or row
 
     return focus_live_session(
@@ -375,16 +396,15 @@ def focus_live_session(
             focus = {"focused": True, "focused_at": focused_at, "focus_generation": generation}
         else:
             focus = {"focused": False}
-        _update_preferences(
+        _update_live_control_preferences(
             db,
             row=existing,
             user_id=user_id,
-            preferences=_live_preferences_patch(existing, focus=focus),
+            focus=focus,
         )
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     return build_live_session_summary(
         db,
-        session_manager=session_manager,
         user_id=user_id,
         row=row,
         is_focused=True,
@@ -401,7 +421,8 @@ def stop_live_session(
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
     row = _load_owned_session_or_raise(db, user_id=user_id, session_id=session_id)
-    preferences = _live_preferences_patch(row, focus={"focused": False})
+    fresh_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
+    preferences = _live_preferences_patch(fresh_row, focus={"focused": False})
     db.update_persona_session(
         session_id=session_id,
         user_id=user_id,
@@ -411,7 +432,6 @@ def stop_live_session(
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     return build_live_session_summary(
         db,
-        session_manager=session_manager,
         user_id=user_id,
         row=row,
         is_focused=False,

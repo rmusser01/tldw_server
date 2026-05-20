@@ -1,3 +1,5 @@
+"""Tests for Persona Buddy live-control REST and WebSocket behavior."""
+
 import json
 import queue
 import threading
@@ -271,7 +273,8 @@ def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db:
 
 
 def test_live_session_create_uses_existing_session_materialization(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -291,8 +294,12 @@ def test_live_session_create_uses_existing_session_materialization(monkeypatch, 
     assert row["scope_snapshot"]["audit"]["scope_snapshot_id"] == row["scope_snapshot"]["scope_snapshot_id"]
     assert row["preferences"]["use_memory_context"] is True
     assert row["preferences"]["use_companion_context"] is True
-    assert row["preferences"]["companion_activity_surface"] == "companion.conversation"
+    assert "companion_activity_surface" not in row["preferences"]
     assert row["activity_surface"] == "companion.conversation"
+    assert (
+        manager.get_preferences(session_id=session_id, user_id="1")["companion_activity_surface"]
+        == "companion.conversation"
+    )
 
 
 def test_live_session_created_by_live_control_can_resume_existing_session_endpoint(
@@ -352,15 +359,20 @@ def test_live_session_focus_a_then_b_only_marks_b_focused(monkeypatch, persona_d
     assert [item["session_id"] for item in focused] == ["sess-b"]
 
 
-def test_live_session_focus_rejects_other_user_session(monkeypatch, persona_db: CharactersRAGDB):
+def test_live_session_focus_and_stop_return_not_found_for_other_user_session(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-owned")
 
     with _client_for_user(2, persona_db) as client:
-        resp = client.post("/api/v1/persona/live/sessions/sess-owned/focus")
+        focus_resp = client.post("/api/v1/persona/live/sessions/sess-owned/focus")
+        stop_resp = client.post("/api/v1/persona/live/sessions/sess-owned/stop")
 
-    assert resp.status_code == 403
+    assert focus_resp.status_code == 404
+    assert stop_resp.status_code == 404
 
 
 def test_live_session_stop_marks_closed_and_clears_focus(monkeypatch, persona_db: CharactersRAGDB):
@@ -378,6 +390,34 @@ def test_live_session_stop_marks_closed_and_clears_focus(monkeypatch, persona_db
     assert stopped.json()["session"]["lifecycle"] == "stopped"
     assert stopped.json()["session"]["is_focused"] is False
     assert listed.json()["focused_session_id"] is None
+
+
+def test_live_session_focus_and_stop_preserve_unrelated_preferences(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id="sess-pref",
+        preferences={
+            "use_memory_context": False,
+            "custom_nested": {"retained": True},
+        },
+    )
+
+    with _client_for_user(1, persona_db) as client:
+        assert client.post("/api/v1/persona/live/sessions/sess-pref/focus").status_code == 200
+        focused_row = persona_db.get_persona_session("sess-pref", user_id="1", include_deleted=False)
+        assert focused_row is not None
+        assert focused_row["preferences"]["use_memory_context"] is False
+        assert focused_row["preferences"]["custom_nested"] == {"retained": True}
+
+        assert client.post("/api/v1/persona/live/sessions/sess-pref/stop").status_code == 200
+        stopped_row = persona_db.get_persona_session("sess-pref", user_id="1", include_deleted=False)
+        assert stopped_row is not None
+        assert stopped_row["preferences"]["use_memory_context"] is False
+        assert stopped_row["preferences"]["custom_nested"] == {"retained": True}
 
 
 def test_live_sessions_ignore_stale_focused_closed_session(monkeypatch, persona_db: CharactersRAGDB):
@@ -560,6 +600,62 @@ def test_persona_stream_voice_config_marks_live_session_connected_and_cleanup(
     assert _session_summary(listed.json(), session_id)["lifecycle"] == "connected"
     assert disconnected.status_code == 200
     assert _session_summary(disconnected.json(), session_id)["lifecycle"] == "idle"
+
+
+def test_persona_stream_presence_refcounts_multiple_websockets_on_same_session(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    _install_persona_stream_test_stubs(monkeypatch, manager)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
+    session_id = "sess-two-websockets"
+    _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
+
+    with _client_for_user(1, persona_db) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws1:
+            _ = json.loads(ws1.receive_text())
+            ws1.send_text(
+                json.dumps(
+                    {
+                        "type": "voice_config",
+                        "session_id": session_id,
+                        "voice": {"trigger_phrases": []},
+                    }
+                )
+            )
+            _recv_until(
+                ws1,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == "VOICE_CONFIG_UPDATED"
+                and data.get("session_id") == session_id,
+            )
+            with client.websocket_connect("/api/v1/persona/stream") as ws2:
+                _ = json.loads(ws2.receive_text())
+                ws2.send_text(
+                    json.dumps(
+                        {
+                            "type": "voice_config",
+                            "session_id": session_id,
+                            "voice": {"trigger_phrases": []},
+                        }
+                    )
+                )
+                _recv_until(
+                    ws2,
+                    lambda data: data.get("event") == "notice"
+                    and data.get("reason_code") == "VOICE_CONFIG_UPDATED"
+                    and data.get("session_id") == session_id,
+                )
+
+            after_one_close = client.get("/api/v1/persona/live/sessions")
+
+        after_both_close = client.get("/api/v1/persona/live/sessions")
+
+    assert after_one_close.status_code == 200
+    assert _session_summary(after_one_close.json(), session_id)["lifecycle"] == "connected"
+    assert after_both_close.status_code == 200
+    assert _session_summary(after_both_close.json(), session_id)["lifecycle"] == "idle"
 
 
 def test_live_session_terminal_status_excludes_send_text_action(monkeypatch, persona_db: CharactersRAGDB):

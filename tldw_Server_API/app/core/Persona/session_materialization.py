@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
 )
+from tldw_Server_API.app.core.Persona.policy_evaluator import normalize_policy_rules
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.Personalization.companion_activity import normalize_persona_activity_surface
 
@@ -213,11 +214,7 @@ def normalize_persisted_persona_session_preferences(preferences: Any) -> dict[st
             normalized_top_k = _get_persona_memory_top_k()
         normalized["memory_top_k"] = max(1, normalized_top_k)
     if "session_policy_rules" in preferences:
-        normalized["session_policy_rules"] = preferences.get("session_policy_rules")
-    if "companion_activity_surface" in preferences:
-        normalized["companion_activity_surface"] = normalize_persona_activity_surface(
-            preferences.get("companion_activity_surface")
-        )
+        normalized["session_policy_rules"] = normalize_policy_rules(preferences.get("session_policy_rules"))
     return normalized
 
 
@@ -242,8 +239,6 @@ def default_persisted_persona_session_preferences(
         ),
         "memory_top_k": _get_persona_memory_top_k(),
     }
-    if activity_surface is not None:
-        payload["companion_activity_surface"] = normalize_persona_activity_surface(activity_surface)
     return merge_persisted_persona_session_preferences(payload)
 
 
@@ -284,30 +279,6 @@ def get_session_preferences_with_activity_surface(
             exc,
         )
     return dict(updated_preferences), activity_surface
-
-
-def _persist_activity_surface_preference(
-    db: CharactersRAGDB,
-    *,
-    session_row: dict[str, Any],
-    user_id: str,
-    activity_surface: str,
-) -> dict[str, Any]:
-    session_id = str(session_row.get("id") or "").strip()
-    if not session_id:
-        return session_row
-    preferences = dict(session_row.get("preferences") or {})
-    preferences["companion_activity_surface"] = activity_surface
-    if preferences == session_row.get("preferences"):
-        return session_row
-    updated = db.update_persona_session(
-        session_id=session_id,
-        user_id=user_id,
-        update_data={"preferences_json": preferences},
-    )
-    if not updated:
-        return session_row
-    return db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or session_row
 
 
 def materialize_persona_session(
@@ -426,13 +397,6 @@ def materialize_persona_session(
         persisted_preferences=session_row.get("preferences"),
         persisted_activity_surface=session_row.get("activity_surface"),
     )
-    session_row = _persist_activity_surface_preference(
-        db,
-        session_row=session_row,
-        user_id=user_id,
-        activity_surface=activity_surface,
-    )
-
     return MaterializedPersonaSession(
         session_id=session_id,
         persona_id=resolved_persona_id,

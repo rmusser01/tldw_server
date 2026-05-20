@@ -66,6 +66,13 @@ Second follow-up coverage fixes:
 - added endpoint-level stream-presence regressions for `user_message` and `voice_config` paths, including connected lifecycle while open and idle lifecycle after WebSocket cleanup
 - focused live-control test file now covers 20 tests
 
+Third follow-up code-quality fixes:
+- ref-counted live stream presence so overlapping WebSockets on the same session keep lifecycle `connected` until the last socket closes
+- changed live-control focus/stop not-owned sessions to owned-only lookup with 404 semantics
+- normalized materialized session policy rules through canonical `normalize_policy_rules`
+- stopped persisting `companion_activity_surface` into `preferences_json`; the surface remains in the `activity_surface` column and runtime manager preferences
+- added regressions for multi-WebSocket presence, not-owned focus/stop, focus/stop preference preservation, materialized policy normalization, and `/persona/sessions` persisted preference surface leakage
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

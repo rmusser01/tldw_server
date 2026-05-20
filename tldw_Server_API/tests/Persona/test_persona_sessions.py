@@ -6,6 +6,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Persona.session_materialization import materialize_persona_session
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 
 
@@ -152,6 +153,91 @@ def test_persona_sessions_list_filters_by_surface(monkeypatch, persona_db: Chara
         assert generic_session_id not in {item["session_id"] for item in payload}
 
     fastapi_app.dependency_overrides.clear()
+
+
+def test_persona_sessions_created_with_surface_do_not_persist_surface_preference(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/session",
+            json={"persona_id": "research_assistant", "surface": "companion.conversation"},
+        )
+        assert created.status_code == 200
+        session_id = created.json()["session_id"]
+
+    row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+    assert row is not None
+    assert row["activity_surface"] == "companion.conversation"
+    assert "companion_activity_surface" not in row["preferences"]
+
+    restarted_manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: restarted_manager)
+    with _client_for_user(1, persona_db) as client:
+        listed = client.get("/api/v1/persona/sessions?surface=companion.conversation")
+
+    assert listed.status_code == 200
+    matched = next(item for item in listed.json() if item["session_id"] == session_id)
+    assert "companion_activity_surface" not in matched["preferences"]
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_materialized_session_policy_rules_are_normalized(persona_db: CharactersRAGDB):
+    manager = SessionManager()
+    _ = persona_db.create_persona_profile(
+        {
+            "id": "persona_policy",
+            "user_id": "1",
+            "name": "Policy Persona",
+            "mode": "session_scoped",
+            "system_prompt": "Policy helper",
+            "is_active": True,
+        }
+    )
+    _ = persona_db.create_persona_session(
+        {
+            "id": "sess_policy_rules",
+            "persona_id": "persona_policy",
+            "user_id": "1",
+            "mode": "session_scoped",
+            "status": "active",
+            "scope_snapshot_json": {},
+            "preferences_json": {
+                "session_policy_rules": [
+                    {
+                        "rule_kind": "MCP_TOOL",
+                        "rule_name": "Notes.Create",
+                        "allowed": False,
+                        "require_confirmation": 1,
+                    },
+                    {"rule_kind": "invalid", "rule_name": "ignored", "allowed": True},
+                ]
+            },
+        }
+    )
+
+    materialized = materialize_persona_session(
+        persona_db,
+        session_manager=manager,
+        user_id="1",
+        persona_id="persona_policy",
+        resume_session_id="sess_policy_rules",
+    )
+
+    assert materialized.session_id == "sess_policy_rules"
+    assert manager.get_preferences(session_id="sess_policy_rules", user_id="1")["session_policy_rules"] == [
+        {
+            "rule_kind": "mcp_tool",
+            "rule_name": "notes.create",
+            "allowed": False,
+            "require_confirmation": True,
+        }
+    ]
 
 
 def test_persona_session_resume_rejects_ownership_mismatch(monkeypatch, persona_db: CharactersRAGDB):
