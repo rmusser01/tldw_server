@@ -815,6 +815,8 @@ git commit -m "feat: add watchlists briefing pipeline wizard"
 
 ## Task 9: Power-User Reuse And Batch Operations
 
+Completion note: Implemented in PR #1864 (`0a892b044`) under `TASK-436`; clone/reuse and batch/palette behavior are tracked in the Backlog final summary and merged into `origin/dev`.
+
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobsTab.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx`
@@ -822,7 +824,7 @@ git commit -m "feat: add watchlists briefing pipeline wizard"
 - Modify as needed: `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
 - Test: existing Jobs/Sources batch tests plus new focused tests.
 
-- [ ] **Step 1: Write failing clone/reuse tests**
+- [x] **Step 1: Write failing clone/reuse tests**
 
 Cover:
 
@@ -830,22 +832,22 @@ Cover:
 - Clone source rules preserves settings but resets status/seen state.
 - Command palette exposes create, clone, run, preview, retry, export.
 
-- [ ] **Step 2: Implement frontend-only clone where possible**
+- [x] **Step 2: Implement frontend-only clone where possible**
 
 Prefer composing existing create APIs with copied payloads. Add backend batch APIs only where frontend composition is unsafe or inefficient.
 
-- [ ] **Step 3: Add batch test/validation actions**
+- [x] **Step 3: Add batch test/validation actions**
 
 Source batch rule test can reuse `checkWatchlistSourcesNow` initially, then move to a richer validation endpoint when Task 4 exists.
 
-- [ ] **Step 4: Run watchlists scale and batch tests**
+- [x] **Step 4: Run watchlists scale and batch tests**
 
 ```bash
 cd apps/packages/ui
 bun run test:watchlists:scale
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobsTab.tsx apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourcesTab.tsx apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsCommandPalette.tsx
@@ -856,6 +858,8 @@ git commit -m "feat: add watchlists reuse and batch controls"
 
 ## Task 10: Operator Recovery And Diagnostics
 
+Completion note: Implemented in PR #1864 (`0a892b044`) under `TASK-436`; delivery/audio retry controls, diagnostics export, and related frontend/backend verification are recorded in the Backlog task.
+
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx`
 - Modify: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx`
@@ -865,7 +869,7 @@ git commit -m "feat: add watchlists reuse and batch controls"
 - Test: `tldw_Server_API/tests/Watchlists/test_delivery_integrations.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_runs_csv_export.py`
 
-- [ ] **Step 1: Write failing operator tests**
+- [x] **Step 1: Write failing operator tests**
 
 Cover:
 
@@ -873,14 +877,14 @@ Cover:
 - Audio-only retry does not rerun ingestion.
 - Diagnostic bundle contains source statuses, filter tallies, output metadata, delivery statuses, audio task metadata, and logs.
 
-- [ ] **Step 2: Run backend tests to verify failure**
+- [x] **Step 2: Run backend tests to verify failure**
 
 ```bash
 source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py tldw_Server_API/tests/Watchlists/test_delivery_integrations.py tldw_Server_API/tests/Watchlists/test_runs_csv_export.py -q
 ```
 
-- [ ] **Step 3: Add backend retry and diagnostics endpoints**
+- [x] **Step 3: Add backend retry and diagnostics endpoints**
 
 Only add endpoints that cannot safely be represented with existing APIs. Keep them stage-specific:
 
@@ -888,15 +892,15 @@ Only add endpoints that cannot safely be represented with existing APIs. Keep th
 - audio retry
 - diagnostic bundle export
 
-- [ ] **Step 4: Render operator controls**
+- [x] **Step 4: Render operator controls**
 
 Controls must show confirmation copy that names what will and will not rerun.
 
-- [ ] **Step 5: Run backend and frontend focused tests**
+- [x] **Step 5: Run backend and frontend focused tests**
 
 Run backend command from Step 2 and focused `RunsTab` Vitest tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py tldw_Server_API/tests/Watchlists/test_delivery_integrations.py tldw_Server_API/tests/Watchlists/test_runs_csv_export.py apps/packages/ui/src/components/Option/Watchlists/shared/WatchlistsHealthBar.tsx apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunsTab.tsx
@@ -907,11 +911,13 @@ git commit -m "feat: add watchlists operator recovery controls"
 
 ## Task 11: End-To-End Verification And Browser QA
 
+Completion note: Completed in PR #1867 (`a1d34679`) under `TASK-439`; focused frontend/backend/security verification and browser-observed `/watchlists` QA are recorded in the Backlog task.
+
 **Files:**
 - Create or modify: `apps/tldw-frontend/e2e/...` only if an existing watchlists workflow spec is present and suitable.
 - Otherwise rely on component/API tests plus browser-observed manual QA.
 
-- [ ] **Step 1: Run focused frontend verification**
+- [x] **Step 1: Run focused frontend verification**
 
 ```bash
 cd apps/packages/ui
@@ -920,21 +926,21 @@ bun run test:watchlists:scale
 bun run test:watchlists:typecheck
 ```
 
-- [ ] **Step 2: Run focused backend verification**
+- [x] **Step 2: Run focused backend verification**
 
 ```bash
 source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_api.py tldw_Server_API/tests/Watchlists/test_full_pipeline_integration.py tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py -q
 ```
 
-- [ ] **Step 3: Run Bandit on touched backend code**
+- [x] **Step 3: Run Bandit on touched backend code**
 
 ```bash
 source .venv/bin/activate
 python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/core/Watchlists -f json -o /tmp/bandit_watchlists_digest_audio.json
 ```
 
-- [ ] **Step 4: Browser QA `/watchlists`**
+- [x] **Step 4: Browser QA `/watchlists`**
 
 Start local services per repo conventions, then verify:
 
@@ -949,7 +955,7 @@ Start local services per repo conventions, then verify:
 - Output preview shows digest, delivery status, final audio, and fallback when applicable.
 - Full tab workflow and "Show all views" still work.
 
-- [ ] **Step 5: Final regression sweep**
+- [x] **Step 5: Final regression sweep**
 
 ```bash
 git diff --check
