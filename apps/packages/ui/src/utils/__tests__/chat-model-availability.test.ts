@@ -106,6 +106,41 @@ describe("chat model availability utilities", () => {
     expect(ids.has("ollama:gemma3:1b")).toBe(true)
   })
 
+  it("does not count catalog-only false as a configured model flag", () => {
+    const ids = buildAvailableChatModelIds(
+      [
+        {
+          id: "gpt-4o",
+          model: "tldw:gpt-4o",
+          provider: "openai",
+          catalog_only: false
+        } as any
+      ],
+      { requireConfiguredFlags: true }
+    )
+
+    expect(ids.has("gpt-4o")).toBe(false)
+    expect(ids.has("openai:gpt-4o")).toBe(false)
+  })
+
+  it("treats any catalog-only true flag as unavailable", () => {
+    const ids = buildAvailableChatModelIds([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        provider: "openai",
+        catalog_only: false,
+        is_configured: true,
+        details: {
+          catalog_only: true
+        }
+      } as any
+    ])
+
+    expect(ids.has("gpt-4o")).toBe(false)
+    expect(ids.has("openai:gpt-4o")).toBe(false)
+  })
+
   it("accepts provider-qualified selections when the available catalog only exposes the base model ID", () => {
     const ids = buildAvailableChatModelIds([
       {

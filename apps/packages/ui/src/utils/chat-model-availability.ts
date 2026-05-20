@@ -203,19 +203,20 @@ function getChatModelDescriptorRecords(
   )
 }
 
-function readBooleanFlagFromRecords(
-  records: Record<string, unknown>[],
-  keys: readonly string[]
+function readCatalogOnlyFlagFromRecords(
+  records: Record<string, unknown>[]
 ): boolean | null {
+  let hasCatalogFlag = false
   for (const record of records) {
-    for (const key of keys) {
+    for (const key of CATALOG_ONLY_FLAG_KEYS) {
       if (!Object.prototype.hasOwnProperty.call(record, key)) continue
       const flag = toBooleanFlag(record[key])
-      if (flag != null) return flag
+      if (flag === true) return true
+      if (flag === false) hasCatalogFlag = true
     }
   }
 
-  return null
+  return hasCatalogFlag ? false : null
 }
 
 function isUsableChatModelDescriptor(
@@ -223,13 +224,10 @@ function isUsableChatModelDescriptor(
   options: BuildAvailableChatModelIdsOptions = {}
 ): boolean {
   const records = getChatModelDescriptorRecords(model)
-  const catalogOnly = readBooleanFlagFromRecords(
-    records,
-    CATALOG_ONLY_FLAG_KEYS
-  )
+  const catalogOnly = readCatalogOnlyFlagFromRecords(records)
   if (catalogOnly === true) return false
 
-  let hasConfiguredFlag = catalogOnly != null
+  let hasConfiguredFlag = false
   for (const record of records) {
     for (const key of CONFIGURED_FLAG_KEYS) {
       if (!Object.prototype.hasOwnProperty.call(record, key)) continue

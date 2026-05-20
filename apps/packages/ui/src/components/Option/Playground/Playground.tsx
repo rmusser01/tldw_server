@@ -2577,7 +2577,7 @@ export const Playground = () => {
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
       runtimeStatus={
-        characterChatBlocked || serverReadinessState === "blocked"
+        characterChatModelBlocked || serverReadinessState === "blocked"
           ? "error"
           : streaming
           ? "streaming"

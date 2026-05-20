@@ -645,6 +645,9 @@ describe("Playground cockpit shell", () => {
         "Character chat is preparing",
       ),
     ).toBeInTheDocument();
+    const runtimeRail = screen.getByTestId("playground-cockpit-right-rail");
+    expect(within(runtimeRail).getByText("Streaming")).toBeInTheDocument();
+    expect(within(runtimeRail).queryByText("Error")).not.toBeInTheDocument();
   });
 
   it("surfaces blocked server readiness locally in Character Chat mode", async () => {

@@ -39,6 +39,10 @@ Verification: focused Vitest suite passed with 9 files and 114 tests; git diff -
 Review follow-up: PR #1871 remained open/draft after the user reported "pr merged"; Gemini review comments requested removing repeated boolean-flag record allocations and simplifying runtime status logic.
 
 Review follow-up verification: the 9-file focused Vitest suite still passed with 114 tests, git diff --check passed, and bunx tsc --noEmit --pretty false still reports the existing repo-wide baseline TypeScript debt with no new touched-file errors.
+
+Cubic review follow-up: fixed catalog-only conflict precedence, kept catalog-only false from satisfying requireConfiguredFlags, and narrowed runtime-rail error mapping so streaming/send-blocked character readiness remains Streaming instead of Error.
+
+Cubic follow-up verification: the 9-file focused Vitest suite passed with 116 tests after adding regressions for catalog-only precedence, configured-flag enforcement, and streaming runtime status.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -47,6 +51,8 @@ Review follow-up verification: the 9-file focused Vitest suite still passed with
 Fixed Character Chat readiness so catalog-only or explicitly unconfigured backend model descriptors cannot make a role-play session look ready. The /chat cockpit now force-refreshes readiness-critical model metadata, fails closed on stale unflagged descriptors for Character Chat, invalidates the persisted model-cache schema, and propagates model-unavailable state into the readiness panel, composition preview, runtime rail, and bottom status strip.
 
 PR #1871 review follow-up removed repeated per-flag descriptor record allocation in the model availability helper and simplified equivalent runtime-status branching in Playground.
+
+PR #1871 cubic follow-up now treats any catalog-only true descriptor flag as unavailable, requires actual configured/provider flags for fail-closed Character Chat readiness, and avoids presenting active streaming as a runtime error.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
