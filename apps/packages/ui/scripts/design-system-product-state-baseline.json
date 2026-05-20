@@ -1,16 +1,5 @@
 [
   {
-    "id": "antd-product-state-import:src/components/Common/PromptInsertModal.tsx:Alert",
-    "path": "src/components/Common/PromptInsertModal.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Common/PromptInsertModal.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Common/Settings/LlamaCppAdvancedControls.tsx:Alert#antd-alert-llamacppadvancedcontrols-type-info-line-225-1ac43xr",
     "path": "src/components/Common/Settings/LlamaCppAdvancedControls.tsx",
     "rule": "antd-product-state-import",
