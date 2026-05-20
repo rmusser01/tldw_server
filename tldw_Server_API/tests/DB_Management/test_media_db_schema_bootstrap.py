@@ -511,6 +511,24 @@ def test_transform_sqlite_statement_to_postgres_rewrites_insert_ignore_and_colla
 
 
 @pytest.mark.unit
+def test_audio_preset_partial_indexes_convert_to_postgres_boolean_predicates() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema import (
+        postgres_sqlite_conversion as postgres_sqlite_conversion_module,
+    )
+
+    statements = postgres_sqlite_conversion_module._convert_sqlite_sql_to_postgres_statements(
+        SimpleNamespace(),
+        MediaDatabase._AUDIO_PRESETS_TABLE_SQL,
+    )
+    converted_sql = "\n".join(statements).upper()
+
+    assert "WHERE DELETED = FALSE" in converted_sql
+    assert "WHERE IS_DEFAULT = TRUE AND DELETED = FALSE" in converted_sql
+    assert "WHERE DELETED = 0" not in converted_sql
+    assert "WHERE IS_DEFAULT = 1" not in converted_sql
+
+
+@pytest.mark.unit
 def test_run_postgres_migrate_to_v11_swallows_per_statement_backend_errors_and_continues() -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies import (
         postgres_mediafiles as postgres_mediafiles_module,
