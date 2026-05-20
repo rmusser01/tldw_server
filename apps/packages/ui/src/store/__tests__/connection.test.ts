@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { ConnectionPhase } from "@/types/connection"
+import {
+  ConnectionPhase,
+  deriveConnectionUxState,
+  type ConnectionState
+} from "@/types/connection"
 
 vi.mock("@/services/tldw-server", () => ({
   getStoredTldwServerURL: vi.fn(async () => null)
@@ -95,6 +99,97 @@ describe("connection store stability", () => {
       value: originalChrome,
       configurable: true
     })
+  })
+
+  it("maps the setup connection UX state matrix to stable route states", () => {
+    const baseState: ConnectionState = {
+      phase: ConnectionPhase.UNCONFIGURED,
+      serverUrl: null,
+      lastCheckedAt: null,
+      lastError: null,
+      lastStatusCode: null,
+      isConnected: false,
+      isChecking: false,
+      consecutiveFailures: 0,
+      offlineBypass: false,
+      knowledgeStatus: "unknown",
+      knowledgeLastCheckedAt: null,
+      knowledgeError: null,
+      mode: "normal",
+      configStep: "none",
+      errorKind: "none",
+      hasCompletedFirstRun: false,
+      userPersona: null,
+      lastConfigUpdatedAt: null,
+      checksSinceConfigChange: 0
+    }
+    const derive = (overrides: Partial<ConnectionState>) =>
+      deriveConnectionUxState({
+        ...baseState,
+        ...overrides
+      })
+
+    expect(derive({})).toBe("unconfigured")
+    expect(derive({ configStep: "url" })).toBe("configuring_url")
+    expect(derive({ configStep: "auth" })).toBe("configuring_auth")
+    expect(derive({ configStep: "health", isChecking: true })).toBe("testing")
+    expect(
+      derive({
+        phase: ConnectionPhase.SEARCHING,
+        configStep: "health",
+        isChecking: true
+      })
+    ).toBe("testing")
+    expect(
+      derive({
+        phase: ConnectionPhase.CONNECTED,
+        isConnected: true,
+        serverUrl: "http://127.0.0.1:8000",
+        knowledgeStatus: "ready",
+        hasCompletedFirstRun: true
+      })
+    ).toBe("connected_ok")
+    expect(
+      derive({
+        phase: ConnectionPhase.CONNECTED,
+        isConnected: true,
+        serverUrl: "http://127.0.0.1:8000",
+        errorKind: "partial",
+        knowledgeStatus: "ready",
+        hasCompletedFirstRun: true
+      })
+    ).toBe("connected_degraded")
+    expect(
+      derive({
+        phase: ConnectionPhase.CONNECTED,
+        isConnected: true,
+        serverUrl: "http://127.0.0.1:8000",
+        knowledgeStatus: "offline",
+        hasCompletedFirstRun: true
+      })
+    ).toBe("connected_degraded")
+    expect(
+      derive({
+        phase: ConnectionPhase.ERROR,
+        errorKind: "auth",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    ).toBe("error_auth")
+    expect(
+      derive({
+        phase: ConnectionPhase.ERROR,
+        errorKind: "unreachable",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    ).toBe("error_unreachable")
+    expect(
+      derive({
+        mode: "demo",
+        phase: ConnectionPhase.CONNECTED,
+        isConnected: true,
+        offlineBypass: true
+      })
+    ).toBe("demo_mode")
   })
 
   it("keeps connected state through transient unreachable checks before threshold", async () => {
