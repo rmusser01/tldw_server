@@ -373,8 +373,12 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     try {
       const runtime = browser.runtime
       const url = runtime?.id && runtime.getURL ? runtime.getURL(path) : null
-      if (url && browser.tabs?.create) {
-        browser.tabs.create({ url })
+      if (url) {
+        if (browser.tabs?.create) {
+          void browser.tabs.create({ url })
+        } else {
+          window.open(url, "_blank")
+        }
         setMoreOpen(false)
         requestAnimationFrame(() => moreBtnRef.current?.focus())
         return
