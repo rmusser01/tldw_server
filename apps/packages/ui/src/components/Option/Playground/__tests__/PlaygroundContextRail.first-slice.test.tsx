@@ -166,12 +166,39 @@ describe("PlaygroundContextRail first-slice controls", () => {
     });
 
     expect(
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
     ).toEqual([
       "Composition",
       "Context stack",
       "Prompt",
       "Search & sources",
+      "Session",
+    ]);
+  });
+
+  it("places the optional character sessions panel before the generic session controls", () => {
+    renderRail({
+      compositionPreviewSummary: compositionSummary(),
+      characterSessionsPanel: (
+        <section>
+          <h2>Character sessions</h2>
+          <p>Recent character chats</p>
+        </section>
+      ),
+    });
+
+    expect(
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "Composition",
+      "Context stack",
+      "Prompt",
+      "Search & sources",
+      "Character sessions",
       "Session",
     ]);
   });
@@ -197,15 +224,21 @@ describe("PlaygroundContextRail first-slice controls", () => {
       screen.getByRole("region", { name: "Next message composition" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Select a prompt" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Select a prompt" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Search & sources" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open Search & Context" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Web search" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Session" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Web search" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Session" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Use temporary chat" }),
     ).toBeInTheDocument();
@@ -262,13 +295,19 @@ describe("PlaygroundContextRail first-slice controls", () => {
       within(rail).getByRole("button", { name: "Collapse Session" }),
     );
 
-    expect(screen.getByRole("heading", { name: "Composition" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Context stack" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Composition" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Context stack" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Search & sources" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Session" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Session" }),
+    ).toBeInTheDocument();
   });
 
   it("preserves existing left rail actions after regrouping", () => {
@@ -296,11 +335,15 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear prompt" }));
     fireEvent.click(screen.getByRole("button", { name: "Web search" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Search & Context" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Search & Context" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Clear files" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear knowledge" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear media scopes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear research context" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear research context" }),
+    );
 
     expect(props.onClearPrompt).toHaveBeenCalledTimes(1);
     expect(props.onToggleWebSearch).toHaveBeenCalledTimes(1);
@@ -347,10 +390,16 @@ describe("PlaygroundContextRail first-slice controls", () => {
     const promptManagement = screen.getByRole("region", {
       name: "Prompt management",
     });
-    expect(within(promptManagement).queryByText("No prompt selected")).toBeNull();
-    expect(within(promptManagement).getByText("Ready to add prompt")).toBeInTheDocument();
     expect(
-      within(promptManagement).getByText("Select a prompt to add system instructions."),
+      within(promptManagement).queryByText("No prompt selected"),
+    ).toBeNull();
+    expect(
+      within(promptManagement).getByText("Ready to add prompt"),
+    ).toBeInTheDocument();
+    expect(
+      within(promptManagement).getByText(
+        "Select a prompt to add system instructions.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -452,7 +501,9 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     expect(screen.getByText("Server chat")).toBeInTheDocument();
     expect(screen.getByText("Research follow-up")).toBeInTheDocument();
-    expect(screen.getAllByText("Loading conversation").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Loading conversation").length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getByText("History linked")).toBeInTheDocument();
   });
 
@@ -469,7 +520,9 @@ describe("PlaygroundContextRail first-slice controls", () => {
     expect(screen.getByText("Load failed")).toBeInTheDocument();
     expect(screen.getByText("Archived investigation")).toBeInTheDocument();
     expect(screen.getByText("Failed to load conversation")).toBeInTheDocument();
-    expect(screen.getByText("Conversation no longer exists")).toBeInTheDocument();
+    expect(
+      screen.getByText("Conversation no longer exists"),
+    ).toBeInTheDocument();
     expect(screen.getByText("No saved history yet")).toBeInTheDocument();
   });
 
@@ -504,7 +557,9 @@ describe("PlaygroundContextRail first-slice controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear files" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear knowledge" }));
     fireEvent.click(screen.getByRole("button", { name: "Clear media scopes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear research context" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Clear research context" }),
+    );
 
     expect(props.onClearFiles).toHaveBeenCalledTimes(1);
     expect(props.onClearKnowledge).toHaveBeenCalledTimes(1);

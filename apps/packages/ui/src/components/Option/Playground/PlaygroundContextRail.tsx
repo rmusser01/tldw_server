@@ -28,7 +28,11 @@ type ContextCountItem = {
   onClear: (() => void) | undefined;
 };
 
-export type PlaygroundPromptContextState = "none" | "system" | "quick" | "custom";
+export type PlaygroundPromptContextState =
+  | "none"
+  | "system"
+  | "quick"
+  | "custom";
 
 export type PlaygroundPromptSummary = {
   state: PlaygroundPromptContextState;
@@ -85,6 +89,7 @@ export type PlaygroundContextRailProps = {
   };
   promptSummary?: PlaygroundPromptSummary;
   promptSelectControl?: React.ReactNode;
+  characterSessionsPanel?: React.ReactNode;
   onClearPrompt?: () => void;
   onOpenSearchContext: () => void;
   onClearFiles?: () => void;
@@ -96,11 +101,16 @@ export type PlaygroundContextRailProps = {
 
 const sourceIcon = (kind: PlaygroundContextSource["kind"]) => {
   const className = "h-3.5 w-3.5";
-  if (kind === "web") return <Globe2 className={className} aria-hidden="true" />;
-  if (kind === "file") return <FileText className={className} aria-hidden="true" />;
-  if (kind === "knowledge") return <BookOpen className={className} aria-hidden="true" />;
-  if (kind === "media") return <Database className={className} aria-hidden="true" />;
-  if (kind === "assistant") return <UserRound className={className} aria-hidden="true" />;
+  if (kind === "web")
+    return <Globe2 className={className} aria-hidden="true" />;
+  if (kind === "file")
+    return <FileText className={className} aria-hidden="true" />;
+  if (kind === "knowledge")
+    return <BookOpen className={className} aria-hidden="true" />;
+  if (kind === "media")
+    return <Database className={className} aria-hidden="true" />;
+  if (kind === "assistant")
+    return <UserRound className={className} aria-hidden="true" />;
   return <Layers3 className={className} aria-hidden="true" />;
 };
 
@@ -138,6 +148,7 @@ export const PlaygroundContextRail = ({
   contextCounts,
   promptSummary,
   promptSelectControl,
+  characterSessionsPanel,
   onClearPrompt,
   onOpenSearchContext,
   onClearFiles,
@@ -157,15 +168,11 @@ export const PlaygroundContextRail = ({
   const activeSourceCount = contextSources.filter(
     (source) => source.state !== "disabled",
   ).length;
-  const effectivePromptSummary =
-    promptSummary || {
-      state: "none" as const,
-      label: t("cockpit.noPromptSelected", "No prompt selected"),
-      detail: t(
-        "cockpit.noPromptContext",
-        "No system prompt will be added.",
-      ),
-    };
+  const effectivePromptSummary = promptSummary || {
+    state: "none" as const,
+    label: t("cockpit.noPromptSelected", "No prompt selected"),
+    detail: t("cockpit.noPromptContext", "No system prompt will be added."),
+  };
   const promptActive = effectivePromptSummary.state !== "none";
   const showActionablePromptEmptyState =
     !promptActive && Boolean(compositionPreviewSummary);
@@ -193,87 +200,87 @@ export const PlaygroundContextRail = ({
       : t("cockpit.activeSourceCountMany", "{{count}} active sources", {
           count: activeSourceCount,
         });
-  const countLabels = ([
-    contextCounts.research > 0
-      ? contextCounts.research === 1
-        ? {
-            label: t(
-              "cockpit.contextResearchCountOne",
-              "1 research attachment",
-            ),
-            clearLabel: t(
-              "cockpit.clearResearchContext",
-              "Clear research context",
-            ),
-            onClear: onClearResearch,
-          }
-        : {
-            label: t(
-              "cockpit.contextResearchCountMany",
-              `${contextCounts.research} research attachments`,
-              { count: contextCounts.research },
-            ),
-            clearLabel: t(
-              "cockpit.clearResearchContext",
-              "Clear research context",
-            ),
-            onClear: onClearResearch,
-          }
-      : null,
-    contextCounts.files > 0
-      ? contextCounts.files === 1
-        ? {
-            label: t("cockpit.contextFilesCountOne", "1 file"),
-            clearLabel: t("cockpit.clearFiles", "Clear files"),
-            onClear: onClearFiles,
-          }
-        : {
-            label: t(
-              "cockpit.contextFilesCountMany",
-              `${contextCounts.files} files`,
-              { count: contextCounts.files },
-            ),
-            clearLabel: t("cockpit.clearFiles", "Clear files"),
-            onClear: onClearFiles,
-          }
-      : null,
-    contextCounts.knowledge > 0
-      ? contextCounts.knowledge === 1
-        ? {
-            label: t("cockpit.contextKnowledgeCountOne", "1 knowledge item"),
-            clearLabel: t("cockpit.clearKnowledge", "Clear knowledge"),
-            onClear: onClearKnowledge,
-          }
-        : {
-            label: t(
-              "cockpit.contextKnowledgeCountMany",
-              `${contextCounts.knowledge} knowledge items`,
-              { count: contextCounts.knowledge },
-            ),
-            clearLabel: t("cockpit.clearKnowledge", "Clear knowledge"),
-            onClear: onClearKnowledge,
-          }
-      : null,
-    contextCounts.media > 0
-      ? contextCounts.media === 1
-        ? {
-            label: t("cockpit.contextMediaCountOne", "1 media scope"),
-            clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
-            onClear: onClearMedia,
-          }
-        : {
-            label: t(
-              "cockpit.contextMediaCountMany",
-              `${contextCounts.media} media scopes`,
-              { count: contextCounts.media },
-            ),
-            clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
-            onClear: onClearMedia,
-          }
-      : null,
-  ] satisfies Array<ContextCountItem | null>).filter(
-    (item): item is ContextCountItem => Boolean(item),
-  );
+  const countLabels = (
+    [
+      contextCounts.research > 0
+        ? contextCounts.research === 1
+          ? {
+              label: t(
+                "cockpit.contextResearchCountOne",
+                "1 research attachment",
+              ),
+              clearLabel: t(
+                "cockpit.clearResearchContext",
+                "Clear research context",
+              ),
+              onClear: onClearResearch,
+            }
+          : {
+              label: t(
+                "cockpit.contextResearchCountMany",
+                `${contextCounts.research} research attachments`,
+                { count: contextCounts.research },
+              ),
+              clearLabel: t(
+                "cockpit.clearResearchContext",
+                "Clear research context",
+              ),
+              onClear: onClearResearch,
+            }
+        : null,
+      contextCounts.files > 0
+        ? contextCounts.files === 1
+          ? {
+              label: t("cockpit.contextFilesCountOne", "1 file"),
+              clearLabel: t("cockpit.clearFiles", "Clear files"),
+              onClear: onClearFiles,
+            }
+          : {
+              label: t(
+                "cockpit.contextFilesCountMany",
+                `${contextCounts.files} files`,
+                { count: contextCounts.files },
+              ),
+              clearLabel: t("cockpit.clearFiles", "Clear files"),
+              onClear: onClearFiles,
+            }
+        : null,
+      contextCounts.knowledge > 0
+        ? contextCounts.knowledge === 1
+          ? {
+              label: t("cockpit.contextKnowledgeCountOne", "1 knowledge item"),
+              clearLabel: t("cockpit.clearKnowledge", "Clear knowledge"),
+              onClear: onClearKnowledge,
+            }
+          : {
+              label: t(
+                "cockpit.contextKnowledgeCountMany",
+                `${contextCounts.knowledge} knowledge items`,
+                { count: contextCounts.knowledge },
+              ),
+              clearLabel: t("cockpit.clearKnowledge", "Clear knowledge"),
+              onClear: onClearKnowledge,
+            }
+        : null,
+      contextCounts.media > 0
+        ? contextCounts.media === 1
+          ? {
+              label: t("cockpit.contextMediaCountOne", "1 media scope"),
+              clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
+              onClear: onClearMedia,
+            }
+          : {
+              label: t(
+                "cockpit.contextMediaCountMany",
+                `${contextCounts.media} media scopes`,
+                { count: contextCounts.media },
+              ),
+              clearLabel: t("cockpit.clearMediaScopes", "Clear media scopes"),
+              onClear: onClearMedia,
+            }
+        : null,
+    ] satisfies Array<ContextCountItem | null>
+  ).filter((item): item is ContextCountItem => Boolean(item));
 
   return (
     <div
@@ -349,10 +356,7 @@ export const PlaygroundContextRail = ({
                   title: source.title,
                 });
               return (
-                <li
-                  key={source.id}
-                  className={cockpitRailStyles.inset}
-                >
+                <li key={source.id} className={cockpitRailStyles.inset}>
                   <div className="flex items-start gap-2">
                     <span className="mt-0.5 rounded border border-border bg-surface2 p-1 text-text-muted">
                       {sourceIcon(source.kind)}
@@ -432,7 +436,9 @@ export const PlaygroundContextRail = ({
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>{promptManagementLabel}</p>
             {promptManagementDetail ? (
-              <p className={cockpitRailStyles.muted}>{promptManagementDetail}</p>
+              <p className={cockpitRailStyles.muted}>
+                {promptManagementDetail}
+              </p>
             ) : null}
           </div>
           <span
@@ -525,6 +531,8 @@ export const PlaygroundContextRail = ({
           </button>
         </div>
       </PlaygroundRailSection>
+
+      {characterSessionsPanel}
 
       <PlaygroundRailSection
         label={t("cockpit.conversationSession", "Conversation session")}
