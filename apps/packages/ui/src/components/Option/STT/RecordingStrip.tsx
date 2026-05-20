@@ -4,6 +4,7 @@ import { Mic, Settings, Square, Trash2, Upload as UploadIcon } from "lucide-reac
 import { useTranslation } from "react-i18next"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 
 export interface RecordingStripProps {
   onBlobReady: (blob: Blob, durationMs: number) => void
@@ -68,9 +69,11 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
         recorder.stopRecording()
       } else {
         Promise.resolve(recorder.startRecording()).catch((err) => {
+          const classified = classifyAudioError(err)
           notification.error({
-            message: t("playground:stt.micError", "Microphone error"),
-            description: String(err?.message || err)
+            message:
+              classified.title || t("playground:stt.micError", "Microphone error"),
+            description: classified.recovery
           })
         })
       }
@@ -86,9 +89,11 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
       recorder.stopRecording()
     } else {
       Promise.resolve(recorder.startRecording()).catch((err) => {
+        const classified = classifyAudioError(err)
         notification.error({
-          message: t("playground:stt.micError", "Microphone error"),
-          description: String(err?.message || err)
+          message:
+            classified.title || t("playground:stt.micError", "Microphone error"),
+          description: classified.recovery
         })
       })
     }

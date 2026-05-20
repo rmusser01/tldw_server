@@ -1,10 +1,10 @@
 import OptionLayout from "@web/components/layout/WebLayout"
-import SpeechPlaygroundPage from "@/components/Option/Speech/SpeechPlaygroundPage"
+import SttPlaygroundPage from "@/components/Option/STT/SttPlaygroundPage"
 
 const OptionStt = () => {
   return (
     <OptionLayout>
-      <SpeechPlaygroundPage initialMode="speak" />
+      <SttPlaygroundPage />
     </OptionLayout>
   )
 }

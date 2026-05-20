@@ -44,8 +44,10 @@ const {
   getTranscriptionModelsMock,
   getElevenLabsVoicesMock,
   getElevenLabsModelsMock,
+  addRenderMock,
   setTTSSettingsMock,
   ttsSettingsRef,
+  audioPresetControlPropsRef,
 } =
   vi.hoisted(() => ({
     invalidateQueriesMock: vi.fn(),
@@ -55,6 +57,7 @@ const {
     })),
     getElevenLabsVoicesMock: vi.fn(),
     getElevenLabsModelsMock: vi.fn(),
+    addRenderMock: vi.fn(),
     setTTSSettingsMock: vi.fn(async () => undefined),
     ttsSettingsRef: {
       current: {
@@ -64,6 +67,13 @@ const {
         tldwTtsStreaming: false,
         responseSplitting: "punctuation",
       } as any,
+    },
+    audioPresetControlPropsRef: {
+      current: null as null | {
+        kind: string
+        currentConfig: Record<string, unknown>
+        onApply: (config: Record<string, unknown>, preset: any) => void
+      },
     },
   }))
 
@@ -156,7 +166,11 @@ vi.mock("@/components/Option/Speech/TtsProviderStrip", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
-  TtsStickyActionBar: () => <div data-testid="tts-sticky-action-bar" />,
+  TtsStickyActionBar: ({ onAddRender }: { onAddRender?: () => void }) => (
+    <button type="button" data-testid="tts-sticky-action-bar" onClick={onAddRender}>
+      Add render
+    </button>
+  ),
 }))
 
 vi.mock("@/components/Option/Speech/TtsInspectorPanel", () => ({
@@ -181,6 +195,38 @@ vi.mock("@/components/Option/TTS/VoiceCloningManager", () => ({
 
 vi.mock("@/components/Option/Speech/RenderStrip", () => ({
   RenderStrip: () => <div data-testid="render-strip" />,
+}))
+
+vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
+  AudioPresetControls: (props: {
+    kind: string
+    currentConfig: Record<string, unknown>
+    onApply: (config: Record<string, unknown>, preset: any) => void
+  }) => {
+    audioPresetControlPropsRef.current = props
+    return (
+      <button
+        type="button"
+        data-testid={`${props.kind}-preset-controls`}
+        onClick={() =>
+          props.onApply(
+            {
+              provider: " openai ",
+              model: " gpt-4o-mini-tts ",
+              voice: " verse ",
+              response_format: " opus ",
+              speed: 1.2,
+              response_splitting: "paragraph",
+              streaming: false
+            },
+            { id: "preset-1", name: "OpenAI verse" }
+          )
+        }
+      >
+        Apply mock {props.kind} preset
+      </button>
+    )
+  },
 }))
 
 vi.mock("@/components/Option/Speech/VoicePickerModal", () => ({
@@ -244,7 +290,7 @@ vi.mock("@/hooks/useMultiRenderState", () => ({
     hasReady: false,
     hasIdle: false,
     playingId: null,
-    addRender: vi.fn(),
+    addRender: addRenderMock,
     updateConfig: vi.fn(),
     generateAll: vi.fn(async () => undefined),
     playAllSequentially: vi.fn(),
@@ -344,7 +390,9 @@ describe("SpeechPlaygroundPage", () => {
     getTranscriptionModelsMock.mockClear()
     getElevenLabsVoicesMock.mockReset()
     getElevenLabsModelsMock.mockReset()
+    addRenderMock.mockReset()
     setTTSSettingsMock.mockClear()
+    audioPresetControlPropsRef.current = null
     ttsSettingsRef.current = {
       ttsProvider: "",
       ttsEnabled: true,
@@ -353,6 +401,7 @@ describe("SpeechPlaygroundPage", () => {
       responseSplitting: "punctuation",
     }
     storageValues.clear()
+    localStorage.clear()
     storageValues.set("speechPlaygroundMode", "roundtrip")
     storageValues.set("speechPlaygroundHistory", [])
     setSpeechModeMock.mockReset()
@@ -388,18 +437,88 @@ describe("SpeechPlaygroundPage", () => {
     expect(getTranscriptionModelsMock).not.toHaveBeenCalled()
   })
 
+  it("adds OpenAI render strips with OpenAI model and voice defaults", (): void => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "openai",
+      openAITTSModel: "gpt-4o-mini-tts",
+      openAITTSVoice: "alloy",
+      tldwTtsModel: "KittenML/kitten-tts-nano-0.8",
+      tldwTtsVoice: "Bella",
+      tldwTtsResponseFormat: "mp3",
+    }
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.click(screen.getByTestId("tts-sticky-action-bar"))
+
+    expect(addRenderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        voice: "alloy",
+      })
+    )
+    expect(addRenderMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "KittenML/kitten-tts-nano-0.8",
+        voice: "Bella",
+      })
+    )
+  })
+
   it("uses TTS-specific page copy and history controls when locked to listen mode", (): void => {
     render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
 
     expect(
       screen.getByRole("heading", { level: 1, name: "Text to Speech" })
     ).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "TTS readiness" })).toHaveTextContent(
+      "Browser preview: Ready"
+    )
     expect(
       screen.getByText("Draft text, choose a voice, and generate audio in one place.")
     ).toBeInTheDocument()
     expect(screen.getByText("TTS history")).toBeInTheDocument()
     expect(screen.getByText("Generate audio to see TTS history here.")).toBeInTheDocument()
     expect(screen.queryByTestId("speech-history-type-filter")).not.toBeInTheDocument()
+  })
+
+  it("renders TTS preset controls and applies a saved preset without starting generation", async (): Promise<void> => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "browser",
+      tldwTtsResponseFormat: "mp3",
+      tldwTtsSpeed: 1,
+    }
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    expect(screen.getByTestId("tts-preset-controls")).toBeInTheDocument()
+    expect(audioPresetControlPropsRef.current?.currentConfig).toEqual(
+      expect.objectContaining({
+        provider: "browser",
+        response_format: "mp3",
+        speed: 1,
+      })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply mock tts preset" }))
+
+    await waitFor(() => {
+      expect(setTTSSettingsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ttsProvider: "openai",
+          openAITTSModel: "gpt-4o-mini-tts",
+          openAITTSVoice: "verse",
+          tldwTtsResponseFormat: "opus",
+          tldwTtsSpeed: 1.2,
+          responseSplitting: "paragraph",
+        })
+      )
+    })
+    expect(addRenderMock).not.toHaveBeenCalled()
   })
 
   it("does not overwrite stored mode when locked mode is provided", (): void => {

@@ -30,7 +30,25 @@ const sampleEntries: SttHistoryEntry[] = [
         model: "whisper-1",
         text: "Hello world from whisper",
         latencyMs: 1200,
-        wordCount: 4
+        wordCount: 4,
+        config: {
+          model: "whisper-1",
+          language: "en",
+          task: "transcribe",
+          responseFormat: "verbose_json",
+          timestampGranularities: ["word"],
+          segmentationEnabled: true
+        },
+        metadata: {
+          createdAt: "2026-03-06T14:05:09.000Z",
+          audioSourceLabel: "Recorded audio",
+          audioSizeBytes: 1536,
+          clientLatencyMs: 1200,
+          language: "en",
+          durationSeconds: 4.2,
+          segmentCount: 3,
+          wordCount: 4
+        }
       },
       {
         model: "distil-v3",
@@ -97,5 +115,23 @@ describe("HistoryPanel", () => {
     fireEvent.click(deleteBtn)
 
     expect(defaultProps.onDelete).toHaveBeenCalledWith("rec-1")
+  })
+
+  it("renders persisted STT provenance metadata", () => {
+    render(<HistoryPanel {...defaultProps} entries={sampleEntries} />)
+
+    fireEvent.click(screen.getByText(/2 models compared/))
+
+    expect(screen.getByText("2026-03-06 14:05:09 UTC")).toBeInTheDocument()
+    expect(screen.getByText("Recorded audio")).toBeInTheDocument()
+    expect(screen.getByText("1.5 KB")).toBeInTheDocument()
+    expect(screen.getByText("Client measured 1.2s")).toBeInTheDocument()
+    expect(screen.getByText("Language en")).toBeInTheDocument()
+    expect(screen.getByText("Task transcribe")).toBeInTheDocument()
+    expect(screen.getByText("Format verbose_json")).toBeInTheDocument()
+    expect(screen.getByText("Timestamps word")).toBeInTheDocument()
+    expect(screen.getByText("Segmentation on")).toBeInTheDocument()
+    expect(screen.getByText("Duration 4.2s")).toBeInTheDocument()
+    expect(screen.getByText("3 segments")).toBeInTheDocument()
   })
 })

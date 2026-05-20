@@ -73,6 +73,10 @@ import { TtsOutputTab } from "@/components/Option/Speech/TtsOutputTab"
 import { TtsAdvancedTab } from "@/components/Option/Speech/TtsAdvancedTab"
 import { VoiceCloningManager } from "@/components/Option/TTS/VoiceCloningManager"
 import { RenderStrip } from "@/components/Option/Speech/RenderStrip"
+import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
+import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
+import { buildTtsReadinessItems } from "@/components/Option/Audio/audio-readiness"
+import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 import { VoicePickerModal, type VoiceSelection } from "@/components/Option/Speech/VoicePickerModal"
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog"
 import { useAudioSourcePreferences } from "@/hooks/useAudioSourcePreferences"
@@ -697,11 +701,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
             })
             setLastTranscript(text)
           }
-        } catch (e: any) {
+        } catch (e: unknown) {
+          const classified = classifyAudioError(e)
           notification.error({
             message: t("playground:actions.speechErrorTitle", "Dictation failed"),
-            description:
-              e?.message ||
+            description: classified.recovery ||
               t(
                 "playground:actions.speechErrorBody",
                 "Transcription request failed. Check tldw server health."
@@ -718,9 +722,10 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
       recorder.start(useLongRunning ? 5000 : undefined)
       setIsRecording(true)
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const classified = classifyAudioError(e)
       const description =
-        e?.message ||
+        classified.recovery ||
         t(
           "playground:actions.speechMicError",
           "Unable to access your microphone. Check browser permissions and try again."
@@ -884,6 +889,85 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     enabled: isTldw && hasAudio
   })
 
+  const currentTtsSelection = React.useMemo(() => {
+    const format = tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3"
+    const speed = ttsSettings?.tldwTtsSpeed ?? 1
+
+    if (provider === "browser") {
+      return {
+        provider,
+        model: "",
+        voice: "",
+        format,
+        speed
+      }
+    }
+
+    if (provider === "openai") {
+      const model =
+        openAiModel ||
+        ttsSettings?.openAITTSModel ||
+        OPENAI_TTS_MODELS[0]?.value ||
+        "tts-1"
+      const voice =
+        openAiVoice ||
+        ttsSettings?.openAITTSVoice ||
+        OPENAI_TTS_VOICES[model]?.[0]?.value ||
+        "alloy"
+      return { provider, model, voice, format, speed }
+    }
+
+    if (provider === "elevenlabs") {
+      const model =
+        elevenModelId ||
+        ttsSettings?.elevenLabsModel ||
+        elevenLabsData?.models?.[0]?.model_id ||
+        ""
+      const voice =
+        elevenVoiceId ||
+        ttsSettings?.elevenLabsVoiceId ||
+        elevenLabsData?.voices?.[0]?.voice_id ||
+        ""
+      return { provider, model, voice, format, speed }
+    }
+
+    return {
+      provider,
+      model:
+        tldwModel ||
+        ttsSettings?.tldwTtsModel ||
+        DEFAULT_TLDW_TTS_MODEL,
+      voice:
+        tldwVoice ||
+        ttsSettings?.tldwTtsVoice ||
+        DEFAULT_TLDW_TTS_VOICE,
+      format,
+      speed
+    }
+  }, [
+    elevenLabsData?.models,
+    elevenLabsData?.voices,
+    elevenModelId,
+    elevenVoiceId,
+    openAiModel,
+    openAiVoice,
+    provider,
+    tldwFormat,
+    tldwModel,
+    tldwVoice,
+    ttsSettings
+  ])
+  const ttsReadinessItems = React.useMemo(
+    () =>
+      buildTtsReadinessItems({
+        provider,
+        hasAudio,
+        providersInfo,
+        elevenLabsApiKey: ttsSettings?.elevenLabsApiKey
+      }),
+    [hasAudio, provider, providersInfo, ttsSettings?.elevenLabsApiKey]
+  )
+
   React.useEffect(() => {
     if (provider !== "elevenlabs" || ttsSettings?.elevenLabsApiKey) {
       setInlineElevenLabsApiKey("")
@@ -900,23 +984,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       if (stored) lastVoice = JSON.parse(stored)
     } catch {}
 
+    const matchingLastVoice = lastVoice?.provider === provider ? lastVoice : null
     const defaultConfig = {
-      provider: lastVoice?.provider || (provider === "browser" ? "tldw" : provider),
-      voice:
-        lastVoice?.voice ||
-        tldwVoice ||
-        ttsSettings?.tldwTtsVoice ||
-        DEFAULT_TLDW_TTS_VOICE,
-      model:
-        lastVoice?.model ||
-        tldwModel ||
-        ttsSettings?.tldwTtsModel ||
-        DEFAULT_TLDW_TTS_MODEL,
-      format: tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3",
-      speed: ttsSettings?.tldwTtsSpeed ?? 1
+      ...currentTtsSelection,
+      voice: matchingLastVoice?.voice || currentTtsSelection.voice,
+      model: matchingLastVoice?.model || currentTtsSelection.model
     }
     multiRender.addRender(defaultConfig)
-  }, [provider, tldwVoice, tldwModel, tldwFormat, ttsSettings, multiRender])
+  }, [provider, currentTtsSelection, multiRender])
 
   const handleVoicePickerSelect = React.useCallback(
     (selection: VoiceSelection) => {
@@ -1083,6 +1158,214 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       tldwNormalizePlurals
     ]
   )
+  const currentTtsPresetConfig = React.useMemo(() => {
+    const config: Record<string, unknown> = {
+      provider: currentTtsSelection.provider,
+      response_format: currentTtsSelection.format,
+      speed: currentTtsSelection.speed,
+      streaming: tldwStreaming,
+      response_splitting: responseSplitting,
+      normalization_options: normalizationOptions
+    }
+    if (currentTtsSelection.model) config.model = currentTtsSelection.model
+    if (currentTtsSelection.voice) config.voice = currentTtsSelection.voice
+    if (tldwLanguage) config.lang_code = tldwLanguage
+    if (tldwEmotion) config.emotion = tldwEmotion
+    if (typeof tldwEmotionIntensity === "number") {
+      config.emotion_intensity = tldwEmotionIntensity
+    }
+    if (currentTtsSelection.provider === "browser") {
+      config.browser_local = true
+      config.requires_browser_revalidation = true
+    }
+    return config
+  }, [
+    currentTtsSelection,
+    normalizationOptions,
+    responseSplitting,
+    tldwEmotion,
+    tldwEmotionIntensity,
+    tldwLanguage,
+    tldwStreaming
+  ])
+
+  const handleApplyServerTtsPreset = React.useCallback(
+    async (config: Record<string, unknown>) => {
+      const normalizedProvider =
+        typeof config.provider === "string" ? config.provider.trim().toLowerCase() : ""
+      const nextProvider =
+        normalizedProvider
+          ? normalizedProvider
+          : provider
+      const nextModel =
+        typeof config.model === "string" && config.model.trim()
+          ? config.model.trim()
+          : undefined
+      const nextVoice =
+        typeof config.voice === "string" && config.voice.trim()
+          ? config.voice.trim()
+          : undefined
+      const nextFormat =
+        typeof config.response_format === "string" && config.response_format.trim()
+          ? config.response_format.trim()
+          : typeof config.format === "string" && config.format.trim()
+            ? config.format.trim()
+            : undefined
+      const nextSpeed =
+        typeof config.speed === "number" && Number.isFinite(config.speed)
+          ? config.speed
+          : undefined
+      const nextStreaming =
+        typeof config.streaming === "boolean" ? config.streaming : undefined
+      const nextSplitting =
+        typeof config.response_splitting === "string"
+          ? config.response_splitting
+          : undefined
+      const nextLanguage =
+        typeof config.lang_code === "string"
+          ? config.lang_code
+          : typeof config.language === "string"
+            ? config.language
+            : undefined
+      const nextEmotion = typeof config.emotion === "string" ? config.emotion : undefined
+      const nextEmotionIntensity =
+        typeof config.emotion_intensity === "number" &&
+        Number.isFinite(config.emotion_intensity)
+          ? config.emotion_intensity
+          : undefined
+      const normalizers =
+        config.normalization_options &&
+        typeof config.normalization_options === "object" &&
+        !Array.isArray(config.normalization_options)
+          ? (config.normalization_options as Record<string, unknown>)
+          : {}
+      const boolOr = (value: unknown, fallback: boolean) =>
+        typeof value === "boolean" ? value : fallback
+
+      if (nextProvider === "openai") {
+        if (nextModel) setOpenAiModel(nextModel)
+        if (nextVoice) setOpenAiVoice(nextVoice)
+      } else if (nextProvider === "elevenlabs") {
+        if (nextModel) setElevenModelId(nextModel)
+        if (nextVoice) setElevenVoiceId(nextVoice)
+      } else if (nextProvider !== "browser") {
+        if (nextModel) setTldwModel(nextModel)
+        if (nextVoice) setTldwVoice(nextVoice)
+      }
+      if (nextFormat) setTldwFormat(nextFormat)
+      if (nextSplitting) setResponseSplitting(nextSplitting)
+      if (nextLanguage) setTldwLanguage(nextLanguage)
+      if (typeof nextStreaming === "boolean") setTldwStreaming(nextStreaming)
+      if (nextEmotion) setTldwEmotion(nextEmotion)
+      if (typeof nextEmotionIntensity === "number") {
+        setTldwEmotionIntensity(nextEmotionIntensity)
+      }
+      setTldwNormalize(boolOr(normalizers.normalize, tldwNormalize))
+      setTldwNormalizeUnits(
+        boolOr(normalizers.unit_normalization, tldwNormalizeUnits)
+      )
+      setTldwNormalizeUrls(boolOr(normalizers.url_normalization, tldwNormalizeUrls))
+      setTldwNormalizeEmails(
+        boolOr(normalizers.email_normalization, tldwNormalizeEmails)
+      )
+      setTldwNormalizePhones(
+        boolOr(normalizers.phone_normalization, tldwNormalizePhones)
+      )
+      setTldwNormalizePlurals(
+        boolOr(
+          normalizers.optional_pluralization_normalization,
+          tldwNormalizePlurals
+        )
+      )
+
+      try {
+        const currentSettings = await getTTSSettings()
+        await setTTSSettings({
+          ...currentSettings,
+          ttsProvider: nextProvider,
+          responseSplitting: nextSplitting ?? currentSettings.responseSplitting,
+          openAITTSModel:
+            nextProvider === "openai" && nextModel
+              ? nextModel
+              : currentSettings.openAITTSModel,
+          openAITTSVoice:
+            nextProvider === "openai" && nextVoice
+              ? nextVoice
+              : currentSettings.openAITTSVoice,
+          elevenLabsModel:
+            nextProvider === "elevenlabs" && nextModel
+              ? nextModel
+              : currentSettings.elevenLabsModel,
+          elevenLabsVoiceId:
+            nextProvider === "elevenlabs" && nextVoice
+              ? nextVoice
+              : currentSettings.elevenLabsVoiceId,
+          tldwTtsModel:
+            nextProvider !== "openai" && nextProvider !== "elevenlabs" && nextProvider !== "browser" && nextModel
+              ? nextModel
+              : currentSettings.tldwTtsModel,
+          tldwTtsVoice:
+            nextProvider !== "openai" && nextProvider !== "elevenlabs" && nextProvider !== "browser" && nextVoice
+              ? nextVoice
+              : currentSettings.tldwTtsVoice,
+          tldwTtsResponseFormat: nextFormat ?? currentSettings.tldwTtsResponseFormat,
+          tldwTtsSpeed: nextSpeed ?? currentSettings.tldwTtsSpeed,
+          tldwTtsLanguage: nextLanguage ?? currentSettings.tldwTtsLanguage,
+          tldwTtsStreaming: nextStreaming ?? currentSettings.tldwTtsStreaming,
+          tldwTtsEmotion: nextEmotion ?? currentSettings.tldwTtsEmotion,
+          tldwTtsEmotionIntensity:
+            nextEmotionIntensity ?? currentSettings.tldwTtsEmotionIntensity,
+          tldwTtsNormalize: boolOr(
+            normalizers.normalize,
+            currentSettings.tldwTtsNormalize
+          ),
+          tldwTtsNormalizeUnits: boolOr(
+            normalizers.unit_normalization,
+            currentSettings.tldwTtsNormalizeUnits
+          ),
+          tldwTtsNormalizeUrls: boolOr(
+            normalizers.url_normalization,
+            currentSettings.tldwTtsNormalizeUrls
+          ),
+          tldwTtsNormalizeEmails: boolOr(
+            normalizers.email_normalization,
+            currentSettings.tldwTtsNormalizeEmails
+          ),
+          tldwTtsNormalizePhones: boolOr(
+            normalizers.phone_normalization,
+            currentSettings.tldwTtsNormalizePhones
+          ),
+          tldwTtsNormalizePlurals: boolOr(
+            normalizers.optional_pluralization_normalization,
+            currentSettings.tldwTtsNormalizePlurals
+          )
+        })
+        await queryClient.invalidateQueries({ queryKey: ["fetchTTSSettings"] })
+      } catch (error: unknown) {
+        notification.error({
+          message: t("playground:tts.presetApplyFailedTitle", "Preset apply failed"),
+          description:
+            error instanceof Error
+              ? error.message
+              : t(
+                  "playground:tts.presetApplyFailedBody",
+                  "Unable to apply this preset. Check settings and try again."
+                )
+        })
+      }
+    },
+    [
+      provider,
+      queryClient,
+      t,
+      tldwNormalize,
+      tldwNormalizeEmails,
+      tldwNormalizePhones,
+      tldwNormalizePlurals,
+      tldwNormalizeUnits,
+      tldwNormalizeUrls
+    ]
+  )
   const voiceRoleError = React.useMemo(() => {
     if (!useVoiceRoles) return null
     if (voiceCards.length < 1) return "Select at least one voice."
@@ -1167,8 +1450,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     const config = await tldwClient.getConfig()
     const serverUrl = String(config?.serverUrl || "").trim()
     if (!serverUrl) {
+      const classified = classifyAudioError("tldw server not configured")
       setStreamStatus("error")
-      setStreamErrorSafe("tldw server not configured")
+      setStreamErrorSafe(classified.recovery)
       return
     }
     const token =
@@ -1176,8 +1460,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         ? String(config?.accessToken || "").trim()
         : String(config?.apiKey || "").trim()
     if (!token) {
+      const classified = classifyAudioError("Missing authentication token")
       setStreamStatus("error")
-      setStreamErrorSafe("Missing authentication token")
+      setStreamErrorSafe(classified.recovery)
       return
     }
 
@@ -1242,8 +1527,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         try {
           const payload = JSON.parse(event.data)
           if (payload?.type === "error") {
+            const classified = classifyAudioError(payload?.message || "Streaming error")
             setStreamStatus("error")
-            setStreamErrorSafe(payload?.message || "Streaming error")
+            setStreamErrorSafe(classified.recovery)
           }
         } catch {
           // ignore non-JSON status frames
@@ -1258,8 +1544,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     }
 
     ws.onerror = () => {
+      const classified = classifyAudioError("Streaming connection error")
       setStreamStatus("error")
-      setStreamErrorSafe("Streaming connection error")
+      setStreamErrorSafe(classified.recovery)
     }
 
     ws.onclose = () => {
@@ -1446,12 +1733,14 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
             })
             setTtsJobStatus("success")
           } else {
+            const classified = classifyAudioError("No audio artifact found for this job.")
             setTtsJobStatus("error")
-            setTtsJobError("No audio artifact found for this job.")
+            setTtsJobError(classified.recovery)
           }
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const classified = classifyAudioError(error)
           setTtsJobStatus("error")
-          setTtsJobError(error?.message || "Long-form TTS job failed.")
+          setTtsJobError(classified.recovery || "Long-form TTS job failed.")
         } finally {
           ttsJobAbortRef.current = null
         }
@@ -2070,10 +2359,11 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
       }
       setVoicePreviewUrl(url)
       setVoicePreviewCardId(card.id)
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const classified = classifyAudioError(error)
       notification.error({
         message: "Preview failed",
-        description: error?.message || "Unable to generate preview audio."
+        description: classified.recovery || "Unable to generate preview audio."
       })
     } finally {
       setVoicePreviewingId(null)
@@ -2456,7 +2746,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                   {withTemplateFallback(
                     t(
                       "playground:tooltip.speechToTextDetails",
-                      "Uses {{model}} · {{task}} · {{format}}. Configure in Settings → General → Speech-to-Text.",
+                      "Uses {{model}} · {{task}} · {{format}}. Configure in Settings -> Speech (/settings/speech).",
                       {
                         model: activeModel || sttModel || "whisper-1",
                         task: sttTask === "translate" ? "translate" : "transcribe",
@@ -2467,7 +2757,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                       activeModel || sttModel || "whisper-1"
                     } · ${sttTask === "translate" ? "translate" : "transcribe"} · ${(
                       sttResponseFormat || "json"
-                    ).toUpperCase()}. Configure in Settings -> General -> Speech-to-Text.`
+                    ).toUpperCase()}. Configure in Settings -> Speech (/settings/speech).`
                   )}
                 </div>
 
@@ -2558,16 +2848,30 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                 {/* Zone 1: Workspace */}
                 <div className="flex-1 flex flex-col min-w-0">
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <AudioReadinessStrip items={ttsReadinessItems} label="TTS readiness" />
                     <TtsProviderStrip
                       provider={provider}
-                      model={tldwModel || ttsSettings?.tldwTtsModel || ""}
-                      voice={tldwVoice || ttsSettings?.tldwTtsVoice || ""}
-                      format={tldwFormat || ttsSettings?.tldwTtsResponseFormat || "mp3"}
-                      speed={ttsSettings?.tldwTtsSpeed ?? 1}
+                      model={currentTtsSelection.model}
+                      voice={currentTtsSelection.voice}
+                      format={currentTtsSelection.format}
+                      speed={currentTtsSelection.speed}
                       presetValue={(ttsPreset as TtsPresetKey) || "balanced"}
                       onPresetChange={(preset) => void applyTtsPreset(preset)}
                       onLabelClick={openInspectorAt}
                       onGearClick={() => setInspectorOpen((prev) => !prev)}
+                    />
+                    <AudioPresetControls
+                      kind="tts"
+                      currentConfig={currentTtsPresetConfig}
+                      capabilityAssumptions={{
+                        provider,
+                        model: currentTtsSelection.model,
+                        voice: currentTtsSelection.voice,
+                        browser_local: provider === "browser"
+                      }}
+                      onApply={(config) => {
+                        void handleApplyServerTtsPreset(config)
+                      }}
                     />
 
                     {/* Error banners */}
@@ -2787,6 +3091,9 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                             audioUrl={render.audioUrl}
                             audioBlob={render.audioBlob}
                             errorMessage={render.errorMessage}
+                            errorSettingsHref={render.errorSettingsHref}
+                            metadata={render.metadata}
+                            disabled={render.disabled}
                             progress={render.progress}
                             isPlaying={multiRender.playingId === render.id}
                             forcePaused={multiRender.playingId !== null && multiRender.playingId !== render.id}
@@ -2802,6 +3109,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                             onPlay={multiRender.startPlaying}
                             onPause={multiRender.stopPlaying}
                             onEnd={multiRender.handleStripEnded}
+                            onDuplicate={multiRender.duplicateRender}
+                            onToggleDisabled={multiRender.setRenderDisabled}
                             onRetry={(id) => {
                               const effectiveText = useDraftEditor ? transcriptDraft : ttsText
                               void multiRender.generateRender(id, effectiveText)
@@ -3002,8 +3311,8 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                   voiceTab={
                     <TtsVoiceTab
                       provider={provider}
-                      model={tldwModel || ttsSettings?.tldwTtsModel || ""}
-                      voice={tldwVoice || ttsSettings?.tldwTtsVoice || ""}
+                      model={currentTtsSelection.model}
+                      voice={currentTtsSelection.voice}
                       onProviderChange={(val) => {
                         if (ttsSettings) {
                           void setTTSSettings({

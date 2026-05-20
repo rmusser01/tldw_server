@@ -40,7 +40,7 @@ export function TtsProviderStrip({
 
       {isBrowser ? (
         <>
-          <Tag className="cursor-pointer">Browser TTS</Tag>
+          <Tag className="cursor-pointer">Browser preview</Tag>
           {voice && (
             <Tooltip title={`Voice: ${voice}`}>
               <Tag

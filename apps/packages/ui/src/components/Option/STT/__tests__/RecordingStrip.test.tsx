@@ -1,11 +1,12 @@
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockStartRecording = vi.fn()
 const mockStopRecording = vi.fn()
 const mockClearRecording = vi.fn()
 const mockLoadBlob = vi.fn()
+const notificationErrorMock = vi.fn()
 
 vi.mock("@/hooks/useAudioRecorder", () => ({
   useAudioRecorder: () => ({
@@ -27,7 +28,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
-    error: vi.fn(),
+    error: notificationErrorMock,
     success: vi.fn()
   })
 }))
@@ -78,5 +79,23 @@ describe("RecordingStrip", () => {
     render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
     const btn = screen.getByRole("button", { name: /start recording/i })
     expect(btn.getAttribute("aria-label")).toContain("Start recording")
+  })
+
+  it("shows classified microphone permission notification when recording cannot start", async () => {
+    mockStartRecording.mockRejectedValueOnce(
+      new DOMException("Permission denied", "NotAllowedError")
+    )
+
+    render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
+    fireEvent.click(screen.getByRole("button", { name: /start recording/i }))
+
+    await waitFor(() => {
+      expect(notificationErrorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Microphone access is blocked",
+          description: expect.stringContaining("browser permission")
+        })
+      )
+    })
   })
 })

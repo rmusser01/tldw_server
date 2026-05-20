@@ -1,14 +1,20 @@
 import React from "react"
 import { Button, Tag, Tooltip, notification } from "antd"
-import { Edit3, Play, RefreshCw, Trash2, X } from "lucide-react"
+import { Ban, CopyPlus, Edit3, Play, RefreshCw, Trash2, X } from "lucide-react"
 import { UnifiedAudioPlayer } from "@/components/Common/UnifiedAudioPlayer"
 import { TtsJobProgress, type TtsJobProgressStep } from "@/components/Common/TtsJobProgress"
+import type { TtsResultMetadata } from "@/components/Option/Audio/comparison-provenance"
+import {
+  formatByteSize,
+  formatClientLatency,
+  formatCreatedAt
+} from "@/components/Option/Audio/comparison-provenance"
 
 export type RenderStripState = "idle" | "generating" | "ready" | "playing" | "error"
 
 export type RenderStripConfig = {
   provider: string
-  voice: string
+  voice?: string
   model?: string
   format?: string
   speed?: number
@@ -21,6 +27,9 @@ export type RenderStripProps = {
   audioUrl?: string
   audioBlob?: Blob
   errorMessage?: string
+  errorSettingsHref?: string
+  metadata?: TtsResultMetadata
+  disabled?: boolean
   /** Progress 0-100 for long-running generations */
   progress?: number
   /** Whether this strip's audio is currently playing */
@@ -40,6 +49,8 @@ export type RenderStripProps = {
   /** Called when audio playback ends naturally */
   onEnd?: (id: string) => void
   onRetry?: (id: string) => void
+  onDuplicate?: (id: string) => void
+  onToggleDisabled?: (id: string, disabled: boolean) => void
   onConfigTagClick?: (id: string, field: string) => void
 }
 
@@ -56,6 +67,9 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
   audioUrl,
   audioBlob,
   errorMessage,
+  errorSettingsHref,
+  metadata,
+  disabled,
   progress,
   isPlaying,
   forcePaused,
@@ -70,6 +84,8 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
   onPause,
   onEnd,
   onRetry,
+  onDuplicate,
+  onToggleDisabled,
   onConfigTagClick
 }) => {
   const [undoPending, setUndoPending] = React.useState(false)
@@ -112,19 +128,32 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
 
   if (undoPending) return null
 
-  const providerLabel = config.provider === "tldw"
-    ? (config.model || "tldw")
-    : config.provider
+  const providerLabel =
+    config.provider === "browser"
+      ? "Browser preview"
+      : config.provider === "tldw"
+        ? (config.model || "tldw")
+        : config.provider
+  const ariaConfig = [providerLabel, config.voice].filter(Boolean).join(" ")
 
   const isGenerating = state === "generating"
   const isReady = state === "ready" || state === "playing"
   const isError = state === "error"
   const isIdle = state === "idle"
+  const metadataTags = [
+    metadata?.createdAt ? formatCreatedAt(metadata.createdAt) : undefined,
+    metadata ? `Input ${metadata.inputTextLength} chars` : undefined,
+    metadata?.inputTextPreview,
+    metadata?.inputTextHash ? `Hash ${metadata.inputTextHash}` : undefined,
+    formatByteSize(metadata?.audioSizeBytes),
+    formatClientLatency(metadata?.clientLatencyMs),
+    disabled ? "Disabled for Generate All" : undefined
+  ].filter((tag): tag is string => Boolean(tag))
 
   return (
     <div
       role="region"
-      aria-label={`Render strip: ${providerLabel} ${config.voice}`}
+      aria-label={`Render strip: ${ariaConfig}`}
       className="rounded-lg border border-border bg-card p-3 transition-colors hover:border-border-hover"
       data-strip-id={id}
       data-strip-state={state}
@@ -140,14 +169,16 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           </Tag>
         </Tooltip>
 
-        <Tooltip title={`Voice: ${config.voice}`}>
-          <Tag
-            className="cursor-pointer"
-            onClick={() => onConfigTagClick?.(id, "voice")}
-          >
-            {config.voice}
-          </Tag>
-        </Tooltip>
+        {config.voice && (
+          <Tooltip title={`Voice: ${config.voice}`}>
+            <Tag
+              className="cursor-pointer"
+              onClick={() => onConfigTagClick?.(id, "voice")}
+            >
+              {config.voice}
+            </Tag>
+          </Tooltip>
+        )}
 
         {config.format && (
           <Tooltip title={`Format: ${config.format}`}>
@@ -188,6 +219,32 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           </Tooltip>
         )}
 
+        <Tooltip title="Duplicate this row with the same render settings">
+          <Button
+            size="small"
+            icon={<CopyPlus className="h-3.5 w-3.5" />}
+            onClick={() => onDuplicate?.(id)}
+          >
+            Duplicate
+          </Button>
+        </Tooltip>
+
+        <Tooltip
+          title={
+            disabled
+              ? "Include this row in Generate All"
+              : "Skip this row in Generate All"
+          }
+        >
+          <Button
+            size="small"
+            icon={<Ban className="h-3.5 w-3.5" />}
+            onClick={() => onToggleDisabled?.(id, !disabled)}
+          >
+            {disabled ? "Enable" : "Disable"}
+          </Button>
+        </Tooltip>
+
         <Tooltip title="Edit config">
           <Button
             type="text"
@@ -209,6 +266,14 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           />
         </Tooltip>
       </div>
+
+      {metadataTags.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {metadataTags.map((tag) => (
+            <Tag key={tag}>{tag}</Tag>
+          ))}
+        </div>
+      )}
 
       {/* Generating state */}
       {isGenerating && (
@@ -246,6 +311,11 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           <span className="flex-1 text-sm text-red-700 dark:text-red-400">
             {errorMessage || "Generation failed"}
           </span>
+          {errorSettingsHref && (
+            <Button size="small" type="link" href={errorSettingsHref}>
+              Open Settings
+            </Button>
+          )}
           <Button
             size="small"
             icon={<RefreshCw className="h-3.5 w-3.5" />}

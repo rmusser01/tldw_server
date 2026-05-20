@@ -35,6 +35,14 @@ import type {
   MlxLoadRequest,
   MlxUnloadRequest,
 } from "../TldwApiClient"
+import type {
+  AudioPresetCreatePayload,
+  AudioPresetKind,
+  AudioPresetListResponse,
+  AudioPresetUpdatePayload,
+  AudioPresetValidationResponse,
+  AudioPreset
+} from "@/types/audio-presets"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -44,6 +52,7 @@ export interface TldwApiClientCore {
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
+  requestWithCurrentConfig<T>(init: any, requireAuth?: boolean): Promise<T>
   upload<T>(init: any, requireAuth?: boolean): Promise<T>
 }
 
@@ -672,6 +681,93 @@ export const modelsAudioMethods = {
     return await bgRequest<any>({
       path: `/api/v1/audio/transcriptions/health${query}`,
       method: "GET"
+    })
+  },
+
+  async getTranscriptionCapabilities(
+    this: TldwApiClientCore,
+    options?: { timeoutMs?: number }
+  ): Promise<any> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<any>({
+      path: "/api/v1/audio/transcriptions/capabilities",
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async listAudioPresets(
+    this: TldwApiClientCore,
+    options?: {
+      kind?: AudioPresetKind
+      favorite?: boolean
+      is_default?: boolean
+      limit?: number
+      offset?: number
+      timeoutMs?: number
+    }
+  ): Promise<AudioPresetListResponse> {
+    await this.ensureConfigForRequest(true)
+    const query = buildQuery({
+      kind: options?.kind,
+      favorite: options?.favorite,
+      is_default: options?.is_default,
+      limit: options?.limit,
+      offset: options?.offset
+    })
+    return await this.requestWithCurrentConfig<AudioPresetListResponse>({
+      path: `/api/v1/audio/presets${query}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async createAudioPreset(
+    this: TldwApiClientCore,
+    payload: AudioPresetCreatePayload
+  ): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPreset>({
+      path: "/api/v1/audio/presets",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async updateAudioPreset(
+    this: TldwApiClientCore,
+    presetId: string,
+    payload: AudioPresetUpdatePayload
+  ): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPreset>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async deleteAudioPreset(
+    this: TldwApiClientCore,
+    presetId: string
+  ): Promise<void> {
+    await this.ensureConfigForRequest(true)
+    await this.requestWithCurrentConfig<void>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "DELETE"
+    })
+  },
+
+  async validateAudioPreset(
+    this: TldwApiClientCore,
+    presetId: string
+  ): Promise<AudioPresetValidationResponse> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPresetValidationResponse>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}/validate`,
+      method: "POST"
     })
   },
 

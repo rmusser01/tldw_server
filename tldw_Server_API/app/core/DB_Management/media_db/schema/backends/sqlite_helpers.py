@@ -129,6 +129,7 @@ class SupportsSqlitePostCoreStructures(Protocol):
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
+    _AUDIO_PRESETS_TABLE_SQL: str
     _CURRENT_SCHEMA_VERSION: int
     db_path_str: str
     is_memory_db: bool
@@ -151,6 +152,7 @@ def ensure_sqlite_post_core_structures(
     db._ensure_sqlite_data_tables(conn)
     ensure_sqlite_fts_structures(db, conn)
     conn.executescript(_SQLITE_COLLECTIONS_AND_CONTENT_ITEMS_SQL)
+    conn.executescript(db._AUDIO_PRESETS_TABLE_SQL)
     db._ensure_sqlite_visibility_columns(conn)
     db._ensure_sqlite_source_hash_column(conn)
     db._ensure_sqlite_claims_extensions(conn)
