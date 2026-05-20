@@ -50,12 +50,25 @@ test.describe("Speech Playground", () => {
 
       // Heading visible
       await expect(speech.heading).toBeVisible()
+      await expect(authedPage.getByRole("heading", { name: /^Speech Playground$/i })).toBeVisible()
+      await expect(
+        authedPage.getByText(
+          /Record speech, edit transcripts, and synthesize audio in one place\./i
+        )
+      ).toBeVisible()
 
       // Mode selector visible with all three options
       await expect(speech.modeSelector).toBeVisible()
       await expect(speech.roundTripOption).toBeVisible()
       await expect(speech.speakOption).toBeVisible()
       await expect(speech.listenOption).toBeVisible()
+
+      // TTS readiness and output history stay visible on the first screen.
+      await expect(authedPage.getByRole("status", { name: /^TTS readiness$/i })).toBeVisible()
+      await expect(authedPage.getByText(/^Speech history$/i)).toBeVisible()
+      await expect(
+        authedPage.getByText(/Start a recording or generate audio to see history here\./i)
+      ).toBeVisible()
 
       // Playback toolbar visible
       await expect(speech.playbackToolbar).toBeVisible()
