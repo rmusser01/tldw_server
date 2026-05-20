@@ -1,7 +1,7 @@
 ---
 id: TASK-458
 title: Implement Persona Buddy live-control backend API
-status: In Progress
+status: Done
 labels:
 - persona
 - buddy
@@ -22,11 +22,11 @@ Implement Task 1 from the Persona Buddy interaction text-slice plan: backend liv
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Backend live-control schemas are added without changing existing /session, /sessions, or /stream response shapes.
-- [ ] #2 Existing Persona session materialization is extracted and reused by /persona/session and live-control create/resume.
-- [ ] #3 Live-control list/create/focus/stop routes are authenticated, user-scoped, and tested.
-- [ ] #4 Lifecycle, terminal allowed-actions, focus single-winner behavior, stream presence, idempotency, and redaction tests are covered.
-- [ ] #5 Focused backend tests and git diff checks are recorded.
+- [x] #1 Backend live-control schemas are added without changing existing /session, /sessions, or /stream response shapes.
+- [x] #2 Existing Persona session materialization is extracted and reused by /persona/session and live-control create/resume.
+- [x] #3 Live-control list/create/focus/stop routes are authenticated, user-scoped, and tested.
+- [x] #4 Lifecycle, terminal allowed-actions, focus single-winner behavior, stream presence, idempotency, and redaction tests are covered.
+- [x] #5 Focused backend tests and git diff checks are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -106,20 +106,24 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control_app.json` -> passed
 - `git diff --check` -> passed
 
+Final targeted review:
+- spec compliance targeted re-review -> clean
+- code quality targeted re-review -> clean
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented and reviewed the backend Persona Buddy live-control API slice. The backend now supports authenticated, user-scoped live session list/create/focus/stop behavior, backend-owned focus metadata, lifecycle summaries, idempotent create semantics, stream presence, terminal-session guards, and bounded WebSocket client message metadata. Existing public session responses redact live-control internals while preserving compatible custom preference fields.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
