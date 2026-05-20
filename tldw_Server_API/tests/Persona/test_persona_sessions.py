@@ -216,6 +216,20 @@ def test_persona_sessions_redact_live_control_preferences(
         assert created.status_code == 200
         session_id = created.json()["session"]["session_id"]
 
+    row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+    assert row is not None
+    preferences = dict(row["preferences"])
+    preferences["custom_visible_preference"] = {"retained": True}
+    preferences["provider_api_key"] = "sk-private"
+    preferences["raw_prompt"] = "private raw prompt"
+    assert persona_db.update_persona_session(
+        session_id=session_id,
+        user_id="1",
+        update_data={"preferences_json": preferences},
+        expected_version=int(row["version"]),
+    )
+
+    with _client_for_user(1, persona_db) as client:
         listed = client.get("/api/v1/persona/sessions?surface=companion.conversation")
         detail = client.get(f"/api/v1/persona/sessions/{session_id}")
 
@@ -224,12 +238,18 @@ def test_persona_sessions_redact_live_control_preferences(
     assert "persona_live_control" not in matched["preferences"]
     assert "sensitive-create-key" not in str(matched)
     assert "companion_activity_surface" not in matched["preferences"]
+    assert matched["preferences"]["custom_visible_preference"] == {"retained": True}
+    assert "provider_api_key" not in matched["preferences"]
+    assert "raw_prompt" not in matched["preferences"]
 
     assert detail.status_code == 200
     detail_payload = detail.json()
     assert "persona_live_control" not in detail_payload["preferences"]
     assert "sensitive-create-key" not in str(detail_payload)
     assert "companion_activity_surface" not in detail_payload["preferences"]
+    assert detail_payload["preferences"]["custom_visible_preference"] == {"retained": True}
+    assert "provider_api_key" not in detail_payload["preferences"]
+    assert "raw_prompt" not in detail_payload["preferences"]
 
     fastapi_app.dependency_overrides.clear()
 

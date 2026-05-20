@@ -272,23 +272,14 @@ def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db:
     assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
 
 
-def test_live_session_create_new_unknown_persona_idempotency_reuses_default_session(
+def test_live_session_create_new_unknown_persona_returns_not_found(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
-        first = client.post(
-            "/api/v1/persona/live/sessions",
-            json={
-                "persona_id": "missing_persona",
-                "reuse_policy": "create_new",
-                "idempotency_key": "unknown-create-key",
-                "surface": "companion.conversation",
-            },
-        )
-        second = client.post(
+        resp = client.post(
             "/api/v1/persona/live/sessions",
             json={
                 "persona_id": "missing_persona",
@@ -298,28 +289,17 @@ def test_live_session_create_new_unknown_persona_idempotency_reuses_default_sess
             },
         )
 
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.json()["session"]["persona_id"] == "research_assistant"
-    assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
+    assert resp.status_code == 404
 
 
-def test_live_session_resume_compatible_unknown_persona_reuses_default_session(
+def test_live_session_resume_compatible_unknown_persona_returns_not_found(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
-        first = client.post(
-            "/api/v1/persona/live/sessions",
-            json={
-                "persona_id": "missing_persona",
-                "reuse_policy": "resume_compatible",
-                "surface": "companion.conversation",
-            },
-        )
-        second = client.post(
+        resp = client.post(
             "/api/v1/persona/live/sessions",
             json={
                 "persona_id": "missing_persona",
@@ -328,10 +308,7 @@ def test_live_session_resume_compatible_unknown_persona_reuses_default_session(
             },
         )
 
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.json()["session"]["persona_id"] == "research_assistant"
-    assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
+    assert resp.status_code == 404
 
 
 def test_live_session_create_uses_existing_session_materialization(monkeypatch, persona_db: CharactersRAGDB):
@@ -452,6 +429,27 @@ def test_live_session_stop_marks_closed_and_clears_focus(monkeypatch, persona_db
     assert stopped.json()["session"]["lifecycle"] == "stopped"
     assert stopped.json()["session"]["is_focused"] is False
     assert listed.json()["focused_session_id"] is None
+
+
+def test_live_session_stop_terminal_session_is_idempotent(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id="sess-archived",
+        status="archived",
+    )
+
+    with _client_for_user(1, persona_db) as client:
+        stopped = client.post("/api/v1/persona/live/sessions/sess-archived/stop")
+
+    assert stopped.status_code == 200
+    assert stopped.json()["session"]["status"] == "archived"
+    row = persona_db.get_persona_session("sess-archived", user_id="1", include_deleted=False)
+    assert row is not None
+    assert row["status"] == "archived"
 
 
 def test_live_session_focus_and_stop_preserve_unrelated_preferences(monkeypatch, persona_db: CharactersRAGDB):
@@ -590,6 +588,69 @@ def test_live_session_active_stream_presence_is_connected(monkeypatch, persona_d
     assert listed.json()["sessions"][0]["lifecycle"] == "connected"
 
 
+def test_live_session_idempotency_scans_beyond_first_page(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+
+    with _client_for_user(1, persona_db) as client:
+        first = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "research_assistant",
+                "reuse_policy": "create_new",
+                "idempotency_key": "paged-key",
+                "surface": "companion.conversation",
+            },
+        )
+        assert first.status_code == 200
+        first_session_id = first.json()["session"]["session_id"]
+        for idx in range(205):
+            filler = client.post(
+                "/api/v1/persona/live/sessions",
+                json={
+                    "persona_id": "research_assistant",
+                    "reuse_policy": "create_new",
+                    "idempotency_key": f"filler-{idx}",
+                    "surface": "companion.conversation",
+                },
+            )
+            assert filler.status_code == 200
+
+        second = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "research_assistant",
+                "reuse_policy": "create_new",
+                "idempotency_key": "paged-key",
+                "surface": "companion.conversation",
+            },
+        )
+
+    assert second.status_code == 200
+    assert second.json()["session"]["session_id"] == first_session_id
+
+
+def test_live_session_focus_only_touches_target_and_previously_focused(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-b")
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-untouched")
+
+    with _client_for_user(1, persona_db) as client:
+        assert client.post("/api/v1/persona/live/sessions/sess-a/focus").status_code == 200
+        untouched_before = persona_db.get_persona_session("sess-untouched", user_id="1", include_deleted=False)
+        assert untouched_before is not None
+        assert client.post("/api/v1/persona/live/sessions/sess-b/focus").status_code == 200
+
+    untouched_after = persona_db.get_persona_session("sess-untouched", user_id="1", include_deleted=False)
+    assert untouched_after is not None
+    assert untouched_after["version"] == untouched_before["version"]
+    assert untouched_after["last_modified"] == untouched_before["last_modified"]
+
+
 def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
     monkeypatch,
     persona_db: CharactersRAGDB,
@@ -631,6 +692,86 @@ def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
     assert user_turn["metadata"]["client_message_id"] == "u" * 128
     persisted_user_turn = next(turn for turn in persisted_turns if turn["turn_type"] == "user_message")
     assert persisted_user_turn["metadata"]["client_message_id"] == "u" * 128
+
+
+def test_persona_stream_user_message_rejects_stopped_session(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    persisted_turns: list[dict[str, object]] = []
+    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
+    session_id = "sess-stopped-user-message"
+    _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id, status="closed")
+
+    with _client_for_user(1, persona_db) as client:
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": session_id,
+                        "text": "Can you still hear me?",
+                    }
+                )
+            )
+            notice = _recv_until(
+                ws,
+                lambda data: data.get("event") == "notice"
+                and data.get("reason_code") == "SESSION_TERMINAL"
+                and data.get("session_id") == session_id,
+            )
+
+    assert notice["level"] == "error"
+    assert manager.list_turns(session_id=session_id, user_id="1", limit=10) == []
+    assert persisted_turns == []
+
+
+def test_persona_stream_user_message_preserves_private_live_control_preferences(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    manager = SessionManager()
+    _install_persona_stream_test_stubs(monkeypatch, manager)
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
+
+    with _client_for_user(1, persona_db) as client:
+        created = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "research_assistant",
+                "reuse_policy": "create_new",
+                "idempotency_key": "preserve-private-key",
+            },
+        )
+        assert created.status_code == 200
+        session_id = created.json()["session"]["session_id"]
+
+        with client.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": session_id,
+                        "text": "Please continue.",
+                    }
+                )
+            )
+            _recv_until(
+                ws,
+                lambda data: data.get("event") == "tool_plan" and data.get("session_id") == session_id,
+            )
+
+    row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+    assert row is not None
+    live_preferences = row["preferences"]["persona_live_control"]
+    assert live_preferences["create_idempotency_key"] == "preserve-private-key"
+    assert live_preferences["focus"]["focused"] is True
 
 
 def test_persona_stream_voice_config_marks_live_session_connected_and_cleanup(

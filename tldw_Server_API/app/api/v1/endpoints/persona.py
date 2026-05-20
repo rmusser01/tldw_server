@@ -1307,6 +1307,31 @@ def _merge_persisted_persona_session_preferences(*payloads: Any) -> dict[str, An
     return merged
 
 
+def _merge_private_persona_session_preferences(*payloads: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        merged.update(payload)
+        if "session_policy_rules" in payload:
+            merged["session_policy_rules"] = normalize_policy_rules(payload.get("session_policy_rules"))
+    merged.pop("companion_activity_surface", None)
+    return merged
+
+
+def _public_persona_session_preferences(*payloads: Any) -> dict[str, Any]:
+    preferences = _merge_private_persona_session_preferences(*payloads)
+    for key in (
+        "persona_live_control",
+        "companion_activity_surface",
+        "voice_runtime",
+        "provider_api_key",
+        "raw_prompt",
+    ):
+        preferences.pop(key, None)
+    return preferences
+
+
 def _default_persisted_persona_session_preferences(profile: dict[str, Any] | None) -> dict[str, Any]:
     return _merge_persisted_persona_session_preferences(
         {
@@ -1347,8 +1372,11 @@ def _load_persona_policy_rules_for_session(
         "policy_rules": normalize_policy_rules(_DEFAULT_PERSONA_POLICY_RULES),
         "persona_state_context_default": True,
         "preferences": {},
+        "persisted_preferences": {},
         "activity_surface": normalize_persona_activity_surface(None),
         "session_exists": False,
+        "session_status": "active",
+        "session_terminal": False,
     }
     sid = str(session_id or "").strip()
     uid = str(user_id or "").strip()
@@ -1378,8 +1406,12 @@ def _load_persona_policy_rules_for_session(
             "policy_rules": normalize_policy_rules(policy_rules),
             "persona_state_context_default": persona_state_context_default,
             "preferences": _normalize_persisted_persona_session_preferences(session_row.get("preferences")),
+            "persisted_preferences": dict(session_row.get("preferences") or {}),
             "activity_surface": normalize_persona_activity_surface(session_row.get("activity_surface")),
             "session_exists": True,
+            "session_status": str(session_row.get("status") or "active").strip().lower() or "active",
+            "session_terminal": str(session_row.get("status") or "active").strip().lower()
+            in {"closed", "archived"},
         }
     except (OSError, RuntimeError, ValueError, CharactersRAGDBError) as exc:
         logger.debug(
@@ -1433,16 +1465,16 @@ def _persist_persona_session_preferences(
     base_preferences: Any = None,
     patch_preferences: Any = None,
 ) -> dict[str, Any]:
-    merged_preferences = _merge_persisted_persona_session_preferences(
+    merged_preferences = _merge_private_persona_session_preferences(
         base_preferences,
-        patch_preferences,
+        _normalize_persisted_persona_session_preferences(patch_preferences),
     )
     sid = str(session_id or "").strip()
     uid = str(user_id or "").strip()
     if db is None or not sid or not uid:
         return merged_preferences
 
-    current_preferences = _normalize_persisted_persona_session_preferences(base_preferences)
+    current_preferences = _merge_private_persona_session_preferences(base_preferences)
     if current_preferences == merged_preferences:
         return merged_preferences
 
@@ -3105,7 +3137,7 @@ def _persona_session_summary_from_db(
     manager_row: dict[str, Any] | None = None,
 ) -> PersonaSessionSummary:
     scope_snapshot = row.get("scope_snapshot") or {}
-    preferences = _merge_persisted_persona_session_preferences(
+    preferences = _public_persona_session_preferences(
         row.get("preferences"),
         (manager_row or {}).get("preferences"),
     )
@@ -3133,7 +3165,7 @@ def _persona_session_detail_from_db(
     scope_snapshot = row.get("scope_snapshot") or {}
     turns = list((manager_snapshot or {}).get("turns") or [])
     turn_count = int((manager_snapshot or {}).get("turn_count") or len(turns))
-    preferences = _merge_persisted_persona_session_preferences(
+    preferences = _public_persona_session_preferences(
         row.get("preferences"),
         (manager_snapshot or {}).get("preferences"),
     )
@@ -9222,6 +9254,14 @@ async def persona_stream(
                 session_id=session_id,
                 user_id=authenticated_user_id,
             )
+            if bool(runtime_context.get("session_terminal", False)):
+                await _emit_notice(
+                    session_id=session_id,
+                    level="error",
+                    message="Persona session is stopped.",
+                    reason_code="SESSION_TERMINAL",
+                )
+                return
             runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
             runtime_mode = _bounded_label(
                 runtime_context.get("runtime_mode"),
@@ -9332,7 +9372,7 @@ async def persona_stream(
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
-                base_preferences=runtime_context.get("preferences"),
+                base_preferences=runtime_context.get("persisted_preferences"),
                 patch_preferences=preferences_patch,
             )
             persona_turn_classifier = classify_persona_turn(normalized_text)
@@ -9726,6 +9766,14 @@ async def persona_stream(
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
+                if bool(runtime_context.get("session_terminal", False)):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Persona session is stopped.",
+                        reason_code="SESSION_TERMINAL",
+                    )
+                    continue
                 runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
                 _ = session_manager.create(
                     user_id=connection_user_id,
@@ -9894,6 +9942,14 @@ async def persona_stream(
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
+                if bool(runtime_context.get("session_terminal", False)):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Persona session is stopped.",
+                        reason_code="SESSION_TERMINAL",
+                    )
+                    continue
                 runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
                 _mark_live_control_stream_connected(session_id)
                 runtime_mode = _bounded_label(
@@ -10211,7 +10267,7 @@ async def persona_stream(
                         persona_scope_db,
                         session_id=session_id,
                         user_id=authenticated_user_id,
-                        base_preferences=runtime_context.get("preferences"),
+                        base_preferences=runtime_context.get("persisted_preferences"),
                         patch_preferences={"session_policy_rules": session_policy_rules},
                     )
                 else:

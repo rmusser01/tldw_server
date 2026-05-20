@@ -83,6 +83,19 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_sessions.py -q` -> 35 passed, 5 warnings
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control_app.json` -> passed
 
+Fifth follow-up review fixes:
+- preserved private `persona_live_control` metadata during WebSocket preference persistence while keeping it redacted from public session responses
+- changed live-control create/resume to reject explicit unknown persona IDs with 404 while still ensuring the built-in default profile exists when requested
+- kept `/persona/sessions` response compatibility for unrelated preference keys while redacting known internal/sensitive fields
+- blocked WebSocket user/voice/audio/config work on terminal persona sessions
+- made focus clearing update only the target plus previously-focused rows, and paginated idempotency/reuse/focus scans beyond the first page
+- made stop idempotent for already-terminal sessions without rewriting archived status
+
+Verification:
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_sessions.py -q` -> 40 passed, 5 warnings
+- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py -f json -o /tmp/bandit_persona_buddy_live_control_app.json` -> passed
+- `git diff --check` -> passed
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

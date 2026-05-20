@@ -21,6 +21,7 @@ _TERMINAL_STATUSES = {"closed", "archived"}
 _CAPABILITIES = {"text": True, "voice": False, "browser_microphone_required": False}
 _generation_lock = RLock()
 _last_focus_generation = 0
+_SESSION_SCAN_PAGE_SIZE = 200
 
 
 class PersonaLiveStreamRegistry:
@@ -169,12 +170,41 @@ def _persona_name_for_row(db: CharactersRAGDB, *, row: dict[str, Any], user_id: 
 
 def _resolve_live_control_persona_id(db: CharactersRAGDB, *, user_id: str, persona_id: str | None) -> str:
     requested_persona_id = str(persona_id or "").strip()
-    profile = None
-    if requested_persona_id:
-        profile = db.get_persona_profile(requested_persona_id, user_id=user_id, include_deleted=False)
-    if profile is None:
+    if not requested_persona_id:
         profile = ensure_default_persona_profile(db, user_id=user_id)
+        return str((profile or {}).get("id") or DEFAULT_PERSONA_ID).strip() or DEFAULT_PERSONA_ID
+    profile = db.get_persona_profile(requested_persona_id, user_id=user_id, include_deleted=False)
+    if profile is None and requested_persona_id == DEFAULT_PERSONA_ID:
+        profile = ensure_default_persona_profile(db, user_id=user_id)
+    if profile is None:
+        raise FileNotFoundError("Persona not found")
     return str((profile or {}).get("id") or DEFAULT_PERSONA_ID).strip() or DEFAULT_PERSONA_ID
+
+
+def _iter_persona_session_rows(
+    db: CharactersRAGDB,
+    *,
+    user_id: str,
+    persona_id: str | None = None,
+    surface: str | None = None,
+    include_deleted: bool = False,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = db.list_persona_sessions(
+            user_id=user_id,
+            persona_id=persona_id,
+            activity_surface=normalize_persona_activity_surface(surface) if surface is not None else None,
+            include_deleted=include_deleted,
+            limit=_SESSION_SCAN_PAGE_SIZE,
+            offset=offset,
+        )
+        rows.extend(page)
+        if len(page) < _SESSION_SCAN_PAGE_SIZE:
+            break
+        offset += _SESSION_SCAN_PAGE_SIZE
+    return rows
 
 
 def build_live_session_summary(
@@ -278,13 +308,11 @@ def _find_session_by_idempotency_key(
     surface: str | None,
     idempotency_key: str,
 ) -> dict[str, Any] | None:
-    rows = db.list_persona_sessions(
+    rows = _iter_persona_session_rows(
+        db,
         user_id=user_id,
         persona_id=persona_id,
-        activity_surface=normalize_persona_activity_surface(surface),
-        include_deleted=False,
-        limit=200,
-        offset=0,
+        surface=normalize_persona_activity_surface(surface),
     )
     for row in rows:
         live = _live_control_preferences(row)
@@ -300,13 +328,11 @@ def _find_resume_compatible_session(
     persona_id: str,
     surface: str | None,
 ) -> dict[str, Any] | None:
-    rows = db.list_persona_sessions(
+    rows = _iter_persona_session_rows(
+        db,
         user_id=user_id,
         persona_id=persona_id,
-        activity_surface=normalize_persona_activity_surface(surface),
-        include_deleted=False,
-        limit=100,
-        offset=0,
+        surface=normalize_persona_activity_surface(surface),
     )
     for row in rows:
         if not _is_terminal(row):
@@ -395,15 +421,17 @@ def focus_live_session(
         raise ValueError("Cannot focus a terminal persona session.")
     generation = _next_focus_generation()
     focused_at = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.gmtime())
-    rows = db.list_persona_sessions(user_id=user_id, include_deleted=False, limit=200, offset=0)
+    rows = _iter_persona_session_rows(db, user_id=user_id)
     for existing in rows:
         existing_id = str(existing.get("id") or "").strip()
         if not existing_id:
             continue
         if existing_id == session_id:
             focus = {"focused": True, "focused_at": focused_at, "focus_generation": generation}
-        else:
+        elif _focus_metadata(existing).get("focused"):
             focus = {"focused": False}
+        else:
+            continue
         _update_live_control_preferences(
             db,
             row=existing,
@@ -428,6 +456,14 @@ def stop_live_session(
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
     row = _load_owned_session_or_raise(db, user_id=user_id, session_id=session_id)
+    if _is_terminal(row):
+        return build_live_session_summary(
+            db,
+            user_id=user_id,
+            row=row,
+            is_focused=False,
+            stream_registry=stream_registry,
+        )
     fresh_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     preferences = _live_preferences_patch(fresh_row, focus={"focused": False})
     db.update_persona_session(
@@ -435,7 +471,6 @@ def stop_live_session(
         user_id=user_id,
         update_data={"status": "closed", "preferences_json": preferences},
     )
-    stream_registry.mark_disconnected(user_id=user_id, session_id=session_id)
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     return build_live_session_summary(
         db,
