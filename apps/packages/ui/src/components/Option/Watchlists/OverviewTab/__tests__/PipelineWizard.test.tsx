@@ -3,8 +3,6 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest"
 import { PipelineWizard } from "../PipelineWizard"
 
-vi.setConfig({ testTimeout: 10_000 })
-
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string, options?: Record<string, unknown>) =>

@@ -240,12 +240,17 @@ describe("OverviewTab alert and health summary", () => {
   })
 
   it("renders Overview load failures with the design-system Alert", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined)
-    mocks.fetchOverviewMock.mockRejectedValue(new Error("overview unavailable"))
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-    render(<OverviewTab />)
+    try {
+      mocks.fetchOverviewMock.mockRejectedValue(new Error("overview unavailable"))
 
-    const failureTitle = await screen.findByText("Failed to load overview")
-    expect(failureTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+      render(<OverviewTab />)
+
+      const failureTitle = await screen.findByText("Failed to load overview")
+      expect(failureTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })
