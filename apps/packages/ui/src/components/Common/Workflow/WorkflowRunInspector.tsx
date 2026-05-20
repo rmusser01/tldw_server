@@ -24,7 +24,7 @@ const getAttemptStatusVariant = (
   status: WorkflowStepAttempt["status"]
 ): "danger" | "success" | "warning" | "secondary" => {
   if (status === "failed") return "danger"
-  if (status === "completed") return "success"
+  if (status === "completed" || status === "success") return "success"
   if (status === "running") return "warning"
   return "secondary"
 }
