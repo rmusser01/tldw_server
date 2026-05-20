@@ -358,7 +358,7 @@ git commit -m "fix: normalize watchlists digest template payloads"
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_watchlists_api.py`
 
-- [ ] **Step 1: Write failing audio enqueue test**
+- [x] **Step 1: Write failing audio enqueue test**
 
 In `test_audio_briefing_workflow.py`, replace enqueue-oriented mocks with a scheduler double that only exposes `submit`:
 
@@ -369,6 +369,9 @@ class FakeScheduler:
 
     async def submit(self, handler, payload=None, priority=None, queue_name=None,
                      depends_on=None, idempotency_key=None, metadata=None, auth_context=None):
+        user_id = metadata.get("user_id") if isinstance(metadata, dict) else None
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("Task metadata must include a non-empty 'user_id'")
         self.calls.append({
             "handler": handler,
             "payload": payload,
@@ -387,10 +390,11 @@ assert scheduler.calls[0]["handler"] == "workflow_run"
 assert scheduler.calls[0]["payload"]["definition_snapshot"]["name"] == "audio_briefing"
 assert scheduler.calls[0]["payload"]["metadata"]["watchlist_run_id"] == 123
 assert scheduler.calls[0]["queue_name"] == "workflows"
-assert scheduler.calls[0]["idempotency_key"] == "watchlist-audio-briefing:123"
+assert scheduler.calls[0]["idempotency_key"] == "watchlist-audio-briefing:1:42:123"
+assert scheduler.calls[0]["metadata"]["user_id"] == "1"
 ```
 
-- [ ] **Step 2: Run the failing backend test**
+- [x] **Step 2: Run the failing backend test**
 
 Run:
 
@@ -401,7 +405,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.p
 
 Expected: FAIL because production code calls `enqueue`.
 
-- [ ] **Step 3: Replace enqueue with submit**
+- [x] **Step 3: Replace enqueue with submit**
 
 In `audio_briefing_workflow.py`, remove the `Task` import and replace the enqueue block with:
 
@@ -421,22 +425,23 @@ task_id = await scheduler.submit(
         },
     },
     queue_name="workflows",
-    idempotency_key=f"watchlist-audio-briefing:{run_id}",
+    idempotency_key=f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}",
     metadata={
         "source": "watchlist_audio_briefing",
         "watchlist_job_id": job_id,
         "watchlist_run_id": run_id,
+        "user_id": str(user_id),
     },
 )
 ```
 
 Do not fabricate an audio artifact at enqueue time. This task only proves the request enters Scheduler.
 
-- [ ] **Step 4: Preserve skip behavior**
+- [x] **Step 4: Preserve skip behavior**
 
 Keep existing returns of `None` for `generate_audio=false`, no ingested items, item load failure, or Scheduler submission failure. The caller already maps `None` to `skipped`; later tasks improve the visible reason.
 
-- [ ] **Step 5: Run audio workflow tests**
+- [x] **Step 5: Run audio workflow tests**
 
 Run:
 
@@ -447,7 +452,7 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.p
 
 Expected: PASS.
 
-- [ ] **Step 6: Run endpoint metadata tests**
+- [x] **Step 6: Run endpoint metadata tests**
 
 Run:
 
@@ -462,7 +467,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Run audio delivery endpoint tests**
+- [x] **Step 7: Run audio delivery endpoint tests**
 
 Run:
 
@@ -473,12 +478,13 @@ python -m pytest tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py 
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Run:
 
 ```bash
 git add \
+  Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md \
   tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py \
   tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 git commit -m "fix: submit watchlist audio briefings through scheduler"
