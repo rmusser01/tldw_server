@@ -502,7 +502,7 @@ git commit -m "feat(ui): add Persona live control service"
 - Create: `apps/packages/ui/src/hooks/__tests__/usePersonaLiveControl.test.tsx`
 - Modify: `apps/packages/ui/src/services/persona-stream.ts` only if a tiny helper is needed; otherwise leave it unchanged.
 
-- [ ] **Step 1: Write failing hook tests**
+- [x] **Step 1: Write failing hook tests**
 
 Create tests for:
 
@@ -520,7 +520,7 @@ it("keeps text available when voice capability is false", ...)
 
 Use a fake `WebSocket` class in the test and mocked service functions from `persona-live-control.ts`.
 
-- [ ] **Step 2: Run failing hook tests**
+- [x] **Step 2: Run failing hook tests**
 
 Run from `apps/packages/ui`:
 
@@ -530,7 +530,7 @@ bunx vitest run src/hooks/__tests__/usePersonaLiveControl.test.tsx
 
 Expected: FAIL because the hook does not exist.
 
-- [ ] **Step 3: Implement `usePersonaLiveControl`**
+- [x] **Step 3: Implement `usePersonaLiveControl`**
 
 Create the hook with a small reducer-style state model:
 
@@ -590,7 +590,7 @@ Rules:
 8. Voice controls are not implemented in this hook for this slice; expose capability state only.
 9. Close the WebSocket on unmount.
 
-- [ ] **Step 4: Run hook tests**
+- [x] **Step 4: Run hook tests**
 
 Run:
 
@@ -600,7 +600,7 @@ bunx vitest run src/hooks/__tests__/usePersonaLiveControl.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit hook slice**
+- [x] **Step 5: Commit hook slice**
 
 ```bash
 git add \
