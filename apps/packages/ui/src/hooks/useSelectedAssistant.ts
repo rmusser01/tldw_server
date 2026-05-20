@@ -98,6 +98,14 @@ export const useSelectedAssistant = (
   const setSelectedAssistantWithBroadcast = React.useCallback(
     async (next: AssistantSelection | null) => {
       const normalizedNext = normalizeAssistantSelection(next)
+      if (!normalizedNext) {
+        await syncLegacyCharacterSelectionMirror(null)
+        await clearAssistantSyncSelection()
+        await setSelectedAssistant(null)
+        notifySelectedAssistantSubscribers(null)
+        return
+      }
+
       await setSelectedAssistant(normalizedNext)
       notifySelectedAssistantSubscribers(normalizedNext)
       await clearAssistantSyncSelection()

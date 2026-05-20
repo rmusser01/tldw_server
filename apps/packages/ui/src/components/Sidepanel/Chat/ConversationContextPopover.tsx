@@ -12,7 +12,11 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { CharacterSelect } from "./CharacterSelect"
+import {
+  CharacterSelect,
+  type SidepanelAssistantSelectOpenDetail,
+  type SidepanelAssistantSelectTab
+} from "./CharacterSelect"
 import {
   formatContextSourceLabel,
   resolveContextReadiness,
@@ -174,6 +178,11 @@ export const ConversationContextPopover: React.FC<
   const [assetOptionsError, setAssetOptionsError] =
     React.useState<string | null>(null)
   const [saving, setSaving] = React.useState(false)
+  const [assistantSelectOpenRequest, setAssistantSelectOpenRequest] =
+    React.useState<{
+      id: number
+      tab?: SidepanelAssistantSelectTab
+    } | null>(null)
   const summary = React.useMemo(
     () => summarizeConversationContextPieces(composition),
     [composition]
@@ -215,6 +224,29 @@ export const ConversationContextPopover: React.FC<
     }
     return Array.from(labels)
   }, [composition])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleOpenAssistantSelect = (event: Event) => {
+      const detail = (event as CustomEvent<SidepanelAssistantSelectOpenDetail>)
+        .detail
+      setOpen(true)
+      setAssistantSelectOpenRequest((previous) => ({
+        id: (previous?.id ?? 0) + 1,
+        tab: detail?.tab
+      }))
+    }
+    window.addEventListener(
+      "tldw:open-sidepanel-assistant-select",
+      handleOpenAssistantSelect
+    )
+    return () => {
+      window.removeEventListener(
+        "tldw:open-sidepanel-assistant-select",
+        handleOpenAssistantSelect
+      )
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!open) return
@@ -386,6 +418,7 @@ export const ConversationContextPopover: React.FC<
             setSelectedCharacterId={setSelectedCharacterId}
             iconClassName="size-4"
             className="px-2 text-text-muted hover:text-text"
+            openRequest={assistantSelectOpenRequest ?? undefined}
           />
         }
       />

@@ -32,7 +32,7 @@ import { createSafeStorage } from "@/utils/safe-storage"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStorage } from "@plasmohq/storage/hook"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, ExternalLink } from "lucide-react"
 import React, { lazy, Suspense } from "react"
 import { useTranslation } from "react-i18next"
 import { SidePanelBody } from "~/components/Sidepanel/Chat/body"
@@ -41,6 +41,7 @@ import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHead
 import { ConnectionBanner } from "~/components/Sidepanel/Chat/ConnectionBanner"
 import { useMessage } from "~/hooks/useMessage"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 import type { Character } from "@/types/character"
@@ -69,7 +70,9 @@ import {
   WEB_CLIPPER_ANALYZE_MESSAGE_TYPE
 } from "@/services/web-clipper/analyze-handoff"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
+import type { CommandItem } from "@/components/Common/CommandPalette"
 import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
+import { buildSidepanelFullAppChatPath } from "@/utils/sidepanel-full-app-route"
 import {
   OPEN_HISTORY_EVENT,
   TIMELINE_ACTION_EVENT,
@@ -537,6 +540,7 @@ const SidepanelChat = () => {
   } = useMessage()
   const [selectedCharacter, setSelectedCharacter] =
     useSelectedCharacter<Character | null>(null)
+  const [selectedAssistant] = useSelectedAssistant(null)
   const setRagMediaIds = useStoreMessageOption((state) => state.setRagMediaIds)
   const tabs = useSidepanelChatTabsStore((state) => state.tabs)
   const activeTabId = useSidepanelChatTabsStore((state) => state.activeTabId)
@@ -613,7 +617,7 @@ const SidepanelChat = () => {
     const path = `/options.html#${normalizedRoute}` as const
 
     try {
-      if (browser?.runtime?.getURL) {
+      if (browser?.runtime?.id && browser.runtime.getURL) {
         const url = browser.runtime.getURL(path)
         if (browser.tabs?.create) {
           void browser.tabs.create({ url })
@@ -627,7 +631,11 @@ const SidepanelChat = () => {
     }
 
     try {
-      if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
+      if (
+        typeof chrome !== "undefined" &&
+        chrome.runtime?.id &&
+        chrome.runtime.getURL
+      ) {
         const url = chrome.runtime.getURL(path)
         window.open(url, "_blank")
         return
@@ -636,7 +644,7 @@ const SidepanelChat = () => {
       console.debug("[sidepanel] openOptionsHashRoute chrome API unavailable:", error)
     }
 
-    window.open(path, "_blank")
+    window.open(normalizedRoute, "_blank")
   }, [])
 
   const handleGenerateFlashcardsFromSelection = React.useCallback(() => {
@@ -2190,6 +2198,39 @@ const SidepanelChat = () => {
         })),
     [tabs, t]
   )
+  const selectedCharacterIdForHandoff =
+    selectedCharacter?.id == null ? null : String(selectedCharacter.id)
+  const characterChatFullAppPath = React.useMemo(
+    () =>
+      buildSidepanelFullAppChatPath({
+        selectedAssistant,
+        selectedCharacterId: selectedCharacterIdForHandoff
+      }),
+    [selectedAssistant, selectedCharacterIdForHandoff]
+  )
+  const openCharacterChatInFullAppCommand = React.useMemo<CommandItem[]>(
+    () => {
+      if (characterChatFullAppPath === "/chat") return []
+      return [
+        {
+          id: "action-open-character-chat-full-app",
+          label: t(
+            "common:commandPalette.openCharacterChatFullApp",
+            "Open Character Chat in full app"
+          ),
+          description: t(
+            "common:commandPalette.openCharacterChatFullAppDesc",
+            "Continue the active Character, Persona, or role-play setup in /chat."
+          ),
+          icon: <ExternalLink className="size-4" />,
+          action: () => openOptionsHashRoute(characterChatFullAppPath),
+          category: "action",
+          keywords: ["character", "role-play", "persona", "full app", "chat"]
+        }
+      ]
+    },
+    [characterChatFullAppPath, openOptionsHashRoute, t]
+  )
   const ingestStatusLabel = React.useMemo(() => {
     const status = ingestCard?.status
     switch (status) {
@@ -2593,7 +2634,8 @@ const SidepanelChat = () => {
           onToggleSidebar: toggleSidebar,
           onSearchHistory: requestSidebarSearchFocus,
           onSwitchChat: handleSelectTab,
-          sidepanelChats: commandPaletteChats
+          sidepanelChats: commandPaletteChats,
+          additionalCommands: openCharacterChatInFullAppCommand
         }}
       />
       <Suspense fallback={null}>
