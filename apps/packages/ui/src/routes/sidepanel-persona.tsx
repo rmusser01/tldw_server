@@ -605,6 +605,11 @@ const SidepanelPersona = ({
     [savedPersonaVoiceDefaults]
   )
   const livePersonaId = connected ? activeSessionPersonaId || selectedPersonaId : selectedPersonaId
+
+  React.useEffect(() => {
+    setTranscriptExportConfirmOpen(false)
+  }, [activeSessionPersonaId, sessionId])
+
   const liveVoiceController = usePersonaLiveVoiceController({
     ws: wsRef.current,
     connected,

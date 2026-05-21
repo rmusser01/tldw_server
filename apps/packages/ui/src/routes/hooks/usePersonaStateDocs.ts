@@ -191,6 +191,11 @@ export function usePersonaStateDocs(
             "sidepanel:persona.unsavedStateDiscardPromptRestoreState",
             "You have unsaved state-doc changes. Restore this state version and discard local drafts?"
           )
+        case "archive_state":
+          return t(
+            "sidepanel:persona.unsavedStateDiscardPromptArchiveState",
+            "You have unsaved state-doc changes. Archive this state version and discard local drafts?"
+          )
         case "route_transition":
           return t(
             "sidepanel:persona.unsavedStateDiscardPromptRouteTransition",
@@ -445,6 +450,9 @@ export function usePersonaStateDocs(
       const personaId = getTargetPersonaId()
       const trimmedEntryId = String(entryId || "").trim()
       if (!personaId || !trimmedEntryId || archivingStateEntryId) return false
+      if (!confirmDiscardUnsavedStateDrafts("archive_state")) {
+        return false
+      }
       const confirmed = _confirmWithBrowserPrompt(
         t(
           "sidepanel:persona.stateArchiveConfirm",
@@ -488,6 +496,7 @@ export function usePersonaStateDocs(
       appendLog,
       applyPersonaStatePayload,
       archivingStateEntryId,
+      confirmDiscardUnsavedStateDrafts,
       getTargetPersonaId,
       loadPersonaStateHistory,
       setError,

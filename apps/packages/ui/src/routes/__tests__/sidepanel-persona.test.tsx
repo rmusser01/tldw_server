@@ -756,6 +756,10 @@ describe("SidepanelPersona", () => {
 
       await waitForLiveSessionPanel()
       fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1)
+      })
+      MockWebSocket.instances[0].emitOpen()
 
       const exportButton = await screen.findByTestId("persona-transcript-export-button")
       fireEvent.click(exportButton)
@@ -768,10 +772,19 @@ describe("SidepanelPersona", () => {
         "/api/v1/persona/sessions/sess-export/export",
         { method: "GET" }
       )
+      fireEvent.click(screen.getByRole("button", { name: /Disconnect/i }))
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("persona-transcript-export-confirmation")
+        ).not.toBeInTheDocument()
+      })
+      await screen.findByTestId("persona-transcript-export-button")
+
+      fireEvent.click(screen.getByTestId("persona-transcript-export-button"))
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
       expect(createObjectURLSpy).not.toHaveBeenCalled()
 
-      fireEvent.click(exportButton)
+      fireEvent.click(screen.getByTestId("persona-transcript-export-button"))
       fireEvent.click(await screen.findByRole("button", { name: "Confirm export" }))
 
       await waitFor(() => {
@@ -7314,8 +7327,26 @@ describe("SidepanelPersona", () => {
                   content: "history soul version",
                   is_active: false,
                   version: 1
+                },
+                {
+                  entry_id: "archive-guard-entry",
+                  field: "identity_md",
+                  content: "active identity version",
+                  is_active: true,
+                  version: 2
                 }
               ]
+            })
+          })
+        }
+        if (path.includes("/persona/profiles/research_assistant/state/archive")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              persona_id: "research_assistant",
+              soul_md: "initial soul",
+              identity_md: null,
+              heartbeat_md: "initial heartbeat"
             })
           })
         }
@@ -7400,6 +7431,24 @@ describe("SidepanelPersona", () => {
     fireEvent.change(soulInput, {
       target: { value: "unsaved local draft before restore" }
     })
+
+    confirmSpy.mockClear()
+    confirmSpy.mockReturnValueOnce(false)
+    fireEvent.click(screen.getByTestId("persona-state-archive-archive-guard-entry"))
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled()
+    })
+    expect(String(confirmSpy.mock.calls[0]?.[0] || "")).toContain(
+      "Archive this state version and discard local drafts"
+    )
+    const declinedArchiveCall = mocks.fetchWithAuth.mock.calls.find(
+      ([calledPath, calledInit]) =>
+        String(calledPath).includes("/persona/profiles/research_assistant/state/archive") &&
+        String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+          "POST"
+    )
+    expect(declinedArchiveCall).toBeFalsy()
+    expect(soulInput.value).toBe("unsaved local draft before restore")
 
     confirmSpy.mockClear()
     confirmSpy.mockReturnValueOnce(false)

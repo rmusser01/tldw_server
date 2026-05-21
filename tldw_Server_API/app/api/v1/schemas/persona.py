@@ -1096,6 +1096,16 @@ class PersonaStateRestoreRequest(BaseModel):
 class PersonaStateArchiveRequest(BaseModel):
     entry_id: str = Field(..., min_length=1, max_length=200)
 
+    @field_validator("entry_id", mode="before")
+    @classmethod
+    def _strip_required_entry_id(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("entry_id is required")
+        return stripped
+
 
 class PersonaConnectionCreate(BaseModel):
     id: str | None = Field(default=None, min_length=1, max_length=200)

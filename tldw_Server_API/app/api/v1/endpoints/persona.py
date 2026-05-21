@@ -2928,7 +2928,7 @@ def _replace_persona_state_docs(
 
 
 def _increment_persona_state_metric(*, action: str, result: str) -> None:
-    action_value = _bounded_label(action, allowed={"read", "write", "history", "restore"}, fallback="read")
+    action_value = _bounded_label(action, allowed={"read", "write", "history", "restore", "archive"}, fallback="read")
     result_value = _bounded_label(
         result,
         allowed={
@@ -3208,6 +3208,12 @@ def _redacted_persona_export_metadata(
     path: str = "metadata",
     markers: set[str],
 ) -> Any:
+    """Return transcript-export-safe metadata while recording omitted paths.
+
+    JSON primitives, including null values represented by ``None``, are preserved.
+    Values under secret-like keys and values that cannot be safely serialized into
+    the export payload are omitted and recorded in ``markers``.
+    """
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
         for raw_key in sorted(value):
@@ -3238,6 +3244,12 @@ def _persona_session_export_from_db(
     *,
     manager_snapshot: dict[str, Any] | None = None,
 ) -> PersonaSessionExportResponse:
+    """Build the deterministic redacted export payload for one live session.
+
+    The caller is responsible for proving session ownership and providing the
+    in-memory session snapshot. This helper only shapes DB metadata, visible
+    transcript turns, and redaction markers into the response schema.
+    """
     turns = list((manager_snapshot or {}).get("turns") or [])
     redaction_markers: set[str] = set()
     exported_turns: list[dict[str, Any]] = []
@@ -6323,12 +6335,16 @@ async def restore_persona_profile_state_entry(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaStateResponse:
+    """Restore a user-owned Persona state-history entry as the active state.
+
+    Only state-doc memory entries for the selected Persona can be restored. The
+    restored entry becomes active for its state field, sibling active entries
+    for that field are archived, and the updated state-doc view is returned.
+    """
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     target_entry_id = str(payload.entry_id or "").strip()
-    if not target_entry_id:
-        raise HTTPException(status_code=400, detail="entry_id is required")
 
     try:
         profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
@@ -6409,12 +6425,17 @@ async def archive_persona_profile_state_entry(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaStateResponse:
+    """Archive a user-owned Persona state-history entry without deleting it.
+
+    Only state-doc memory entries for the selected Persona can be archived. The
+    action removes the entry from current state by marking it archived and
+    returns the updated state-doc view; missing Persona or entry ownership
+    failures return 404.
+    """
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     target_entry_id = str(payload.entry_id or "").strip()
-    if not target_entry_id:
-        raise HTTPException(status_code=400, detail="entry_id is required")
 
     try:
         profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
@@ -7860,6 +7881,11 @@ async def persona_session_export(
             user_id=user_id,
             limit_turns=None if limit_turns <= 0 else limit_turns,
         )
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Persona transcript is only available for active live sessions",
+            )
         return _persona_session_export_from_db(row, manager_snapshot=snapshot)
     except HTTPException:
         raise

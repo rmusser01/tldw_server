@@ -60,7 +60,10 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
     setRules([])
     setError(null)
     setNotice(null)
-    if (!normalizedPersonaId) return
+    if (!normalizedPersonaId) {
+      setLoading(false)
+      return
+    }
 
     const loadRules = async () => {
       setLoading(true)
@@ -111,6 +114,7 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
   const saveRules = async () => {
     setError(null)
     setNotice(null)
+    if (loading || saving) return
     if (!normalizedPersonaId) {
       setError("Select a persona before editing policy rules.")
       return
@@ -173,7 +177,7 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
           size="small"
           type="primary"
           loading={saving}
-          disabled={!normalizedPersonaId}
+          disabled={!normalizedPersonaId || loading || saving}
           onClick={() => {
             void saveRules()
           }}

@@ -132,6 +132,35 @@ describe("Persona Garden scope and policy editors", () => {
     expect(mocks.fetchWithAuth).toHaveBeenCalledTimes(1)
   })
 
+  it("disables scope saves while rules are loading", async () => {
+    let resolveLoad:
+      | ((value: { ok: boolean; json: () => Promise<{ rules: unknown[] }> }) => void)
+      | undefined
+    mocks.fetchWithAuth.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoad = resolve
+      })
+    )
+
+    render(
+      <ScopesPanel
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Research Persona"
+      />
+    )
+
+    expect(await screen.findByText("Loading...")).toBeInTheDocument()
+    expect(screen.getByTestId("persona-scope-save-button")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("persona-scope-save-button"))
+    expect(mocks.fetchWithAuth).toHaveBeenCalledTimes(1)
+
+    resolveLoad?.({
+      ok: true,
+      json: async () => ({ rules: [] })
+    })
+    await screen.findByText("No scope rules yet.")
+  })
+
   it("loads and saves selected persona policy rules through the authenticated endpoint", async () => {
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: unknown }) => {
       if (path === "/api/v1/persona/profiles/persona-1/policy-rules" && !init) {

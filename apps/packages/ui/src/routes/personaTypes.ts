@@ -263,6 +263,7 @@ export type UnsavedStateDiscardReason =
   | "persona_switch"
   | "session_switch"
   | "restore_state"
+  | "archive_state"
   | "route_transition"
   | "before_unload"
 

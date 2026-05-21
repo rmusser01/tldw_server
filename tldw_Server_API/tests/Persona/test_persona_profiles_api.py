@@ -919,6 +919,11 @@ def test_persona_profile_state_history_scoping_and_validation(persona_db: Charac
             f"/api/v1/persona/profiles/{persona_id}/state/history?field=unknown_field"
         )
         assert invalid_filter.status_code == 400
+        invalid_archive = user_one_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/state/archive",
+            json={"entry_id": "   "},
+        )
+        assert invalid_archive.status_code == 422
 
     fastapi_app.dependency_overrides.clear()
 
