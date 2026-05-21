@@ -797,7 +797,7 @@ git commit -m "test(e2e): cover Buddy text interaction"
 - Modify: `backlog/tasks/task-457 - Create-Persona-Buddy-interaction-implementation-plan.md` if executing from this plan
 - Optional Modify: `Docs/superpowers/specs/2026-05-20-persona-buddy-interaction-prd-design.md` only if implementation reveals a needed scope clarification.
 
-- [ ] **Step 1: Run focused backend verification**
+- [x] **Step 1: Run focused backend verification**
 
 Run:
 
@@ -811,7 +811,13 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused frontend verification**
+Observed PASS using the shared repo virtualenv from this worktree:
+
+```bash
+source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_sessions.py -q
+```
+
+- [x] **Step 2: Run focused frontend verification**
 
 Run from `apps/packages/ui`:
 
@@ -826,7 +832,9 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run OpenAPI path verification**
+Observed PASS: 5 files, 107 tests passed.
+
+- [x] **Step 3: Run OpenAPI path verification**
 
 Run from `apps/packages/ui`:
 
@@ -836,7 +844,9 @@ bun run verify:openapi
 
 Expected: PASS. If it fails because the backend OpenAPI snapshot lacks the new routes, regenerate or update the relevant spec snapshot according to the verifier output.
 
-- [ ] **Step 4: Run E2E verification**
+Observed PASS; verifier reported only existing reviewed exception paths and all client paths present.
+
+- [x] **Step 4: Run E2E verification**
 
 Run from `apps/tldw-frontend`:
 
@@ -846,7 +856,13 @@ bunx playwright test e2e/workflows/persona-buddy-interaction.spec.ts --reporter=
 
 Expected: PASS.
 
-- [ ] **Step 5: Run Bandit on touched backend code**
+Observed PASS with isolated server command:
+
+```bash
+TLDW_WEB_URL=http://127.0.0.1:18080 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18080' bunx playwright test e2e/workflows/persona-buddy-interaction.spec.ts --reporter=line
+```
+
+- [x] **Step 5: Run Bandit on touched backend code**
 
 Run:
 
@@ -862,7 +878,9 @@ python -m bandit -r \
 
 Expected: command exits 0 or reports no new findings in touched code. If findings appear, fix them before finalizing.
 
-- [ ] **Step 6: Run whitespace check**
+Observed PASS; JSON report written to `/tmp/bandit_persona_buddy_live_control.json`.
+
+- [x] **Step 6: Run whitespace check**
 
 Run:
 
@@ -872,7 +890,9 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 7: Update Backlog final summary**
+Observed PASS; no output.
+
+- [x] **Step 7: Update Backlog final summary**
 
 If executing this plan, update the relevant implementation Backlog task with:
 
@@ -881,7 +901,7 @@ If executing this plan, update the relevant implementation Backlog task with:
 3. known skips,
 4. PR link once opened.
 
-- [ ] **Step 8: Final commit**
+- [x] **Step 8: Final commit**
 
 ```bash
 git status --short
