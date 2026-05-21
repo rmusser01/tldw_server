@@ -49,7 +49,7 @@ export const VoiceTranscriptComposer: React.FC<VoiceTranscriptComposerProps> = (
         </div>
         {!supported && (
           <Alert
-            variant="info"
+            variant="error"
             title={t("option:flashcards.studyAssistantVoiceUnavailable", {
               defaultValue: "Voice transcript is unavailable in this browser."
             })}

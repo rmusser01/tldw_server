@@ -4,14 +4,14 @@ title: Migrate VoiceTranscriptComposer unsupported alert to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-21 00:34'
+updated_date: 2026-05-21 00:34
 labels:
-  - design-system
-  - product-state
-  - ui
+- design-system
+- product-state
+- ui
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/1897'
+- https://github.com/rmusser01/tldw_server/pull/1897
 ---
 
 ## Description
@@ -50,7 +50,7 @@ Verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated VoiceTranscriptComposer's unsupported-browser voice transcript notice from AntD Alert to the canonical design-system Alert, added focused product-state coverage, and removed the VoiceTranscriptComposer baseline exception. Product-state baseline exceptions reduced from 326 to 325.
+Migrated VoiceTranscriptComposer's unsupported-browser voice transcript notice from AntD Alert to the canonical design-system Alert, added focused product-state coverage, removed the VoiceTranscriptComposer baseline exception, and addressed PR review feedback by mapping the unavailable state to the design-system Alert error variant. Product-state baseline exceptions remain 325.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

@@ -51,5 +51,6 @@ describe("VoiceTranscriptComposer product-state UI", () => {
     expect(
       unavailableMessage.closest('[data-ds-component="Alert"]')
     ).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toContainElement(unavailableMessage)
   })
 })
