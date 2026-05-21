@@ -8,9 +8,8 @@ export type HeaderActionPolicy = {
 const normalizePathname = (pathname: string): string => {
   const trimmed = pathname.trim()
   if (!trimmed || trimmed === "/") return "/"
-  return trimmed.endsWith("/") && trimmed.length > 1
-    ? trimmed.slice(0, -1)
-    : trimmed
+  const withoutTrailingSlashes = trimmed.replace(/\/+$/, "")
+  return withoutTrailingSlashes || "/"
 }
 
 export const isMainChatRoute = (pathname: string): boolean =>

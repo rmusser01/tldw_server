@@ -75,13 +75,9 @@ export const Header: React.FC<Props> = ({
   const [shareLabel, setShareLabel] = React.useState("")
   const [shareError, setShareError] = React.useState<string | null>(null)
   const [copiedShareId, setCopiedShareId] = React.useState<string | null>(null)
-  const normalizedPath =
-    location.pathname.length > 1 && location.pathname.endsWith("/")
-      ? location.pathname.slice(0, -1)
-      : location.pathname
   const headerActionPolicy = React.useMemo(
-    () => getHeaderActionPolicy(normalizedPath),
-    [normalizedPath]
+    () => getHeaderActionPolicy(location.pathname),
+    [location.pathname]
   )
   const isChatRoute = headerActionPolicy.showChatSessionActions
 

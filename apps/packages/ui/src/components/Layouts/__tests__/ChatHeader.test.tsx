@@ -53,7 +53,6 @@ const createProps = (overrides: Partial<React.ComponentProps<typeof ChatHeader>>
   onOpenSettings: vi.fn(),
   onToggleTheme: vi.fn(),
   themeMode: "dark" as const,
-  onClearChat: vi.fn(),
   onStartSavedChat: vi.fn(),
   onStartTemporaryChat: vi.fn(),
   onStartCharacterChat: vi.fn(),

@@ -29,7 +29,15 @@ describe("getHeaderActionPolicy", () => {
     })
   })
 
-  it("normalizes trailing slashes before classifying chat routes", () => {
-    expect(getHeaderActionPolicy("/chat/").showChatSessionActions).toBe(true)
-  })
+  it.each(["/chat/", "/chat//"])(
+    "normalizes trailing slashes before classifying chat routes: %s",
+    (pathname) => {
+      expect(getHeaderActionPolicy(pathname)).toMatchObject({
+        showChatSessionActions: true,
+        showChatTitle: true,
+        showSessionModeBadge: true,
+        showShareConversation: true,
+      })
+    }
+  )
 })
