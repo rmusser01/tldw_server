@@ -41,7 +41,7 @@ def _clear_overrides_and_registry():
     persona_live_stream_registry.clear()
 
 
-def _client_for_user(user_id: int, db: CharactersRAGDB):
+def _client_for_user(user_id: int, db: CharactersRAGDB) -> TestClient:
     async def override_user():
         return User(id=user_id, username=f"user-{user_id}", email=None, is_active=True)
 
@@ -292,6 +292,40 @@ def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db:
     assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
 
 
+def test_live_session_idempotency_key_ignores_stopped_session(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+
+    with _client_for_user(1, persona_db) as client:
+        first = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "research_assistant",
+                "reuse_policy": "create_new",
+                "idempotency_key": "retry-after-stop",
+                "surface": "companion.conversation",
+            },
+        )
+        assert first.status_code == 200
+        first_session_id = first.json()["session"]["session_id"]
+        stopped = client.post(f"/api/v1/persona/live/sessions/{first_session_id}/stop")
+        second = client.post(
+            "/api/v1/persona/live/sessions",
+            json={
+                "persona_id": "research_assistant",
+                "reuse_policy": "create_new",
+                "idempotency_key": "retry-after-stop",
+                "surface": "companion.conversation",
+            },
+        )
+
+    assert stopped.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["session"]["session_id"] != first_session_id
+    stopped_row = persona_db.get_persona_session(first_session_id, user_id="1", include_deleted=False)
+    assert stopped_row is not None
+    assert "create_idempotency_key" not in stopped_row["preferences"].get("persona_live_control", {})
+
+
 def test_live_session_create_new_unknown_persona_returns_not_found(
     monkeypatch,
     persona_db: CharactersRAGDB,
@@ -511,6 +545,38 @@ def test_live_session_focus_and_stop_preserve_unrelated_preferences(monkeypatch,
         assert stopped_row is not None
         assert stopped_row["preferences"]["use_memory_context"] is False
         assert stopped_row["preferences"]["custom_nested"] == {"retained": True}
+
+
+def test_live_session_focus_preserves_fresh_preference_state(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id="sess-race",
+        preferences={"use_memory_context": True},
+    )
+    stale_row = persona_db.get_persona_session("sess-race", user_id="1", include_deleted=False)
+    assert stale_row is not None
+    fresh_preferences = dict(stale_row["preferences"])
+    fresh_preferences["concurrent_setting"] = "kept"
+    persona_db.update_persona_session(
+        session_id="sess-race",
+        user_id="1",
+        update_data={"preferences_json": fresh_preferences},
+    )
+
+    live_control_module._update_live_control_preferences(
+        persona_db,
+        row=stale_row,
+        user_id="1",
+        focus={"focused": True, "focused_at": "2026-05-20T00:00:00+00:00", "focus_generation": 12},
+    )
+
+    focused_row = persona_db.get_persona_session("sess-race", user_id="1", include_deleted=False)
+    assert focused_row is not None
+    assert focused_row["preferences"]["concurrent_setting"] == "kept"
 
 
 def test_live_sessions_ignore_stale_focused_closed_session(monkeypatch, persona_db: CharactersRAGDB):
@@ -744,6 +810,40 @@ def test_live_session_list_reports_focus_outside_returned_page(monkeypatch, pers
     payload = listed.json()
     assert payload["focused_session_id"] == focused_session_id
     assert focused_session_id not in {item["session_id"] for item in payload["sessions"]}
+
+
+def test_live_session_list_detects_pretty_printed_focus_metadata(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    focused_session_id = "sess-pretty-focused"
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id=focused_session_id,
+        preferences={
+            "persona_live_control": {
+                "focus": {
+                    "focused": True,
+                    "focused_at": "2026-05-20T00:00:00+00:00",
+                    "focus_generation": 11,
+                }
+            }
+        },
+    )
+    row = persona_db.get_persona_session(focused_session_id, user_id="1", include_deleted=False)
+    assert row is not None
+    persona_db.update_persona_session(
+        session_id=focused_session_id,
+        user_id="1",
+        update_data={"preferences_json": json.dumps(row["preferences"], indent=2, sort_keys=True)},
+    )
+
+    with _client_for_user(1, persona_db) as client:
+        listed = client.get("/api/v1/persona/live/sessions")
+
+    assert listed.status_code == 200
+    assert listed.json()["focused_session_id"] == focused_session_id
 
 
 def test_live_session_list_does_not_paginate_all_sessions_for_focus(monkeypatch, persona_db: CharactersRAGDB):

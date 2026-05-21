@@ -356,6 +356,7 @@ def list_live_session_summaries(
     limit: int = 100,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
+    """Return bounded Persona Live session summaries plus the current focused session id."""
     normalized_surface = normalize_persona_activity_surface(surface) if surface is not None else None
     rows = db.list_persona_sessions(
         user_id=user_id,
@@ -404,6 +405,8 @@ def _find_session_by_idempotency_key(
         surface=normalize_persona_activity_surface(surface),
     )
     for row in rows:
+        if _is_terminal(row):
+            continue
         live = _live_control_preferences(row)
         if str(live.get("create_idempotency_key") or "") == idempotency_key:
             return row
@@ -440,6 +443,7 @@ def create_or_resume_live_session(
     surface: str | None = None,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
+    """Create or resume a Persona Live session using the requested reuse policy and focus it."""
     resolved_persona_id = _resolve_live_control_persona_id(db, user_id=user_id, persona_id=persona_id)
     requested_key = str(idempotency_key or "").strip() or None
     row: dict[str, Any] | None = None
@@ -505,18 +509,20 @@ def focus_live_session(
     session_id: str,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
+    """Mark one non-terminal Persona Live session as focused and clear prior focused rows."""
     row = _load_owned_session_or_raise(db, user_id=user_id, session_id=session_id)
     if _is_terminal(row):
         raise ValueError("Cannot focus a terminal persona session.")
     generation = _next_focus_generation()
     focused_at = _utc_now_iso()
     previously_focused_rows = _focused_session_rows(db, user_id=user_id)
+    fresh_target_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     _update_preferences(
         db,
-        row=row,
+        row=fresh_target_row,
         user_id=user_id,
         preferences=_live_preferences_patch(
-            row,
+            fresh_target_row,
             focus={"focused": True, "focused_at": focused_at, "focus_generation": generation},
         ),
     )
@@ -547,6 +553,7 @@ def stop_live_session(
     session_id: str,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
+    """Stop a Persona Live session and remove live-control focus/idempotency metadata."""
     row = _load_owned_session_or_raise(db, user_id=user_id, session_id=session_id)
     if _is_terminal(row):
         return build_live_session_summary(
@@ -557,7 +564,7 @@ def stop_live_session(
             stream_registry=stream_registry,
         )
     fresh_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
-    preferences = _live_preferences_patch(fresh_row, focus={"focused": False})
+    preferences = _live_preferences_patch(fresh_row, focus={"focused": False}, idempotency_key=None)
     db.update_persona_session(
         session_id=session_id,
         user_id=user_id,

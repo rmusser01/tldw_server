@@ -3775,17 +3775,21 @@ class PersonaStateStore:
         clauses = [
             "user_id = ?",
             "status NOT IN (?, ?)",
-            "preferences_json LIKE ?",
-            "(preferences_json LIKE ? OR preferences_json LIKE ?)",
         ]
         params: list[Any] = [
             user_id,
             "closed",
             "archived",
-            '%"persona_live_control"%',
-            '%"focused": true%',
-            '%"focused":true%',
         ]
+        if self.backend_type == BackendType.POSTGRESQL:
+            clauses.append("(preferences_json::jsonb #>> '{persona_live_control,focus,focused}') = 'true'")
+        else:
+            clauses.extend(
+                [
+                    "json_valid(preferences_json) = 1",
+                    "json_extract(preferences_json, '$.persona_live_control.focus.focused') = 1",
+                ]
+            )
         if persona_id is not None:
             clauses.append("persona_id = ?")
             params.append(persona_id)

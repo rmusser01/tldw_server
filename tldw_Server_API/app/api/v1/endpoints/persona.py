@@ -7488,6 +7488,7 @@ async def persona_session(
     response_model=PersonaLiveSessionListResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
 )
 async def persona_live_sessions(
     persona_id: str | None = Query(default=None),
@@ -7518,6 +7519,7 @@ async def persona_live_sessions(
     response_model=PersonaLiveSessionFocusResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
 )
 async def persona_live_session_create(
     req: PersonaLiveSessionCreateRequest = Body(...),
@@ -7554,6 +7556,7 @@ async def persona_live_session_create(
     response_model=PersonaLiveSessionFocusResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
 )
 async def persona_live_session_focus(
     session_id: str,
@@ -7586,6 +7589,7 @@ async def persona_live_session_focus(
     response_model=PersonaLiveSessionStopResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_rate_limit)],
 )
 async def persona_live_session_stop(
     session_id: str,

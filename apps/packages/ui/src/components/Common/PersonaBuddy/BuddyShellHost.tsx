@@ -5,6 +5,7 @@ import { useSetting } from "@/hooks/useSetting"
 import { useDesktop } from "@/hooks/useMediaQuery"
 import { usePersonaLiveControl } from "@/hooks/usePersonaLiveControl"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import {
   getPersonaVisualPack,
   listPersonaVisualPacks
@@ -377,8 +378,10 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       }),
     [renderContext, selectedAssistant]
   )
+  const { capabilities } = useServerCapabilities()
+  const liveControlEnabled = Boolean(capabilities?.hasPersonaLiveControl)
   const liveControl = usePersonaLiveControl({
-    autoLoad: resolvedPersona.hasTargetPersona,
+    autoLoad: resolvedPersona.hasTargetPersona && liveControlEnabled,
     defaultPersonaId: resolvedPersona.activePersonaId,
     surface: renderContext.surface_id
   })
@@ -618,7 +621,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       visualPack={visualPack}
       visualState={visualState}
       visualDiagnostic={visualDiagnostic}
-      liveControl={liveControl}
+      liveControl={liveControlEnabled ? liveControl : null}
       onVisualRenderError={handleVisualRenderError}
       position={position}
       onToggle={() => setOpen(!isOpen)}

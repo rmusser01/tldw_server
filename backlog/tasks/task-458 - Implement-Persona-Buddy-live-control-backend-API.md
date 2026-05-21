@@ -110,6 +110,17 @@ Final targeted review:
 - spec compliance targeted re-review -> clean
 - code quality targeted re-review -> clean
 
+Seventh follow-up review fixes:
+- added rate limiting dependencies to all Persona Live control REST routes
+- made create idempotency ignore stopped sessions and clear the key when stopping
+- updated focus writes to preserve fresh target-session preferences while keeping prior focused-row updates targeted
+- replaced format-sensitive focused-session JSON `LIKE` matching with backend JSON-path predicates
+- added regressions for stopped idempotency reuse, fresh preference preservation, and pretty-printed focus metadata
+
+Verification:
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_sessions.py -q` -> 50 passed, 5 warnings
+- `bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx` -> 31 passed
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
