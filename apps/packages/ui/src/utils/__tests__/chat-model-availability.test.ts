@@ -935,6 +935,39 @@ describe("character chat readiness", () => {
     })
   })
 
+  it("blocks provider-unconfigured selected models persisted with the tldw provider-qualified prefix", () => {
+    expect(
+      buildCharacterChatReadiness({
+        isServerConnected: true,
+        selectedCharacter: { id: 1, name: "Ariadne" },
+        selectedModel: "tldw:openai:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false,
+            provider_is_configured: false,
+            catalog_only: true
+          } as any,
+          {
+            id: "gemma3:1b",
+            model: "tldw:gemma3:1b",
+            provider: "ollama",
+            is_configured: true,
+            provider_is_configured: true,
+            catalog_only: false
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "blocked",
+      missingRequirement: "chat-model",
+      reason: "provider-unconfigured",
+      recommendedAction: "open-model-settings"
+    })
+  })
+
   it("blocks selected catalog-only models from the real backend model catalog", () => {
     expect(
       buildCharacterChatReadiness({

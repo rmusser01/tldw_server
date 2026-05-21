@@ -1,10 +1,10 @@
 ---
 id: TASK-457
 title: Implement Character Chat Phase 7 model usability and send gating
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-21 02:12'
+updated_date: '2026-05-21 07:25'
 labels:
   - character-chat
   - roleplay
@@ -34,7 +34,7 @@ Implement Phase 7 from the Character Chat first-class PRD and implementation pla
 - [x] #2 Character Chat readiness panel, status strip, runtime inspector, composition preview, model selector copy, and SEND action consume one shared model-usability result and do not show positive health copy for unusable models.
 - [x] #3 Character selected plus no usable model blocks or converts SEND into a setup action without invoking submit, without calling /complete-v2, and without losing draft/character/session state.
 - [x] #4 Provider/model setup failures show actionable model/provider recovery copy instead of generic retry-only guidance when the failure is configuration-specific.
-- [ ] #5 Real-backend Playwright verification covers no-provider/send-gating without simulated frontend responses; successful-send is verified only through a real callable provider or explicitly marked blocked by environment.
+- [x] #5 Real-backend Playwright verification covers no-provider/send-gating without simulated frontend responses; successful-send is verified only through a real callable provider or explicitly marked blocked by environment.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -63,19 +63,22 @@ Task 4 local TDD: added PlaygroundSendControl character-gating coverage, then im
 Task 5 local TDD: added failing dropdown and form-level tests for Character Chat model-usability selector copy. Implemented optional model-usability label/title/warning props on ChatModelSelectorDropdown, suppressed the generic positive connection-health badge when a model-usability override is active, and passed Character Chat model-usability label/title from Playground through PlaygroundForm. The selector now keeps provider/model identity visible while showing copy such as Provider setup needed or Checking model readiness, without Healthy/Ready copy for blocked/loading usability. Verification: selector/form suite passed with 2 files / 6 tests; broader Phase 7 focused suite passed with 8 files / 115 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files. Bandit not applicable for this Task 5 slice because touched code is TypeScript/TSX and docs only.
 
 Task 6 local TDD: added provider/model recovery coverage for Character Chat stream failures and the existing Playground error banner. Implemented conservative structured failure classification so provider_not_configured/missing API key and model-not-callable failures encode an open-model-settings recovery payload while arbitrary 503s remain retry/transient. The banner now opens model settings for local recovery payloads instead of defaulting to Health & diagnostics. Updated the starter integration test for current dev's collapsed Explore chat modes entrypoint after rebasing. Verification: focused Task 6 suite passed with 2 files / 10 tests; broader Phase 7 focused suite passed with 10 files / 125 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files. Bandit not applicable for this Task 6 slice because touched implementation/test files are TypeScript/TSX/docs/backlog only.
+
+Task 7 real-backend verification: added `apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts`, which creates a real character through the FastAPI backend, selects a real backend-advertised blocked model, observes network calls without simulating successful chat responses, verifies Character Chat setup surfaces align, preserves draft/character state, and asserts no `/api/v1/chats/*/complete-v2` request is made while blocked. The spec also contains opt-in real provider-failure and successful-send scenarios that skip unless the environment provides explicit real models for those checks. Real-browser verification exposed that the domain `models-audio` client mixin dropped backend model readiness flags before caching, so Task 7 preserves `is_configured`, `provider_is_configured`, and `catalog_only`, adds a regression in `tldw-api-client.models-normalization.test.ts`, and bumps `TldwModels` cache schema to 6 to evict stale readiness caches. Verification: backend health `status: ok`; focused Vitest suite passed with 6 files / 110 tests; real-backend Playwright suite passed with 1 passed / 2 skipped. The two skips were intentional environment skips: no explicit forced provider-failure model, and no non-local/non-custom callable model to prove successful-send without simulation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Phase 7 is complete for the scoped Character Chat model-usability/send-gating slice. The WebUI now uses one model-usability contract across readiness, status, runtime/composition, model selector, and composer SEND behavior; blocked Character Chat sends become setup/recovery actions without losing draft or character state and without calling `/complete-v2`. Real-backend E2E verification covers the blocked no-provider/catalog-only path without simulated successful responses; provider-failure and successful-send checks remain opt-in/skipped unless a suitable real model is configured.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

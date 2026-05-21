@@ -131,6 +131,9 @@ export const modelsAudioMethods = {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
+        is_configured: m.is_configured,
+        provider_is_configured: m.provider_is_configured,
+        catalog_only: m.catalog_only,
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {

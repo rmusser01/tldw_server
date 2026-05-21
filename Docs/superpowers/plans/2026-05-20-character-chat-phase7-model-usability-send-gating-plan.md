@@ -777,10 +777,13 @@ git commit -m "feat: recover character chat model failures"
 ## Task 7: Real-Backend E2E Verification
 
 **Files:**
-- Create: `apps/tldw-frontend/tests/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts`
-- Optional modify: existing Playwright config only if needed for stable selectors
+- Create: `apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts`
+- Modify: `apps/packages/ui/src/services/tldw/domains/models-audio.ts`
+- Modify: `apps/packages/ui/src/services/tldw/TldwModels.ts`
+- Test: `apps/packages/ui/src/services/__tests__/tldw-api-client.models-normalization.test.ts`
+- Test: `apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts`
 
-- [ ] **Step 1: Write a no-provider/send-gating Playwright test**
+- [x] **Step 1: Write a no-provider/send-gating Playwright test**
 
 The test must run against a real backend URL and real WebUI. It may intercept requests only to observe that `/complete-v2` was not called; it must not simulate a successful character response.
 
@@ -797,24 +800,24 @@ Test flow:
    - selected character remains active
    - no `/api/v1/chats/*/complete-v2` request was made
 
-- [ ] **Step 2: Write a provider-failure recovery test when the environment supports it**
+- [x] **Step 2: Write a provider-failure recovery test when the environment supports it**
 
 Use a real backend provider path that returns a real provider/configuration failure. Do not replace backend responses in the browser.
 
 If the environment lacks a controlled provider-failure setup, mark this scenario skipped with a precise reason and keep the no-provider/send-gating test active.
 
-- [ ] **Step 3: Write successful-send test only when a real callable provider is configured**
+- [x] **Step 3: Write successful-send test only when a real callable provider is configured**
 
 If a real local or external provider is configured, add a successful character message test that proves `/complete-v2` returns a character response.
 
 If no callable provider is available, explicitly mark successful-send signoff blocked in the test output or verification notes. Do not use frontend interception as proof.
 
-- [ ] **Step 4: Run the Playwright test against real backend**
+- [x] **Step 4: Run the Playwright test against real backend**
 
 Use the project's existing environment variables:
 
 ```bash
-TLDW_E2E_SERVER_URL=127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test tests/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts --reporter=line
+TLDW_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts --project=journeys --reporter=line
 ```
 
 Expected:
@@ -823,10 +826,20 @@ Expected:
 - Provider-failure passes or is skipped with an environment reason.
 - Successful-send passes only when a real callable provider is configured; otherwise it is marked blocked, not faked.
 
-- [ ] **Step 5: Commit Task 7**
+Actual verification on 2026-05-21 against the real FastAPI backend at `http://127.0.0.1:8000`:
+
+- Backend health returned `status: ok` with `auth_mode: single_user`.
+- Focused Vitest suite passed: `6` files, `110` tests.
+- Real-backend Playwright suite passed with `1 passed, 2 skipped`.
+- The active no-provider/send-gating scenario used the backend-advertised OpenAI `gpt-4o` catalog-only/unconfigured model and verified blocked readiness, preserved draft/character state, and no `/api/v1/chats/*/complete-v2` call.
+- Provider-failure and successful-send scenarios skipped because this environment exposes no explicit forced provider-failure model and no non-local/non-custom callable model. Local/custom-risk providers were intentionally not used as proof.
+
+Implementation note: Real-browser verification exposed that the domain `models-audio` client mixin was dropping `is_configured`, `provider_is_configured`, and `catalog_only` before `TldwModels` cached the catalog. Task 7 now preserves those flags and bumps the model cache schema to evict stale readiness caches.
+
+- [x] **Step 5: Commit Task 7**
 
 ```bash
-git add apps/tldw-frontend/tests/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts
+git add apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts apps/packages/ui/src/services/tldw/domains/models-audio.ts apps/packages/ui/src/services/tldw/TldwModels.ts apps/packages/ui/src/services/__tests__/tldw-api-client.models-normalization.test.ts apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts
 git commit -m "test: cover character chat readiness gating e2e"
 ```
 
