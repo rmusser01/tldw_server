@@ -95,7 +95,8 @@ const QUICK_SETUP_STEP_FIELDS: Array<Array<keyof QuickSetupValues>> = [
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
-const extractPipelineErrorMessage = (error: unknown): string => {
+export const extractPipelineErrorMessage = (error: unknown): string => {
+  if (typeof error === "string") return error.trim()
   if (!isRecord(error)) {
     return error instanceof Error && error.message.trim().length > 0
       ? error.message.trim()

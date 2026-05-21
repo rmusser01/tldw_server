@@ -3,7 +3,7 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { OverviewTab } from "../OverviewTab"
+import { extractPipelineErrorMessage, OverviewTab } from "../OverviewTab"
 import { QUICK_SETUP_DEFAULT_VALUES } from "../quick-setup"
 
 const ONBOARDING_PATH_STORAGE_KEY = "watchlists:onboarding-path:v1"
@@ -201,6 +201,25 @@ const selectPipelineFeed = async (label: string) => {
     expect(checkbox).toBeChecked()
   })
 }
+
+describe("extractPipelineErrorMessage", () => {
+  it("preserves string and structured error details", () => {
+    expect(extractPipelineErrorMessage("template_not_found: briefing_markdown")).toBe(
+      "template_not_found: briefing_markdown"
+    )
+    expect(
+      extractPipelineErrorMessage({
+        response: {
+          data: {
+            detail: {
+              message: "template_not_found: briefing_markdown"
+            }
+          }
+        }
+      })
+    ).toBe("template_not_found: briefing_markdown")
+  })
+})
 
 describe("OverviewTab quick setup flow", () => {
   beforeEach(() => {
