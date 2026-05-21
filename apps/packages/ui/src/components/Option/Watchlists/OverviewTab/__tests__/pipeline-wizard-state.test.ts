@@ -199,4 +199,77 @@ describe("watchlists pipeline wizard state", () => {
       audio: "1 speaker audio briefing"
     })
   })
+
+  it("serializes weekdays and advanced cadence without changing backend schedule fields", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+    const base = {
+      ...createDefaultPipelineWizardDraft(),
+      sourceMode: "existing" as const,
+      sourceIds: [10],
+      monitorName: "Cadence Brief",
+      templateName: "briefing_md",
+      audioEnabled: false,
+      audioSpeakers: []
+    }
+
+    expect(
+      toBriefingPipelineDraft({
+        ...base,
+        scheduleMode: "weekdays",
+        scheduleHour: 8,
+        scheduleMinute: 15
+      })
+    ).toEqual(
+      expect.objectContaining({
+        scheduleExpr: "15 8 * * MON-FRI",
+        timezone: "UTC"
+      })
+    )
+
+    expect(
+      toBriefingPipelineDraft({
+        ...base,
+        scheduleMode: "advanced",
+        scheduleAdvancedCron: "20 6 * * TUE"
+      })
+    ).toEqual(
+      expect.objectContaining({
+        scheduleExpr: "20 6 * * TUE",
+        timezone: "UTC"
+      })
+    )
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("summarizes one-source and audio-off review states without podcast assumptions", () => {
+    const summary = buildPipelineWizardReviewSummary(
+      {
+        ...createDefaultPipelineWizardDraft(),
+        sourceMode: "existing",
+        sourceIds: [7],
+        monitorName: "Manual Brief",
+        scheduleMode: "manual",
+        templateName: "briefing_md",
+        audioEnabled: false,
+        audioSpeakers: []
+      },
+      [{ id: 7, name: "AI Feed" }]
+    )
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        sources: "AI Feed",
+        cadence: "Manual only",
+        audio: "Audio disabled"
+      })
+    )
+  })
 })

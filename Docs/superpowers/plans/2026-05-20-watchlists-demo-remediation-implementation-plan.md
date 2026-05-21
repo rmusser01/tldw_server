@@ -1047,7 +1047,7 @@ git diff --check
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx`
 
-- [ ] **Step 1: Write schedule utility tests**
+- [x] **Step 1: Write schedule utility tests**
 
 Add cases for:
 
@@ -1061,13 +1061,13 @@ Expected payload examples:
 
 ```ts
 expect(resolveQuickSetupSchedule({ kind: "interval", unit: "hour", every: 5 }))
-  .toMatchObject({ schedule_type: "interval", interval_hours: 5 })
+  .toMatchObject({ schedule_expr: "0 */5 * * *" })
 
 expect(resolveQuickSetupSchedule({ kind: "weekly", weekday: "mon", time: "08:00" }))
-  .toMatchObject({ schedule_type: "cron" })
+  .toMatchObject({ schedule_expr: "0 8 * * MON" })
 ```
 
-- [ ] **Step 2: Write review summary tests**
+- [x] **Step 2: Write review summary tests**
 
 In `PipelineWizard.test.tsx`, assert:
 
@@ -1075,7 +1075,7 @@ In `PipelineWizard.test.tsx`, assert:
 - audio off displays only text digest/report copy.
 - audio on displays "1 speaker", "2 speakers", "3 speakers", or "4 speakers" based on the cast, not a fixed 3-person podcast assumption.
 
-- [ ] **Step 3: Run tests and confirm failure**
+- [x] **Step 3: Run tests and confirm failure**
 
 Run:
 
@@ -1087,9 +1087,9 @@ bunx vitest run \
   --maxWorkers=1 --no-file-parallelism
 ```
 
-Expected: FAIL for unsupported variable cadence and existing summary contradictions.
+Observed: FAIL for unsupported cadence-draft serialization and missing weekdays/advanced cron wizard options.
 
-- [ ] **Step 4: Extend schedule draft model**
+- [x] **Step 4: Extend schedule draft model**
 
 In `quick-setup.ts` and `pipeline-contract.ts`, represent cadence as:
 
@@ -1103,15 +1103,15 @@ type WatchlistCadenceDraft =
   | { kind: "advanced"; cron: string }
 ```
 
-- [ ] **Step 5: Implement variable cadence conversion**
+- [x] **Step 5: Implement variable cadence conversion**
 
 Map interval and weekly drafts into the existing job schedule payload shape already accepted by `JobFormModal`/backend. Do not invent a new backend schedule contract unless current fields cannot express the cadence.
 
-- [ ] **Step 6: Update wizard controls**
+- [x] **Step 6: Update wizard controls**
 
-In `PipelineWizard.tsx`, add variable cadence controls using the existing SchedulePicker patterns. Keep advanced cron behind an explicit advanced disclosure.
+In `PipelineWizard.tsx`, add variable cadence controls using the existing schedule utility patterns. Keep advanced cron behind an explicit advanced cadence choice.
 
-- [ ] **Step 7: Fix review summary**
+- [x] **Step 7: Fix review summary**
 
 Use normalized draft state, not stale form labels, for:
 
@@ -1122,7 +1122,7 @@ Use normalized draft state, not stale form labels, for:
 - optional audio speaker count
 - first-run behavior
 
-- [ ] **Step 8: Run focused tests**
+- [x] **Step 8: Run focused tests**
 
 Run:
 
@@ -1136,7 +1136,7 @@ bunx vitest run \
   --maxWorkers=1 --no-file-parallelism
 ```
 
-Expected: PASS.
+Observed from `apps/packages/ui`: PASS, 6 files and 35 tests.
 
 - [ ] **Step 9: Commit**
 

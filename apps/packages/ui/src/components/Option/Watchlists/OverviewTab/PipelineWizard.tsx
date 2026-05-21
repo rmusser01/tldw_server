@@ -169,7 +169,9 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
       { value: "manual", label: t("watchlists:overview.pipelineSetup.schedule.manual", "Manual only") },
       { value: "interval", label: t("watchlists:overview.pipelineSetup.schedule.interval", "Every N hours/minutes") },
       { value: "daily", label: t("watchlists:overview.pipelineSetup.schedule.daily", "Daily") },
-      { value: "weekly", label: t("watchlists:overview.pipelineSetup.schedule.weekly", "Weekly") }
+      { value: "weekdays", label: t("watchlists:overview.pipelineSetup.schedule.weekdays", "Weekdays") },
+      { value: "weekly", label: t("watchlists:overview.pipelineSetup.schedule.weekly", "Weekly") },
+      { value: "advanced", label: t("watchlists:overview.pipelineSetup.schedule.advanced", "Advanced cron") }
     ],
     [t]
   )
@@ -235,6 +237,10 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
           "Weekly on {{weekday}} at {{time}}",
           { weekday, time }
         ),
+      weekdays: (time: string) =>
+        t("watchlists:overview.pipelineSetup.review.cadence.weekdays", "Weekdays at {{time}}", { time }),
+      advanced: (cron: string) =>
+        t("watchlists:overview.pipelineSetup.review.cadence.advanced", "Custom cron: {{cron}}", { cron }),
       weekdayLabels: weekdayLabelByToken
     }
   }), [t, weekdayLabelByToken])
@@ -262,7 +268,13 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         return draft.sourceMode === "new" ? ["sourceName", "sourceUrl"] : ["sourceIds"]
       }
       if (currentStep === 1) {
-        return ["monitorName", "scheduleIntervalValue", "scheduleHour", "scheduleMinute"]
+        return [
+          "monitorName",
+          "scheduleIntervalValue",
+          "scheduleHour",
+          "scheduleMinute",
+          "scheduleAdvancedCron"
+        ]
       }
       if (currentStep === 2) return ["templateName", "emailRecipients"]
       if (currentStep === 3) {
@@ -295,7 +307,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         "monitorName",
         "scheduleIntervalValue",
         "scheduleHour",
-        "scheduleMinute"
+        "scheduleMinute",
+        "scheduleAdvancedCron"
       ].includes(firstError)) setCurrentStep(1)
       else if (["templateName", "emailRecipients"].includes(firstError)) setCurrentStep(2)
       else setCurrentStep(3)
@@ -458,7 +471,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 aria-label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}
                 value={draft.scheduleMode}
                 options={scheduleOptions}
-                onChange={(value) => updateDraft({ scheduleMode: value })}
+                onChange={(value) => updateDraft({ scheduleMode: value as PipelineWizardScheduleMode })}
               />
             </Form.Item>
             {draft.scheduleMode === "interval" && (
@@ -487,7 +500,11 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 </Form.Item>
               </div>
             )}
-            {(draft.scheduleMode === "daily" || draft.scheduleMode === "weekly") && (
+            {(
+              draft.scheduleMode === "daily" ||
+              draft.scheduleMode === "weekdays" ||
+              draft.scheduleMode === "weekly"
+            ) && (
               <div className="grid gap-3 sm:grid-cols-3">
                 {draft.scheduleMode === "weekly" && (
                   <Form.Item label={t("watchlists:overview.pipelineSetup.fields.weekday", "Weekday")}>
@@ -528,6 +545,25 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                   />
                 </Form.Item>
               </div>
+            )}
+            {draft.scheduleMode === "advanced" && (
+              <Form.Item
+                label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")}
+                validateStatus={stepErrors.includes("scheduleAdvancedCron") ? "error" : undefined}
+                help={stepErrors.includes("scheduleAdvancedCron")
+                  ? t(
+                    "watchlists:overview.pipelineSetup.validation.cronExpression",
+                    "Enter a 5-field cron expression."
+                  )
+                  : undefined}
+              >
+                <Input
+                  aria-label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")}
+                  placeholder="0 8 * * MON-FRI"
+                  value={draft.scheduleAdvancedCron}
+                  onChange={(event) => updateDraft({ scheduleAdvancedCron: event.target.value })}
+                />
+              </Form.Item>
             )}
             <Form.Item label={t("watchlists:overview.pipelineSetup.fields.runNow", "Run immediately")}>
               <Switch

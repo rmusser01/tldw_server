@@ -227,6 +227,32 @@ describe("PipelineWizard", () => {
     expect(getDialogQueries().getByLabelText("Every")).toHaveAttribute("aria-valuemax", "59")
   })
 
+  it("offers weekdays and advanced cron cadence choices in the monitor step", async () => {
+    renderWizard()
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+    })
+    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
+    })
+    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
+      target: { value: "Weekday Brief" }
+    })
+
+    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Weekdays"))
+    expect(getDialogQueries().getByLabelText("Hour")).toBeInTheDocument()
+    expect(getDialogQueries().getByLabelText("Minute")).toBeInTheDocument()
+
+    fireEvent.mouseDown(getDialogQueries().getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Advanced cron"))
+    expect(getDialogQueries().getByLabelText("Cron expression")).toHaveValue("")
+  })
+
   it("renders preview failures with the design-system Alert", async () => {
     renderWizard({ previewError: "Preview context unavailable" })
 

@@ -5,14 +5,17 @@ import type {
 } from "@/types/watchlists"
 import {
   resolveQuickSetupSchedule,
+  type WatchlistCadenceDraft,
   type QuickSetupSchedulePreset
 } from "./quick-setup"
+import { normalizeWeekdayToken, type WeekdayToken } from "../JobsTab/schedule-utils"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 
 export interface BriefingPipelineDraft {
   monitorName: string
   sourceIds: number[]
   schedulePreset: QuickSetupSchedulePreset
+  scheduleCadence?: WatchlistCadenceDraft
   scheduleExpr?: string | null
   timezone?: string
   templateName: string
@@ -46,11 +49,53 @@ const SCHEDULE_LABELS: Record<QuickSetupSchedulePreset, string> = {
   weekdays: "Weekdays at 08:00"
 }
 
+const WEEKDAY_LABELS: Record<WeekdayToken, string> = {
+  SUN: "Sunday",
+  MON: "Monday",
+  TUE: "Tuesday",
+  WED: "Wednesday",
+  THU: "Thursday",
+  FRI: "Friday",
+  SAT: "Saturday"
+}
+
 const normalizeRecipients = (value: string[] | undefined): string[] => {
   if (!Array.isArray(value)) return []
   return value
     .map((entry) => String(entry || "").trim())
     .filter((entry) => entry.length > 0)
+}
+
+const formatCadenceTime = (value: string | undefined): string => {
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return "08:00"
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return "08:00"
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return "08:00"
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
+const formatScheduleCadenceLabel = (
+  cadence: WatchlistCadenceDraft | undefined,
+  fallback: QuickSetupSchedulePreset
+): string => {
+  if (!cadence) return SCHEDULE_LABELS[fallback]
+  if (cadence.kind === "manual") return "Manual only"
+  if (cadence.kind === "advanced") {
+    const cron = String(cadence.cron || "").trim()
+    return cron ? `Custom cron: ${cron}` : "Custom cron"
+  }
+  if (cadence.kind === "interval") {
+    const value = Math.max(1, Math.floor(Number(cadence.every) || 1))
+    const unit = cadence.unit === "minute" || cadence.unit === "minutes" ? "minute" : "hour"
+    return `Every ${value} ${unit}${value === 1 ? "" : "s"}`
+  }
+  const time = formatCadenceTime("time" in cadence ? cadence.time : undefined)
+  if (cadence.kind === "daily") return `Daily at ${time}`
+  if (cadence.kind === "weekdays") return `Weekdays at ${time}`
+  const weekday = WEEKDAY_LABELS[normalizeWeekdayToken(cadence.weekday)]
+  return `Weekly on ${weekday} at ${time}`
 }
 
 export const validateBriefingPipelineDraft = (
@@ -89,7 +134,7 @@ export const toPipelineJobCreatePayload = (
         schedule_expr: draft.scheduleExpr,
         timezone: draft.timezone
       }
-    : resolveQuickSetupSchedule(draft.schedulePreset)
+    : resolveQuickSetupSchedule(draft.scheduleCadence || draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
   const templateVersionNum = Number(draft.templateVersion)
   const normalizedTemplateVersion =
@@ -228,7 +273,7 @@ export const buildPipelineReviewSummary = (
   if (deliveries.length === 0) deliveries.push("In-app reports")
 
   return {
-    scheduleLabel: SCHEDULE_LABELS[draft.schedulePreset],
+    scheduleLabel: formatScheduleCadenceLabel(draft.scheduleCadence, draft.schedulePreset),
     artifacts,
     deliveries
   }
