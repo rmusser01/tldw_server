@@ -4354,7 +4354,7 @@ describe("SidepanelPersona", () => {
 
     render(<SidepanelPersona mode="companion" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1)
     })
@@ -4459,7 +4459,7 @@ describe("SidepanelPersona", () => {
 
     render(<SidepanelPersona />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
 
     await waitFor(() => {
       expect(mocks.fetchWithAuth).toHaveBeenCalled()
@@ -4604,6 +4604,12 @@ describe("SidepanelPersona", () => {
         return Promise.resolve({
           ok: true,
           json: async () => []
+        })
+      }
+      if (path.includes("/persona/session")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ session_id: "sess-memory-status" })
         })
       }
       return Promise.resolve({
@@ -5333,7 +5339,7 @@ describe("SidepanelPersona", () => {
     })
 
     render(<SidepanelPersona />)
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
 
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1)
@@ -5887,6 +5893,54 @@ describe("SidepanelPersona", () => {
       expect(userMessage?.use_companion_context).toBe(false)
       expect(userMessage?.memory_top_k).toBe(3)
     })
+  })
+
+  it("shows live memory mode status from the selected persona and controls", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: "research_assistant",
+              name: "Research Assistant",
+              mode: "persistent_scoped"
+            }
+          ]
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+
+    const memoryStatus = await screen.findByTestId("persona-memory-status")
+    await waitFor(() => {
+      expect(memoryStatus).toHaveTextContent("Mode: persistent scoped")
+    })
+    expect(memoryStatus).toHaveTextContent("Memory: on")
+    expect(memoryStatus).toHaveTextContent("Top-k: 3")
+    expect(memoryStatus).toHaveTextContent("State context: available")
+
+    fireEvent.click(screen.getByTestId("persona-memory-toggle"))
+
+    expect(memoryStatus).toHaveTextContent("Memory: off")
   })
 
   it("updates persona state-context profile default and applies it to outgoing messages", async () => {

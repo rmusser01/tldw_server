@@ -2982,6 +2982,11 @@ def _persona_info_from_profile(
     return PersonaInfo(
         id=str(profile.get("id") or _DEFAULT_PERSONA_ID),
         name=str(profile.get("name") or _DEFAULT_PERSONA_NAME),
+        mode=_bounded_label(
+            profile.get("mode"),
+            allowed=_PERSONA_RUNTIME_MODES,
+            fallback="session_scoped",
+        ),
         description=description[:300] if description else None,
         voice="default",
         avatar_url=None,
@@ -3123,6 +3128,7 @@ def _persona_catalog_items() -> list[PersonaInfo]:
         PersonaInfo(
             id=_DEFAULT_PERSONA_ID,
             name=_DEFAULT_PERSONA_NAME,
+            mode="session_scoped",
             description=_DEFAULT_PERSONA_DESCRIPTION,
             voice="default",
             avatar_url=None,

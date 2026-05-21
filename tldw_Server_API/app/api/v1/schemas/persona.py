@@ -593,6 +593,7 @@ class PersonaVisualDeactivateResponse(BaseModel):
 class PersonaInfo(BaseModel):
     id: str
     name: str
+    mode: PersonaMode = "session_scoped"
     description: str | None = None
     voice: str | None = None
     avatar_url: str | None = None
