@@ -112,6 +112,9 @@ def test_persona_session_export_returns_selected_session_transcript(monkeypatch,
             turn_type="user_message",
             metadata={
                 "visible": "kept",
+                "optional_value": None,
+                "list_with_null": ["first", None, "last"],
+                "nested": {"kept_null": None},
                 "bytes_base64": "raw-audio",
                 "system_prompt": "hidden prompt",
                 "auth_token": sensitive_value,
@@ -140,7 +143,12 @@ def test_persona_session_export_returns_selected_session_transcript(monkeypatch,
         ]
         assert [turn["event_type"] for turn in payload["turns"]] == ["user_message", "assistant_message"]
         assert payload["turns"][0]["content"] == "hello"
-        assert payload["turns"][0]["metadata"] == {"visible": "kept"}
+        assert payload["turns"][0]["metadata"] == {
+            "list_with_null": ["first", None, "last"],
+            "nested": {"kept_null": None},
+            "optional_value": None,
+            "visible": "kept",
+        }
         assert sensitive_value not in str(payload)
         assert "hidden prompt" not in str(payload)
         assert "raw-audio" not in str(payload)

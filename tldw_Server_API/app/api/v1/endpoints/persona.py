@@ -3199,6 +3199,7 @@ _PERSONA_SESSION_EXPORT_REDACT_KEY_RE = re.compile(
     r"password|policy|secret|system[_-]?prompt|token|tool[_-]?config)",
     re.IGNORECASE,
 )
+_PERSONA_SESSION_EXPORT_DROP = object()
 
 
 def _redacted_persona_export_metadata(
@@ -3216,20 +3217,20 @@ def _redacted_persona_export_metadata(
                 markers.add(marker_path)
                 continue
             sanitized = _redacted_persona_export_metadata(value[raw_key], path=marker_path, markers=markers)
-            if sanitized is not None:
+            if sanitized is not _PERSONA_SESSION_EXPORT_DROP:
                 redacted[key] = sanitized
         return redacted
     if isinstance(value, list):
         sanitized_items: list[Any] = []
         for idx, item in enumerate(value):
             sanitized = _redacted_persona_export_metadata(item, path=f"{path}.{idx}", markers=markers)
-            if sanitized is not None:
+            if sanitized is not _PERSONA_SESSION_EXPORT_DROP:
                 sanitized_items.append(sanitized)
         return sanitized_items
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     markers.add(path)
-    return None
+    return _PERSONA_SESSION_EXPORT_DROP
 
 
 def _persona_session_export_from_db(
