@@ -82,6 +82,8 @@ Export hardening:
 - allow export only for sessions owned by the authenticated user
 - export only the selected session, not all persona history
 - omit or redact secrets, auth material, raw binary audio, and large tool payloads
+- omit or redact hidden system/developer prompts, hidden policy metadata, hidden tool configuration, and tool metadata that was not visible in the live session UI
+- omit non-selected-session memory records and retrieved source payloads that were not shown to the user during the session
 - include enough metadata for audit, such as persona id, session id, timestamps, event types, and redaction markers
 - provide deterministic JSON for machine use and Markdown as a readable convenience, if both are implemented
 
@@ -95,9 +97,9 @@ The current module should expose:
 - retrieval toggle
 - top-k retrieval setting
 - session/persona memory visibility where supported
-- archive or clear controls where backend support already exists or is directly adjacent
+- archive or clear controls only where backend support already exists
 
-Move cross-app personalization, semantic memory tuning, automatic memory merge/prune, and broad long-term curation into a separate future PRD.
+Missing archive or clear controls should be marked as non-blocking follow-up unless they are already supported by the Persona backend. Move cross-app personalization, semantic memory tuning, automatic memory merge/prune, and broad long-term curation into a separate future PRD.
 
 ### Scopes And Policies Editing
 
@@ -125,29 +127,31 @@ Scopes and Policies hardening:
 
 ### Minimal MCP And Tool Capability Discovery
 
-Keep minimal tool discovery and default toolset management in current scope.
+Keep minimal tool discovery and persona-local default selection in current scope.
 
 Persona Garden should show enough tool information for a user to understand what a persona can use and why a tool may be unavailable. This includes:
 
 - visible available tools or tool categories
-- persona default or allowed tools
+- persona-local default or allowed tools selected only from already-authorized tools
 - blocked or unavailable reason text
 - confirmation requirements for impactful tools
 
-Do not expand this into marketplace-style tool installation or admin-level tool lifecycle management in the current PRD.
+Do not expand this into marketplace-style tool installation, global tool configuration, admin-level tool lifecycle management, or global permission changes in the current PRD.
 
 Tool discovery hardening:
 
 - show only tools visible to the authenticated user and current deployment
 - avoid exposing hidden/admin-only tool names through blocked reason text
 - distinguish "not installed", "disabled by server", "not allowed for this persona", and "requires confirmation" where the backend can truthfully report that distinction
-- keep any default-tool save path constrained by persona policy and server capability checks
+- keep any default-tool save path constrained by persona policy, server capability checks, and already-authorized user permissions
 
 ### Static Visual And Persona Media Context
 
 Keep existing static/state visual pack support as persona-owned media context.
 
 The current PRD should acknowledge visual packs, state mappings, and static persona visual feedback where already integrated. It should explicitly avoid making rich avatar animation, visemes, lip-sync, or 3D rendering blockers for current completion.
+
+Current completion creates no new animation, viseme, lip-sync, renderer, or high-frequency visual-runtime requirements. It only acknowledges already-integrated visual pack and static state support.
 
 ### Security And Reliability Completion
 
@@ -165,6 +169,8 @@ Keep security and reliability as acceptance criteria:
 ## Move Out To Future PRDs
 
 Each item below should become its own PRD and should not block current Persona module completion. The tracking issue is #1902.
+
+The patched PRD should label every item in this section as "not a current completion blocker."
 
 ### Persona-backed Chat Startup
 
@@ -279,6 +285,8 @@ When updating `Docs/Product/Persona_Agent_Design.md`, apply these changes:
 - Current Persona PRD keeps Scopes and Policies editing, transcript export, minimal tool discovery, memory controls, and reliability/security closeout in scope.
 - Current Persona PRD moves ordinary chat integration, Workspace persona defaults, scheduled work, expressive avatars, broad personalization, tool administration, and multi-agent collaboration out to future PRDs.
 - Future scope links to GitHub issue #1902.
+- Every future-scope bucket is labeled as not a current completion blocker in the patched PRD.
+- If a future-scope bucket is missing from #1902, update #1902 before considering the PRD patch complete.
 - Transcript export, Scopes/Policies editing, and tool discovery include the hardening constraints from this design.
 - Shipped or partially shipped claims are backed by current code evidence during the PRD patch.
 - No design-system backlog tasks are touched.
@@ -287,5 +295,6 @@ When updating `Docs/Product/Persona_Agent_Design.md`, apply these changes:
 
 - Review the updated PRD against this spec.
 - Confirm every moved-out feature appears in #1902.
+- If any moved-out feature is missing from #1902, update #1902 before marking the PRD patch complete.
 - Confirm the PRD does not describe future PRDs as current completion blockers.
 - Confirm no design-system backlog tasks or files are modified.
