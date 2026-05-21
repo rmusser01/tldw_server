@@ -96,8 +96,61 @@ describe("RecentStudySessions", () => {
     )
 
     expect(screen.getByText("Session service offline")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Session service offline")
+        .closest('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
     expect(refetchMock).toHaveBeenCalled()
+  })
+
+  it("renders loading and no-session product states through canonical design-system primitives", () => {
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isFetching: false,
+      isError: false
+    } as any)
+
+    const { rerender } = render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("Loading recent study sessions...")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Loading recent study sessions...")
+        .closest('[data-ds-component="LoadingState"]')
+    ).toBeInTheDocument()
+
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false
+    } as any)
+
+    rerender(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("No completed study sessions yet.")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("No completed study sessions yet.")
+        .closest('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
   })
 })
