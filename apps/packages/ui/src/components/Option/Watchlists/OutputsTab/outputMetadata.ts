@@ -164,6 +164,12 @@ const asNonEmptyString = (value: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined
 }
 
+const asKnownAudioStatus = (value: unknown): string | undefined => {
+  const status = asNonEmptyString(value)
+  if (!status || status.toLowerCase() === "unknown") return undefined
+  return status
+}
+
 const asSafeDownloadUrl = (value: unknown): string | undefined => {
   const url = asNonEmptyString(value)
   if (!url) return undefined
@@ -590,7 +596,11 @@ export const getAudioStatusSummary = (
     asNonEmptyString(record?.task_id) ||
     asNonEmptyString(record?.taskId) ||
     asNonEmptyString(record?.audio_briefing_task_id)
-  const rawStatus = asNonEmptyString(record?.status) || "unknown"
+  const rawStatus =
+    asKnownAudioStatus(record?.audio_briefing_status) ||
+    asKnownAudioStatus(record?.audio_status) ||
+    asKnownAudioStatus(record?.status) ||
+    "unknown"
   const status = rawStatus === "pending" && taskId ? "queued" : rawStatus
   const scriptArtifact = normalizeAudioArtifact(
     record?.script_artifact,

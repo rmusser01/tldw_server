@@ -2,10 +2,14 @@
 id: TASK-440
 title: Design staged remediation plans for Watchlists demo-readiness issues
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-05-21 00:01'
 labels:
 - watchlists
 - design
 - demo-readiness
+dependencies: []
 priority: High
 modified_files:
 - Docs/superpowers/specs/2026-05-20-watchlists-demo-remediation-staged-plans-design.md

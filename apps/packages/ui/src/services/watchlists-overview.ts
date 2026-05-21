@@ -188,18 +188,19 @@ const hasAudioOutputIssue = (metadata: unknown): boolean => {
     record.generate_audio === true ||
     audio?.requested === true ||
     audio?.enabled === true
-  if (!requested) return false
   const normalized = normalizeStatus(
     (record.audio_briefing_status as string | null | undefined) ||
       (record.audio_status as string | null | undefined) ||
       (audio?.status as string | null | undefined)
   )
-  return (
+  if (
     normalized === "enqueue failed" ||
-    normalized === "skipped" ||
     normalized === "failed" ||
     normalized === "error"
-  )
+  ) {
+    return true
+  }
+  return requested && normalized === "skipped"
 }
 
 const getSourceErrorCount = (run: Pick<WatchlistRun, "stats">): number => {

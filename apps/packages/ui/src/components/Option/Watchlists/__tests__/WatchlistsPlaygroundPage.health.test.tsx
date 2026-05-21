@@ -154,6 +154,9 @@ const buildOverviewData = (): WatchlistsOverviewData => ({
   items: {
     unread: 0
   },
+  alerts: {
+    unread: 0
+  },
   runs: {
     running: 0,
     pending: 0,

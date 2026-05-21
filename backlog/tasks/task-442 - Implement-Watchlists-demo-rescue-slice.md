@@ -4,7 +4,7 @@ title: Implement Watchlists demo rescue slice
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-21 04:06
+updated_date: '2026-05-21 04:06'
 labels:
 - watchlists
 - demo-readiness

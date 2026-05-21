@@ -146,14 +146,18 @@ async def _maybe_await(value):
 
 
 _SENSITIVE_ERROR_TOKEN_RE = re.compile(
-    r"(?i)(?:^|[?&\s,;])(?:api[_-]?key|auth[_-]?token|access[_-]?token|"
-    r"refresh[_-]?token|token|secret|password|credential)\s*[:=]\s*[A-Za-z0-9._~+/=%-]+"
+    r"(?i)(?:"
+    r"['\"](?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|"
+    r"token|secret|password|credential)['\"]\s*:\s*['\"][^'\"]+['\"]"
+    r"|(?:^|[?&\s,;])(?:api[_-]?key|auth[_-]?token|access[_-]?token|"
+    r"refresh[_-]?token|token|secret|password|credential)\s*[:=]\s*['\"]?[^'\"\s,;&]+['\"]?"
+    r")"
 )
 _AUTHORIZATION_BEARER_RE = re.compile(
-    r"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+"
+    r"(?i)\bauthorization\s*:\s*bearer\s+[^'\"\s,;&]+"
 )
 _BEARER_SECRET_RE = re.compile(
-    r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"
+    r"(?i)\bbearer\s+[^'\"\s,;&]+"
 )
 _STANDALONE_HTTP_URL_RE = re.compile(r"(?i)^https?://\S+$")
 
