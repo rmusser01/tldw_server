@@ -18,6 +18,7 @@ import { DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-setting
 import type { WatchlistChatHandoffPayload } from "@/services/tldw/watchlist-chat-handoff"
 import { downloadWatchlistOutput, downloadWatchlistOutputBinary } from "@/services/watchlists"
 import type { WatchlistOutput } from "@/types/watchlists"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -35,6 +36,15 @@ import {
   isAudioOutput
 } from "./outputMetadata"
 import { ReportEvidencePanel } from "./ReportEvidencePanel"
+
+const SENSITIVE_AUDIO_ERROR_VALUE_PATTERN =
+  /\b(authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password)\b\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;)}\]]+)/gi
+const BEARER_AUDIO_ERROR_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
+
+const sanitizeAudioErrorMessage = (error: string): string =>
+  sanitizeServerErrorMessage(error, "Audio generation failed")
+    .replace(BEARER_AUDIO_ERROR_VALUE_PATTERN, "Bearer [REDACTED]")
+    .replace(SENSITIVE_AUDIO_ERROR_VALUE_PATTERN, "$1=[REDACTED]")
 
 interface OutputPreviewDrawerProps {
   output: WatchlistOutput | null | undefined
@@ -205,6 +215,9 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const audioSummary = useMemo(() => {
     return getOutputAudioStatusSummary(output?.metadata)
   }, [output?.metadata])
+  const audioErrorMessage = useMemo(() => {
+    return audioSummary.error ? sanitizeAudioErrorMessage(audioSummary.error) : null
+  }, [audioSummary.error])
 
   const templateName = useMemo(() => {
     return getOutputTemplateName(output?.metadata)
@@ -274,6 +287,20 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           <div className="text-xs text-warning">
             {t("watchlists:outputs.audioFallback", "Fallback: {{reason}}", {
               reason: audioSummary.fallbackReason
+            })}
+          </div>
+        )}
+        {audioErrorMessage && (
+          <div className="text-xs text-danger">
+            {t("watchlists:outputs.audioError", "Error: {{error}}", {
+              error: audioErrorMessage
+            })}
+          </div>
+        )}
+        {audioSummary.taskId && (
+          <div className="text-xs text-text-muted">
+            {t("watchlists:outputs.audioTaskId", "Task: {{taskId}}", {
+              taskId: audioSummary.taskId
             })}
           </div>
         )}
@@ -477,6 +504,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}
@@ -527,6 +555,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
         </div>
       ) : (
         <div className="space-y-4">
+          {renderAudioArtifactGraph()}
           {output && hasReportEvidenceMetadata && (
             <div className="rounded-lg border border-border bg-surface p-3">
               <ReportEvidencePanel

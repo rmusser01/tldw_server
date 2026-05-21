@@ -3,7 +3,7 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { OverviewTab } from "../OverviewTab"
+import { extractPipelineErrorMessage, OverviewTab } from "../OverviewTab"
 import { QUICK_SETUP_DEFAULT_VALUES } from "../quick-setup"
 
 const ONBOARDING_PATH_STORAGE_KEY = "watchlists:onboarding-path:v1"
@@ -201,6 +201,25 @@ const selectPipelineFeed = async (label: string) => {
     expect(checkbox).toBeChecked()
   })
 }
+
+describe("extractPipelineErrorMessage", () => {
+  it("preserves string and structured error details", () => {
+    expect(extractPipelineErrorMessage("template_not_found: briefing_markdown")).toBe(
+      "template_not_found: briefing_markdown"
+    )
+    expect(
+      extractPipelineErrorMessage({
+        response: {
+          data: {
+            detail: {
+              message: "template_not_found: briefing_markdown"
+            }
+          }
+        }
+      })
+    ).toBe("template_not_found: briefing_markdown")
+  })
+})
 
 describe("OverviewTab quick setup flow", () => {
   beforeEach(() => {
@@ -456,7 +475,10 @@ describe("OverviewTab quick setup flow", () => {
       expect.objectContaining({
         watchlist_id: 42,
         output_prefs: expect.objectContaining({
-          template_name: "briefing_md"
+          template_name: "briefing_markdown",
+          template: expect.objectContaining({
+            default_name: "briefing_markdown"
+          })
         })
       })
     )
@@ -855,7 +877,7 @@ describe("OverviewTab quick setup flow", () => {
       has_more: false
     })
     mockState.getWatchlistTemplateMock.mockResolvedValue({
-      name: "briefing_md",
+      name: "briefing_markdown",
       format: "md",
       content: "## {{ title }}"
     })
@@ -891,6 +913,9 @@ describe("OverviewTab quick setup flow", () => {
 
     fireEvent.click(screen.getByTestId("watchlists-pipeline-preview-generate"))
 
+    await waitFor(() => {
+      expect(mockState.getWatchlistTemplateMock).toHaveBeenCalledWith("briefing_markdown")
+    })
     await waitFor(() => {
       expect(mockState.previewWatchlistTemplateMock).toHaveBeenCalledWith(
         "## {{ title }}",
@@ -1018,6 +1043,75 @@ describe("OverviewTab quick setup flow", () => {
       destination: "outputs"
     })
   }, 20_000)
+
+  it("shows in-page error when pipeline output creation fails for a missing template", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    mockState.fetchOverviewMock.mockResolvedValue(
+      createOverviewPayload({
+        sources: { total: 2, healthy: 2 },
+        jobs: { total: 1, active: 1 }
+      })
+    )
+    mockState.createWatchlistJobMock.mockResolvedValue({ id: 303 })
+    mockState.triggerWatchlistRunMock.mockResolvedValue({ id: 404 })
+    const outputError = new Error("Request failed with status code 400") as Error & {
+      response?: {
+        data?: {
+          detail?: {
+            code?: string
+            message?: string
+          }
+        }
+      }
+    }
+    outputError.response = {
+      data: {
+        detail: {
+          code: "template_not_found",
+          message: "template_not_found: briefing_markdown"
+        }
+      }
+    }
+    mockState.createWatchlistOutputMock.mockRejectedValue(outputError)
+
+    render(<OverviewTab />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-overview-cta-pipeline-builder")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-overview-cta-pipeline-builder"))
+    await waitFor(() => {
+      expect(pipelineQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+    })
+    await selectPipelineFeed("AI Feed")
+    clickPipelineNext()
+    await waitFor(() => {
+      expect(pipelineQueries().getByLabelText("Run immediately")).toBeInTheDocument()
+    })
+    fireEvent.click(pipelineQueries().getByLabelText("Run immediately"))
+    fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
+      target: { value: "Morning Brief" }
+    })
+    await advancePipelineFromMonitorToReview()
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-pipeline-test-generation")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-pipeline-test-generation"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-pipeline-error")).toHaveTextContent(
+        "Could not create the digest output"
+      )
+    })
+    expect(screen.getByTestId("watchlists-pipeline-error")).toHaveTextContent(
+      "briefing_markdown"
+    )
+    expect(mockState.setActiveTabMock).not.toHaveBeenLastCalledWith("outputs")
+    expect(mockState.openOutputPreviewMock).not.toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
+  })
 
   it("restores focus to guided setup trigger after quick setup modal closes", async () => {
     mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())

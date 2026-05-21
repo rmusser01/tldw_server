@@ -1634,7 +1634,7 @@ def test_outputs_generate_audio_trigger_failure_marks_enqueue_failed_metadata(
     metadata = output.get("metadata", {})
     assert metadata.get("audio_briefing_requested") is True
     assert metadata.get("audio_briefing_status") == "enqueue_failed"
-    assert "scheduler unavailable" in str(metadata.get("audio_briefing_error", ""))
+    assert metadata.get("audio_briefing_error") == "RuntimeError"
     assert "audio_briefing_task_id" not in metadata
     assert mock_trigger.await_count == 1
 

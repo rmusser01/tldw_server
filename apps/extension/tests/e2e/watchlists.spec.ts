@@ -1112,7 +1112,7 @@ test.describe('Watchlists playground smoke', () => {
     await context.close()
   })
 
-  test('overview health and failed-run notification click-through', async () => {
+  test('overview health and failed-run click-through', async () => {
     test.setTimeout(120_000)
     const extPath = path.resolve('.output/chrome-mv3')
     const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
@@ -1278,13 +1278,9 @@ test.describe('Watchlists playground smoke', () => {
     await expect(page.getByText('Recent Failed Runs')).toBeVisible()
     await expect(page.getByText('Alert Monitor')).toBeVisible()
 
-    const failureNotice = page
-      .locator('.ant-notification-notice')
-      .filter({ hasText: 'Run failed' })
-      .first()
-    await expect(failureNotice).toBeVisible({ timeout: 10_000 })
-    await expect(failureNotice).toContainText('rate-limiting requests')
-    await failureNotice.getByRole('button', { name: 'View run' }).click()
+    const failedRunCard = page.locator('.ant-card').filter({ hasText: 'Recent Failed Runs' }).first()
+    await expect(failedRunCard).toContainText('Rate limit exceeded while fetching source')
+    await failedRunCard.getByRole('button', { name: 'View run' }).click()
 
     await expectWatchlistsDestination(page, 'Activity')
     const runDialog = page.getByRole('dialog', { name: 'Run Details' })
@@ -2846,6 +2842,222 @@ test.describe('Watchlists playground smoke', () => {
       'href',
       'https://github.com/rmusser01/tldw_server/blob/main/Docs/API/Watchlists_Filters_OPML.md'
     )
+
+    await context.close()
+  })
+
+  test('strict demo readiness route renders Activity and Reports without crashing on output errors', async () => {
+    test.setTimeout(120_000)
+    const extPath = path.resolve('.output/chrome-mv3')
+    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+      seedConfig: seededWatchlistsConfig
+    })
+    await installWatchlistsRuntimeBridge(context)
+
+    await context.addInitScript(() => {
+      ;(window as any).__watchlistsStubbed = true
+      ;(window as any).__watchlistsOutputCreateCalls = 0
+
+      const now = () => new Date().toISOString()
+      const sources = [
+        {
+          id: 1,
+          name: 'Demo Feed',
+          url: 'https://example.com/demo.xml',
+          source_type: 'rss',
+          active: true,
+          tags: ['demo'],
+          status: 'healthy',
+          created_at: now(),
+          updated_at: now(),
+          last_scraped_at: now()
+        }
+      ]
+      const jobs = [
+        {
+          id: 11,
+          name: 'Demo Briefing',
+          description: 'Demo monitor',
+          active: true,
+          scope: { sources: [1], groups: [], tags: ['demo'] },
+          schedule_expr: '0 9 * * *',
+          timezone: 'UTC',
+          job_filters: { filters: [] },
+          output_prefs: {
+            template_name: 'briefing_markdown',
+            template: { default_name: 'briefing_markdown' },
+            generate_audio: true
+          },
+          created_at: now(),
+          updated_at: now(),
+          last_run_at: now(),
+          next_run_at: now()
+        }
+      ]
+      const runs = [
+        {
+          id: 101,
+          job_id: 11,
+          status: 'completed',
+          started_at: now(),
+          finished_at: now(),
+          error_msg: null,
+          stats: {
+            items_found: 2,
+            items_ingested: 2,
+            items_filtered: 0,
+            items_errored: 0
+          }
+        }
+      ]
+      const outputs = [
+        {
+          id: 201,
+          run_id: 101,
+          job_id: 11,
+          type: 'briefing',
+          format: 'md',
+          title: 'Demo report with failed audio',
+          version: 1,
+          expired: false,
+          metadata: {
+            template_name: 'briefing_markdown',
+            audio_briefing_requested: true,
+            audio_briefing_status: 'failed',
+            audio_briefing_error: 'TTS provider timeout'
+          },
+          created_at: now(),
+          expires_at: null
+        }
+      ]
+
+      const paginate = (list, page, size) => {
+        const current = page || 1
+        const limit = size || list.length || 1
+        const start = (current - 1) * limit
+        const end = start + limit
+        return {
+          items: list.slice(start, end),
+          total: list.length,
+          page: current,
+          size: limit,
+          has_more: end < list.length
+        }
+      }
+
+      const handleRequest = (payload) => {
+        const path = payload?.path || ''
+        const method = String(payload?.method || 'GET').toUpperCase()
+        const body = payload?.body || null
+        const [pathname, queryString] = path.split('?')
+        const params = new URLSearchParams(queryString || '')
+        const page = Number(params.get('page') || 1)
+        const size = Number(params.get('size') || 20)
+
+        if (pathname === '/api/v1/watchlists/sources' && method === 'GET') {
+          return paginate(sources, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/jobs' && method === 'GET') {
+          return paginate(jobs, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/runs' && method === 'GET') {
+          const q = params.get('q')
+          const filtered = q ? runs.filter((run) => run.status === q) : runs
+          return paginate(filtered, page, size)
+        }
+
+        const runDetailsMatch = pathname.match(/^\/api\/v1\/watchlists\/runs\/(\d+)\/details$/)
+        if (runDetailsMatch && method === 'GET') {
+          return {
+            ...runs[0],
+            filter_tallies: { include: 2 },
+            log_text: 'Completed successfully',
+            log_path: null,
+            truncated: false,
+            filtered_sample: null
+          }
+        }
+
+        if (pathname === '/api/v1/watchlists/items' && method === 'GET') {
+          return paginate([], page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/tags' && method === 'GET') {
+          return paginate([], page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/groups' && method === 'GET') {
+          return paginate([], page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/templates' && method === 'GET') {
+          return { items: [{ name: 'briefing_markdown', format: 'md', updated_at: now() }] }
+        }
+
+        if (pathname === '/api/v1/watchlists/settings' && method === 'GET') {
+          return {
+            default_output_ttl_seconds: 86400,
+            temporary_output_ttl_seconds: 3600
+          }
+        }
+
+        if (pathname === '/api/v1/watchlists/outputs' && method === 'GET') {
+          return paginate(outputs, page, size)
+        }
+
+        if (pathname === '/api/v1/watchlists/outputs' && method === 'POST') {
+          ;(window as any).__watchlistsOutputCreateCalls += 1
+          if (body?.template_name !== 'briefing_markdown') {
+            throw new Error('unexpected_template_name')
+          }
+          throw new Error('template_not_found: briefing_markdown')
+        }
+
+        return null
+      }
+
+      ;(window as any).__watchlistsBindBridge(handleRequest)
+    })
+
+    const pageErrors: string[] = []
+    const page = await context.newPage()
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.message)
+    })
+    await page.goto(optionsUrl + '?e2e=1&view=all#/watchlists', { waitUntil: 'domcontentloaded' })
+    await page.waitForFunction(() => (window as any).__watchlistsStubbed === true, undefined, {
+      timeout: 5_000
+    })
+    await basePage.close().catch(() => {})
+
+    await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Activity' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'Reports' })).toBeVisible()
+
+    await page.getByRole('tab', { name: 'Activity' }).click()
+    await expect(
+      page.locator('.ant-tabs-tabpane-active').getByText('Completed', { exact: true }).first()
+    ).toBeVisible()
+
+    await page.getByRole('tab', { name: 'Reports' }).click()
+    await expect(
+      page.locator('.ant-tabs-tabpane-active').getByText('Demo report with failed audio')
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Regenerate' }).first().click()
+    await page
+      .getByRole('dialog', { name: 'Regenerate Output' })
+      .getByRole('button', { name: 'Regenerate' })
+      .click()
+
+    await expect
+      .poll(async () => page.evaluate(() => (window as any).__watchlistsOutputCreateCalls))
+      .toBe(1)
+    await expect(page.getByTestId('watchlists-outputs-live-region')).toContainText(
+      'Failed to regenerate Demo report with failed audio.'
+    )
+    expect(pageErrors).toEqual([])
 
     await context.close()
   })

@@ -43,6 +43,7 @@ interface PipelineWizardProps {
   previewRendered: string | null
   previewRunId: number | null
   previewWarnings: string[]
+  submitError: string | null
   onCancel: () => void
   onSubmit: (draft: PipelineWizardDraft, options: { mode: "create" | "test" }) => void
   onPreview: (draft: PipelineWizardDraft) => void
@@ -81,6 +82,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   previewRendered,
   previewRunId,
   previewWarnings,
+  submitError,
   onCancel,
   onSubmit,
   onPreview
@@ -364,6 +366,13 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
               "watchlists:overview.pipelineSetup.validationError",
               "Review the highlighted pipeline fields."
             )}
+          />
+        )}
+        {submitError && (
+          <DesignSystemAlert
+            variant="error"
+            title={submitError}
+            data-testid="watchlists-pipeline-error"
           />
         )}
 

@@ -76,6 +76,7 @@ import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
+import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 import {
   trackWatchlistsOnboardingTelemetry,
   type WatchlistsQuickSetupStep
@@ -90,6 +91,43 @@ const QUICK_SETUP_STEP_FIELDS: Array<Array<keyof QuickSetupValues>> = [
   ["monitorName", "schedulePreset", "setupGoal", "runNow", "includeAudioBriefing"],
   []
 ]
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+export const extractPipelineErrorMessage = (error: unknown): string => {
+  if (typeof error === "string") return error.trim()
+  if (!isRecord(error)) {
+    return error instanceof Error && error.message.trim().length > 0
+      ? error.message.trim()
+      : ""
+  }
+
+  const response = isRecord(error.response) ? error.response : undefined
+  const data = response && isRecord(response.data) ? response.data : undefined
+  const detail = data ? data.detail : error.detail
+
+  if (typeof detail === "string") return detail.trim()
+  if (isRecord(detail)) {
+    const message = detail.message
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message.trim()
+    }
+    const code = detail.code
+    if (typeof code === "string" && code.trim().length > 0) {
+      return code.trim()
+    }
+  }
+
+  const message = error.message
+  if (typeof message === "string" && message.trim().length > 0) {
+    return message.trim()
+  }
+
+  return error instanceof Error && error.message.trim().length > 0
+    ? error.message.trim()
+    : ""
+}
 
 export const OverviewTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
@@ -112,6 +150,7 @@ export const OverviewTab: React.FC = () => {
   const [pipelinePreviewRendered, setPipelinePreviewRendered] = useState<string | null>(null)
   const [pipelinePreviewRunId, setPipelinePreviewRunId] = useState<number | null>(null)
   const [pipelinePreviewWarnings, setPipelinePreviewWarnings] = useState<string[]>([])
+  const [pipelineSetupError, setPipelineSetupError] = useState<string | null>(null)
   const [onboardingPath, setOnboardingPath] = useState<WatchlistsOnboardingPath>(() =>
     readWatchlistsOnboardingPath()
   )
@@ -281,11 +320,11 @@ export const OverviewTab: React.FC = () => {
   }, [setActiveTab])
 
   const handleOpenFailedRuns = useCallback(() => {
-    if (typeof setRunsStatusFilter === "function") {
+    if (typeof setRunsStatusFilter === "function" && (data?.runs.failed ?? 0) > 0) {
       setRunsStatusFilter("failed")
     }
     setActiveTab("runs")
-  }, [setActiveTab, setRunsStatusFilter])
+  }, [data?.runs.failed, setActiveTab, setRunsStatusFilter])
 
   const handleOpenAttentionOutputs = useCallback(() => {
     setActiveTab("outputs")
@@ -660,6 +699,7 @@ export const OverviewTab: React.FC = () => {
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
     setPipelinePreviewWarnings([])
+    setPipelineSetupError(null)
     setPipelineSetupOpen(true)
     void trackWatchlistsOnboardingTelemetry({ type: "pipeline_setup_opened" })
     void loadPipelineSources()
@@ -673,6 +713,7 @@ export const OverviewTab: React.FC = () => {
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
     setPipelinePreviewWarnings([])
+    setPipelineSetupError(null)
   }, [pipelineSetupSubmitting])
 
   const generatePipelineTemplatePreview = useCallback(async (wizardDraft: PipelineWizardDraft) => {
@@ -684,7 +725,7 @@ export const OverviewTab: React.FC = () => {
 
     try {
       const draft = toBriefingPipelineDraft(wizardDraft)
-      const templateName = String(draft.templateName || "").trim()
+      const templateName = normalizeWatchlistTemplateName(draft.templateName)
       if (!templateName) {
         setPipelinePreviewError(
           t(
@@ -811,6 +852,7 @@ export const OverviewTab: React.FC = () => {
 
     try {
       setPipelineSetupSubmitting(true)
+      setPipelineSetupError(null)
       const shouldRunNow = Boolean(wizardDraft.runNow || mode === "test")
       shouldRunNowForTelemetry = shouldRunNow
 
@@ -899,6 +941,21 @@ export const OverviewTab: React.FC = () => {
       )
     } catch (err) {
       console.error("Failed to complete pipeline setup:", err)
+      if (pipelineFailureStage === "output_create") {
+        const fallbackMessage = t(
+          "watchlists:overview.pipelineSetup.outputCreateError",
+          "Could not create the digest output"
+        )
+        const detail = extractPipelineErrorMessage(err)
+        setPipelineSetupError(detail ? `${fallbackMessage}: ${detail}` : fallbackMessage)
+        void trackWatchlistsOnboardingTelemetry({
+          type: "pipeline_setup_failed",
+          stage: pipelineFailureStage,
+          mode,
+          runNow: shouldRunNowForTelemetry
+        })
+        return
+      }
       void trackWatchlistsOnboardingTelemetry({
         type: "pipeline_setup_failed",
         stage: pipelineFailureStage,
@@ -1325,7 +1382,7 @@ export const OverviewTab: React.FC = () => {
             {data.systemHealth === "degraded"
               ? t(
                   "watchlists:overview.health.degradedDescription",
-                  "Some sources or recent runs show failures. Open failed runs to investigate."
+                  "Some sources, recent runs, or reports need review. Open the linked surface to investigate."
                 )
               : t(
                   "watchlists:overview.health.healthyDescription",
@@ -1430,7 +1487,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleOpenFailedRuns}
                     data-testid="watchlists-overview-attention-runs"
                   >
-                    {t("watchlists:overview.attention.runs", "Failed activity runs ({{count}})", {
+                    {t("watchlists:overview.attention.runs", "Activity needs review ({{count}})", {
                       count: overviewBadges.runs
                     })}
                   </Button>
@@ -1441,7 +1498,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleOpenAttentionOutputs}
                     data-testid="watchlists-overview-attention-outputs"
                   >
-                    {t("watchlists:overview.attention.outputs", "Reports with delivery issues ({{count}})", {
+                    {t("watchlists:overview.attention.outputs", "Reports need review ({{count}})", {
                       count: overviewBadges.outputs
                     })}
                   </Button>
@@ -2122,6 +2179,7 @@ export const OverviewTab: React.FC = () => {
         previewRendered={pipelinePreviewRendered}
         previewRunId={pipelinePreviewRunId}
         previewWarnings={pipelinePreviewWarnings}
+        submitError={pipelineSetupError}
         onCancel={closePipelineSetup}
         onSubmit={(draft, options) => {
           void completePipelineSetup(draft, options)

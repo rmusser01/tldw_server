@@ -4543,14 +4543,19 @@ async def get_run_details(
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             log_text = None
             truncated = False
-    # Build stats for detail view, including filter totals when present
-    detail_stats: dict[str, int] = {
+    # Build stats for detail view, preserving raw stats while keeping opt-in tallies gated.
+    detail_stats: dict[str, Any] = {
+        key: value
+        for key, value in stats.items()
+        if key not in {"filter_tallies", "filters_include", "filters_exclude", "filters_flag"}
+    }
+    detail_stats.update({
         "items_found": items_found,
         "items_ingested": items_ingested,
         "filters_include": 0,
         "filters_exclude": 0,
         "filters_flag": 0,
-    }
+    })
     try:
         if isinstance(stats.get("filters_matched"), int):
             detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
@@ -6757,9 +6762,13 @@ async def create_output(
             else:
                 metadata["audio_briefing_status"] = "skipped"
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Watchlists output audio briefing enqueue failed for run {payload.run_id}: {exc}")
+            logger.warning(
+                "Watchlists output audio briefing enqueue failed for run {} (error_type={})",
+                payload.run_id,
+                type(exc).__name__,
+            )
             metadata["audio_briefing_status"] = "enqueue_failed"
-            metadata["audio_briefing_error"] = str(exc)
+            metadata["audio_briefing_error"] = type(exc).__name__
         metadata_update_needed = True
 
     if isinstance(delivery_plan, dict):

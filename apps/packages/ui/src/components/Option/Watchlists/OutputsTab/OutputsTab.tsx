@@ -37,6 +37,7 @@ import {
 } from "@/services/watchlists"
 import type { WatchlistJob, WatchlistOutput, WatchlistTemplate } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import { OutputPreviewDrawer } from "./OutputPreviewDrawer"
 import {
@@ -69,6 +70,16 @@ import {
 } from "../shared/focus-management"
 
 const OUTPUTS_ADVANCED_FILTERS_STORAGE_KEY = "watchlists:outputs:advanced-filters:v1"
+const SENSITIVE_LOG_VALUE_PATTERN =
+  /\b(authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password)\b\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;)}\]]+)/gi
+const BEARER_LOG_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
+
+const getSafeLogErrorMessage = (err: unknown): string => {
+  const message = sanitizeServerErrorMessage(err, "Request failed")
+  return message
+    .replace(BEARER_LOG_VALUE_PATTERN, "Bearer [REDACTED]")
+    .replace(SENSITIVE_LOG_VALUE_PATTERN, "$1=[REDACTED]")
+}
 
 const readStoredDisclosureState = (key: string): boolean | null => {
   if (typeof window === "undefined") return null
@@ -203,7 +214,7 @@ export const OutputsTab: React.FC = () => {
         })
       }
     } catch (err) {
-      console.error("Failed to fetch outputs:", err)
+      console.error("Failed to fetch outputs:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.fetchError", "Failed to load outputs"))
       setOutputsLiveAnnouncement(
         t("watchlists:outputs.live.loadError", "Reports refresh failed.")
@@ -232,7 +243,7 @@ export const OutputsTab: React.FC = () => {
       })
       setJobs(result.items || [])
     } catch (err) {
-      console.error("Failed to fetch jobs:", err)
+      console.error("Failed to fetch jobs:", getSafeLogErrorMessage(err))
     }
   }, [selectedWatchlistId])
 
@@ -248,7 +259,7 @@ export const OutputsTab: React.FC = () => {
       const result = await fetchWatchlistTemplates()
       setTemplates(Array.isArray(result.items) ? result.items : [])
     } catch (err) {
-      console.error("Failed to fetch templates:", err)
+      console.error("Failed to fetch templates:", getSafeLogErrorMessage(err))
       setTemplates([])
     } finally {
       setTemplatesLoading(false)
@@ -437,7 +448,7 @@ export const OutputsTab: React.FC = () => {
         })
       )
     } catch (err) {
-      console.error("Failed to download output:", err)
+      console.error("Failed to download output:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.downloadError", "Failed to download output"))
       setOutputsLiveAnnouncement(
         t("watchlists:outputs.live.downloadError", "Failed to download {{title}}.", {
@@ -477,7 +488,7 @@ export const OutputsTab: React.FC = () => {
       setRegenOpen(false)
       loadOutputs()
     } catch (err) {
-      console.error("Failed to regenerate output:", err)
+      console.error("Failed to regenerate output:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.regenerateError", "Failed to regenerate output"))
       setOutputsLiveAnnouncement(
         t("watchlists:outputs.live.regenerateError", "Failed to regenerate {{title}}.", {

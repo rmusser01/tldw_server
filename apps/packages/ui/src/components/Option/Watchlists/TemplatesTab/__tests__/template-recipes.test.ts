@@ -3,6 +3,7 @@ import {
   buildTemplateFromRecipe,
   createDefaultTemplateRecipeOptions
 } from "../template-recipes"
+import { normalizeWatchlistTemplateName } from "../../shared/templateNames"
 
 describe("template recipe builder", () => {
   it("builds briefing markdown recipe with optional sections", () => {
@@ -19,6 +20,18 @@ describe("template recipe builder", () => {
     expect(result.content).toContain("# {{ title }}")
     expect(result.content).not.toContain("## Executive Summary")
     expect(result.content).not.toContain("Tags: {{ item.tags")
+  })
+
+  it("keeps briefing recipe ids separate from backend output template names", () => {
+    const result = buildTemplateFromRecipe("briefing_md", createDefaultTemplateRecipeOptions())
+
+    expect(result.suggestedName).toBe("briefing_md")
+    expect(normalizeWatchlistTemplateName(result.suggestedName)).toBe("briefing_markdown")
+    expect(normalizeWatchlistTemplateName(" briefing_md ")).toBe("briefing_markdown")
+    expect(normalizeWatchlistTemplateName("newsletter_html")).toBe("newsletter_html")
+    expect(normalizeWatchlistTemplateName("mece_md")).toBe("mece_markdown")
+    expect(normalizeWatchlistTemplateName("custom_daily_digest")).toBe("custom_daily_digest")
+    expect(normalizeWatchlistTemplateName(null)).toBe("")
   })
 
   it("builds newsletter html recipe and honors link toggle", () => {

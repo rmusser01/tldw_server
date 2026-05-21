@@ -25,6 +25,8 @@ export type AudioStatusLabelKey =
   | "running"
   | "in_progress"
   | "failed"
+  | "skipped"
+  | "enqueue_failed"
   | "error"
   | "unknown"
 
@@ -55,6 +57,7 @@ export interface AudioStatusSummary {
   statusColor: string
   fallbackReason?: string
   error?: string
+  taskId?: string
   downloadUrl?: string
   scriptArtifact?: AudioArtifactSummary
   speakerArtifacts: AudioArtifactSummary[]
@@ -111,6 +114,8 @@ const DEFAULT_AUDIO_STATUS_LABELS: Record<AudioStatusLabelKey, string> = {
   running: "Running",
   in_progress: "In progress",
   failed: "Failed",
+  skipped: "Skipped",
+  enqueue_failed: "Enqueue failed",
   error: "Error",
   unknown: "Unknown"
 }
@@ -140,6 +145,11 @@ export const createOutputMetadataLabels = (
       DEFAULT_AUDIO_STATUS_LABELS.in_progress
     ),
     failed: t("watchlists:outputs.audioStatus.failed", DEFAULT_AUDIO_STATUS_LABELS.failed),
+    skipped: t("watchlists:outputs.audioStatus.skipped", DEFAULT_AUDIO_STATUS_LABELS.skipped),
+    enqueue_failed: t(
+      "watchlists:outputs.audioStatus.enqueueFailed",
+      DEFAULT_AUDIO_STATUS_LABELS.enqueue_failed
+    ),
     error: t("watchlists:outputs.audioStatus.error", DEFAULT_AUDIO_STATUS_LABELS.error),
     unknown: t("watchlists:outputs.audioStatus.unknown", DEFAULT_AUDIO_STATUS_LABELS.unknown)
   }
@@ -480,6 +490,8 @@ export const getAudioStatusColor = (status: string): string => {
   ) {
     return "blue"
   }
+  if (normalized === "skipped") return "default"
+  if (normalized === "enqueue_failed") return "red"
   if (normalized === "failed" || normalized === "error") return "red"
   return "default"
 }
@@ -555,6 +567,17 @@ const getAudioMetadataRecord = (metadata: unknown): Record<string, unknown> | nu
   if (nestedAudio) return nestedAudio
   const nestedBriefing = getMetadataRecord(record.audio_briefing)
   if (nestedBriefing) return nestedBriefing
+  const flatStatus = asNonEmptyString(record.audio_briefing_status)
+  const flatTaskId = asNonEmptyString(record.audio_briefing_task_id)
+  const flatError = asNonEmptyString(record.audio_briefing_error)
+  if (record.audio_briefing_requested === true || flatStatus || flatTaskId || flatError) {
+    return {
+      status: flatStatus,
+      requested: record.audio_briefing_requested === true,
+      task_id: flatTaskId,
+      error: flatError
+    }
+  }
   return record
 }
 
@@ -563,7 +586,12 @@ export const getAudioStatusSummary = (
   labels?: OutputMetadataLabels
 ): AudioStatusSummary => {
   const record = getMetadataRecord(value)
-  const status = asNonEmptyString(record?.status) || "unknown"
+  const taskId =
+    asNonEmptyString(record?.task_id) ||
+    asNonEmptyString(record?.taskId) ||
+    asNonEmptyString(record?.audio_briefing_task_id)
+  const rawStatus = asNonEmptyString(record?.status) || "unknown"
+  const status = rawStatus === "pending" && taskId ? "queued" : rawStatus
   const scriptArtifact = normalizeAudioArtifact(
     record?.script_artifact,
     "Script"
@@ -585,10 +613,13 @@ export const getAudioStatusSummary = (
     asNonEmptyString(record?.fallback_reason) ||
     asNonEmptyString(record?.fallbackReason)
   const error = asNonEmptyString(record?.error)
+  const explicitlyRequested = record?.requested === true || record?.audio_briefing_requested === true
   const requested =
     record !== null &&
     (
+      explicitlyRequested ||
       status !== "unknown" ||
+      Boolean(taskId) ||
       Boolean(downloadUrl) ||
       Boolean(scriptArtifact) ||
       Boolean(finalArtifact) ||
@@ -604,6 +635,7 @@ export const getAudioStatusSummary = (
     statusColor: getAudioStatusColor(status),
     fallbackReason,
     error,
+    taskId,
     downloadUrl,
     scriptArtifact,
     speakerArtifacts,
