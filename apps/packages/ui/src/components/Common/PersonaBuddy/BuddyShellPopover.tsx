@@ -1,6 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Palette, Send, Square, Sparkles } from "lucide-react"
+import { Mic, MicOff, Palette, Send, Square, Sparkles } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import type {
@@ -58,6 +58,16 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
   const focusedSession = liveControl?.focusedSession ?? null
   const needsApproval = (focusedSession?.pendingApprovalCount ?? 0) > 0
   const sessionOptions = liveControl?.sessions ?? []
+  const voiceCapable = Boolean(
+    focusedSession &&
+      (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
+  )
+  const voiceState = String(liveControl?.voiceState ?? "").trim().toLowerCase()
+  const isListening =
+    liveControl?.voiceIsListening === true || voiceState === "listening"
+  const voiceActionLabel = isListening
+    ? t("personaBuddy.voiceStop", "Stop listening")
+    : t("personaBuddy.voiceListen", "Listen")
 
   const handleDraftChange = (
     event: React.ChangeEvent<HTMLTextAreaElement>
@@ -173,6 +183,20 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               Stop
             </button>
           </div>
+          {voiceCapable ? (
+            <Link
+              data-testid="persona-buddy-voice-link"
+              to={liveRoute}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text hover:bg-surface2"
+            >
+              {isListening ? (
+                <MicOff aria-hidden="true" className="h-3.5 w-3.5" />
+              ) : (
+                <Mic aria-hidden="true" className="h-3.5 w-3.5" />
+              )}
+              {voiceActionLabel}
+            </Link>
+          ) : null}
 
           <textarea
             data-testid="persona-buddy-text-input"
