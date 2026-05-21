@@ -21,6 +21,31 @@ export interface PersonaBuddySummary {
   active_visual_pack?: PersonaVisualPack | null
 }
 
+export interface PersonaBuddyLiveSessionSummary {
+  sessionId: string
+  personaId: string
+  personaName: string
+  lifecycle: string
+  pendingApprovalCount: number
+  suggestedVisualState?: string | null
+}
+
+export interface PersonaBuddyLiveControlView {
+  sessions: PersonaBuddyLiveSessionSummary[]
+  focusedSessionId: string | null
+  focusedSession: PersonaBuddyLiveSessionSummary | null
+  streamState: string
+  canSendText: boolean
+  pendingFocusSessionId: string | null
+  startTextSession: (personaId?: string | null) => Promise<unknown>
+  stopSession: (sessionId?: string | null) => Promise<unknown>
+  focusSession: (sessionId: string) => Promise<unknown>
+  sendText: (
+    text: string,
+    options?: { clientMessageId?: string | null }
+  ) => Promise<{ ok: boolean; clientMessageId: string; error?: string }>
+}
+
 export interface PersonaBuddyRenderContext {
   surface_id: string
   surface_active: boolean

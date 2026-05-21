@@ -22,6 +22,8 @@ PersonaMode = Literal["session_scoped", "persistent_scoped"]
 PersonaScopeRuleType = Literal["conversation_id", "character_id", "media_id", "media_tag", "note_id"]
 PersonaPolicyRuleKind = Literal["mcp_tool", "skill"]
 PersonaSessionStatus = Literal["active", "paused", "closed", "archived"]
+PersonaLiveLifecycle = Literal["idle", "connecting", "connected", "recovering", "stopping", "stopped", "error"]
+PersonaLiveReusePolicy = Literal["resume_compatible", "create_new"]
 PersonaExemplarKind = Literal["style", "catchphrase", "boundary", "scenario_demo", "tool_behavior"]
 PersonaExemplarSourceType = Literal["manual", "transcript_import", "character_seed", "generated_candidate"]
 PersonaExemplarReviewAction = Literal["approve", "reject"]
@@ -660,6 +662,63 @@ class PersonaSessionSummary(BaseModel):
 
 class PersonaSessionDetail(PersonaSessionSummary):
     turns: list[dict[str, object]] = Field(default_factory=list)
+
+
+class PersonaLiveSessionCreateRequest(BaseModel):
+    persona_id: str = Field(min_length=1, max_length=128)
+    reuse_policy: PersonaLiveReusePolicy = "resume_compatible"
+    idempotency_key: str | None = Field(default=None, max_length=128)
+    surface: str | None = Field(default=None, max_length=120)
+
+    @field_validator("persona_id", mode="before")
+    @classmethod
+    def _strip_required_persona_id(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("persona_id is required")
+        return stripped
+
+    @field_validator("idempotency_key", "surface", mode="before")
+    @classmethod
+    def _strip_optional_text(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+
+class PersonaLiveSessionSummary(BaseModel):
+    session_id: str
+    persona_id: str
+    persona_name: str
+    lifecycle: PersonaLiveLifecycle
+    status: PersonaSessionStatus | None = None
+    is_focused: bool = False
+    focused_at: str | None = None
+    focus_generation: int | None = None
+    last_activity_at: str | None = None
+    pending_approval_count: int = 0
+    active_tool_name: str | None = None
+    error_state: str | None = None
+    recovery_hint: str | None = None
+    suggested_visual_state: str | None = None
+    allowed_actions: list[str] = Field(default_factory=list)
+    capabilities: dict[str, bool] = Field(default_factory=dict)
+
+
+class PersonaLiveSessionListResponse(BaseModel):
+    sessions: list[PersonaLiveSessionSummary] = Field(default_factory=list)
+    focused_session_id: str | None = None
+
+
+class PersonaLiveSessionFocusResponse(BaseModel):
+    session: PersonaLiveSessionSummary
+
+
+class PersonaLiveSessionStopResponse(BaseModel):
+    session: PersonaLiveSessionSummary
 
 
 class PersonaVoiceDefaults(BaseModel):

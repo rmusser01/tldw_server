@@ -25,9 +25,40 @@ const mocks = vi.hoisted(() => ({
   buddyShellEnabled: true
 }))
 
+const capabilityMocks = vi.hoisted(() => ({
+  state: {
+    capabilities: {
+      hasPersonaLiveControl: true
+    },
+    loading: false,
+    error: null
+  }
+}))
+
 const visualMocks = vi.hoisted(() => ({
   listPersonaVisualPacks: vi.fn(),
   getPersonaVisualPack: vi.fn()
+}))
+
+const liveControlMocks = vi.hoisted(() => ({
+  calls: [] as unknown[],
+  state: {
+    sessions: [],
+    focusedSessionId: null,
+    focusedSession: null,
+    loading: false,
+    error: null,
+    lastSendError: null,
+    streamState: "closed",
+    pendingFocusSessionId: null,
+    canSendText: false,
+    voiceAvailable: false,
+    reload: vi.fn(),
+    focusSession: vi.fn(),
+    startTextSession: vi.fn(),
+    stopSession: vi.fn(),
+    sendText: vi.fn()
+  } as Record<string, unknown>
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
@@ -55,6 +86,17 @@ vi.mock("@/hooks/useSetting", () => ({
 }))
 
 vi.mock("@/services/persona-visuals", () => visualMocks)
+
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => capabilityMocks.state
+}))
+
+vi.mock("@/hooks/usePersonaLiveControl", () => ({
+  usePersonaLiveControl: (options?: unknown) => {
+    liveControlMocks.calls.push(options)
+    return liveControlMocks.state
+  }
+}))
 
 const buildPersonaSelection = ({
   id = "persona-1",
@@ -133,6 +175,30 @@ const buildVisualPack = (personaId = "persona-1") => ({
       height: 24
     }
   }
+})
+
+const buildLiveSession = (overrides: Record<string, unknown> = {}) => ({
+  sessionId: "live-session-1",
+  personaId: "persona-1",
+  personaName: "Live Research Buddy",
+  lifecycle: "connected",
+  status: "active",
+  isFocused: true,
+  focusedAt: "2026-05-20T12:00:00Z",
+  focusGeneration: 1,
+  lastActivityAt: "2026-05-20T12:01:00Z",
+  pendingApprovalCount: 0,
+  activeToolName: null,
+  errorState: null,
+  recoveryHint: null,
+  suggestedVisualState: null,
+  allowedActions: ["send_text_ws", "focus", "stop"],
+  capabilities: {
+    text: true,
+    voice: false,
+    browserMicrophoneRequired: false
+  },
+  ...overrides
 })
 
 const buildMovementVisualPack = (
@@ -259,6 +325,13 @@ describe("BuddyShellHost", () => {
     mocks.isDesktop = true
     mocks.selectedAssistant = null
     mocks.buddyShellEnabled = true
+    capabilityMocks.state = {
+      capabilities: {
+        hasPersonaLiveControl: true
+      },
+      loading: false,
+      error: null
+    }
     visualMocks.listPersonaVisualPacks.mockReset()
     visualMocks.getPersonaVisualPack.mockReset()
     visualMocks.listPersonaVisualPacks.mockResolvedValue({
@@ -266,6 +339,24 @@ describe("BuddyShellHost", () => {
       active_pack: null
     })
     visualMocks.getPersonaVisualPack.mockResolvedValue(null)
+    liveControlMocks.state = {
+      sessions: [],
+      focusedSessionId: null,
+      focusedSession: null,
+      loading: false,
+      error: null,
+      lastSendError: null,
+      streamState: "closed",
+      pendingFocusSessionId: null,
+      canSendText: false,
+      voiceAvailable: false,
+      reload: vi.fn(),
+      focusSession: vi.fn(),
+      startTextSession: vi.fn(),
+      stopSession: vi.fn(),
+      sendText: vi.fn()
+    }
+    liveControlMocks.calls = []
     document.body.innerHTML = ""
     const portalRoot = document.createElement("div")
     portalRoot.id = "tldw-portal-root"
@@ -800,8 +891,119 @@ describe("BuddyShellHost", () => {
     )
 
     expect(
-      screen.getByRole("link", { name: "Open Visuals" })
+      screen.getByRole("link", { name: "Choose/Change Buddy" })
     ).toHaveAttribute("href", "/persona?persona_id=persona-1&tab=visuals")
+  })
+
+  it("shows a focused live session status in the dock", async () => {
+    liveControlMocks.state = {
+      ...liveControlMocks.state,
+      focusedSessionId: "live-session-1",
+      focusedSession: buildLiveSession(),
+      sessions: [buildLiveSession()],
+      streamState: "open",
+      canSendText: true
+    }
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      },
+      root: "sidepanel"
+    })
+
+    expect(screen.getByTestId("persona-buddy-live-status")).toHaveTextContent(
+      "Connected"
+    )
+  })
+
+  it("hides live controls when the server capability is unavailable", () => {
+    capabilityMocks.state = {
+      capabilities: {
+        hasPersonaLiveControl: false
+      },
+      loading: false,
+      error: null
+    }
+    liveControlMocks.state = {
+      ...liveControlMocks.state,
+      focusedSessionId: "live-session-1",
+      focusedSession: buildLiveSession(),
+      sessions: [buildLiveSession()],
+      streamState: "open",
+      canSendText: true
+    }
+    usePersonaBuddyShellStore.setState((state) => ({
+      ...state,
+      isOpen: true
+    }))
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      },
+      root: "sidepanel"
+    })
+
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("persona-buddy-text-input")).not.toBeInTheDocument()
+    expect(liveControlMocks.calls.at(-1)).toMatchObject({ autoLoad: false })
+  })
+
+  it("keeps urgent badge visible while drag movement override is active", async () => {
+    const rectSpy = mockDockRect()
+    const visualPack = buildMovementVisualPack("persona-1", ["moving_right"])
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [visualPack],
+      active_pack: visualPack
+    })
+    liveControlMocks.state = {
+      ...liveControlMocks.state,
+      focusedSessionId: "live-session-1",
+      focusedSession: buildLiveSession({ pendingApprovalCount: 3 }),
+      sessions: [buildLiveSession({ pendingApprovalCount: 3 })],
+      streamState: "open",
+      canSendText: true
+    }
+
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        live_session_id: "live-session-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      },
+      root: "sidepanel"
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
+        "data-visual-state",
+        "idle"
+      )
+    })
+    await dragBuddyBy(48)
+
+    expect(screen.getByTestId("persona-buddy-urgent-badge")).toHaveTextContent("3")
+    expect(usePersonaVisualRuntimeStore.getState().override?.state).toBe(
+      "moving_right"
+    )
+    rectSpy.mockRestore()
   })
 
   it("hides the Visuals workflow action when the buddy context has no persona id", () => {
@@ -823,7 +1025,7 @@ describe("BuddyShellHost", () => {
     )
 
     expect(
-      screen.queryByRole("link", { name: "Open Visuals" })
+      screen.queryByRole("link", { name: "Choose/Change Buddy" })
     ).not.toBeInTheDocument()
   })
 

@@ -132,6 +132,42 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.hasPersona).toBe(false)
   })
 
+  it("detects Persona live-control support from the live sessions route", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "persona-live-control" },
+      paths: {
+        "/api/v1/persona/live/sessions": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasPersona).toBe(true)
+    expect(capabilities.hasPersonaLiveControl).toBe(true)
+  })
+
+  it("honors docs-info disabling Persona live-control support", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "persona-live-control-disabled" },
+      paths: {
+        "/api/v1/persona/live/sessions": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: {
+        hasPersonaLiveControl: false
+      }
+    })
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasPersona).toBe(true)
+    expect(capabilities.hasPersonaLiveControl).toBe(false)
+  })
+
   it("falls back to openapi-only capability detection when docs-info fetch fails", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "test-version" },

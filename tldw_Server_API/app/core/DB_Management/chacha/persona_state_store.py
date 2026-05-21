@@ -1746,6 +1746,42 @@ class PersonaStateStore:
         cursor = self.execute_query(query, tuple(params))
         return [self._persona_profile_row_to_dict(row) for row in cursor.fetchall() if row]
 
+    def get_persona_profiles_by_ids(
+        self,
+        *,
+        user_id: str,
+        persona_ids: Iterable[str],
+        include_deleted: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        normalized_ids: list[str] = []
+        seen: set[str] = set()
+        for persona_id in persona_ids:
+            normalized_id = str(persona_id or "").strip()
+            if not normalized_id or normalized_id in seen:
+                continue
+            normalized_ids.append(normalized_id)
+            seen.add(normalized_id)
+        if not normalized_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        clauses = ["user_id = ?", f"id IN ({placeholders})"]
+        params: list[Any] = [user_id, *normalized_ids]
+        if not include_deleted:
+            clauses.append("deleted = 0")
+        where_sql = " AND ".join(clauses)
+        query = f"SELECT * FROM persona_profiles WHERE {where_sql}"  # nosec B608
+        cursor = self.execute_query(query, tuple(params))
+        profiles: dict[str, dict[str, Any]] = {}
+        for row in cursor.fetchall():
+            profile = self._persona_profile_row_to_dict(row)
+            if not profile:
+                continue
+            profile_id = str(profile.get("id") or "").strip()
+            if profile_id:
+                profiles[profile_id] = profile
+        return profiles
+
     def update_persona_profile(
         self,
         *,
@@ -3725,6 +3761,66 @@ class PersonaStateStore:
         params.extend([max(1, int(limit)), max(0, int(offset))])
         cursor = self.execute_query(query, tuple(params))
         return [self._persona_session_row_to_dict(row) for row in cursor.fetchall() if row]
+
+    def list_focused_persona_sessions(
+        self,
+        *,
+        user_id: str,
+        persona_id: str | None = None,
+        activity_surface: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Return sessions whose decoded live-control focus metadata is active."""
+        clauses = [
+            "user_id = ?",
+            "status NOT IN (?, ?)",
+        ]
+        params: list[Any] = [
+            user_id,
+            "closed",
+            "archived",
+        ]
+        if self.backend_type == BackendType.POSTGRESQL:
+            clauses.append("(preferences_json::jsonb #>> '{persona_live_control,focus,focused}') = 'true'")
+        else:
+            clauses.extend(
+                [
+                    "json_valid(preferences_json) = 1",
+                    "json_extract(preferences_json, '$.persona_live_control.focus.focused') = 1",
+                ]
+            )
+        if persona_id is not None:
+            clauses.append("persona_id = ?")
+            params.append(persona_id)
+        if activity_surface is not None:
+            clauses.append("activity_surface = ?")
+            params.append(self._normalize_persona_session_activity_surface(activity_surface))
+        if not include_deleted:
+            clauses.append("deleted = 0")
+        where_sql = " AND ".join(clauses)
+        query = (
+            "SELECT * FROM persona_sessions "  # nosec B608
+            f"WHERE {where_sql} "
+            "ORDER BY last_modified DESC, id ASC LIMIT ?"
+        )
+        params.append(max(1, int(limit)))
+        cursor = self.execute_query(query, tuple(params))
+        rows = [self._persona_session_row_to_dict(row) for row in cursor.fetchall() if row]
+        focused_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not row:
+                continue
+            preferences = row.get("preferences")
+            if not isinstance(preferences, dict):
+                continue
+            live_control = preferences.get("persona_live_control")
+            if not isinstance(live_control, dict):
+                continue
+            focus = live_control.get("focus")
+            if isinstance(focus, dict) and self._as_bool(focus.get("focused")):
+                focused_rows.append(row)
+        return focused_rows
 
     def update_persona_session(
         self,
