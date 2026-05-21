@@ -1,6 +1,6 @@
 import React from "react"
 import { Button, Checkbox, Input, Select, Tag, Typography } from "antd"
-import { CheckCircle2, Send, XCircle } from "lucide-react"
+import { CheckCircle2, Download, Send, XCircle } from "lucide-react"
 import {
   useLocation,
   useNavigate
@@ -549,6 +549,7 @@ const SidepanelPersona = ({
     personaStateContextProfileDefault,
     updatingPersonaStateContextDefault,
     savingCompanionCheckIn,
+    transcriptExporting,
     companionPrompts,
     canSend,
     canSaveCompanionCheckIn,
@@ -559,6 +560,7 @@ const SidepanelPersona = ({
     sendUserMessage,
     sendSetupLiveTestMessage,
     loadSessionHistory,
+    exportSelectedSessionTranscript,
     confirmPlanWithMap,
     cancelPlan,
     handleResumeSessionSelectionChange,
@@ -1758,6 +1760,24 @@ const SidepanelPersona = ({
 
   const transcriptPanel = (
     <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-surface p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <Typography.Text className="text-xs font-medium text-text">
+          {t("sidepanel:persona.transcript", "Transcript")}
+        </Typography.Text>
+        {sessionId ? (
+          <Button
+            data-testid="persona-transcript-export-button"
+            size="small"
+            icon={<Download size={14} />}
+            loading={transcriptExporting}
+            onClick={() => {
+              void exportSelectedSessionTranscript()
+            }}
+          >
+            {t("sidepanel:persona.exportTranscript", "Export transcript")}
+          </Button>
+        ) : null}
+      </div>
       <div className="space-y-2">
         {logs.length === 0 ? (
           <Typography.Text type="secondary" className="text-xs">

@@ -670,6 +670,115 @@ describe("SidepanelPersona", () => {
     )
   })
 
+  it("exports the selected live session transcript through the authenticated endpoint", async () => {
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:persona-session-export")
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {})
+
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { body?: any }) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "research_assistant", name: "Research Assistant" }]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "research_assistant",
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      if (path.includes("/persona/sessions?persona_id=research_assistant")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      if (path === "/api/v1/persona/session") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            session_id: "sess-export",
+            persona: { id: init?.body?.persona_id || "research_assistant" }
+          })
+        })
+      }
+      if (path === "/api/v1/persona/sessions/sess-export?limit_turns=0") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ preferences: {} })
+        })
+      }
+      if (path === "/api/v1/persona/sessions/sess-export/export") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            session_id: "sess-export",
+            persona_id: "research_assistant",
+            format: "json",
+            created_at: "2026-05-21T00:00:00Z",
+            updated_at: "2026-05-21T00:00:01Z",
+            turn_count: 1,
+            redaction_markers: ["metadata.auth_token"],
+            turns: [
+              {
+                turn_id: "turn-1",
+                timestamp: "2026-05-21T00:00:01Z",
+                role: "user",
+                event_type: "user_message",
+                content: "hello",
+                metadata: {}
+              }
+            ]
+          })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    try {
+      render(<SidepanelPersona />)
+
+      await waitForLiveSessionPanel()
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+
+      const exportButton = await screen.findByTestId("persona-transcript-export-button")
+      fireEvent.click(exportButton)
+
+      await waitFor(() => {
+        expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+          "/api/v1/persona/sessions/sess-export/export",
+          { method: "GET" }
+        )
+      })
+      expect(createObjectURLSpy).toHaveBeenCalledTimes(1)
+      const blob = createObjectURLSpy.mock.calls[0]?.[0] as Blob
+      expect(blob.type).toBe("application/json")
+      expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:persona-session-export")
+      expect(
+        await screen.findByText("Transcript export downloaded.")
+      ).toBeInTheDocument()
+    } finally {
+      createObjectURLSpy.mockRestore()
+      revokeObjectURLSpy.mockRestore()
+    }
+  })
+
   it("publishes route-local buddy context ahead of stale persisted assistant state", async () => {
     window.localStorage.setItem(
       SELECTED_ASSISTANT_STORAGE_KEY,
