@@ -3,7 +3,10 @@ import React from "react"
 import type {
   PersonaBuddyShellPosition
 } from "@/store/persona-buddy-shell"
-import type { PersonaBuddySummary } from "@/types/persona-buddy"
+import type {
+  PersonaBuddyLiveControlView,
+  PersonaBuddySummary
+} from "@/types/persona-buddy"
 import type {
   PersonaVisualPack,
   PersonaVisualStateId
@@ -28,6 +31,7 @@ type BuddyShellDockProps = {
   visualPack?: PersonaVisualPack | null
   visualState?: PersonaVisualStateId
   visualDiagnostic?: PersonaVisualDiagnostic | null
+  liveControl?: PersonaBuddyLiveControlView | null
   onVisualRenderError?: (error: PersonaVisualRenderError | null) => void
   position: PersonaBuddyShellPosition
   onToggle: () => void
@@ -43,6 +47,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   visualPack = null,
   visualState = "idle",
   visualDiagnostic = null,
+  liveControl = null,
   onVisualRenderError,
   position,
   onToggle,
@@ -57,6 +62,18 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
   const showVisualDiagnostic =
     Boolean(visualDiagnostic) &&
     (isOpen || visualDiagnostic?.severity !== "info")
+  const focusedLiveSession = liveControl?.focusedSession ?? null
+  const urgentCount = focusedLiveSession?.pendingApprovalCount ?? 0
+  const liveStatusLabel = urgentCount > 0
+    ? "Needs approval"
+    : focusedLiveSession?.lifecycle === "connected" ||
+        liveControl?.streamState === "open"
+      ? "Connected"
+      : focusedLiveSession?.lifecycle === "recovering"
+        ? "Recovering"
+        : focusedLiveSession
+          ? "Idle"
+          : null
 
   return (
     <div
@@ -103,7 +120,23 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
           <div className="truncate text-xs text-text-muted">
             {buddySummary.visual?.species_id ?? "buddy unavailable"}
           </div>
+          {liveStatusLabel ? (
+            <div
+              data-testid="persona-buddy-live-status"
+              className="mt-0.5 truncate text-[11px] font-medium text-text-muted"
+            >
+              {liveStatusLabel}
+            </div>
+          ) : null}
         </div>
+        {urgentCount > 0 ? (
+          <span
+            data-testid="persona-buddy-urgent-badge"
+            className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-danger px-1.5 text-[11px] font-semibold text-white"
+          >
+            {urgentCount}
+          </span>
+        ) : null}
         <div className="text-lg leading-none text-text">
           {isDormant ? "·" : isOpen ? "−" : "+"}
         </div>
@@ -125,6 +158,7 @@ export const BuddyShellDock: React.FC<BuddyShellDockProps> = ({
           buddySummary={buddySummary}
           personaId={personaId}
           visualDiagnostic={visualDiagnostic}
+          liveControl={liveControl}
         />
       ) : null}
     </div>

@@ -619,7 +619,7 @@ git commit -m "feat(ui): add shared Persona live control hook"
 - Modify: `apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx`
 - Create: `apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellPopover.test.tsx`
 
-- [ ] **Step 1: Write failing Buddy shell tests**
+- [x] **Step 1: Write failing Buddy shell tests**
 
 Add tests that verify:
 
@@ -636,7 +636,7 @@ it("routes Choose/Change Buddy to Visuals without activation bypass", ...)
 
 Mock `usePersonaLiveControl()` so component tests stay deterministic.
 
-- [ ] **Step 2: Run failing Buddy shell tests**
+- [x] **Step 2: Run failing Buddy shell tests**
 
 Run:
 
@@ -648,7 +648,7 @@ bunx vitest run \
 
 Expected: FAIL until UI props and controls are added.
 
-- [ ] **Step 3: Extend types for live-control display**
+- [x] **Step 3: Extend types for live-control display**
 
 In `apps/packages/ui/src/types/persona-buddy.ts`, add small display-only types if needed:
 
@@ -666,7 +666,7 @@ export interface PersonaBuddyLiveStatusSummary {
 
 Do not add visual-pack editing fields here.
 
-- [ ] **Step 4: Wire `BuddyShellHost` to `usePersonaLiveControl`**
+- [x] **Step 4: Wire `BuddyShellHost` to `usePersonaLiveControl`**
 
 In `BuddyShellHost.tsx`:
 
@@ -676,7 +676,7 @@ In `BuddyShellHost.tsx`:
 4. Pass `liveControl` props to `BuddyShellDock`.
 5. Map `focusedSession.suggestedVisualState` into `renderContext.visual_state` only when it is valid for `resolvePersonaVisualState()` or can safely fall back.
 
-- [ ] **Step 5: Add dock status and badge**
+- [x] **Step 5: Add dock status and badge**
 
 In `BuddyShellDock.tsx`:
 
@@ -685,7 +685,7 @@ In `BuddyShellDock.tsx`:
 3. Render `data-testid="persona-buddy-urgent-badge"` when `urgentCount > 0`.
 4. Keep visual diagnostics visible and do not hide the badge during drag.
 
-- [ ] **Step 6: Add compact popover controls**
+- [x] **Step 6: Add compact popover controls**
 
 In `BuddyShellPopover.tsx`:
 
@@ -702,7 +702,7 @@ In `BuddyShellPopover.tsx`:
 6. Keep "Choose/Change Buddy" linked to the existing Visuals route.
 7. For approval-needed state, render a notice and the full Live link. Do not render approve/reject buttons.
 
-- [ ] **Step 7: Run Buddy shell tests**
+- [x] **Step 7: Run Buddy shell tests**
 
 Run:
 
@@ -714,7 +714,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 8: Run VisualPackEditor guardrail**
+- [x] **Step 8: Run VisualPackEditor guardrail**
 
 Run:
 
