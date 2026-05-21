@@ -301,7 +301,8 @@ const VisualManagementHeader: React.FC<{
   personaName: string
   model: PersonaVisualManagementModel
   t: VisualPackTranslate
-}> = ({ personaName, model, t }) => {
+  onOpenAttention?: (row: PersonaVisualManagementAttentionRow) => void
+}> = ({ personaName, model, t, onOpenAttention }) => {
   const topAttention = model.attentionRows[0]
   const attentionCopy = getManagementAttentionCopy(topAttention, t)
   const counts = model.summary.packCounts
@@ -352,9 +353,23 @@ const VisualManagementHeader: React.FC<{
           )}
         </div>
       </div>
-      <div className="mt-3 rounded-md border border-border bg-surface px-3 py-2 text-xs">
-        <div className="font-medium text-text">{attentionCopy.title}</div>
-        <div className="mt-1 text-text-muted">{attentionCopy.message}</div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs">
+        <div>
+          <div className="font-medium text-text">{attentionCopy.title}</div>
+          <div className="mt-1 text-text-muted">{attentionCopy.message}</div>
+        </div>
+        {topAttention && onOpenAttention ? (
+          <Button
+            data-testid="persona-visual-management-attention-action"
+            size="small"
+            icon={<FileSearch className="h-3.5 w-3.5" />}
+            onClick={() => onOpenAttention(topAttention)}
+          >
+            {t("sidepanel:personaGarden.visuals.management.openAttention", {
+              defaultValue: "Open"
+            })}
+          </Button>
+        ) : null}
       </div>
     </section>
   )
@@ -373,6 +388,15 @@ const VisualWorkspaceSectionHeading: React.FC<{
     ) : null}
   </div>
 )
+
+const focusPersonaVisualSection = (
+  element: HTMLElement | null,
+  block: ScrollLogicalPosition = "start"
+): void => {
+  if (!element) return
+  element.focus({ preventScroll: true })
+  element.scrollIntoView?.({ block, behavior: "smooth" })
+}
 
 const getGenerationReadinessCopy = (
   view: PersonaVisualGenerationReadinessView,
@@ -1226,7 +1250,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   const importPreviewInputRef = React.useRef<HTMLInputElement | null>(null)
   const draftTitleInputRef = React.useRef<HTMLInputElement | null>(null)
   const duplicateTargetSelectRef = React.useRef<HTMLSelectElement | null>(null)
-  const libraryPanelRef = React.useRef<HTMLDivElement | null>(null)
+  const packBasicsSectionRef = React.useRef<HTMLElement | null>(null)
+  const portableActionsSectionRef = React.useRef<HTMLElement | null>(null)
+  const libraryPanelRef = React.useRef<HTMLElement | null>(null)
+  const jobsReviewSectionRef = React.useRef<HTMLElement | null>(null)
+  const generationReadinessRef = React.useRef<HTMLDivElement | null>(null)
   const activationControlsRef = React.useRef<HTMLDivElement | null>(null)
   const generationReadinessRequestIdRef = React.useRef(0)
   const duplicateTargetsRequestIdRef = React.useRef(0)
@@ -1785,14 +1813,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [])
 
   const focusLibraryPanel = React.useCallback(() => {
-    libraryPanelRef.current?.scrollIntoView?.({ block: "start" })
-    libraryPanelRef.current?.focus()
+    focusPersonaVisualSection(libraryPanelRef.current)
   }, [])
 
   const focusImportPreviewInput = React.useCallback(() => {
-    importPreviewInputRef.current?.scrollIntoView?.({ block: "center" })
-    importPreviewInputRef.current?.click()
-    importPreviewInputRef.current?.focus()
+    focusPersonaVisualSection(importPreviewInputRef.current, "center")
   }, [])
 
   const openImportArchivePicker = React.useCallback(() => {
@@ -1800,7 +1825,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       source: "native_import",
       requestId: (current?.requestId ?? 0) + 1
     }))
-    globalThis.setTimeout(focusImportPreviewInput, 0)
+    globalThis.setTimeout(() => {
+      focusImportPreviewInput()
+      importPreviewInputRef.current?.click()
+    }, 0)
   }, [focusImportPreviewInput])
 
   const focusDuplicateControls = React.useCallback(() => {
@@ -1813,8 +1841,44 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     const activateButton = activationControlsRef.current?.querySelector<
       HTMLButtonElement
     >('[data-testid="persona-visual-activate-button"]')
-    activateButton?.focus()
+    if (activateButton && !activateButton.disabled) {
+      focusPersonaVisualSection(activateButton)
+      return
+    }
+    focusPersonaVisualSection(activationControlsRef.current)
   }, [])
+
+  const focusManagementAttentionTarget = React.useCallback(
+    (row: PersonaVisualManagementAttentionRow) => {
+      switch (row.target) {
+        case "packs":
+          focusPersonaVisualSection(packBasicsSectionRef.current)
+          break
+        case "validation":
+          focusActivationControls()
+          break
+        case "candidates":
+        case "jobs":
+          focusPersonaVisualSection(jobsReviewSectionRef.current)
+          break
+        case "import":
+          focusImportPreviewInput()
+          break
+        case "export":
+          focusPersonaVisualSection(portableActionsSectionRef.current)
+          break
+        case "library":
+          focusLibraryPanel()
+          break
+        case "generation":
+          focusPersonaVisualSection(generationReadinessRef.current)
+          break
+        default:
+          break
+      }
+    },
+    [focusActivationControls, focusImportPreviewInput, focusLibraryPanel]
+  )
 
   const handleCreateDraft = async () => {
     const title = draftTitle.trim()
@@ -3620,15 +3684,18 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       </Modal>
 
       <section
+        ref={packBasicsSectionRef}
         data-testid="persona-visual-section-pack-basics"
         className="rounded-lg border border-border bg-surface p-3"
         aria-label="Pack basics and active status"
+        tabIndex={-1}
       >
         {showManagementHeader ? (
           <VisualManagementHeader
             personaName={selectedPersonaName || selectedPersonaId}
             model={managementModel}
             t={t}
+            onOpenAttention={focusManagementAttentionTarget}
           />
         ) : null}
         <div
@@ -3923,9 +3990,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           </section>
 
           <section
+            ref={portableActionsSectionRef}
             data-testid="persona-visual-section-portable-actions"
             className="rounded-lg border border-border bg-surface p-3"
             aria-label="Portable archive and duplicate actions"
+            tabIndex={-1}
           >
             <VisualWorkspaceSectionHeading
               title="Portable archive and duplicate actions"
@@ -4518,7 +4587,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                   </div>
                 )}
               </div>
-              <div ref={activationControlsRef} className="flex flex-wrap gap-2">
+              <div
+                ref={activationControlsRef}
+                className="flex flex-wrap gap-2"
+                tabIndex={-1}
+              >
                 <Button
                   data-testid="persona-visual-save-manifest"
                   size="small"
@@ -4554,9 +4627,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           </section>
 
           <section
+            ref={jobsReviewSectionRef}
             data-testid="persona-visual-section-jobs-review"
             className="rounded-lg border border-border bg-surface p-3"
             aria-label="Jobs and review"
+            tabIndex={-1}
           >
             <div className="flex flex-wrap items-start justify-between gap-2">
               <VisualWorkspaceSectionHeading
@@ -4637,7 +4712,9 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               </Button>
             </div>
             <div
+              ref={generationReadinessRef}
               data-testid="persona-visual-generation-readiness"
+              tabIndex={-1}
               className={`mt-3 rounded border px-3 py-2 text-xs ${generationReadinessCopy.toneClassName}`}
             >
               <div className="font-medium">{generationReadinessCopy.title}</div>
