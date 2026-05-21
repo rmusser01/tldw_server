@@ -1,7 +1,8 @@
 import React from "react"
-import { Alert, Button, Input, Space, Typography } from "antd"
+import { Button, Input, Space, Typography } from "antd"
 import { Mic, Square } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 
@@ -48,9 +49,8 @@ export const VoiceTranscriptComposer: React.FC<VoiceTranscriptComposerProps> = (
         </div>
         {!supported && (
           <Alert
-            type="info"
-            showIcon
-            message={t("option:flashcards.studyAssistantVoiceUnavailable", {
+            variant="info"
+            title={t("option:flashcards.studyAssistantVoiceUnavailable", {
               defaultValue: "Voice transcript is unavailable in this browser."
             })}
           />
