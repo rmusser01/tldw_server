@@ -14,6 +14,17 @@ Reconcile the original Persona module PRD into a current completion contract for
 
 The current Persona PRD should stop acting as a catch-all roadmap. It should define what must be true before the current Persona module is considered coherent and complete. Broader platform work remains valid, but should move into explicit follow-up PRDs tracked by issue #1902.
 
+## Design Review Notes
+
+This reconciliation intentionally narrows the current Persona PRD, but the first draft left four risks underspecified:
+
+- transcript export could expose more session/tool data than intended
+- scope and policy editing could be mistaken for a privilege-granting admin surface
+- tool discovery could reveal tools the current user or deployment should not see
+- PRD status updates could mark stale goals as shipped without current code evidence
+
+The hardening rules below address those risks and should be carried into the PRD patch.
+
 ## Source Documents
 
 - `Docs/Product/Persona_Agent_Design.md`
@@ -66,6 +77,14 @@ The Persona Garden live session should show user and assistant turns, voice tran
 
 This export is not a scheduled report system and should not imply daily brief or workflow delivery support.
 
+Export hardening:
+
+- allow export only for sessions owned by the authenticated user
+- export only the selected session, not all persona history
+- omit or redact secrets, auth material, raw binary audio, and large tool payloads
+- include enough metadata for audit, such as persona id, session id, timestamps, event types, and redaction markers
+- provide deterministic JSON for machine use and Markdown as a readable convenience, if both are implemented
+
 ### Persona Memory Controls
 
 Keep persona-owned memory controls in current scope, but bound them narrowly.
@@ -96,6 +115,14 @@ Current completion should require users to:
 - recover from policy validation errors
 - understand when a live tool plan is blocked by policy
 
+Scopes and Policies hardening:
+
+- editing persona rules must not grant capabilities the authenticated user, server config, or deployment policy does not already allow
+- destructive changes should use confirmation or a clear review step
+- validation errors should identify the invalid rule, field, and reason without leaking hidden tool details
+- saves should preserve rule ownership and avoid cross-persona writes
+- concurrent edits should fail predictably or use the existing versioning pattern where available
+
 ### Minimal MCP And Tool Capability Discovery
 
 Keep minimal tool discovery and default toolset management in current scope.
@@ -108,6 +135,13 @@ Persona Garden should show enough tool information for a user to understand what
 - confirmation requirements for impactful tools
 
 Do not expand this into marketplace-style tool installation or admin-level tool lifecycle management in the current PRD.
+
+Tool discovery hardening:
+
+- show only tools visible to the authenticated user and current deployment
+- avoid exposing hidden/admin-only tool names through blocked reason text
+- distinguish "not installed", "disabled by server", "not allowed for this persona", and "requires confirmation" where the backend can truthfully report that distinction
+- keep any default-tool save path constrained by persona policy and server capability checks
 
 ### Static Visual And Persona Media Context
 
@@ -221,12 +255,22 @@ Scope:
 When updating `Docs/Product/Persona_Agent_Design.md`, apply these changes:
 
 1. Replace stale implementation status with a current status section.
-2. Mark voice protocol, persona/session memory, and policy object support as shipped or partially shipped according to current code evidence.
+2. Mark voice protocol, persona/session memory, and policy object support as shipped or partially shipped only when current code evidence supports it.
 3. Clarify that Persona Garden/live Persona sessions are the current module boundary.
 4. Add the current completion scope from this design.
 5. Add a future PRD section linking #1902.
 6. Replace old `project_id` phrasing with a note that Workspace-scoped persona defaults moved to a future PRD.
 7. Keep the original long-term vision visible, but do not let future tracks block current completion.
+8. Preserve the `tool_result.result` compatibility-removal timeline as a dated maintenance item rather than treating it as a current feature gap before its planned removal window.
+
+## Suggested PRD Patch Sequence
+
+1. Update the status and summary so the PRD no longer reads as a 2026-02-09 scaffold snapshot.
+2. Add a "Current Completion Scope" section using the keep-list above.
+3. Add "Moved To Future PRDs" and link #1902.
+4. Replace or annotate old `project_id` language with Workspace terminology and future-PRD ownership.
+5. Add acceptance criteria for transcript export, Scopes/Policies editing, tool discovery, memory controls, and security/reliability.
+6. Keep the historical milestone section only if it is relabeled as history; otherwise replace it with current completion milestones.
 
 ## Acceptance Criteria
 
@@ -235,6 +279,8 @@ When updating `Docs/Product/Persona_Agent_Design.md`, apply these changes:
 - Current Persona PRD keeps Scopes and Policies editing, transcript export, minimal tool discovery, memory controls, and reliability/security closeout in scope.
 - Current Persona PRD moves ordinary chat integration, Workspace persona defaults, scheduled work, expressive avatars, broad personalization, tool administration, and multi-agent collaboration out to future PRDs.
 - Future scope links to GitHub issue #1902.
+- Transcript export, Scopes/Policies editing, and tool discovery include the hardening constraints from this design.
+- Shipped or partially shipped claims are backed by current code evidence during the PRD patch.
 - No design-system backlog tasks are touched.
 
 ## Verification Plan
