@@ -92,6 +92,42 @@ const QUICK_SETUP_STEP_FIELDS: Array<Array<keyof QuickSetupValues>> = [
   []
 ]
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+
+const extractPipelineErrorDetail = (error: unknown): string | null => {
+  const errorRecord = asRecord(error)
+  const response = asRecord(errorRecord?.response)
+  const data = asRecord(response?.data)
+  const detail = data?.detail
+  if (typeof detail === "string") {
+    const trimmed = detail.trim()
+    return trimmed || null
+  }
+
+  const detailRecord = asRecord(detail)
+  const message = detailRecord?.message
+  if (typeof message === "string") {
+    const trimmed = message.trim()
+    if (trimmed) return trimmed
+  }
+
+  const code = detailRecord?.code
+  if (typeof code === "string") {
+    const trimmed = code.trim()
+    if (trimmed) return trimmed
+  }
+
+  if (error instanceof Error) {
+    const trimmed = error.message.trim()
+    return trimmed || null
+  }
+
+  return null
+}
+
 export const OverviewTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const [data, setData] = useState<WatchlistsOverviewData | null>(null)
@@ -108,6 +144,7 @@ export const OverviewTab: React.FC = () => {
   const [pipelineSetupSubmitting, setPipelineSetupSubmitting] = useState(false)
   const [pipelineSourcesLoading, setPipelineSourcesLoading] = useState(false)
   const [pipelineSources, setPipelineSources] = useState<WatchlistSource[]>([])
+  const [pipelineSubmitError, setPipelineSubmitError] = useState<string | null>(null)
   const [pipelinePreviewLoading, setPipelinePreviewLoading] = useState(false)
   const [pipelinePreviewError, setPipelinePreviewError] = useState<string | null>(null)
   const [pipelinePreviewRendered, setPipelinePreviewRendered] = useState<string | null>(null)
@@ -657,6 +694,7 @@ export const OverviewTab: React.FC = () => {
   }, [selectedWatchlistId, t])
 
   const openPipelineSetup = useCallback(() => {
+    setPipelineSubmitError(null)
     setPipelinePreviewError(null)
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
@@ -670,6 +708,7 @@ export const OverviewTab: React.FC = () => {
     if (pipelineSetupSubmitting) return
     setPipelineSetupOpen(false)
     setPipelinePreviewLoading(false)
+    setPipelineSubmitError(null)
     setPipelinePreviewError(null)
     setPipelinePreviewRendered(null)
     setPipelinePreviewRunId(null)
@@ -811,6 +850,7 @@ export const OverviewTab: React.FC = () => {
       wizardDraft.sourceMode === "new" ? "source_create" : "job_create"
 
     try {
+      setPipelineSubmitError(null)
       setPipelineSetupSubmitting(true)
       const shouldRunNow = Boolean(wizardDraft.runNow || mode === "test")
       shouldRunNowForTelemetry = shouldRunNow
@@ -906,15 +946,34 @@ export const OverviewTab: React.FC = () => {
         mode,
         runNow: shouldRunNowForTelemetry
       })
+      const genericError = t(
+        "watchlists:overview.pipelineSetup.error",
+        "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
+      )
+      const outputError = t(
+        "watchlists:overview.pipelineSetup.outputError",
+        "Could not create the digest output."
+      )
+      const outputErrorDetail = extractPipelineErrorDetail(err)
+      setPipelineSubmitError(
+        pipelineFailureStage === "output_create"
+          ? outputErrorDetail
+            ? t(
+                "watchlists:overview.pipelineSetup.outputErrorWithDetails",
+                "Could not create the digest output. Details: {{message}}",
+                { message: outputErrorDetail }
+              )
+            : outputError
+          : genericError
+      )
       if (createdRunId != null) {
+        if (pipelineFailureStage === "output_create") {
+          message.error(outputError)
+          return
+        }
         setActiveTab("runs")
         openRunDetail(createdRunId)
-        message.error(
-          t(
-            "watchlists:overview.pipelineSetup.error",
-            "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
-          )
-        )
+        message.error(genericError)
         return
       }
 
@@ -965,12 +1024,7 @@ export const OverviewTab: React.FC = () => {
           )
         }
       } else {
-        message.error(
-          t(
-            "watchlists:overview.pipelineSetup.error",
-            "Pipeline setup failed. Open Activity or Reports to inspect recovery options."
-          )
-        )
+        message.error(genericError)
       }
     } finally {
       setPipelineSetupSubmitting(false)
@@ -1431,7 +1485,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleOpenFailedRuns}
                     data-testid="watchlists-overview-attention-runs"
                   >
-                    {t("watchlists:overview.attention.runs", "Failed activity runs ({{count}})", {
+                    {t("watchlists:overview.attention.runs", "Activity needs review ({{count}})", {
                       count: overviewBadges.runs
                     })}
                   </Button>
@@ -1442,7 +1496,7 @@ export const OverviewTab: React.FC = () => {
                     onClick={handleOpenAttentionOutputs}
                     data-testid="watchlists-overview-attention-outputs"
                   >
-                    {t("watchlists:overview.attention.outputs", "Reports with delivery issues ({{count}})", {
+                    {t("watchlists:overview.attention.outputs", "Reports need review ({{count}})", {
                       count: overviewBadges.outputs
                     })}
                   </Button>
@@ -2118,6 +2172,7 @@ export const OverviewTab: React.FC = () => {
         sources={pipelineSources}
         sourcesLoading={pipelineSourcesLoading}
         submitting={pipelineSetupSubmitting}
+        submitError={pipelineSubmitError}
         previewLoading={pipelinePreviewLoading}
         previewError={pipelinePreviewError}
         previewRendered={pipelinePreviewRendered}

@@ -3050,7 +3050,10 @@ test.describe('Watchlists playground smoke', () => {
       page.locator('.ant-tabs-tabpane-active').getByText('Demo report with failed audio')
     ).toBeVisible()
     await page.getByRole('button', { name: 'Regenerate' }).first().click()
-    await page.getByRole('button', { name: 'Regenerate' }).last().click()
+    await page
+      .getByRole('dialog', { name: 'Regenerate Output' })
+      .getByRole('button', { name: 'Regenerate' })
+      .click()
 
     await expect
       .poll(async () => page.evaluate(() => (window as any).__watchlistsOutputCreateCalls))

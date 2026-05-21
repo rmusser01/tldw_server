@@ -242,6 +242,17 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const renderAudioArtifactGraph = () => {
     if (!audioSummary.requested) return null
 
+    const normalizedStatus = audioSummary.status.trim().toLowerCase()
+    const audioStatusDisplay = t(
+      "watchlists:outputs.audioBriefingStatus",
+      "Audio briefing {{status}}",
+      {
+        status: normalizedStatus === "pending"
+          ? t("watchlists:outputs.audioStatus.queuedAdjective", "queued")
+          : audioSummary.statusLabel.toLowerCase()
+      }
+    )
+
     const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
       <div key={key}>
         <div className="font-medium text-text">{artifact.label}</div>
@@ -268,7 +279,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           <div className="text-sm font-medium text-text">
             {t("watchlists:outputs.audioArtifactsLabel", "Audio artifacts")}
           </div>
-          <Tag color={audioSummary.statusColor}>{audioSummary.statusLabel}</Tag>
+          <Tag color={audioSummary.statusColor}>{audioStatusDisplay}</Tag>
         </div>
         {audioSummary.fallbackReason && (
           <div className="text-xs text-warning">
@@ -276,6 +287,9 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
               reason: audioSummary.fallbackReason
             })}
           </div>
+        )}
+        {audioSummary.detail && (
+          <div className="text-xs text-text-muted">{audioSummary.detail}</div>
         )}
         <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
           {audioSummary.scriptArtifact && (
@@ -477,6 +491,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}

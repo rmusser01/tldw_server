@@ -201,6 +201,31 @@ describe("outputMetadata helpers", () => {
     expect(summary.scriptArtifact?.uri).toBeUndefined()
   })
 
+  it("normalizes legacy report-level audio briefing metadata", () => {
+    const pendingSummary = getAudioStatusSummary({
+      audio_briefing_requested: true,
+      audio_briefing_status: "pending",
+      audio_briefing_task_id: "task_audio_pending"
+    })
+    expect(pendingSummary).toMatchObject({
+      requested: true,
+      status: "pending",
+      detail: "task_audio_pending"
+    })
+
+    const failedSummary = getAudioStatusSummary({
+      audio_briefing_requested: true,
+      audio_briefing_status: "failed",
+      audio_briefing_error: "TTS provider timeout"
+    })
+    expect(failedSummary).toMatchObject({
+      requested: true,
+      status: "failed",
+      error: "TTS provider timeout",
+      detail: "TTS provider timeout"
+    })
+  })
+
   it("returns artifact labels and tag colors by output kind", () => {
     expect(getOutputArtifactLabel({ format: "mp3", type: "tts_audio" })).toBe("Audio briefing")
     expect(getOutputArtifactTagColor({ format: "mp3", type: "tts_audio" })).toBe("purple")

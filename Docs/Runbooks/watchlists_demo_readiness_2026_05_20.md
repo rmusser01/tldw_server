@@ -65,7 +65,8 @@ Do not describe audio as playable, produced, or complete when only the Scheduler
 
 ## Demo Script Safe Claims
 
-- Safe: Watchlists can create feeds and monitors from the shared WebUI/extension route.
+- Safe after WebUI smoke passes: Watchlists can create feeds and monitors from `/watchlists` in the WebUI.
+- Safe for extension only after the extension build and route smoke pass: the extension can render the shared `/watchlists` route and preserve the same Activity/Reports recovery behavior.
 - Safe: Briefing monitor payloads use the backend `briefing_markdown` template name.
 - Safe: Reports can show pending, failed, skipped, or completed audio states without implying playback exists.
 - Safe: Source and run failures can put Watchlists into an attention state.
@@ -87,4 +88,4 @@ Do not describe audio as playable, produced, or complete when only the Scheduler
 - Audio status may truthfully be pending, failed, or skipped during a demo; narrate that state directly.
 - Some remote sources may block scraping or return no usable items. Replace the source or show the diagnostic rather than retrying silently.
 - Extension verification depends on a current extension build and seeded server configuration.
-- Current verification on 2026-05-20 blocked before the extension route smoke: `wxt build` did not finish within 120 seconds during Chrome extension build, so do not claim the extension path is demo-ready until the extension build gate passes.
+- Current focused verification on 2026-05-20 passed the WebUI demo-readiness smoke and the extension strict demo-readiness route smoke with mocked API responses. This proves route/rendering and recovery behavior, not real remote source reachability or final audio playback.

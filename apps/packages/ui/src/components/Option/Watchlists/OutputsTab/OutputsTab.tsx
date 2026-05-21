@@ -37,6 +37,7 @@ import {
 } from "@/services/watchlists"
 import type { WatchlistJob, WatchlistOutput, WatchlistTemplate } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import { OutputPreviewDrawer } from "./OutputPreviewDrawer"
 import {
@@ -69,15 +70,15 @@ import {
 } from "../shared/focus-management"
 
 const OUTPUTS_ADVANCED_FILTERS_STORAGE_KEY = "watchlists:outputs:advanced-filters:v1"
+const SENSITIVE_LOG_VALUE_PATTERN =
+  /\b(authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password)\b\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;)}\]]+)/gi
+const BEARER_LOG_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
 
 const getSafeLogErrorMessage = (err: unknown): string => {
-  if (err instanceof Error) return err.message
-  if (typeof err === "string") return err
-  try {
-    return JSON.stringify(err) ?? String(err)
-  } catch {
-    return String(err)
-  }
+  const message = sanitizeServerErrorMessage(err, "Request failed")
+  return message
+    .replace(SENSITIVE_LOG_VALUE_PATTERN, "$1=[REDACTED]")
+    .replace(BEARER_LOG_VALUE_PATTERN, "Bearer [REDACTED]")
 }
 
 const readStoredDisclosureState = (key: string): boolean | null => {

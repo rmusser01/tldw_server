@@ -2,7 +2,7 @@
 
 Status: Draft for review
 Date: 2026-05-20
-Backlog: TASK-440
+Backlog: TASK-464
 Scope: `/watchlists` WebUI and browser-extension shared UI, plus directly connected Watchlists API, Scheduler, output, delivery, and audio briefing flows needed to make the news scraping to digest to optional audio workflow demonstrable and durable.
 
 ## 1. Context

@@ -1,10 +1,10 @@
 ---
-id: TASK-442
+id: TASK-466
 title: Implement Watchlists demo rescue slice
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-20 22:51
+updated_date: 2026-05-20 23:22
 labels:
 - watchlists
 - demo-readiness
@@ -15,7 +15,18 @@ modified_files:
 - Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md
 - apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts
 - apps/extension/tests/e2e/watchlists.spec.ts
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/quick-setup.ts
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
+- apps/packages/ui/src/services/watchlists-overview.ts
+- tldw_Server_API/app/api/v1/endpoints/watchlists.py
+- tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py
+- tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py
+- tldw_Server_API/app/core/Watchlists/pipeline.py
 ---
 
 ## Description
@@ -36,13 +47,13 @@ Implement PR A from the Watchlists demo remediation plan: template contract hotf
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 1 committed in 7de556bad. Task 2 replaces the audio briefing bridge with Scheduler submit(...), includes Scheduler-required user_id metadata, scopes idempotency by user/job/run, and updates the implementation plan. Verification: test_audio_briefing_workflow.py 12 passed; watchlists API generate_audio metadata subset 3 passed; test_audio_output_delivery.py 8 passed; git diff --check passed; Bandit on audio_briefing_workflow.py reported 0 findings.
+Clean PR branch replayed the Watchlists demo-rescue commits onto current dev, renumbered stale Backlog task IDs to TASK-464/TASK-465/TASK-466 to avoid collisions, and retained current dev's newer Watchlists route/audio state. Final review fixes added root Watchlist container and scoped alert stubs to browser smoke coverage, kept pipeline wizard errors in context when digest output creation fails, and surfaced report-level audio briefing status on markdown report previews.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 5 added the Watchlists demo-readiness runbook, a focused WebUI same-origin Playwright smoke for pipeline creation and output/audio failure truthfulness, and an extension route smoke for the same Reports/Activity recovery path. During WebUI verification, caught output regeneration failures were still surfacing through the Next.js runtime overlay because OutputsTab logged the raw error object; OutputsTab now logs a safe string for that caught path while preserving the in-app error message and live region. Verification recorded: WebUI Playwright smoke 2 passed; focused OutputsTab/OutputPreviewDrawer Vitest 3 files/11 tests passed; backend watchlists demo/pipeline/audio pytest set 29 passed, 4 skipped, 1 xpassed; git diff --check passed; Bandit on touched Watchlists Python paths reported 0 results/errors. Extension Playwright could not execute because global setup hangs in WXT build; isolated bun run build:chrome:prod also timed out after 120 seconds after the same WXT duplicate-import warnings, before .output/chrome-mv3 was produced.
+Implemented the scoped Watchlists demo-readiness rescue slice and review fixes on a clean dev-based branch. Verification recorded: focused Watchlists Vitest suite 10 files / 79 tests passed; focused backend Watchlists pytest set 35 passed with 5 warnings; WebUI Playwright demo-readiness smoke 3 passed; extension strict demo-readiness route smoke 1 passed after WXT Chrome build; git diff --check passed; Bandit on touched Watchlists Python paths reported 0 results/errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

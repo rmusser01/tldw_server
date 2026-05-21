@@ -1,9 +1,10 @@
-import type { Locator, Page, Route } from "@playwright/test"
+import type { Page, Route } from "@playwright/test"
 import {
   test,
   expect,
-  assertNoCriticalErrors
+  getCriticalIssues
 } from "../utils/fixtures"
+import type { DiagnosticsData } from "../utils/fixtures"
 import { stubNotificationsApi, waitForConnection } from "../utils/helpers"
 
 type WatchlistsRouteOptions = {
@@ -15,6 +16,19 @@ type WatchlistsRouteOptions = {
 }
 
 const now = () => "2026-05-20T15:00:00Z"
+
+const demoWatchlist = {
+  id: 42,
+  name: "Demo Watchlist",
+  description: "Demo readiness fixture",
+  objective: "Track demo news sources and generate briefings",
+  domain: "news",
+  status: "active",
+  priority: "medium",
+  tags: ["demo"],
+  created_at: now(),
+  updated_at: now()
+}
 
 const source = {
   id: 101,
@@ -132,12 +146,68 @@ const assertNoRuntimeOverlay = async (page: Page) => {
   await expect(page.getByText(/Unhandled Runtime Error|Build Error|Application error/i)).toHaveCount(0)
 }
 
-const domClick = async (locator: Locator) => {
-  await locator.evaluate((node) => {
-    if (node instanceof HTMLElement) {
-      node.click()
-    }
-  })
+const assertNoUnexpectedCriticalErrors = async (
+  diagnostics: DiagnosticsData,
+  options: { allowedConsoleErrorPatterns?: RegExp[] } = {}
+) => {
+  const critical = getCriticalIssues(diagnostics)
+  const allowedConsoleErrorPatterns = [
+    /Warning: \[antd: message\] Static function can not consume context like dynamic theme/,
+    ...(options.allowedConsoleErrorPatterns || [])
+  ]
+  const consoleErrors = critical.consoleErrors.filter(
+    (entry) => !allowedConsoleErrorPatterns.some((pattern) => pattern.test(entry.text))
+  )
+
+  if (
+    critical.pageErrors.length > 0 ||
+    consoleErrors.length > 0 ||
+    critical.requestFailures.length > 0
+  ) {
+    throw new Error(
+      `Unexpected browser diagnostics:\n${JSON.stringify(
+        {
+          pageErrors: critical.pageErrors,
+          consoleErrors,
+          requestFailures: critical.requestFailures
+        },
+        null,
+        2
+      )}`
+    )
+  }
+}
+
+const assertNoUnmatchedWatchlistsRequests = (state: {
+  unmatchedRequests: Array<{ method: string; path: string }>
+}) => {
+  expect(state.unmatchedRequests).toEqual([])
+}
+
+const EXPECTED_REGENERATE_FAILURE_CONSOLE = /Failed to regenerate output:.*template_not_found: briefing_markdown/
+const EXPECTED_OUTPUT_CREATE_400_CONSOLE =
+  /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/
+
+const fillGuidedQuickSetup = async (page: Page) => {
+  const quickSetupDialog = page.getByRole("dialog", { name: /Add initial collection|Guided quick setup/ })
+  const openedAutomatically = await quickSetupDialog
+    .waitFor({ state: "visible", timeout: 2000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!openedAutomatically) {
+    await page.getByTestId("watchlists-overview-cta-guided-setup").click()
+  }
+  await expect(quickSetupDialog).toBeVisible()
+  await quickSetupDialog.getByLabel("Feed name").fill("Demo Feed")
+  await quickSetupDialog.getByRole("textbox", { name: /\* Feed URL/ }).fill("https://example.com/feed.xml")
+  await quickSetupDialog.getByRole("button", { name: "Next" }).click()
+
+  await quickSetupDialog.getByLabel("Monitor name").fill("Demo Briefing")
+  await quickSetupDialog.getByRole("button", { name: "Next" }).click()
+
+  await expect(quickSetupDialog.getByTestId("watchlists-overview-quick-setup-candidate-summary"))
+    .toContainText("1 ingestable")
+  await quickSetupDialog.getByRole("button", { name: /Create collection|Create setup/i }).click()
 }
 
 const setupWatchlistsReadinessRoutes = async (
@@ -148,14 +218,21 @@ const setupWatchlistsReadinessRoutes = async (
     localStorage.setItem("watchlists:show-all-views:v1", "true")
   })
   const state = {
+    watchlists: [demoWatchlist],
     sources: [...(options.sources || [])],
     jobs: [...(options.jobs || [])],
     runs: [...(options.runs || [])],
     outputs: [...(options.outputs || [])],
+    sourceTests: [] as Array<Record<string, unknown>>,
     createdSources: [] as Array<Record<string, unknown>>,
     createdJobs: [] as Array<Record<string, unknown>>,
-    outputCreates: [] as Array<Record<string, unknown>>
+    outputCreates: [] as Array<Record<string, unknown>>,
+    unmatchedRequests: [] as Array<{ method: string; path: string }>
   }
+
+  await page.route(/\/api\/v1\/persona\/profiles(?:\?.*)?$/, async (route) => {
+    await jsonResponse(route, [])
+  })
 
   await page.route(/\/api\/v1\/watchlists(?:\/.*)?(?:\?.*)?$/, async (route) => {
     const request = route.request()
@@ -164,6 +241,26 @@ const setupWatchlistsReadinessRoutes = async (
     const method = request.method()
     const pageNum = Number(searchParams.get("page") || "1")
     const size = Number(searchParams.get("size") || "25")
+
+    if (method === "GET" && pathname === "/api/v1/watchlists") {
+      await jsonResponse(route, {
+        items: state.watchlists,
+        total: state.watchlists.length,
+        page: pageNum,
+        size
+      })
+      return
+    }
+
+    if (method === "GET" && /^\/api\/v1\/watchlists\/\d+\/alerts$/.test(pathname)) {
+      await jsonResponse(route, {
+        items: [],
+        total: 0,
+        page: pageNum,
+        size
+      })
+      return
+    }
 
     if (method === "GET" && pathname === "/api/v1/watchlists/sources") {
       await jsonResponse(route, {
@@ -192,6 +289,8 @@ const setupWatchlistsReadinessRoutes = async (
     }
 
     if (method === "POST" && pathname === "/api/v1/watchlists/sources/test") {
+      const payload = request.postDataJSON() as Record<string, unknown>
+      state.sourceTests.push(payload)
       await jsonResponse(route, {
         items: [
           {
@@ -249,6 +348,19 @@ const setupWatchlistsReadinessRoutes = async (
         total: filtered.length,
         page: pageNum,
         size
+      })
+      return
+    }
+
+    const runDetailsMatch = pathname.match(/^\/api\/v1\/watchlists\/runs\/(\d+)\/details$/)
+    if (method === "GET" && runDetailsMatch) {
+      await jsonResponse(route, {
+        ...completedRun,
+        filter_tallies: { include: 2 },
+        log_text: "Completed successfully",
+        log_path: null,
+        truncated: false,
+        filtered_sample: null
       })
       return
     }
@@ -366,7 +478,17 @@ const setupWatchlistsReadinessRoutes = async (
       return
     }
 
-    await route.continue()
+    state.unmatchedRequests.push({ method, path: `${pathname}${url.search}` })
+    await jsonResponse(
+      route,
+      {
+        detail: {
+          code: "unmatched_watchlists_mock",
+          message: `Unhandled Watchlists mock route: ${method} ${pathname}`
+        }
+      },
+      500
+    )
   })
   await stubNotificationsApi(page)
 
@@ -374,6 +496,49 @@ const setupWatchlistsReadinessRoutes = async (
 }
 
 test.describe("Watchlists demo readiness gate", () => {
+  test("preflights and creates the first guided news feed and monitor", async ({
+    authedPage: page,
+    diagnostics
+  }) => {
+    const state = await setupWatchlistsReadinessRoutes(page)
+
+    await page.goto("/watchlists?tab=overview", { waitUntil: "domcontentloaded" })
+    await waitForConnection(page)
+
+    await expect(page.getByRole("heading", { name: "Watchlists" })).toBeVisible()
+    await assertNoRuntimeOverlay(page)
+
+    await fillGuidedQuickSetup(page)
+
+    await expect.poll(() => state.sourceTests.length).toBe(1)
+    expect(state.sourceTests[0]).toMatchObject({
+      url: "https://example.com/feed.xml",
+      source_type: "rss"
+    })
+    await expect.poll(() => state.createdSources.length).toBe(1)
+    expect(state.createdSources[0]).toMatchObject({
+      name: "Demo Feed",
+      url: "https://example.com/feed.xml",
+      source_type: "rss",
+      active: true
+    })
+    await expect.poll(() => state.createdJobs.length).toBe(1)
+    expect(state.createdJobs[0]).toMatchObject({
+      name: "Demo Briefing",
+      scope: { sources: [501] },
+      output_prefs: {
+        template_name: "briefing_markdown",
+        template: { default_name: "briefing_markdown" },
+        generate_audio: true
+      }
+    })
+    await expect.poll(() => state.runs.length).toBe(1)
+
+    assertNoUnmatchedWatchlistsRequests(state)
+    await assertNoRuntimeOverlay(page)
+    await assertNoUnexpectedCriticalErrors(diagnostics)
+  })
+
   test("loads /watchlists and creates the demo briefing monitor with backend template names", async ({
     authedPage: page,
     diagnostics
@@ -388,24 +553,26 @@ test.describe("Watchlists demo readiness gate", () => {
     await expect(page.getByRole("heading", { name: "Watchlists" })).toBeVisible()
     await assertNoRuntimeOverlay(page)
 
-    await page.getByTestId("watchlists-overview-cta-pipeline-builder").click({ force: true })
+    await page.getByTestId("watchlists-overview-cta-pipeline-builder").click()
     const pipelineDialog = page.getByRole("dialog", { name: "Briefing pipeline builder" })
     await expect(pipelineDialog).toBeVisible()
     const demoFeedCheckbox = pipelineDialog.getByRole("checkbox", { name: "Demo Feed" })
     await expect(demoFeedCheckbox).toBeVisible()
-    await demoFeedCheckbox.check({ force: true })
+    await demoFeedCheckbox.check()
     await expect(demoFeedCheckbox).toBeChecked()
-    await domClick(pipelineDialog.getByRole("button", { name: "Next" }))
+    await pipelineDialog.getByRole("button", { name: "Next" }).click()
 
     await pipelineDialog.getByLabel("Monitor name").fill("Demo Briefing")
     await expect(pipelineDialog.getByLabel("Monitor name")).toHaveValue("Demo Briefing")
-    await expect(pipelineDialog.getByLabel("Template")).toHaveValue("briefing_md")
-    await domClick(pipelineDialog.getByRole("button", { name: "Next" }))
+    await pipelineDialog.getByRole("button", { name: "Next" }).click()
 
-    await expect(
-      pipelineDialog.getByText("Confirm this pipeline before creating monitor, run, and output artifacts.")
-    ).toBeVisible()
-    await domClick(pipelineDialog.getByRole("button", { name: "Create pipeline" }))
+    await expect(pipelineDialog.getByLabel("Template")).toHaveValue("briefing_md")
+    await pipelineDialog.getByRole("button", { name: "Next" }).click()
+    await expect(pipelineDialog.getByLabel("Audio briefing")).toBeVisible()
+    await pipelineDialog.getByRole("button", { name: "Next" }).click()
+
+    await expect(pipelineDialog.getByTestId("watchlists-pipeline-review-summary")).toBeVisible()
+    await pipelineDialog.getByRole("button", { name: "Create pipeline" }).click()
 
     await expect.poll(() => state.createdJobs.length).toBe(1)
     expect(state.createdJobs[0]).toMatchObject({
@@ -424,8 +591,9 @@ test.describe("Watchlists demo readiness gate", () => {
       generate_audio: true
     })
 
+    assertNoUnmatchedWatchlistsRequests(state)
     await assertNoRuntimeOverlay(page)
-    await assertNoCriticalErrors(diagnostics)
+    await assertNoUnexpectedCriticalErrors(diagnostics)
   })
 
   test("renders output creation failure in-app and keeps audio status truthful", async ({
@@ -446,15 +614,13 @@ test.describe("Watchlists demo readiness gate", () => {
     await page.getByRole("tab", { name: /Reports/ }).click()
     await expect(page.getByText("Pending audio report")).toBeVisible()
     await page.getByRole("button", { name: "Regenerate" }).first().click()
-    await page.getByRole("button", { name: "Regenerate" }).last().click()
+    const regenerateDialog = page.getByRole("dialog", { name: "Regenerate Output" })
+    await regenerateDialog.getByRole("button", { name: "Regenerate" }).click()
 
     await expect(page.getByTestId("watchlists-outputs-live-region")).toContainText(
       "Failed to regenerate Pending audio report."
     )
-    await domClick(
-      page.getByRole("dialog", { name: "Regenerate Output" })
-        .getByRole("button", { name: "Cancel" })
-    )
+    await regenerateDialog.getByRole("button", { name: "Cancel" }).click()
     await expect.poll(() => state.outputCreates.length).toBe(1)
     expect(state.outputCreates[0]).toMatchObject({
       run_id: 404,
@@ -469,14 +635,20 @@ test.describe("Watchlists demo readiness gate", () => {
     ]) {
       const row = page.locator(".ant-table-row").filter({ hasText: expected.title })
       await expect(row).toBeVisible()
-      await domClick(row.getByRole("button", { name: "Preview" }))
+      await row.getByRole("button", { name: "Preview" }).click()
       const previewDrawer = page.getByRole("dialog", { name: expected.title })
       await expect(previewDrawer).toContainText(expected.status)
       await expect(previewDrawer).toContainText(expected.detail)
-      await domClick(previewDrawer.getByRole("button", { name: "Close" }))
+      await previewDrawer.getByRole("button", { name: "Close" }).click()
     }
 
+    assertNoUnmatchedWatchlistsRequests(state)
     await assertNoRuntimeOverlay(page)
-    await assertNoCriticalErrors(diagnostics)
+    await assertNoUnexpectedCriticalErrors(diagnostics, {
+      allowedConsoleErrorPatterns: [
+        EXPECTED_REGENERATE_FAILURE_CONSOLE,
+        EXPECTED_OUTPUT_CREATE_400_CONSOLE
+      ]
+    })
   })
 })

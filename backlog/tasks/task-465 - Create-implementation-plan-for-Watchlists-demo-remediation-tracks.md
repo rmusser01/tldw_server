@@ -1,5 +1,5 @@
 ---
-id: TASK-441
+id: TASK-465
 title: Create implementation plan for Watchlists demo remediation tracks
 status: Done
 assignee: []
@@ -34,7 +34,7 @@ Create a task-by-task implementation plan from the approved Watchlists demo reme
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
-Created implementation plan Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md from the approved Watchlists demo remediation spec.
+Created implementation plan Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md from the approved Watchlists demo remediation spec in TASK-464.
 
 Local adversarial review fixed two plan gaps before completion: explicit generate_audio=true output creation fields and scheduled digest/newsletter auto_output contract.
 

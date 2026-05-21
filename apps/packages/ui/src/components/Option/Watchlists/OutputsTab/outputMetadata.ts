@@ -55,6 +55,7 @@ export interface AudioStatusSummary {
   statusColor: string
   fallbackReason?: string
   error?: string
+  detail?: string
   downloadUrl?: string
   scriptArtifact?: AudioArtifactSummary
   speakerArtifacts: AudioArtifactSummary[]
@@ -563,7 +564,11 @@ export const getAudioStatusSummary = (
   labels?: OutputMetadataLabels
 ): AudioStatusSummary => {
   const record = getMetadataRecord(value)
-  const status = asNonEmptyString(record?.status) || "unknown"
+  const status =
+    asNonEmptyString(record?.status) ||
+    asNonEmptyString(record?.audio_briefing_status) ||
+    asNonEmptyString(record?.audio_status) ||
+    "unknown"
   const scriptArtifact = normalizeAudioArtifact(
     record?.script_artifact,
     "Script"
@@ -584,10 +589,20 @@ export const getAudioStatusSummary = (
   const fallbackReason =
     asNonEmptyString(record?.fallback_reason) ||
     asNonEmptyString(record?.fallbackReason)
-  const error = asNonEmptyString(record?.error)
+  const error =
+    asNonEmptyString(record?.error) ||
+    asNonEmptyString(record?.audio_briefing_error) ||
+    asNonEmptyString(record?.audio_error)
+  const taskId =
+    asNonEmptyString(record?.task_id) ||
+    asNonEmptyString(record?.audio_briefing_task_id) ||
+    asNonEmptyString(record?.audio_task_id)
+  const detail = error || taskId
   const requested =
     record !== null &&
     (
+      record.audio_briefing_requested === true ||
+      record.generate_audio === true ||
       status !== "unknown" ||
       Boolean(downloadUrl) ||
       Boolean(scriptArtifact) ||
@@ -604,6 +619,7 @@ export const getAudioStatusSummary = (
     statusColor: getAudioStatusColor(status),
     fallbackReason,
     error,
+    detail,
     downloadUrl,
     scriptArtifact,
     speakerArtifacts,

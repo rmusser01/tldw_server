@@ -38,6 +38,7 @@ interface PipelineWizardProps {
   sources: WatchlistSource[]
   sourcesLoading: boolean
   submitting: boolean
+  submitError: string | null
   previewLoading: boolean
   previewError: string | null
   previewRendered: string | null
@@ -76,6 +77,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
   sources,
   sourcesLoading,
   submitting,
+  submitError,
   previewLoading,
   previewError,
   previewRendered,
@@ -364,6 +366,13 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
               "watchlists:overview.pipelineSetup.validationError",
               "Review the highlighted pipeline fields."
             )}
+          />
+        )}
+        {submitError && (
+          <DesignSystemAlert
+            variant="error"
+            data-testid="watchlists-pipeline-error"
+            title={submitError}
           />
         )}
 

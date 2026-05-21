@@ -15,7 +15,7 @@
 - Demo remediation spec: `Docs/superpowers/specs/2026-05-20-watchlists-demo-remediation-staged-plans-design.md`
 - Existing digest/audio PRD: `Docs/superpowers/specs/2026-05-18-watchlists-digest-audio-briefing-prd-design.md`
 - Existing digest/audio implementation plan: `Docs/superpowers/plans/2026-05-18-watchlists-digest-audio-briefing-implementation-plan.md`
-- Backlog: `TASK-441`
+- Backlog: `TASK-465`
 
 ## Verified Current-State Evidence
 
@@ -939,7 +939,7 @@ npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=l
 
 Expected: PASS.
 
-Actual: PASS, 2 tests passed with mocked same-origin Watchlists endpoints.
+Actual: PASS, 3 tests passed with mocked same-origin Watchlists endpoints.
 
 - [ ] **Step 7: Run extension strict watchlists smoke**
 
@@ -952,7 +952,7 @@ npx playwright test tests/e2e/watchlists.spec.ts --reporter=line
 
 Expected: PASS with no skipped watchlists tests.
 
-Actual: BLOCKED before test execution. Playwright global setup hangs in `wxt build`; an isolated `bun run build:chrome:prod` reproduced the same WXT build hang and timed out after 120 seconds after duplicate-import warnings, before `.output/chrome-mv3` was produced.
+Actual: PASS, 1 strict demo-readiness route test passed after WXT built `.output/chrome-mv3`. The build still emits existing duplicated-import, unresolved font, chunk-size, and Rollup circular-chunk warnings.
 
 - [x] **Step 8: Run backend demo-scope tests**
 
@@ -970,7 +970,7 @@ python -m pytest \
 
 Expected: PASS.
 
-Actual: PASS, 29 passed, 4 skipped, 1 xpassed.
+Actual: PASS, 35 passed, 5 warnings.
 
 - [x] **Step 9: Run touched Python Bandit**
 
@@ -1873,7 +1873,7 @@ Using the runbook, verify:
 
 - [ ] **Step 7: Update task final summary**
 
-Update `TASK-441` with:
+Update `TASK-465` with:
 
 - plan path
 - review status

@@ -73,6 +73,9 @@ vi.mock("antd", () => ({
   }),
   List: () => <div />,
   Modal: ({ children, open }: any) => (open ? <div>{children}</div> : null),
+  Radio: Object.assign(({ children }: any) => <label>{children}</label>, {
+    Group: ({ children }: any) => <div>{children}</div>
+  }),
   Select: Object.assign(() => <select />, {
     Option: ({ children }: any) => <option>{children}</option>
   }),
@@ -104,6 +107,7 @@ vi.mock("@/services/watchlists", () => ({
   createWatchlistOutput: vi.fn(),
   createWatchlistJob: vi.fn(),
   createWatchlistSource: vi.fn(),
+  deleteWatchlistSource: vi.fn(),
   deleteWatchlistJob: vi.fn(),
   fetchWatchlistRuns: vi.fn(),
   fetchWatchlistSources: vi.fn(),
@@ -122,7 +126,8 @@ vi.mock("@/store/watchlists", () => ({
       openRunDetail: healthMocks.openRunDetail,
       openOutputPreview: healthMocks.openOutputPreview,
       openSourceForm: healthMocks.openSourceForm,
-      openJobForm: healthMocks.openJobForm
+      openJobForm: healthMocks.openJobForm,
+      selectedWatchlistId: 42
     })
 }))
 

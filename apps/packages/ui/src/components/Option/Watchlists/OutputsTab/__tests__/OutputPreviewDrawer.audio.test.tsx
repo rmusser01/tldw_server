@@ -146,7 +146,7 @@ describe("OutputPreviewDrawer audio support", () => {
     })
 
     expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
-    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("Audio briefing completed")).toBeInTheDocument()
     expect(screen.getByText("Briefing script")).toBeInTheDocument()
     expect(screen.getByText("Host")).toBeInTheDocument()
     expect(screen.getByText("Analyst")).toBeInTheDocument()
