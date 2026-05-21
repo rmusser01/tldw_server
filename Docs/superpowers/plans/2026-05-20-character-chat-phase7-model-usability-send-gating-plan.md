@@ -869,6 +869,7 @@ Actual: `bunx tsc --noEmit --pretty false` still fails on inherited baseline Typ
 
 - `apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx`
 - `apps/packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx`
+- `apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx`
 - `apps/packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx`
 - `apps/packages/ui/src/hooks/keyboard/useShortcutConfig.ts`
 - `apps/packages/ui/src/hooks/usePersonaLiveControl.tsx`
@@ -885,6 +886,13 @@ Actual on 2026-05-21 against `http://127.0.0.1:8000`: backend health returned `s
 - No-provider/send-gating passed against a real backend-created character and real backend model metadata.
 - Provider-failure skipped because no explicit forced provider-failure model was configured.
 - Successful-send skipped because no non-local/non-custom callable model was configured; local/custom-risk providers were intentionally not used as proof.
+
+Rebase closeout on 2026-05-21:
+
+- Rebased `codex/character-chat-post-phase6-prd` onto current `origin/dev` at `027bfeb52`.
+- Focused unit/component suite still passed with `7` files and `94` tests.
+- `bunx tsc --noEmit --pretty false` still fails only outside the Phase 7 touched scope; current `dev` adds the inherited `Watchlists/RunsTab/RunDetailDrawer.tsx` baseline errors listed above.
+- Real-backend Playwright verification was rerun with the backend started outside the sandbox so it could bind to `127.0.0.1:8000`. Backend health returned `status: ok`; the Phase 7 journey suite passed with `1 passed, 2 skipped`.
 
 - [x] **Step 4: Run Bandit only if backend Python was touched**
 
