@@ -4,7 +4,7 @@ title: Implement Character Chat Phase 7 model usability and send gating
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-21 00:44'
+updated_date: '2026-05-21 01:33'
 labels:
   - character-chat
   - roleplay
@@ -43,6 +43,8 @@ Implement Phase 7 from the Character Chat first-class PRD and implementation pla
 Execution started with superpowers:subagent-driven-development and superpowers:test-driven-development. Controller ran baseline before production edits: bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.ts ../packages/ui/src/components/Option/Playground/__tests__/CharacterChatReadinessPanel.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundStatusStrip.first-slice.test.tsx --reporter=verbose passed with 3 files / 39 tests. Two Task 1 workers were shut down after no edits/progress reports; controller implemented Task 1 locally under TDD. Red test: focused utility test failed with 11 failures because buildChatModelUsability was not a function. Green tests: focused utility test passed with 33 tests; baseline trio passed with 3 files / 50 tests. Task 1 added the pure model usability contract/helper and unit coverage only; UI wiring remains pending.
 
 Task 1 final: addressed spec-review gaps for provider aliases, colon-bearing local model IDs, and provider-qualified duplicate matching. Verification: focused utility suite passed with 41/41 tests; baseline trio passed with 3 files / 58 tests; git diff --check clean. Review gates: Task 1 spec review approved and code-quality review approved for HEAD ebda82474. Task 1 remains UI-unwired by design; Task 2 will map Character Chat readiness to the usability contract.
+
+Task 2 local TDD: added failing readiness and panel tests for models-loading, selected-model-missing, provider-unconfigured, model-unavailable, no-models-available copy, ready, and send-disabled ordering. Implemented buildCharacterChatReadiness on top of buildChatModelUsability and added precise blocker copy preserving character/draft context. Verification: focused readiness/panel suite passed with 2 files / 50 tests; baseline trio passed with 3 files / 63 tests; git diff --check clean. AC #2 is not checked yet because status strip, runtime inspector, composition preview, model selector, and SEND controls are later tasks.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -845,6 +845,23 @@ describe("character chat readiness", () => {
     })
   })
 
+  it("blocks character chat while model readiness is loading", () => {
+    expect(
+      buildCharacterChatReadiness({
+        isServerConnected: true,
+        selectedCharacter: { id: 1, name: "Ariadne" },
+        selectedModel: "gpt-4o-mini",
+        availableModels: null,
+        modelsLoading: true
+      })
+    ).toMatchObject({
+      status: "blocked",
+      missingRequirement: "chat-model",
+      reason: "models-loading",
+      recommendedAction: "retry"
+    })
+  })
+
   it("blocks stale selected models when the catalog is loaded", () => {
     expect(
       buildCharacterChatReadiness({
@@ -856,7 +873,31 @@ describe("character chat readiness", () => {
     ).toMatchObject({
       status: "blocked",
       missingRequirement: "chat-model",
-      reason: "selected-model-unavailable",
+      reason: "selected-model-missing",
+      recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("blocks provider-unconfigured selected models with model settings recovery", () => {
+    expect(
+      buildCharacterChatReadiness({
+        isServerConnected: true,
+        selectedCharacter: { id: 1, name: "Ariadne" },
+        selectedModel: "openai:gpt-4o",
+        availableModels: [
+          {
+            id: "gpt-4o",
+            model: "tldw:gpt-4o",
+            provider: "openai",
+            is_configured: false,
+            provider_is_configured: false
+          } as any
+        ]
+      })
+    ).toMatchObject({
+      status: "blocked",
+      missingRequirement: "chat-model",
+      reason: "provider-unconfigured",
       recommendedAction: "open-model-settings"
     })
   })
@@ -872,8 +913,8 @@ describe("character chat readiness", () => {
             id: "gpt-4o",
             model: "tldw:gpt-4o",
             provider: "openai",
-            is_configured: false,
-            provider_is_configured: false,
+            is_configured: true,
+            provider_is_configured: true,
             catalog_only: true
           } as any,
           {
@@ -888,8 +929,25 @@ describe("character chat readiness", () => {
     ).toMatchObject({
       status: "blocked",
       missingRequirement: "chat-model",
-      reason: "selected-model-unavailable",
+      reason: "model-unavailable",
       recommendedAction: "open-model-settings"
+    })
+  })
+
+  it("allows send-disabled to block only after model usability is ready", () => {
+    expect(
+      buildCharacterChatReadiness({
+        isServerConnected: true,
+        selectedCharacter: { id: 1, name: "Ariadne" },
+        selectedModel: "gpt-4o-mini",
+        availableModels: [{ model: "tldw:gpt-4o-mini", is_configured: true }],
+        isSendBlocked: true
+      })
+    ).toMatchObject({
+      status: "blocked",
+      missingRequirement: "chat-send",
+      reason: "send-disabled",
+      recommendedAction: "retry"
     })
   })
 
@@ -910,6 +968,88 @@ describe("character chat readiness", () => {
     })
   })
 
+  it("returns precise in-context copy for model readiness blockers", () => {
+    const cases = [
+      {
+        readiness: buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "Ariadne" },
+          selectedModel: "gpt-4o-mini",
+          availableModels: null,
+          modelsLoading: true
+        }),
+        title: "Checking chat model readiness",
+        actionLabel: "Try again"
+      },
+      {
+        readiness: buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "Ariadne" },
+          selectedModel: "missing-model",
+          availableModels: [{ model: "tldw:gpt-4o-mini", is_configured: true }]
+        }),
+        title: "Choose an available chat model before chatting as Ariadne",
+        actionLabel: "Open model settings"
+      },
+      {
+        readiness: buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "Ariadne" },
+          selectedModel: "gpt-4o",
+          availableModels: []
+        }),
+        title: "Configure a chat model before chatting as Ariadne",
+        actionLabel: "Open model settings"
+      },
+      {
+        readiness: buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "Ariadne" },
+          selectedModel: "openai:gpt-4o",
+          availableModels: [
+            {
+              id: "gpt-4o",
+              model: "tldw:gpt-4o",
+              provider: "openai",
+              is_configured: false
+            } as any
+          ]
+        }),
+        title:
+          "Configure the selected model provider before chatting as Ariadne",
+        actionLabel: "Open model settings"
+      },
+      {
+        readiness: buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "Ariadne" },
+          selectedModel: "openai:gpt-4o",
+          availableModels: [
+            {
+              id: "gpt-4o",
+              model: "tldw:gpt-4o",
+              provider: "openai",
+              is_configured: true,
+              catalog_only: true
+            } as any
+          ]
+        }),
+        title: "The selected chat model is not callable right now",
+        actionLabel: "Open model settings"
+      }
+    ]
+
+    for (const testCase of cases) {
+      const copy = getCharacterChatReadinessCopy(testCase.readiness, t, {
+        characterName: "Ariadne"
+      })
+      expect(copy.title).toBe(testCase.title)
+      expect(copy.description).toContain("Ariadne")
+      expect(copy.description).toContain("kept")
+      expect(copy.actionLabel).toBe(testCase.actionLabel)
+    }
+  })
+
   it("returns consistent in-context no-model copy for selected characters", () => {
     const readiness = buildCharacterChatReadiness({
       isServerConnected: true,
@@ -925,7 +1065,7 @@ describe("character chat readiness", () => {
     ).toEqual({
       title: "Choose a chat model before chatting as Ariadne",
       description:
-        "Saved characters are still available. Configure a chat model, then return here to continue with Ariadne.",
+        "Your character selection and draft are kept. Configure a chat model, then return here to continue with Ariadne.",
       actionLabel: "Open model settings"
     })
   })

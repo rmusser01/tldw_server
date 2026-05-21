@@ -66,8 +66,12 @@ export type CharacterChatReadinessMissingRequirement =
 export type CharacterChatReadinessReason =
   | "server-unavailable"
   | "missing-character"
+  | "models-loading"
   | "no-selected-model"
   | "no-models-available"
+  | "selected-model-missing"
+  | "provider-unconfigured"
+  | "model-unavailable"
   | "selected-model-unavailable"
   | "send-disabled"
 
@@ -129,6 +133,9 @@ type CharacterChatReadinessInput = {
   selectedCharacter?: unknown
   selectedModel?: string | null
   availableModels?: ModelDescriptor[] | null
+  modelsLoading?: boolean
+  allowDegradedSend?: boolean
+  serverDegraded?: boolean
   isSendBlocked?: boolean
 }
 
@@ -755,6 +762,9 @@ export function buildCharacterChatReadiness({
   selectedCharacter,
   selectedModel,
   availableModels,
+  modelsLoading = false,
+  allowDegradedSend = false,
+  serverDegraded = false,
   isSendBlocked = false
 }: CharacterChatReadinessInput): CharacterChatReadiness {
   if (!isServerConnected) {
@@ -773,38 +783,69 @@ export function buildCharacterChatReadiness({
     )
   }
 
-  const normalizedSelectedModel = normalizeChatModelId(selectedModel)
-  if (!normalizedSelectedModel) {
-    return blockedCharacterChatReadiness(
-      "chat-model",
-      "no-selected-model",
-      "open-model-settings"
-    )
-  }
+  const modelUsability = buildChatModelUsability({
+    isServerConnected: true,
+    selectedModel,
+    availableModels,
+    modelsLoading,
+    allowDegradedSend,
+    serverDegraded
+  })
 
-  if (Array.isArray(availableModels)) {
-    const availableModelIds = buildAvailableChatModelIds(availableModels, {
-      requireConfiguredFlags: true
-    })
-    if (availableModelIds.size === 0) {
+  switch (modelUsability.status) {
+    case "loading":
+      return blockedCharacterChatReadiness(
+        "chat-model",
+        "models-loading",
+        "retry"
+      )
+    case "no_server":
+      return blockedCharacterChatReadiness(
+        "server-connection",
+        "server-unavailable",
+        "open-server-settings"
+      )
+    case "no_selection":
+      return blockedCharacterChatReadiness(
+        "chat-model",
+        "no-selected-model",
+        "open-model-settings"
+      )
+    case "no_models":
       return blockedCharacterChatReadiness(
         "chat-model",
         "no-models-available",
         "open-model-settings"
       )
-    }
-
-    const unavailableModel = findUnavailableChatModel(
-      [normalizedSelectedModel],
-      availableModelIds
-    )
-    if (unavailableModel) {
+    case "selected_missing":
       return blockedCharacterChatReadiness(
         "chat-model",
-        "selected-model-unavailable",
+        "selected-model-missing",
         "open-model-settings"
       )
-    }
+    case "provider_unconfigured":
+      return blockedCharacterChatReadiness(
+        "chat-model",
+        "provider-unconfigured",
+        "open-model-settings"
+      )
+    case "model_unavailable":
+      return blockedCharacterChatReadiness(
+        "chat-model",
+        "model-unavailable",
+        "open-model-settings"
+      )
+    case "degraded":
+      if (!modelUsability.canSend) {
+        return blockedCharacterChatReadiness(
+          "chat-send",
+          "send-disabled",
+          "retry"
+        )
+      }
+      break
+    case "ready":
+      break
   }
 
   if (isSendBlocked) {
@@ -872,6 +913,148 @@ export function getCharacterChatReadinessCopy(
   }
 
   if (readiness.missingRequirement === "chat-model") {
+    const inContextDescription = characterName
+      ? {
+          defaultValue:
+            "Your character selection and draft are kept. Configure a chat model, then return here to continue with {{characterName}}.",
+          characterName
+        }
+      : "Your character selection and draft are kept. Configure a chat model, then return to start the character chat."
+    const modelActionLabel = translateReadinessCopy(
+      t,
+      "characterChatReadiness.model.action",
+      "Open model settings"
+    )
+
+    if (readiness.reason === "models-loading") {
+      return {
+        title: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.loadingTitle",
+          "Checking chat model readiness"
+        ),
+        description: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.loadingDescription",
+          characterName
+            ? {
+                defaultValue:
+                  "Your character selection and draft are kept while tldw_server checks which chat models can be used with {{characterName}}.",
+                characterName
+              }
+            : "Your character selection and draft are kept while tldw_server checks which chat models are available."
+        ),
+        actionLabel: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.retryAction",
+          "Try again"
+        )
+      }
+    }
+
+    if (readiness.reason === "provider-unconfigured") {
+      return {
+        title: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.providerUnconfiguredTitle",
+          characterName
+            ? {
+                defaultValue:
+                  "Configure the selected model provider before chatting as {{characterName}}",
+                characterName
+              }
+            : "Configure the selected model provider before starting character chat"
+        ),
+        description: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.providerUnconfiguredDescription",
+          characterName
+            ? {
+                defaultValue:
+                  "Your character selection and draft are kept. Configure the provider for the selected model, then return here to continue with {{characterName}}.",
+                characterName
+              }
+            : "Your character selection and draft are kept. Configure the provider for the selected model, then return to start the character chat."
+        ),
+        actionLabel: modelActionLabel
+      }
+    }
+
+    if (
+      readiness.reason === "selected-model-missing" ||
+      readiness.reason === "selected-model-unavailable"
+    ) {
+      return {
+        title: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.selectedMissingTitle",
+          characterName
+            ? {
+                defaultValue:
+                  "Choose an available chat model before chatting as {{characterName}}",
+                characterName
+              }
+            : "Choose an available chat model before starting character chat"
+        ),
+        description: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.selectedMissingDescription",
+          characterName
+            ? {
+                defaultValue:
+                  "Your character selection and draft are kept. Choose a model from the available chat catalog, then return here to continue with {{characterName}}.",
+                characterName
+              }
+            : "Your character selection and draft are kept. Choose a model from the available chat catalog, then return to start the character chat."
+        ),
+        actionLabel: modelActionLabel
+      }
+    }
+
+    if (readiness.reason === "model-unavailable") {
+      return {
+        title: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.unavailableTitle",
+          "The selected chat model is not callable right now"
+        ),
+        description: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.unavailableDescription",
+          characterName
+            ? {
+                defaultValue:
+                  "Your character selection and draft are kept. Choose or configure a callable chat model, then return here to continue with {{characterName}}.",
+                characterName
+              }
+            : "Your character selection and draft are kept. Choose or configure a callable chat model, then return to start the character chat."
+        ),
+        actionLabel: modelActionLabel
+      }
+    }
+
+    if (readiness.reason === "no-models-available") {
+      return {
+        title: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.noneAvailableTitle",
+          characterName
+            ? {
+                defaultValue:
+                  "Configure a chat model before chatting as {{characterName}}",
+                characterName
+              }
+            : "Configure a chat model before starting character chat"
+        ),
+        description: translateReadinessCopy(
+          t,
+          "characterChatReadiness.model.noneAvailableDescription",
+          inContextDescription
+        ),
+        actionLabel: modelActionLabel
+      }
+    }
+
     if (characterName) {
       return {
         title: translateReadinessCopy(
@@ -888,7 +1071,7 @@ export function getCharacterChatReadinessCopy(
           "characterChatReadiness.model.descriptionWithCharacter",
           {
             defaultValue:
-              "Saved characters are still available. Configure a chat model, then return here to continue with {{characterName}}.",
+              "Your character selection and draft are kept. Configure a chat model, then return here to continue with {{characterName}}.",
             characterName
           }
         ),

@@ -272,7 +272,7 @@ git commit -m "feat: classify character chat model usability"
 - Test: `apps/packages/ui/src/utils/__tests__/chat-model-availability.test.ts`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/CharacterChatReadinessPanel.test.tsx`
 
-- [ ] **Step 1: Write failing readiness mapping tests**
+- [x] **Step 1: Write failing readiness mapping tests**
 
 Add tests proving `buildCharacterChatReadiness` maps model usability to precise blocked reasons:
 
@@ -304,7 +304,7 @@ it("blocks character chat with provider-unconfigured copy when the selected mode
 
 Also test `models-loading`, `selected-model-missing`, `model-unavailable`, `no-models-available`, and ready.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run:
 
@@ -314,7 +314,7 @@ bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.
 
 Expected: fails on new reason/copy expectations.
 
-- [ ] **Step 3: Extend readiness reason types without breaking old callers**
+- [x] **Step 3: Extend readiness reason types without breaking old callers**
 
 Update `CharacterChatReadinessReason`:
 
@@ -334,7 +334,7 @@ export type CharacterChatReadinessReason =
 
 Keep `selected-model-unavailable` temporarily for compatibility with tests/components that have not moved yet. New code should use the more specific reasons.
 
-- [ ] **Step 4: Refactor `buildCharacterChatReadiness` to call `buildChatModelUsability`**
+- [x] **Step 4: Refactor `buildCharacterChatReadiness` to call `buildChatModelUsability`**
 
 The readiness builder should:
 
@@ -343,7 +343,7 @@ The readiness builder should:
 - Map usability statuses to existing `CharacterChatReadinessMissingRequirement` and `CharacterChatReadinessAction`.
 - Only evaluate `isSendBlocked` after model usability returns `ready` or allowed `degraded`.
 
-- [ ] **Step 5: Add copy for precise model failures**
+- [x] **Step 5: Add copy for precise model failures**
 
 Extend `getCharacterChatReadinessCopy` so first-time and power users see the actual blocker:
 
@@ -355,7 +355,7 @@ Extend `getCharacterChatReadinessCopy` so first-time and power users see the act
 
 Each description must preserve character context and say drafts/selections are kept.
 
-- [ ] **Step 6: Run readiness and panel tests**
+- [x] **Step 6: Run readiness and panel tests**
 
 Run:
 
@@ -365,7 +365,7 @@ bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.
 
 Expected: pass.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```bash
 git add apps/packages/ui/src/utils/chat-model-availability.ts apps/packages/ui/src/utils/__tests__/chat-model-availability.test.ts apps/packages/ui/src/components/Option/Playground/__tests__/CharacterChatReadinessPanel.test.tsx
