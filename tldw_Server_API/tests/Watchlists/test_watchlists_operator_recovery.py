@@ -528,6 +528,17 @@ def test_safe_source_error_text_redacts_common_secret_formats():
     assert "Bearer [redacted]" in text
 
 
+def test_safe_source_error_text_removes_url_basic_auth():
+    text = _safe_source_error_text(
+        "https://demo_user:value_to_redact@example.test/feed?api_key=query_value_to_redact"
+    )
+
+    assert text == "https://example.test/feed"
+    assert "demo_user" not in text
+    assert "value_to_redact" not in text
+    assert "query_value_to_redact" not in text
+
+
 @pytest.mark.asyncio
 async def test_site_source_records_partial_extraction_status(monkeypatch):
     user_id = 9442

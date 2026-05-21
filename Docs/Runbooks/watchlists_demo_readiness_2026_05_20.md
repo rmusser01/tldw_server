@@ -13,7 +13,7 @@
 Use real remote RSS or site sources that are reachable from the demo machine. Test each source before it appears in the script.
 
 ```bash
-curl -sf \
+curl -sS \
   -H "X-API-Key: $SINGLE_USER_API_KEY" \
   -H "Content-Type: application/json" \
   -X POST http://127.0.0.1:8000/api/v1/watchlists/sources/test \

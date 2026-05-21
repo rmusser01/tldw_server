@@ -155,6 +155,21 @@ _AUTHORIZATION_BEARER_RE = re.compile(
 _BEARER_SECRET_RE = re.compile(
     r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+"
 )
+_STANDALONE_HTTP_URL_RE = re.compile(r"(?i)^https?://\S+$")
+
+
+def _source_error_url_without_credentials(text: str) -> str | None:
+    """Return a URL without userinfo, query, or fragment when text is a standalone URL."""
+    if not _STANDALONE_HTTP_URL_RE.fullmatch(text):
+        return None
+    parsed = urlparse(text)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    hostname = parsed.hostname or parsed.netloc.rsplit("@", 1)[-1]
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = f"{hostname}:{parsed.port}" if parsed.port is not None else hostname
+    return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
 
 
 def _safe_source_error_text(value: Any) -> str:
@@ -162,18 +177,18 @@ def _safe_source_error_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
-    text = _AUTHORIZATION_BEARER_RE.sub("Authorization: Bearer [redacted]", text)
-    text = _BEARER_SECRET_RE.sub("Bearer [redacted]", text)
-    text = _SENSITIVE_ERROR_TOKEN_RE.sub("[redacted]", text)
     try:
-        parsed = urlparse(text)
-        if parsed.scheme and parsed.netloc:
-            text = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        safe_url = _source_error_url_without_credentials(text)
+        if safe_url:
+            return safe_url[:500]
     except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(
             "watchlists.source_error_url_parse_failed: error_type={}",
             type(exc).__name__,
         )
+    text = _AUTHORIZATION_BEARER_RE.sub("Authorization: Bearer [redacted]", text)
+    text = _BEARER_SECRET_RE.sub("Bearer [redacted]", text)
+    text = _SENSITIVE_ERROR_TOKEN_RE.sub("[redacted]", text)
     return text[:500]
 
 
