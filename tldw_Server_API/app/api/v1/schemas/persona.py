@@ -664,6 +664,26 @@ class PersonaSessionDetail(PersonaSessionSummary):
     turns: list[dict[str, object]] = Field(default_factory=list)
 
 
+class PersonaSessionExportTurn(BaseModel):
+    turn_id: str | None = None
+    timestamp: str | None = None
+    role: str
+    event_type: str
+    content: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class PersonaSessionExportResponse(BaseModel):
+    session_id: str
+    persona_id: str
+    format: Literal["json"] = "json"
+    created_at: str
+    updated_at: str
+    turn_count: int = 0
+    redaction_markers: list[str] = Field(default_factory=list)
+    turns: list[PersonaSessionExportTurn] = Field(default_factory=list)
+
+
 class PersonaLiveSessionCreateRequest(BaseModel):
     persona_id: str = Field(min_length=1, max_length=128)
     reuse_policy: PersonaLiveReusePolicy = "resume_compatible"

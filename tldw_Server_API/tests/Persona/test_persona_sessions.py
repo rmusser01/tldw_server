@@ -93,6 +93,93 @@ def test_materialized_session_reads_memory_top_k_from_settings_attributes(monkey
     assert row["preferences"]["memory_top_k"] == 6
 
 
+def test_persona_session_export_returns_selected_session_transcript(monkeypatch, persona_db: CharactersRAGDB):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+
+    with _client_for_user(1, persona_db) as client:
+        created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
+        assert created.status_code == 200
+        session_id = created.json()["session_id"]
+        sensitive_value = "sensitive" + "-value"
+
+        manager.append_turn(
+            session_id=session_id,
+            user_id="1",
+            persona_id="research_assistant",
+            role="user",
+            content="hello",
+            turn_type="user_message",
+            metadata={
+                "visible": "kept",
+                "bytes_base64": "raw-audio",
+                "system_prompt": "hidden prompt",
+                "auth_token": sensitive_value,
+            },
+        )
+        manager.append_turn(
+            session_id=session_id,
+            user_id="1",
+            persona_id="research_assistant",
+            role="assistant",
+            content="Hi there.",
+            turn_type="assistant_message",
+        )
+
+        exported = client.get(f"/api/v1/persona/sessions/{session_id}/export")
+        assert exported.status_code == 200
+        payload = exported.json()
+        assert payload["session_id"] == session_id
+        assert payload["persona_id"] == "research_assistant"
+        assert payload["format"] == "json"
+        assert payload["turn_count"] == 2
+        assert payload["redaction_markers"] == [
+            "metadata.auth_token",
+            "metadata.bytes_base64",
+            "metadata.system_prompt",
+        ]
+        assert [turn["event_type"] for turn in payload["turns"]] == ["user_message", "assistant_message"]
+        assert payload["turns"][0]["content"] == "hello"
+        assert payload["turns"][0]["metadata"] == {"visible": "kept"}
+        assert sensitive_value not in str(payload)
+        assert "hidden prompt" not in str(payload)
+        assert "raw-audio" not in str(payload)
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: CharactersRAGDB):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    persona_id = persona_db.create_persona_profile(
+        {
+            "id": "research_assistant",
+            "user_id": "1",
+            "name": "Research Assistant",
+            "mode": "session_scoped",
+            "system_prompt": "Helper",
+            "is_active": True,
+        }
+    )
+    _ = persona_db.create_persona_session(
+        {
+            "id": "sess_export_scoped",
+            "persona_id": persona_id,
+            "user_id": "1",
+            "mode": "session_scoped",
+            "reuse_allowed": False,
+            "status": "active",
+            "scope_snapshot_json": {},
+        }
+    )
+
+    with _client_for_user(2, persona_db) as client:
+        resp = client.get("/api/v1/persona/sessions/sess_export_scoped/export")
+        assert resp.status_code == 404
+
+    fastapi_app.dependency_overrides.clear()
+
+
 def test_persona_sessions_list_and_detail_fall_back_to_persisted_preferences(
     monkeypatch,
     persona_db: CharactersRAGDB,

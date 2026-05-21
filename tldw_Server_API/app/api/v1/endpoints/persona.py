@@ -64,6 +64,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaScopeRulesReplaceRequest,
     PersonaScopeRulesResponse,
     PersonaSessionDetail,
+    PersonaSessionExportResponse,
     PersonaSessionRequest,
     PersonaSessionResponse,
     PersonaSessionSummary,
@@ -3183,6 +3184,79 @@ def _persona_session_detail_from_db(
         scope_snapshot_id=_scope_snapshot_id_from_snapshot(scope_snapshot),
         scope_audit=_scope_audit_from_snapshot(scope_snapshot),
         turns=turns,
+    )
+
+
+_PERSONA_SESSION_EXPORT_REDACT_KEY_RE = re.compile(
+    r"(api[_-]?key|auth|authorization|binary|bytes|bytes_base64|developer[_-]?prompt|hidden|"
+    r"password|policy|secret|system[_-]?prompt|token|tool[_-]?config)",
+    re.IGNORECASE,
+)
+
+
+def _redacted_persona_export_metadata(
+    value: Any,
+    *,
+    path: str = "metadata",
+    markers: set[str],
+) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key in sorted(value):
+            key = str(raw_key)
+            marker_path = f"{path}.{key}"
+            if _PERSONA_SESSION_EXPORT_REDACT_KEY_RE.search(key):
+                markers.add(marker_path)
+                continue
+            sanitized = _redacted_persona_export_metadata(value[raw_key], path=marker_path, markers=markers)
+            if sanitized is not None:
+                redacted[key] = sanitized
+        return redacted
+    if isinstance(value, list):
+        sanitized_items: list[Any] = []
+        for idx, item in enumerate(value):
+            sanitized = _redacted_persona_export_metadata(item, path=f"{path}.{idx}", markers=markers)
+            if sanitized is not None:
+                sanitized_items.append(sanitized)
+        return sanitized_items
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    markers.add(path)
+    return None
+
+
+def _persona_session_export_from_db(
+    row: dict[str, Any],
+    *,
+    manager_snapshot: dict[str, Any] | None = None,
+) -> PersonaSessionExportResponse:
+    turns = list((manager_snapshot or {}).get("turns") or [])
+    redaction_markers: set[str] = set()
+    exported_turns: list[dict[str, Any]] = []
+    for turn in turns:
+        turn_type = str(turn.get("type") or "text")
+        exported_turns.append(
+            {
+                "turn_id": str(turn.get("turn_id") or "") or None,
+                "timestamp": str(turn.get("timestamp") or "") or None,
+                "role": str(turn.get("role") or "unknown"),
+                "event_type": turn_type,
+                "content": str(turn.get("content") or ""),
+                "metadata": _redacted_persona_export_metadata(
+                    turn.get("metadata") or {},
+                    markers=redaction_markers,
+                )
+                or {},
+            }
+        )
+    return PersonaSessionExportResponse(
+        session_id=str(row.get("id") or ""),
+        persona_id=str(row.get("persona_id") or ""),
+        created_at=str(row.get("created_at") or _utc_now_iso()),
+        updated_at=str(row.get("last_modified") or row.get("created_at") or _utc_now_iso()),
+        turn_count=len(exported_turns),
+        redaction_markers=sorted(redaction_markers),
+        turns=exported_turns,
     )
 
 
@@ -7683,6 +7757,39 @@ async def persona_session_detail(
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona session detail") from exc
+
+
+@router.get(
+    "/sessions/{session_id}/export",
+    response_model=PersonaSessionExportResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def persona_session_export(
+    session_id: str,
+    limit_turns: int = Query(default=1000, ge=0, le=1000),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaSessionExportResponse:
+    """Export a redacted transcript for one selected Persona session owned by the user."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    manager = get_session_manager()
+    try:
+        row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Persona session not found")
+        snapshot = manager.get_session_snapshot(
+            session_id=session_id,
+            user_id=user_id,
+            limit_turns=None if limit_turns <= 0 else limit_turns,
+        )
+        return _persona_session_export_from_db(row, manager_snapshot=snapshot)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="export persona session") from exc
 
 
 @router.websocket("/stream")
