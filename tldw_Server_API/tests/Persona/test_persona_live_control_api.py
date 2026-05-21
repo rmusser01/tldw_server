@@ -196,6 +196,26 @@ def test_live_sessions_list_returns_owned_session_summaries(monkeypatch, persona
     }
 
 
+def test_live_sessions_list_batches_persona_name_lookup(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a", name="Persona A")
+    _create_profile(persona_db, user_id="1", persona_id="persona_b", name="Persona B")
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
+    _create_session(persona_db, user_id="1", persona_id="persona_b", session_id="sess-b")
+
+    def fail_per_row_profile_lookup(*args, **kwargs):
+        raise AssertionError("live session listing should batch persona profile lookup")
+
+    monkeypatch.setattr(persona_db, "get_persona_profile", fail_per_row_profile_lookup)
+
+    with _client_for_user(1, persona_db) as client:
+        resp = client.get("/api/v1/persona/live/sessions")
+
+    assert resp.status_code == 200
+    names_by_session = {item["session_id"]: item["persona_name"] for item in resp.json()["sessions"]}
+    assert names_by_session == {"sess-a": "Persona A", "sess-b": "Persona B"}
+
+
 def test_live_session_create_resume_compatible_reuses_active_session(monkeypatch, persona_db: CharactersRAGDB):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
 

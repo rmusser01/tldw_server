@@ -166,11 +166,59 @@ def _persona_name_for_row(db: CharactersRAGDB, *, row: dict[str, Any], user_id: 
     profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
     if profile is None and persona_id == DEFAULT_PERSONA_ID:
         profile = ensure_default_persona_profile(db, user_id=user_id)
+    return _persona_name_from_profile(profile, fallback=persona_id)
+
+
+def _persona_name_from_profile(profile: dict[str, Any] | None, *, fallback: str) -> str:
     if isinstance(profile, dict):
         name = str(profile.get("name") or "").strip()
         if name:
             return name
-    return persona_id
+    return fallback
+
+
+def _persona_names_for_rows(db: CharactersRAGDB, *, user_id: str, rows: list[dict[str, Any]]) -> dict[str, str]:
+    persona_ids: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        persona_id = str(row.get("persona_id") or "").strip()
+        if not persona_id or persona_id in seen:
+            continue
+        persona_ids.append(persona_id)
+        seen.add(persona_id)
+    if not persona_ids:
+        return {}
+
+    profile_lookup = getattr(db, "get_persona_profiles_by_ids", None)
+    if callable(profile_lookup):
+        profiles_by_id = profile_lookup(
+            user_id=user_id,
+            persona_ids=persona_ids,
+            include_deleted=False,
+        )
+    else:
+        profiles_by_id: dict[str, dict[str, Any]] = {}
+        offset = 0
+        while seen - profiles_by_id.keys():
+            page = db.list_persona_profiles(
+                user_id=user_id,
+                include_deleted=False,
+                limit=_SESSION_SCAN_PAGE_SIZE,
+                offset=offset,
+            )
+            for profile in page:
+                profile_id = str(profile.get("id") or "").strip()
+                if profile_id in seen:
+                    profiles_by_id[profile_id] = profile
+            if len(page) < _SESSION_SCAN_PAGE_SIZE:
+                break
+            offset += _SESSION_SCAN_PAGE_SIZE
+    if DEFAULT_PERSONA_ID in seen and DEFAULT_PERSONA_ID not in profiles_by_id:
+        profiles_by_id[DEFAULT_PERSONA_ID] = ensure_default_persona_profile(db, user_id=user_id)
+    return {
+        persona_id: _persona_name_from_profile(profiles_by_id.get(persona_id), fallback=persona_id)
+        for persona_id in persona_ids
+    }
 
 
 def _resolve_live_control_persona_id(db: CharactersRAGDB, *, user_id: str, persona_id: str | None) -> str:
@@ -243,6 +291,7 @@ def build_live_session_summary(
     user_id: str,
     row: dict[str, Any],
     is_focused: bool = False,
+    persona_name: str | None = None,
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
     session_id = str(row.get("id") or "").strip()
@@ -260,7 +309,7 @@ def build_live_session_summary(
     return {
         "session_id": session_id,
         "persona_id": persona_id,
-        "persona_name": _persona_name_for_row(db, row=row, user_id=user_id),
+        "persona_name": persona_name if persona_name is not None else _persona_name_for_row(db, row=row, user_id=user_id),
         "lifecycle": lifecycle,
         "status": status,
         "is_focused": bool(is_focused),
@@ -323,6 +372,7 @@ def list_live_session_summaries(
         surface=normalized_surface,
     )
     focused_id = _focused_session_id(focus_rows)
+    persona_names = _persona_names_for_rows(db, user_id=user_id, rows=rows)
     return {
         "sessions": [
             build_live_session_summary(
@@ -330,6 +380,7 @@ def list_live_session_summaries(
                 user_id=user_id,
                 row=row,
                 is_focused=str(row.get("id") or "").strip() == focused_id,
+                persona_name=persona_names.get(str(row.get("persona_id") or "").strip()),
                 stream_registry=stream_registry,
             )
             for row in rows

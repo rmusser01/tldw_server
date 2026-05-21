@@ -24480,6 +24480,7 @@ for _persona_state_store_method in (
     "create_persona_profile",
     "get_persona_profile",
     "list_persona_profiles",
+    "get_persona_profiles_by_ids",
     "update_persona_profile",
     "soft_delete_persona_profile",
     "restore_persona_profile",

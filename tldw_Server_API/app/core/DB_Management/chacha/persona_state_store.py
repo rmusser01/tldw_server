@@ -1746,6 +1746,42 @@ class PersonaStateStore:
         cursor = self.execute_query(query, tuple(params))
         return [self._persona_profile_row_to_dict(row) for row in cursor.fetchall() if row]
 
+    def get_persona_profiles_by_ids(
+        self,
+        *,
+        user_id: str,
+        persona_ids: Iterable[str],
+        include_deleted: bool = False,
+    ) -> dict[str, dict[str, Any]]:
+        normalized_ids: list[str] = []
+        seen: set[str] = set()
+        for persona_id in persona_ids:
+            normalized_id = str(persona_id or "").strip()
+            if not normalized_id or normalized_id in seen:
+                continue
+            normalized_ids.append(normalized_id)
+            seen.add(normalized_id)
+        if not normalized_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        clauses = ["user_id = ?", f"id IN ({placeholders})"]
+        params: list[Any] = [user_id, *normalized_ids]
+        if not include_deleted:
+            clauses.append("deleted = 0")
+        where_sql = " AND ".join(clauses)
+        query = f"SELECT * FROM persona_profiles WHERE {where_sql}"  # nosec B608
+        cursor = self.execute_query(query, tuple(params))
+        profiles: dict[str, dict[str, Any]] = {}
+        for row in cursor.fetchall():
+            profile = self._persona_profile_row_to_dict(row)
+            if not profile:
+                continue
+            profile_id = str(profile.get("id") or "").strip()
+            if profile_id:
+                profiles[profile_id] = profile
+        return profiles
+
     def update_persona_profile(
         self,
         *,
