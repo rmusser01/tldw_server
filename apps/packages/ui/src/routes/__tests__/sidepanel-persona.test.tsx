@@ -670,7 +670,7 @@ describe("SidepanelPersona", () => {
     )
   })
 
-  it("exports the selected live session transcript through the authenticated endpoint", async () => {
+  it("confirms before exporting the selected live session transcript", async () => {
     const createObjectURLSpy = vi
       .spyOn(URL, "createObjectURL")
       .mockReturnValue("blob:persona-session-export")
@@ -759,6 +759,20 @@ describe("SidepanelPersona", () => {
 
       const exportButton = await screen.findByTestId("persona-transcript-export-button")
       fireEvent.click(exportButton)
+
+      expect(await screen.findByText("Export selected Persona session?")).toBeInTheDocument()
+      expect(screen.getByText("Session: sess-export")).toBeInTheDocument()
+      expect(
+        mocks.fetchWithAuth
+      ).not.toHaveBeenCalledWith(
+        "/api/v1/persona/sessions/sess-export/export",
+        { method: "GET" }
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+      expect(createObjectURLSpy).not.toHaveBeenCalled()
+
+      fireEvent.click(exportButton)
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm export" }))
 
       await waitFor(() => {
         expect(mocks.fetchWithAuth).toHaveBeenCalledWith(

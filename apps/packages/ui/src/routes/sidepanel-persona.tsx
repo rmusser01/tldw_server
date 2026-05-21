@@ -229,6 +229,8 @@ const SidepanelPersona = ({
   const [input, setInput] = React.useState("")
   const [logs, setLogs] = React.useState<PersonaLogEntry[]>([])
   const [pendingPlan, setPendingPlan] = React.useState<PendingPlan | null>(null)
+  const [transcriptExportConfirmOpen, setTranscriptExportConfirmOpen] =
+    React.useState(false)
   const [activeSessionPersonaId, setActiveSessionPersonaId] = React.useState<string | null>(
     null
   )
@@ -586,6 +588,10 @@ const SidepanelPersona = ({
   const confirmPlan = React.useCallback(() => {
     confirmPlanWithMap(approvedStepMap)
   }, [approvedStepMap, confirmPlanWithMap])
+  const confirmTranscriptExport = React.useCallback(() => {
+    setTranscriptExportConfirmOpen(false)
+    void exportSelectedSessionTranscript()
+  }, [exportSelectedSessionTranscript])
 
   // ── Voice controller ──
   const resolvedLivePersonaVoiceDefaults = useResolvedPersonaVoiceDefaults(
@@ -1822,13 +1828,50 @@ const SidepanelPersona = ({
             icon={<Download size={14} />}
             loading={transcriptExporting}
             onClick={() => {
-              void exportSelectedSessionTranscript()
+              setTranscriptExportConfirmOpen(true)
             }}
           >
             {t("sidepanel:persona.exportTranscript", "Export transcript")}
           </Button>
         ) : null}
       </div>
+      {sessionId && transcriptExportConfirmOpen ? (
+        <div
+          data-testid="persona-transcript-export-confirmation"
+          className="mb-3 rounded-md border border-warning/40 bg-warning/5 p-2 text-xs text-text"
+        >
+          <div className="font-medium">
+            {t(
+              "sidepanel:persona.exportTranscriptConfirmTitle",
+              "Export selected Persona session?"
+            )}
+          </div>
+          <div className="mt-1 text-text-muted">
+            {t(
+              "sidepanel:persona.exportTranscriptConfirmDescription",
+              "This downloads a redacted transcript for the selected live session only."
+            )}
+          </div>
+          <div className="mt-1 text-text-muted">{`Session: ${sessionId}`}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="small"
+              type="primary"
+              loading={transcriptExporting}
+              onClick={confirmTranscriptExport}
+            >
+              {t("sidepanel:persona.confirmExportTranscript", "Confirm export")}
+            </Button>
+            <Button
+              size="small"
+              disabled={transcriptExporting}
+              onClick={() => setTranscriptExportConfirmOpen(false)}
+            >
+              {t("common:cancel", "Cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div className="space-y-2">
         {logs.length === 0 ? (
           <Typography.Text type="secondary" className="text-xs">
