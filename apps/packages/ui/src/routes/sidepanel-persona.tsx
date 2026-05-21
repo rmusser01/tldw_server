@@ -2054,7 +2054,10 @@ const SidepanelPersona = ({
       label: t("sidepanel:persona.tabScopes", "Scopes"),
       content: renderLazyPersonaTab(
         "scopes",
-        <LazyScopesPanel selectedPersonaName={selectedPersonaName} />,
+        <LazyScopesPanel
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName}
+        />,
         {
           includeSetupHandoff: false
         }
@@ -2065,7 +2068,10 @@ const SidepanelPersona = ({
       label: t("sidepanel:persona.tabPolicies", "Policies"),
       content: renderLazyPersonaTab(
         "policies",
-        <LazyPoliciesPanel hasPendingPlan={Boolean(pendingPlan)} />,
+        <LazyPoliciesPanel
+          selectedPersonaId={selectedPersonaId}
+          hasPendingPlan={Boolean(pendingPlan)}
+        />,
         {
           includeSetupHandoff: false
         }
