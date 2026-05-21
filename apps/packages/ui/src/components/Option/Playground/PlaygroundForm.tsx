@@ -121,6 +121,7 @@ import { handleChatInputKeyDown } from "@/utils/key-down";
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events";
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection";
 import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry";
+import type { ChatModelUsability } from "@/utils/chat-model-availability";
 import { getProviderDisplayName } from "@/utils/provider-registry";
 import { getVariable } from "@/utils/select-variable";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -257,6 +258,9 @@ type Props = {
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
   onDraftPresenceChange?: (hasDraft: boolean) => void;
   characterChatSendBlocker?: PlaygroundSendBlocker | null;
+  characterChatModelUsability?: ChatModelUsability | null;
+  characterChatModelUsabilityLabel?: string | null;
+  characterChatModelUsabilityTitle?: string | null;
 };
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -448,6 +452,9 @@ export const PlaygroundForm = ({
   onComposerLayoutChange,
   onDraftPresenceChange,
   characterChatSendBlocker = null,
+  characterChatModelUsability = null,
+  characterChatModelUsabilityLabel = null,
+  characterChatModelUsabilityTitle = null,
 }: Props) => {
   const { t: translate } = useTranslation(["playground", "common", "option"]);
   const t = React.useCallback(
@@ -2120,6 +2127,12 @@ export const PlaygroundForm = ({
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
       modelSelectorWarning={modelSelectorWarning}
+      modelUsabilityLabel={characterChatModelUsabilityLabel}
+      modelUsabilityTitle={characterChatModelUsabilityTitle}
+      modelUsabilityWarning={Boolean(
+        characterChatModelUsabilityLabel &&
+          characterChatModelUsability?.status !== "ready",
+      )}
       onBeforeOpen={() => closeComposerPopoversExcept("model")}
       resolvedProviderKey={resolvedProviderKey}
       setModelDropdownOpen={setModelDropdownOpen}

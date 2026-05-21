@@ -2112,6 +2112,68 @@ export const Playground = () => {
       readiness: characterChatReadiness,
       readinessTitle: characterChatReadinessCopy?.title ?? null,
     });
+  const characterChatModelSelectorLabel = React.useMemo(() => {
+    if (
+      !activeCharacterChatModelUsability ||
+      activeCharacterChatModelUsability.status === "ready" ||
+      (activeCharacterChatModelUsability.status === "degraded" &&
+        activeCharacterChatModelUsability.canSend)
+    ) {
+      return null;
+    }
+
+    switch (activeCharacterChatModelUsability.status) {
+      case "loading":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityChecking",
+            "Checking model readiness",
+          ),
+        );
+      case "no_server":
+        return toText(
+          t("playground:composer.modelUsabilityServer", "Server unavailable"),
+        );
+      case "no_selection":
+        return toText(
+          t("playground:composer.modelUsabilityChoose", "Choose model"),
+        );
+      case "no_models":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityNoModels",
+            "No chat models configured",
+          ),
+        );
+      case "selected_missing":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityUnavailable",
+            "Model unavailable",
+          ),
+        );
+      case "provider_unconfigured":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityProviderSetup",
+            "Provider setup needed",
+          ),
+        );
+      case "model_unavailable":
+        return toText(
+          t("playground:composer.modelUsabilityNotCallable", "Not callable"),
+        );
+      case "degraded":
+        return toText(
+          t("playground:composer.modelUsabilityBlocked", "Model blocked"),
+        );
+      default:
+        return null;
+    }
+  }, [activeCharacterChatModelUsability, t]);
+  const characterChatModelSelectorTitle = characterChatModelSelectorLabel
+    ? characterChatModelUsabilityMessage ?? characterChatModelSelectorLabel
+    : null;
   const characterChatModelUsabilityBlocks = Boolean(
     activeCharacterChatModelUsability &&
       activeCharacterChatModelUsability.status !== "ready" &&
@@ -3292,6 +3354,13 @@ export const Playground = () => {
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
                 characterChatSendBlocker={characterChatSendBlocker}
+                characterChatModelUsability={activeCharacterChatModelUsability}
+                characterChatModelUsabilityLabel={
+                  characterChatModelSelectorLabel
+                }
+                characterChatModelUsabilityTitle={
+                  characterChatModelSelectorTitle
+                }
               />
             </div>
           </div>

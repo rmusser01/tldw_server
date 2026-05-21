@@ -671,15 +671,18 @@ vi.mock("../ComposerTextarea", () => ({
 
 vi.mock("../ComposerToolbar", () => ({
   ComposerToolbar: ({
+    modelSelectButton,
     researchLaunchButton,
     toolsButton,
     sendControl
   }: {
+    modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
   }) => (
     <div data-testid="composer-toolbar">
+      {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
       {sendControl}
@@ -1082,5 +1085,34 @@ describe("PlaygroundForm role-play starter", () => {
       "title",
       expect.stringContaining("Ada Lovelace")
     )
+  })
+
+  it("shows character model-usability copy in the model selector", () => {
+    render(
+      <PlaygroundForm
+        droppedFiles={[]}
+        characterChatModelUsability={{
+          status: "provider_unconfigured",
+          canSend: false,
+          selectedModelId: "deepseek-chat",
+          providerQualifiedModelId: "custom:deepseek-chat",
+          matchedModelId: "deepseek-chat",
+          matchedProvider: "custom",
+          recommendedAction: "open-model-settings",
+          detailReason: "provider-unconfigured"
+        }}
+        characterChatModelUsabilityLabel="Provider setup needed"
+        characterChatModelUsabilityTitle="Configure the selected model provider before chatting as Ada"
+      />
+    )
+
+    const selector = screen.getByTestId("model-selector")
+    expect(selector).toHaveTextContent("deepseek-chat - Provider setup needed")
+    expect(selector).toHaveAttribute(
+      "title",
+      "Configure the selected model provider before chatting as Ada"
+    )
+    expect(selector).not.toHaveTextContent("Healthy")
+    expect(selector).not.toHaveTextContent("Ready")
   })
 })

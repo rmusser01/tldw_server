@@ -654,7 +654,7 @@ git commit -m "feat: gate invalid character chat sends"
 - Modify: `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
 - Test: add or update the closest model selector/dropdown test
 
-- [ ] **Step 1: Write failing tests for unusable model label copy**
+- [x] **Step 1: Write failing tests for unusable model label copy**
 
 Add coverage proving an unusable Character Chat model does not render `Healthy`, `Ready`, or a positive provider label.
 
@@ -666,7 +666,7 @@ Expected user-visible examples:
 
 Do not use the word "healthy" for a blocked or loading usability status.
 
-- [ ] **Step 2: Run model selector tests and verify red**
+- [x] **Step 2: Run model selector tests and verify red**
 
 Run the nearest selector test file. If no targeted test exists, create one under:
 
@@ -674,7 +674,7 @@ Run the nearest selector test file. If no targeted test exists, create one under
 apps/packages/ui/src/components/Option/Playground/__tests__/ChatModelSelectorDropdown.character-usability.test.tsx
 ```
 
-- [ ] **Step 3: Pass model usability label into the selector surface**
+- [x] **Step 3: Pass model usability label into the selector surface**
 
 Extend `PlaygroundForm` props with:
 
@@ -687,7 +687,7 @@ In `Playground.tsx`, derive the label from the same readiness copy used by the p
 
 In `useModelSelector.tsx`, keep generic model selection behavior unchanged. Prefer adding optional override props at render sites over making this hook character-chat aware unless the hook already owns the selector button copy.
 
-- [ ] **Step 4: Render blocked usability copy in `ChatModelSelectorDropdown`**
+- [x] **Step 4: Render blocked usability copy in `ChatModelSelectorDropdown`**
 
 When an override label/title is provided:
 
@@ -695,7 +695,7 @@ When an override label/title is provided:
 - The visible compact label must include a concise blocker state.
 - Existing provider/model text remains available so power users know which model is affected.
 
-- [ ] **Step 5: Run selector tests**
+- [x] **Step 5: Run selector tests**
 
 Run:
 
@@ -705,7 +705,7 @@ bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/ChatMo
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```bash
 git add apps/packages/ui/src/hooks/playground/useModelSelector.tsx apps/packages/ui/src/components/Option/Playground/ChatModelSelectorDropdown.tsx apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx apps/packages/ui/src/components/Option/Playground/__tests__/ChatModelSelectorDropdown.character-usability.test.tsx
