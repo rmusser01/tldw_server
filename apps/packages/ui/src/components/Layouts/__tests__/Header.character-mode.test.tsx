@@ -98,15 +98,21 @@ vi.mock("../ChatHeader", () => ({
     activeCharacterName?: string | null
   }) => (
     <div>
-      <button type="button" onClick={() => onStartSavedChat?.()}>
-        New saved chat
-      </button>
-      <button type="button" onClick={() => onStartTemporaryChat?.()}>
-        Temporary chat
-      </button>
-      <button type="button" onClick={() => onStartCharacterChat?.()}>
-        Character chat
-      </button>
+      {onStartSavedChat ? (
+        <button type="button" onClick={() => onStartSavedChat()}>
+          New saved chat
+        </button>
+      ) : null}
+      {onStartTemporaryChat ? (
+        <button type="button" onClick={() => onStartTemporaryChat()}>
+          Temporary chat
+        </button>
+      ) : null}
+      {onStartCharacterChat ? (
+        <button type="button" onClick={() => onStartCharacterChat()}>
+          Character chat
+        </button>
+      ) : null}
       <div data-testid="active-character">
         {activeCharacterName || "none"}
       </div>
@@ -193,18 +199,23 @@ describe("Header character mode sequencing", () => {
     }
   })
 
-  it("routes non-chat surfaces into first-class character chat intent", () => {
+  it("omits chat session actions on non-chat surfaces", () => {
     locationPathname = "/settings/characters"
     selectedCharacter = { id: "char-1", name: "Rin" }
     render(<Header />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
-
-    expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
+    expect(
+      screen.queryByRole("button", { name: "New saved chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Temporary chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Character chat" })
+    ).not.toBeInTheDocument()
+    expect(setTemporaryChatMock).not.toHaveBeenCalled()
     expect(clearChatMock).not.toHaveBeenCalled()
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/chat?mode=character&characterId=char-1"
-    )
+    expect(navigateMock).not.toHaveBeenCalled()
   })
 
   it("clears character state when switching back to saved or temporary chat", () => {

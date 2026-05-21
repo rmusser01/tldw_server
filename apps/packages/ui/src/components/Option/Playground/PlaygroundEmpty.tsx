@@ -26,6 +26,7 @@ export const PlaygroundEmpty = () => {
   const isConnected = useIsConnected();
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
+  const [modesExpanded, setModesExpanded] = React.useState(false);
 
   const dispatchStarter = React.useCallback(
     (mode: "general" | "compare" | "character" | "rag", prompt?: string) => {
@@ -187,48 +188,62 @@ export const PlaygroundEmpty = () => {
       >
         <div className="flex flex-col gap-6">
           <div className="border-t border-border/60 pt-5">
-            <div className="flex flex-col gap-1 text-center sm:text-left">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
-                {t("playground:empty.modeTitle", "Choose a mode")}
-              </p>
-              <p className="text-sm text-text-muted">
-                {t(
-                  "playground:empty.modeBody",
-                  "Pick any starting point. All five stay equally available from the first screen.",
-                )}
-              </p>
+            <div className="flex flex-col gap-3 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-text-muted">
+                  {t("playground:empty.modeTitle", "Chat modes")}
+                </p>
+                <p className="text-sm text-text-muted">
+                  {t(
+                    "playground:empty.modeBody",
+                    "Use a different starting point when the conversation needs structure.",
+                  )}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-controls="playground-empty-mode-deck"
+                aria-expanded={modesExpanded}
+                onClick={() => setModesExpanded((expanded) => !expanded)}
+                className={`inline-flex items-center justify-center rounded-md border border-border bg-surface2 px-3 py-1.5 text-xs font-medium text-text transition hover:bg-surface ${actionButtonFocusClassName}`}
+              >
+                {t("playground:empty.exploreModes", "Explore chat modes")}
+              </button>
             </div>
 
-            <div
-              data-testid="playground-empty-mode-deck"
-              className="mt-4 grid gap-3 sm:grid-cols-2"
-            >
-              {starterCards.map((starter) => {
-                const Icon = starter.icon;
-                return (
-                  <button
-                    key={starter.key}
-                    type="button"
-                    onClick={starter.action}
-                    className={`group flex min-h-[118px] flex-col rounded-2xl border border-border/60 bg-bg/20 px-4 py-4 text-left transition hover:border-primary/40 hover:bg-surface2/60 ${actionButtonFocusClassName}`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="rounded-xl border border-border/50 bg-surface2/70 p-2 text-text-muted transition group-hover:text-text">
-                        <Icon className="h-4 w-4" aria-hidden="true" />
+            {modesExpanded ? (
+              <div
+                id="playground-empty-mode-deck"
+                data-testid="playground-empty-mode-deck"
+                className="mt-4 grid gap-3 sm:grid-cols-2"
+              >
+                {starterCards.map((starter) => {
+                  const Icon = starter.icon;
+                  return (
+                    <button
+                      key={starter.key}
+                      type="button"
+                      onClick={starter.action}
+                      className={`group flex min-h-[118px] flex-col rounded-2xl border border-border/60 bg-bg/20 px-4 py-4 text-left transition hover:border-primary/40 hover:bg-surface2/60 ${actionButtonFocusClassName}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="rounded-xl border border-border/50 bg-surface2/70 p-2 text-text-muted transition group-hover:text-text">
+                          <Icon className="h-4 w-4" aria-hidden="true" />
+                        </div>
+                        <div className="space-y-1">
+                          <span className="block text-base font-semibold text-text">
+                            {starter.title}
+                          </span>
+                          <p className="text-sm leading-6 text-text-muted">
+                            {starter.description}
+                          </p>
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                        <span className="block text-base font-semibold text-text">
-                          {starter.title}
-                        </span>
-                        <p className="text-sm leading-6 text-text-muted">
-                          {starter.description}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           <div className="border-t border-border/60 pt-4">

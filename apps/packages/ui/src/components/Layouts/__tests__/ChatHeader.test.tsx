@@ -149,6 +149,28 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onStartCharacterChat).toHaveBeenCalledTimes(1)
   })
 
+  it("hides chat session actions when callbacks are omitted", () => {
+    render(
+      <ChatHeader
+        {...createProps({
+          onStartSavedChat: undefined,
+          onStartTemporaryChat: undefined,
+          onStartCharacterChat: undefined
+        })}
+      />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "New saved chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Temporary chat (not saved)" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Character chat" })
+    ).not.toBeInTheDocument()
+  })
+
   it("hides temporary and character quick actions below the small breakpoint", () => {
     const props = createProps()
     render(<ChatHeader {...props} />)
