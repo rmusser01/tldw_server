@@ -35,7 +35,7 @@ Write a design/spec artifact that reconciles the original Persona module PRD int
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Persona PRD reconciliation design spec. The spec defines the current Persona Garden/live-session completion scope, moves future platform tracks to GitHub issue #1902, and explicitly avoids design-system backlog work. Verification: git diff --check passed; targeted rg confirmed #1902 and moved-out PRD tracks are present. Bandit was skipped because this is documentation-only.
+Reviewed and hardened the Persona PRD reconciliation design. Added risk notes and constraints for transcript export redaction/ownership, non-escalating Scopes/Policies editing, safe MCP/tool discovery, evidence-backed shipped-status claims, and a suggested PRD patch sequence. Verification: git diff --check passed on the updated spec. Bandit skipped because this remains documentation-only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
