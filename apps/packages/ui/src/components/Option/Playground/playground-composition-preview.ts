@@ -1,4 +1,5 @@
 import type { ConversationContextComposition } from "@/types/conversation-context";
+import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
 import type {
   PlaygroundContextSource,
   PlaygroundPromptSummary,
@@ -61,6 +62,9 @@ export type PlaygroundCompositionPreviewInput = {
   toolSummary: RuntimeToolSummary | null;
   compositionStatus: "idle" | "loading" | "ready" | "error";
   composition: ConversationContextComposition | null;
+  modelUsabilityStatus?: ChatModelUsabilityStatus | null;
+  modelUsabilityCanSend?: boolean | null;
+  modelUsabilityDetail?: string | null;
   modelUnavailable?: boolean;
   modelUnavailableDetail?: string | null;
 };
@@ -123,6 +127,25 @@ const mapToolState = (
   return "disabled";
 };
 
+const mapModelUsabilityState = (
+  status: ChatModelUsabilityStatus | null | undefined,
+  canSend: boolean | null | undefined,
+  legacyUnavailable: boolean,
+  hasSelectedModel: boolean,
+): PlaygroundCompositionPreviewEntryState => {
+  if (status === "loading") return "loading";
+  if (status === "degraded") {
+    if (canSend === false) return "unavailable";
+    return hasSelectedModel ? "degraded" : "unavailable";
+  }
+  if (status === "ready") {
+    return hasSelectedModel ? "active" : "unavailable";
+  }
+  if (status) return "unavailable";
+  if (hasSelectedModel && !legacyUnavailable) return "active";
+  return "unavailable";
+};
+
 export const buildPlaygroundCompositionPreviewSummary = ({
   promptSummary,
   assistantSummary,
@@ -132,6 +155,9 @@ export const buildPlaygroundCompositionPreviewSummary = ({
   toolSummary,
   compositionStatus,
   composition,
+  modelUsabilityStatus = null,
+  modelUsabilityCanSend = null,
+  modelUsabilityDetail = null,
   modelUnavailable = false,
   modelUnavailableDetail = null,
 }: PlaygroundCompositionPreviewInput): PlaygroundCompositionPreviewSummary => {
@@ -162,11 +188,17 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     kind: "model",
     label: "Model",
     title: modelTitle,
-    detail: modelUnavailableDetail || providerRoute.selectedProvider || null,
-    state:
-      providerRoute.selectedModel && !modelUnavailable
-        ? "active"
-        : "unavailable",
+    detail:
+      modelUsabilityDetail ||
+      (modelUnavailable ? modelUnavailableDetail : null) ||
+      providerRoute.selectedProvider ||
+      null,
+    state: mapModelUsabilityState(
+      modelUsabilityStatus,
+      modelUsabilityCanSend,
+      modelUnavailable,
+      Boolean(providerRoute.selectedModel),
+    ),
   };
   const settingsEntry: PlaygroundCompositionPreviewEntry = {
     id: "settings",
@@ -295,7 +327,8 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     ...sourceEntries,
     ...(toolEntry.state !== "disabled" ? [toolEntry] : []),
   ];
-  const hasBlockingModel = modelEntry.state === "unavailable";
+  const hasBlockingModel =
+    modelEntry.state === "unavailable" || modelEntry.state === "loading";
   const hasUnhealthyOptionalEntry = [...entries, ...sourceEntries].some(
     (entry) => entry.state === "degraded" || entry.state === "unavailable",
   );

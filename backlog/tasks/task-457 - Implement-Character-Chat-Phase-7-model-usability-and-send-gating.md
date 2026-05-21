@@ -4,7 +4,7 @@ title: Implement Character Chat Phase 7 model usability and send gating
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-21 01:33'
+updated_date: '2026-05-21 02:12'
 labels:
   - character-chat
   - roleplay
@@ -45,6 +45,18 @@ Execution started with superpowers:subagent-driven-development and superpowers:t
 Task 1 final: addressed spec-review gaps for provider aliases, colon-bearing local model IDs, and provider-qualified duplicate matching. Verification: focused utility suite passed with 41/41 tests; baseline trio passed with 3 files / 58 tests; git diff --check clean. Review gates: Task 1 spec review approved and code-quality review approved for HEAD ebda82474. Task 1 remains UI-unwired by design; Task 2 will map Character Chat readiness to the usability contract.
 
 Task 2 local TDD: added failing readiness and panel tests for models-loading, selected-model-missing, provider-unconfigured, model-unavailable, no-models-available copy, ready, and send-disabled ordering. Implemented buildCharacterChatReadiness on top of buildChatModelUsability and added precise blocker copy preserving character/draft context. Verification: focused readiness/panel suite passed with 2 files / 50 tests; baseline trio passed with 3 files / 63 tests; git diff --check clean. AC #2 is not checked yet because status strip, runtime inspector, composition preview, model selector, and SEND controls are later tasks.
+
+Task 3 local TDD: added red tests for explicit model usability in the status strip and composition preview. Implemented Character Chat model-usability propagation through Playground.tsx, PlaygroundStatusStrip, PlaygroundRuntimeInspector, and composition preview so provider-unconfigured/model-unavailable/loading states no longer show Ready/Healthy copy on those surfaces. Verification: status strip focused suite passed with 1 file / 17 tests; composition preview suite passed with 1 file / 8 tests; combined Task 3 suite passed with 2 files / 25 tests; baseline trio passed with 3 files / 67 tests; git diff --check clean. TypeScript compile was attempted with bunx tsc --noEmit --pretty false and failed only on existing unrelated baseline errors outside the touched files.
+
+Task 3 review fixes: added regression coverage for degraded model usability with canSend=false, explicit no_server status-strip copy, and runtime streaming priority over model-usability blockers. Implemented canSend propagation from buildChatModelUsability into Playground, status strip, runtime inspector, and composition preview. Verification: focused Task 3 suite passed with 3 files / 51 tests; broader character readiness/model surface suite passed with 5 files / 101 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files.
+
+Task 3 review-fix follow-up: addressed reviewer findings for no_selection status-strip copy, legacy modelUnavailable degraded-positive copy, and runtime inspector model-catalog loading. Added regressions for all three. Verification: targeted status-strip/runtime suite passed with 2 files / 45 tests; broader character readiness/model surface suite passed with 5 files / 104 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files.
+
+Task 3 final quality follow-up: added getMatchingCharacterChatModelUsabilityCopy so Playground only reuses readiness copy when the readiness blocker matches the model-usability blocker. This prevents no-character copy from appearing as model-readiness detail. Verification: utility suite passed with 1 file / 46 tests; broader character readiness/model surface suite passed with 5 files / 105 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files.
+
+Task 3 legacy fallback hardening: status strip and composition preview now ignore legacy modelUnavailableMessage/modelUnavailableDetail unless modelUnavailable is true, and Playground only passes those fallback values for the chat-model unavailable path. Added regressions for no-character/no-model fallback leakage. Verification: affected status/composition suite passed with 2 files / 33 tests; broader character readiness/model surface suite passed with 5 files / 107 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files.
+
+Task 3 final status-strip fallback hardening: modelUnavailableReason now also ignores legacy modelUnavailableMessage unless modelUnavailable is true. Added a provider_unconfigured stale-fallback regression. Verification: status-strip focused suite passed with 1 file / 24 tests; broader character readiness/model surface suite passed with 5 files / 108 tests; git diff --check clean. bunx tsc --noEmit --pretty false still fails only on existing unrelated baseline TypeScript debt outside touched files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -865,6 +865,51 @@ export function buildCharacterChatReadiness({
   }
 }
 
+export function getMatchingCharacterChatModelUsabilityCopy({
+  modelUsability,
+  readiness,
+  readinessTitle
+}: {
+  modelUsability: ChatModelUsability | null | undefined
+  readiness: CharacterChatReadiness
+  readinessTitle?: string | null
+}): string | null {
+  if (!modelUsability || modelUsability.status === "ready" || !readinessTitle) {
+    return null
+  }
+
+  if (
+    modelUsability.status === "no_server" &&
+    readiness.missingRequirement === "server-connection"
+  ) {
+    return readinessTitle
+  }
+
+  if (
+    (
+      modelUsability.status === "loading" ||
+      modelUsability.status === "no_selection" ||
+      modelUsability.status === "no_models" ||
+      modelUsability.status === "selected_missing" ||
+      modelUsability.status === "provider_unconfigured" ||
+      modelUsability.status === "model_unavailable"
+    ) &&
+    readiness.missingRequirement === "chat-model"
+  ) {
+    return readinessTitle
+  }
+
+  if (
+    modelUsability.status === "degraded" &&
+    !modelUsability.canSend &&
+    readiness.missingRequirement === "chat-send"
+  ) {
+    return readinessTitle
+  }
+
+  return null
+}
+
 export function getCharacterChatReadinessCopy(
   readiness: CharacterChatReadiness,
   t: TranslationFn,

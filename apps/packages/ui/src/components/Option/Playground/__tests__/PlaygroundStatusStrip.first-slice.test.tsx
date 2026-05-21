@@ -254,6 +254,319 @@ describe("PlaygroundStatusStrip first-slice state", () => {
     expect(openModelSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces provider setup model usability without positive health copy", () => {
+    const openModelSettings = vi.fn();
+
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={1}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="provider_unconfigured"
+        modelUsabilityMessage="Configure the selected model provider before chatting as Ada"
+        onOpenModelSettings={openModelSettings}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model setup needed");
+    expect(status).toHaveTextContent(
+      "Configure the selected model provider before chatting as Ada",
+    );
+    expect(status).not.toHaveTextContent("Ready");
+    expect(status).not.toHaveTextContent("Healthy");
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(openModelSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces not-callable model usability without positive health copy", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={1}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="model_unavailable"
+        modelUsabilityMessage="The selected chat model is not callable right now"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model not callable");
+    expect(status).toHaveTextContent(
+      "The selected chat model is not callable right now",
+    );
+    expect(status).not.toHaveTextContent("Ready");
+    expect(status).not.toHaveTextContent("Healthy");
+  });
+
+  it("surfaces loading model usability before ready copy", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="loading"
+        modelUsabilityMessage="Checking chat model readiness"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Checking model");
+    expect(status).toHaveTextContent("Checking chat model readiness");
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("uses character-specific model usability copy for no selected model", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider={null}
+        selectedModel={null}
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="no_selection"
+        modelUsabilityMessage="Choose a chat model before chatting as Ada"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("No model selected");
+    expect(status).toHaveTextContent(
+      "Choose a chat model before chatting as Ada",
+    );
+    expect(status).not.toHaveTextContent("Choose a model before sending.");
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("does not reuse selected-character fallback copy as model usability detail", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider={null}
+        selectedModel={null}
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="no_selection"
+        modelUnavailable={false}
+        modelUnavailableMessage="Choose a character to start character chat"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("No model selected");
+    expect(status).toHaveTextContent("Choose a model before sending.");
+    expect(status).not.toHaveTextContent(
+      "Choose a character to start character chat",
+    );
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("does not reuse legacy fallback copy for explicit model usability blockers", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="provider_unconfigured"
+        modelUnavailable={false}
+        modelUnavailableMessage="Choose a character to start character chat"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model setup needed");
+    expect(status).toHaveTextContent("Review model settings before sending.");
+    expect(status).not.toHaveTextContent(
+      "Choose a character to start character chat",
+    );
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("does not show positive degraded copy for legacy unavailable models", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degraded
+        degradedChecks={["Provider health degraded"]}
+        errorMessage={null}
+        modelUnavailable
+        modelUnavailableMessage="Choose a chat model before chatting as Ada"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model unavailable");
+    expect(status).toHaveTextContent(
+      "Choose a chat model before chatting as Ada",
+    );
+    expect(status).not.toHaveTextContent("Chat remains available.");
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("treats disallowed degraded model usability as blocked", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degraded
+        degradedChecks={["Provider health degraded"]}
+        errorMessage={null}
+        modelUsabilityStatus="degraded"
+        modelUsabilityCanSend={false}
+        modelUsabilityMessage="Character chat is preparing"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Model unavailable");
+    expect(status).toHaveTextContent("Character chat is preparing");
+    expect(status).not.toHaveTextContent("Chat remains available.");
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("maps explicit no-server model usability to server blocked copy", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={0}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="no_server"
+        modelUsabilityMessage="Connect to tldw_server before starting character chat"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Server unavailable");
+    expect(status).toHaveTextContent(
+      "Connect to tldw_server before starting character chat",
+    );
+    expect(status).not.toHaveTextContent("Ready");
+  });
+
+  it("keeps streaming primary over blocked model usability", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming
+        selectedProvider="openai"
+        selectedModel="gpt-4o"
+        messageCount={1}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive
+        degradedChecks={[]}
+        errorMessage={null}
+        modelUsabilityStatus="provider_unconfigured"
+        modelUsabilityMessage="Configure the selected model provider before chatting as Ada"
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Streaming");
+    expect(status).not.toHaveTextContent("Model setup needed");
+  });
+
+  it("preserves non-character chat ready behavior without model usability", () => {
+    render(
+      <PlaygroundStatusStrip
+        mode="cockpit"
+        streaming={false}
+        selectedProvider="openai"
+        selectedModel="gpt-4.1-mini"
+        messageCount={1}
+        sessionLabel="Server chat"
+        hasContext={false}
+        contextSummary={[]}
+        temporaryChat={false}
+        characterChatActive={false}
+        degradedChecks={[]}
+        errorMessage={null}
+      />,
+    );
+
+    const status = screen.getByRole("status", { name: "Chat status" });
+    expect(status).toHaveTextContent("Ready");
+    expect(status).toHaveTextContent("openai:gpt-4.1-mini");
+  });
+
   it("shows context preview loading without treating the chat route as degraded", () => {
     render(
       <PlaygroundStatusStrip

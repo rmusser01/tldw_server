@@ -123,8 +123,10 @@ import {
   getCharacterChatRouteIntent,
 } from "@/utils/character-chat-mode-intent";
 import {
+  buildChatModelUsability,
   buildCharacterChatReadiness,
   getCharacterChatReadinessCopy,
+  getMatchingCharacterChatModelUsabilityCopy,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
@@ -2048,6 +2050,22 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
+  const characterChatModelUsability = React.useMemo(
+    () =>
+      buildChatModelUsability({
+        isServerConnected: serverReadinessState !== "blocked",
+        selectedModel: providerRouteSummary.selectedModel,
+        availableModels: characterChatAvailableModels,
+        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        serverDegraded: serverReadinessState === "degraded",
+        allowDegradedSend: false,
+      }),
+    [
+      characterChatAvailableModels,
+      providerRouteSummary.selectedModel,
+      serverReadinessState,
+    ],
+  );
   const characterChatReadiness = React.useMemo(
     () =>
       buildCharacterChatReadiness({
@@ -2055,6 +2073,9 @@ export const Playground = () => {
         selectedCharacter,
         selectedModel: providerRouteSummary.selectedModel,
         availableModels: characterChatAvailableModels,
+        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        serverDegraded: serverReadinessState === "degraded",
+        allowDegradedSend: false,
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
@@ -2071,8 +2092,7 @@ export const Playground = () => {
     characterWorkflowActive && characterChatReadiness.status === "blocked";
   const characterChatModelUnavailable =
     characterChatBlocked &&
-    (characterChatReadiness.reason === "selected-model-unavailable" ||
-      characterChatReadiness.reason === "no-models-available");
+    characterChatReadiness.missingRequirement === "chat-model";
   const characterChatReadinessCopy = React.useMemo(
     () =>
       characterChatBlocked
@@ -2081,6 +2101,20 @@ export const Playground = () => {
           })
         : null,
     [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
+  );
+  const activeCharacterChatModelUsability = characterWorkflowActive
+    ? characterChatModelUsability
+    : null;
+  const characterChatModelUsabilityMessage =
+    getMatchingCharacterChatModelUsabilityCopy({
+      modelUsability: activeCharacterChatModelUsability,
+      readiness: characterChatReadiness,
+      readinessTitle: characterChatReadinessCopy?.title ?? null,
+    });
+  const characterChatModelUsabilityBlocks = Boolean(
+    activeCharacterChatModelUsability &&
+      activeCharacterChatModelUsability.status !== "ready" &&
+      !activeCharacterChatModelUsability.canSend,
   );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2444,8 +2478,13 @@ export const Playground = () => {
     toolSummary: cockpitToolSummary,
     compositionStatus,
     composition: null,
+    modelUsabilityStatus: activeCharacterChatModelUsability?.status ?? null,
+    modelUsabilityCanSend: activeCharacterChatModelUsability?.canSend ?? null,
+    modelUsabilityDetail: characterChatModelUsabilityMessage,
     modelUnavailable: characterChatModelUnavailable,
-    modelUnavailableDetail: characterChatReadinessCopy?.title ?? null,
+    modelUnavailableDetail: characterChatModelUnavailable
+      ? characterChatReadinessCopy?.title ?? null
+      : null,
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2611,14 +2650,21 @@ export const Playground = () => {
       selectedProvider={providerRouteSummary.selectedProvider}
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
+      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
+      modelUsabilityDetail={characterChatModelUsabilityMessage}
       runtimeStatus={
-        characterChatModelUnavailable || serverReadinessState === "blocked"
+        serverReadinessState === "blocked"
           ? "error"
           : streaming
             ? "streaming"
-            : serverReadinessState === "degraded"
-              ? "degraded"
-              : "ready"
+            : activeCharacterChatModelUsability?.status === "loading"
+              ? "loading"
+            : characterChatModelUsabilityBlocks
+              ? "error"
+              : serverReadinessState === "degraded"
+                ? "degraded"
+                : "ready"
       }
       runtimeStatusDetail={
         characterChatReadinessCopy?.title ?? runtimeStatusDetail
@@ -2664,8 +2710,13 @@ export const Playground = () => {
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
       serverBlocked={serverReadinessState === "blocked"}
+      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
+      modelUsabilityMessage={characterChatModelUsabilityMessage}
       modelUnavailable={characterChatModelUnavailable}
-      modelUnavailableMessage={characterChatReadinessCopy?.title ?? null}
+      modelUnavailableMessage={
+        characterChatModelUnavailable ? characterChatReadinessCopy?.title ?? null : null
+      }
       compositionStatus={compositionStatus}
       onStopStreaming={() => stopStreamingRequest()}
       onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}

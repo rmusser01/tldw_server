@@ -172,6 +172,95 @@ describe("playground composition preview summary", () => {
     });
   });
 
+  it("uses explicit model usability copy for provider setup blockers", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: "openai",
+          selectedModel: "gpt-4o",
+          providerRouteLabel: "openai:gpt-4o",
+        },
+        modelUsabilityStatus: "provider_unconfigured",
+        modelUsabilityDetail:
+          "Configure the selected model provider before chatting as Ada",
+      }),
+    );
+
+    expect(summary.overallState).toBe("unavailable");
+    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+      state: "unavailable",
+      title: "openai:gpt-4o",
+      detail: "Configure the selected model provider before chatting as Ada",
+    });
+  });
+
+  it("uses explicit loading model usability copy without marking model active", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: "openai",
+          selectedModel: "gpt-4o",
+          providerRouteLabel: "openai:gpt-4o",
+        },
+        modelUsabilityStatus: "loading",
+        modelUsabilityDetail: "Checking chat model readiness",
+      }),
+    );
+
+    expect(summary.overallState).toBe("unavailable");
+    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+      state: "loading",
+      title: "openai:gpt-4o",
+      detail: "Checking chat model readiness",
+    });
+  });
+
+  it("does not reuse selected-character fallback copy as model usability detail", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: null,
+          selectedModel: null,
+          providerRouteLabel: null,
+        },
+        modelUsabilityStatus: "no_selection",
+        modelUnavailable: false,
+        modelUnavailableDetail: "Choose a character to start character chat",
+      }),
+    );
+
+    expect(summary.overallState).toBe("unavailable");
+    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+      state: "unavailable",
+      title: "No model selected",
+    });
+    expect(summary.entries.find((entry) => entry.kind === "model")?.detail).not.toBe(
+      "Choose a character to start character chat",
+    );
+  });
+
+  it("treats disallowed degraded model usability as unavailable", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: "openai",
+          selectedModel: "gpt-4o",
+          providerRouteLabel: "openai:gpt-4o",
+        },
+        modelUsabilityStatus: "degraded",
+        modelUsabilityCanSend: false,
+        modelUsabilityDetail: "Character chat is preparing",
+      }),
+    );
+
+    expect(summary.overallState).toBe("unavailable");
+    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+      state: "unavailable",
+      title: "openai:gpt-4o",
+      detail: "Character chat is preparing",
+    });
+  });
+
   it("keeps MCP unavailable distinct from empty context and preserves character context", () => {
     const summary = buildPlaygroundCompositionPreviewSummary(
       baseInput({

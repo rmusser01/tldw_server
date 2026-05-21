@@ -18,6 +18,7 @@ import {
   Settings2,
   Square,
 } from "lucide-react";
+import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
 
 type PlaygroundStatusStripCompositionStatus =
   | "idle"
@@ -30,7 +31,9 @@ type PlaygroundStatusStripRuntimeState =
   | "server-blocked"
   | "streaming"
   | "loading"
+  | "model-loading"
   | "missing-model"
+  | "provider-unconfigured"
   | "model-unavailable"
   | "degraded"
   | "ready";
@@ -61,6 +64,9 @@ export type PlaygroundStatusStripProps = {
   degradedChecks?: string[];
   errorMessage?: string | null;
   serverBlocked?: boolean;
+  modelUsabilityStatus?: ChatModelUsabilityStatus | null;
+  modelUsabilityCanSend?: boolean | null;
+  modelUsabilityMessage?: string | null;
   modelUnavailable?: boolean;
   modelUnavailableMessage?: string | null;
   compositionStatus?: PlaygroundStatusStripCompositionStatus;
@@ -92,6 +98,9 @@ export const PlaygroundStatusStrip = ({
   degradedChecks = [],
   errorMessage,
   serverBlocked = false,
+  modelUsabilityStatus = null,
+  modelUsabilityCanSend = null,
+  modelUsabilityMessage = null,
   modelUnavailable = false,
   modelUnavailableMessage = null,
   compositionStatus = "idle",
@@ -104,6 +113,28 @@ export const PlaygroundStatusStrip = ({
   const isDegraded = degraded || degradedChecks.length > 0;
   const hasSelectedModel = Boolean(selectedModel?.trim());
   const isContextLoading = compositionStatus === "loading";
+  const blockingModelUsabilityState:
+    | "server-blocked"
+    | "model-loading"
+    | "missing-model"
+    | "provider-unconfigured"
+    | "model-unavailable"
+    | null =
+    modelUsabilityStatus === "no_server"
+      ? "server-blocked"
+      : modelUsabilityStatus === "loading"
+      ? "model-loading"
+      : modelUsabilityStatus === "no_selection"
+        ? "missing-model"
+        : modelUsabilityStatus === "provider_unconfigured"
+          ? "provider-unconfigured"
+          : modelUsabilityStatus === "model_unavailable" ||
+              modelUsabilityStatus === "selected_missing" ||
+              modelUsabilityStatus === "no_models" ||
+              (modelUsabilityStatus === "degraded" &&
+                modelUsabilityCanSend === false)
+            ? "model-unavailable"
+            : null;
   const runtimeState: PlaygroundStatusStripRuntimeState = errorMessage
     ? "error"
     : serverBlocked
@@ -112,13 +143,15 @@ export const PlaygroundStatusStrip = ({
         ? "streaming"
         : isContextLoading
           ? "loading"
-          : modelUnavailable
-            ? "model-unavailable"
-          : !hasSelectedModel
-            ? "missing-model"
-            : isDegraded
-              ? "degraded"
-              : "ready";
+          : blockingModelUsabilityState
+            ? blockingModelUsabilityState
+            : modelUnavailable
+              ? "model-unavailable"
+              : !hasSelectedModel
+                ? "missing-model"
+                : isDegraded
+                  ? "degraded"
+                  : "ready";
   const routeLabel =
     selectedProvider && hasSelectedModel
       ? `${selectedProvider}:${selectedModel}`
@@ -134,13 +167,19 @@ export const PlaygroundStatusStrip = ({
           ? t("cockpit.streaming", "Streaming")
           : runtimeState === "loading"
             ? t("cockpit.loadingContext", `${LOADING_STATE_LABEL} context`)
+            : runtimeState === "model-loading"
+              ? t("cockpit.modelChecking", "Checking model")
             : runtimeState === "missing-model"
               ? t("cockpit.noModelSelected", "No model selected")
+              : runtimeState === "provider-unconfigured"
+                ? t("cockpit.modelSetupNeeded", "Model setup needed")
               : runtimeState === "model-unavailable"
-                ? t("cockpit.modelUnavailable", "Model unavailable")
-              : runtimeState === "degraded"
-                ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
-                : t("cockpit.ready", READY_STATE_LABEL);
+                ? modelUsabilityStatus === "model_unavailable"
+                  ? t("cockpit.modelNotCallable", "Model not callable")
+                  : t("cockpit.modelUnavailable", "Model unavailable")
+                : runtimeState === "degraded"
+                  ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
+                  : t("cockpit.ready", READY_STATE_LABEL);
   const messageLabel = formatCockpitMessageCount(
     t("cockpit.messageCount", {
       count: effectiveMessageCount,
@@ -150,26 +189,37 @@ export const PlaygroundStatusStrip = ({
     effectiveMessageCount,
   );
   const degradedChatAvailableLabel =
-    isDegraded && !errorMessage && !serverBlocked && hasSelectedModel
+    isDegraded &&
+    !errorMessage &&
+    !serverBlocked &&
+    !blockingModelUsabilityState &&
+    !modelUnavailable &&
+    hasSelectedModel
       ? t("cockpit.degradedChatAvailable", "Chat remains available.")
       : null;
   const serverBlockedReason =
     runtimeState === "server-blocked"
-      ? t(
+      ? (modelUsabilityStatus === "no_server" ? modelUsabilityMessage : null) ||
+        t(
           "cockpit.serverUnavailableRecovery",
           "Reconnect to the server or review server settings before sending.",
         )
       : null;
   const missingModelReason =
     runtimeState === "missing-model"
-      ? t(
+      ? modelUsabilityMessage ||
+        (modelUnavailable ? modelUnavailableMessage : null) ||
+        t(
           "cockpit.chooseModelBeforeSending",
           "Choose a model before sending.",
         )
       : null;
   const modelUnavailableReason =
+    runtimeState === "model-loading" ||
+    runtimeState === "provider-unconfigured" ||
     runtimeState === "model-unavailable"
-      ? modelUnavailableMessage ||
+      ? modelUsabilityMessage ||
+        (modelUnavailable ? modelUnavailableMessage : null) ||
         t(
           "cockpit.reviewModelBeforeSending",
           "Review model settings before sending.",
@@ -228,9 +278,12 @@ export const PlaygroundStatusStrip = ({
               ? "border-error/40 bg-error/10 text-error"
               : runtimeState === "degraded" ||
                   runtimeState === "missing-model" ||
+                  runtimeState === "provider-unconfigured" ||
                   runtimeState === "model-unavailable"
                 ? "border-warning/40 bg-warning/10 text-warning"
-                : runtimeState === "streaming" || runtimeState === "loading"
+                : runtimeState === "streaming" ||
+                    runtimeState === "loading" ||
+                    runtimeState === "model-loading"
                   ? "border-info/40 bg-info/10 text-info"
                   : "border-success/40 bg-success/10 text-success"
           }`}
@@ -238,9 +291,12 @@ export const PlaygroundStatusStrip = ({
           {runtimeState === "error" ||
           runtimeState === "server-blocked" ||
           runtimeState === "missing-model" ||
+          runtimeState === "provider-unconfigured" ||
           runtimeState === "model-unavailable" ? (
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : runtimeState === "streaming" || runtimeState === "loading" ? (
+          ) : runtimeState === "streaming" ||
+            runtimeState === "loading" ||
+            runtimeState === "model-loading" ? (
             <Loader2 className="h-3.5 w-3.5" aria-hidden="true" />
           ) : runtimeState === "degraded" ? (
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -347,6 +403,7 @@ export const PlaygroundStatusStrip = ({
             {t("cockpit.reviewSettings", "Review settings")}
           </button>
         ) : (runtimeState === "missing-model" ||
+            runtimeState === "provider-unconfigured" ||
             runtimeState === "model-unavailable") &&
           onOpenModelSettings ? (
           <button

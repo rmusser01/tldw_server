@@ -5,6 +5,7 @@ import {
   buildChatModelUsability,
   findUnavailableChatModel,
   getCharacterChatReadinessCopy,
+  getMatchingCharacterChatModelUsabilityCopy,
   normalizeChatModelId
 } from "../chat-model-availability"
 
@@ -827,6 +828,38 @@ describe("character chat readiness", () => {
       missingRequirement: "selected-character",
       recommendedAction: "choose-character"
     })
+  })
+
+  it("does not reuse character-selection copy as model usability detail", () => {
+    const readiness = buildCharacterChatReadiness({
+      isServerConnected: true,
+      selectedCharacter: null,
+      selectedModel: null,
+      availableModels: null,
+      modelsLoading: true
+    })
+    const readinessCopy = getCharacterChatReadinessCopy(readiness, t)
+    const modelUsability = buildChatModelUsability({
+      isServerConnected: true,
+      selectedModel: null,
+      availableModels: null,
+      modelsLoading: true
+    })
+
+    expect(readiness).toMatchObject({
+      missingRequirement: "selected-character"
+    })
+    expect(modelUsability).toMatchObject({
+      status: "no_selection",
+      canSend: false
+    })
+    expect(
+      getMatchingCharacterChatModelUsabilityCopy({
+        modelUsability,
+        readiness,
+        readinessTitle: readinessCopy.title
+      })
+    ).toBeNull()
   })
 
   it("blocks character chat when no chat model is available", () => {

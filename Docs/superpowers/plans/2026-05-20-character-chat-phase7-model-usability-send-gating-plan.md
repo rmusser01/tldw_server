@@ -382,7 +382,7 @@ git commit -m "feat: map character readiness to model usability"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundStatusStrip.first-slice.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/playground-composition-preview.test.ts`
 
-- [ ] **Step 1: Write failing status strip tests**
+- [x] **Step 1: Write failing status strip tests**
 
 In `PlaygroundStatusStrip.first-slice.test.tsx`, add tests for:
 
@@ -391,7 +391,7 @@ In `PlaygroundStatusStrip.first-slice.test.tsx`, add tests for:
 - `modelUsabilityStatus="loading"` shows checking language.
 - Non-character chat still preserves existing status behavior.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run:
 
@@ -401,7 +401,7 @@ bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/Playgr
 
 Expected: fails because the component only accepts `modelUnavailable`.
 
-- [ ] **Step 3: Build one model usability result in `Playground.tsx`**
+- [x] **Step 3: Build one model usability result in `Playground.tsx`**
 
 Import `buildChatModelUsability` and compute next to `characterChatReadiness`:
 
@@ -426,7 +426,7 @@ const characterChatModelUsability = React.useMemo(
 
 Then pass `modelUsability: characterWorkflowActive ? characterChatModelUsability : null` to status, inspector, and composition preview surfaces.
 
-- [ ] **Step 4: Update `PlaygroundStatusStrip` props**
+- [x] **Step 4: Update `PlaygroundStatusStrip` props**
 
 Replace the boolean-only API with explicit props while keeping backward compatibility during migration:
 
@@ -449,11 +449,11 @@ Status priority should be:
 
 If `modelUsabilityStatus` is present and not `ready`/allowed `degraded`, do not render `Ready`, `Healthy`, or equivalent positive copy.
 
-- [ ] **Step 5: Update composition preview and runtime inspector**
+- [x] **Step 5: Update composition preview and runtime inspector**
 
 Replace derived `modelUnavailable` booleans with the same usability status/copy. The preview and inspector do not need a new visual design; they only need to stop contradicting the readiness panel.
 
-- [ ] **Step 6: Run focused status tests**
+- [x] **Step 6: Run focused status tests**
 
 Run:
 
@@ -463,7 +463,7 @@ bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/Playgr
 
 Expected: pass.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Playground/Playground.tsx apps/packages/ui/src/components/Option/Playground/PlaygroundStatusStrip.tsx apps/packages/ui/src/components/Option/Playground/playground-composition-preview.ts apps/packages/ui/src/components/Option/Playground/PlaygroundRuntimeInspector.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundStatusStrip.first-slice.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/playground-composition-preview.test.ts
