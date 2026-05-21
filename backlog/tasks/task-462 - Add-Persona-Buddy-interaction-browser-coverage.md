@@ -42,6 +42,8 @@ Implement Task 5 from the Persona Buddy interaction text-slice plan: Playwright 
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Task 5 browser coverage is complete for the first Persona Buddy text interaction slice. The focused Playwright spec passes against an isolated Next dev server and covers live-control mocks, Persona stream payload capture, and Choose/Change Buddy routing to the Visuals tab.
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/1901.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
