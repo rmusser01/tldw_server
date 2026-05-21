@@ -47,13 +47,13 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
           mode="spinner"
           size="sm"
           label="Loading recent study sessions..."
-          className="py-4"
         />
       ) : recentSessionsQuery.isError ? (
         <EmptyState
           variant="inline"
           size="sm"
-          title={errorMessage}
+          title="Failed to load recent study sessions"
+          description={errorMessage}
           primaryAction={{
             label: "Retry",
             onClick: () => void recentSessionsQuery.refetch()
