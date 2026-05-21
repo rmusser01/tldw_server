@@ -1,6 +1,6 @@
 # Persona Interaction / Persona Garden PRD
 
-Status: Active - current completion scope reconciled
+Status: Current Persona Garden/live-session completion scope implemented
 
 Owner: Core (Persona, LLM, Audio, MCP, AuthNZ, WebUI)
 
@@ -10,17 +10,19 @@ Future scope tracker: https://github.com/rmusser01/tldw_server/issues/1902
 
 Last reconciled: 2026-05-21
 
+Implementation closeout: 2026-05-21
+
 ## Summary
 
 Persona is the advanced assistant profile system for tldw_server. A Persona is derived from a Character, keeps provenance, and then evolves independently with its own live sessions, state, memory, scopes, policies, tools, voice settings, and static visual/media context.
 
 The current Persona module completion target is the Persona Garden and live-session foundation. It is not the whole assistant platform. Ordinary chat startup, Workspace-level assistant defaults, scheduled autonomous work, expressive avatars, global personalization, full tool administration, and multi-agent collaboration are valid future directions, but they are not blockers for declaring the current Persona module complete.
 
-## Current Status
+## Current Completion Status
 
 The original scaffold-era status from 2026-02-09 is stale. Current code evidence shows the module has moved beyond the initial catalog/session/websocket scaffold.
 
-Shipped or substantially implemented:
+Implemented:
 
 - Authenticated Persona endpoints and websocket interactions.
 - Persona Garden route framing, shared WebUI/extension route behavior, and tabs for `Live Session`, `Profiles`, `State Docs`, `Scopes`, and `Policies`.
@@ -31,14 +33,22 @@ Shipped or substantially implemented:
 - Persona session preference persistence, memory retrieval toggles, memory top-k handling, and Persona memory storage.
 - Persona scope and policy tables, API endpoints, runtime policy loading, and policy-denial behavior for Persona tool execution.
 - Static/state Persona visual-pack support as a Persona-owned media context.
+- Selected live-session transcript export for Persona Garden, including authenticated selected-session export, privacy/redaction constraints, UI download, and export confirmation.
+- Scopes and Policies editing surfaces in Persona Garden, including load/save flows, validation/error recovery, MCP tool picker support, and catalog/default-tool context.
+- Persona-local MCP/tool discovery through already-authorized catalog/tool-picker surfaces, without adding marketplace or global administration behavior.
+- Persona live memory status and Persona state-history archive controls where backend support already exists.
+- Acceptance tests and Backlog evidence for the reconciled completion boundary.
 
-Current completion gaps:
+Closeout evidence:
 
-- Minimal live-session transcript export for the selected Persona Garden session.
-- Non-placeholder Scopes and Policies editing surfaces in Persona Garden.
-- Minimal Persona-local MCP/tool discovery and default selection from already-authorized tools.
-- Persona memory visibility controls only where backend support already exists.
-- Updated acceptance tests and docs that capture the reconciled current boundary.
+- `TASK-442` and `TASK-443` reconciled and patched this PRD's current/future scope split.
+- `TASK-444` and `TASK-445` implemented selected-session transcript export backend and UI.
+- `TASK-449` added selected-session export confirmation.
+- `TASK-446` implemented Scope and Policy rule editors.
+- `TASK-447` exposed Persona-local MCP/tool discovery in the policy editor.
+- `TASK-448` exposed live memory mode, retrieval state, top-k, and state-context applicability.
+- `TASK-450` added state-history archive control for active state-doc history entries.
+- `TASK-451` closes the PRD evidence snapshot after these implementation slices.
 
 Not current completion blockers:
 
@@ -430,6 +440,8 @@ Future scope:
 
 ## Acceptance Criteria For Current Completion
 
+Closeout status: the reconciled current Persona Garden/live-session completion scope is implemented. The checklist below remains the durable acceptance contract for regression and future maintenance.
+
 - Persona Garden clearly separates `My Chat Identity`, `Characters`, and `Persona`.
 - Personas can be created from Characters and remain independent afterward.
 - Live text/voice sessions can connect, resume, degrade safely, and expose understandable recovery states.
@@ -445,11 +457,19 @@ Future scope:
 
 ## Verification Plan
 
-- Review this PRD against `Docs/superpowers/specs/2026-05-21-persona-prd-reconciliation-design.md`.
-- Confirm each moved-out feature appears in #1902.
-- If a moved-out feature is missing from #1902, update #1902 before marking this PRD complete.
-- Confirm this PRD does not describe future PRDs as current completion blockers.
-- Confirm no design-system backlog tasks or files are modified.
+Completed closeout checks:
+
+- Reviewed this PRD against `Docs/superpowers/specs/2026-05-21-persona-prd-reconciliation-design.md`.
+- Confirmed moved-out feature buckets are tracked by #1902.
+- Confirmed this PRD does not describe future PRDs as current completion blockers.
+- Confirmed no design-system backlog tasks or files are modified by the closeout.
+- Recorded implementation evidence in `TASK-442` through `TASK-451`.
+
+Maintenance checks for future changes:
+
+- Keep ordinary `/chat` Persona startup, Workspace Persona defaults, scheduled work, expressive avatar runtime, broad personalization memory, Persona tool administration, and multi-agent workflows out of the current completion contract unless their future PRDs are explicitly accepted back into scope.
+- Keep destructive/write/export actions confirmed and owner-scoped.
+- Keep MCP/tool discovery bounded to already-authorized tools and avoid leaking hidden/admin-only capabilities.
 
 ## Evidence Snapshot
 
@@ -461,3 +481,7 @@ Evidence used for this reconciliation included current code and tests for:
 - Persona profile provenance tests in `tldw_Server_API/tests/Persona/test_persona_profiles_api.py` and `tldw_Server_API/tests/ChaChaNotesDB/test_persona_persistence_db.py`.
 - Persona Garden route tabs and shared route tests in `apps/packages/ui/src/routes/sidepanel-persona.tsx` and `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`.
 - Character-to-Persona actions in `apps/packages/ui/src/components/Option/Characters/`.
+- Selected-session transcript export and confirmation coverage in `tldw_Server_API/tests/Persona/test_persona_profiles_api.py` and `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`.
+- Scope and policy editor coverage in `apps/packages/ui/src/components/PersonaGarden/__tests__/ScopePolicyEditors.test.tsx`.
+- MCP tool picker and Persona-local capability context coverage in `apps/packages/ui/src/components/PersonaGarden/__tests__/ScopePolicyEditors.test.tsx` and `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`.
+- Live memory status and state-history archive coverage in `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx` and `tldw_Server_API/tests/Persona/test_persona_profiles_api.py`.
