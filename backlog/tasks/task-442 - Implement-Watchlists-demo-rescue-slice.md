@@ -21,6 +21,17 @@ modified_files:
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx
+- apps/packages/ui/src/services/watchlists-overview.ts
+- tldw_Server_API/app/api/v1/endpoints/watchlists.py
+- tldw_Server_API/app/core/Scheduler/scheduler.py
+- tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py
+- tldw_Server_API/app/core/Watchlists/pipeline.py
+- tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
+- tldw_Server_API/tests/Watchlists/test_run_detail_filters_totals.py
+- tldw_Server_API/tests/Watchlists/test_watchlists_api.py
+- tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
 ---
 
 ## Description
@@ -42,16 +53,15 @@ Implement PR A from the Watchlists demo remediation plan: template contract hotf
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 committed in 7de556bad. Task 2 replaces the audio briefing bridge with Scheduler submit(...), includes Scheduler-required user_id metadata, scopes idempotency by user/job/run, and updates the implementation plan. Verification: test_audio_briefing_workflow.py 12 passed; watchlists API generate_audio metadata subset 3 passed; test_audio_output_delivery.py 8 passed; git diff --check passed; Bandit on audio_briefing_workflow.py reported 0 findings.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 3 frontend audio-status slice implemented. Added run-audio service contract, explicit output audio trigger fields, defensive output metadata audio status parsing, non-playable audio briefing status rendering in OutputPreviewDrawer, and RunDetailDrawer status lookup/404 handling. Review fix: RunDetailDrawer now scans linked output metadata before claiming no audio was requested, preserves skipped/failed linked-output fallback states, and normalizes succeeded/success audio runs as complete. Canonical audio metadata tests cover pending/skipped/enqueue_failed/failed/completed. Verification from apps/packages/ui: focused and adjacent vitest suite passed 6 files and 51 tests. git diff --check passed. Bandit skipped because this task touched no Python files.
 
 Task 4 implemented. Backend now persists source_statuses/source_errors in run stats with safe source error text, redacts common secret formats, and preserves structured run-detail stats through the API schema. Frontend overview health counts active error:* source states, source-error zero-item runs, and enqueue_failed/skipped audio outputs as attention. Verification: pytest test_watchlists_operator_recovery.py + test_watchlists_pipeline.py + test_run_detail_filters_totals.py passed 16 passed, 1 skipped; focused Vitest passed 2 files/6 tests; git diff --check passed; Bandit on pipeline.py and endpoints/watchlists.py reported 0 results/errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 5 review hardening completed after the first demo-readiness commit and post-rebase repair. The WebUI smoke now covers the first-time guided source preflight and source/monitor creation path, fails closed on unmatched Watchlists API mocks, uses normal Playwright actionability checks, scopes regenerate modal actions, and keeps diagnostics strict with only narrow expected mock-environment allowances. OutputsTab regenerate logging sanitizes server errors and redacts key/token-looking values instead of stringifying arbitrary error objects. Post-rebase fixes restored persistent in-modal pipeline output-create errors, aligned the WebUI/extension smokes with the selected-Watchlist collection model and current five-step pipeline wizard, and made markdown report previews show truthful flat backend audio briefing metadata (`audio_briefing_status`, task id, and error) for queued/failed/skipped states. PR #1906 review fix added string-error handling for pipeline setup error extraction. Runbook safe claims now reflect that the extension build and route smoke passed. Verification: WebUI Playwright smoke 3 passed; extension Watchlists Playwright smoke 14 passed; focused Watchlists UI Vitest 10 files/69 tests passed; focused backend Watchlists pytest 54 passed, 5 skipped, 1 xpassed; PR review focused `OverviewTab.quick-setup` Vitest 22 tests passed; git diff --check passed; Bandit on touched Watchlists Python paths reported 0 results/errors.
+Task 5 review hardening completed after the first demo-readiness commit, post-rebase repair, and PR #1906 review sweep. The WebUI smoke now covers the first-time guided source preflight and source/monitor creation path, fails closed on unmatched Watchlists API mocks, uses normal Playwright actionability checks, scopes regenerate modal actions, and keeps diagnostics strict with only narrow expected mock-environment allowances. OutputsTab logging sanitizes server errors and redacts key/token-looking values instead of stringifying arbitrary error objects. Post-rebase fixes restored persistent in-modal pipeline output-create errors, aligned the WebUI/extension smokes with the selected-Watchlist collection model and current five-step pipeline wizard, and made markdown report previews show truthful flat backend audio briefing metadata (`audio_briefing_status`, task id, and error) for queued/failed/skipped states. PR #1906 review fixes added string-error handling for pipeline setup error extraction, preserved output-create failures in the wizard, rendered sanitized audio status even when report content is empty, gated filter tallies behind `include_tallies`, added Scheduler retry override support for audio workflow submissions, made the audio scheduler injectable, removed raw audio exception text from logs/metadata, broadened source-error redaction, and records partial extraction status without masking successful URLs. Runbook safe claims now reflect that the extension build and route smoke passed. Verification: WebUI Playwright smoke 3 passed; extension Watchlists Playwright smoke 14 passed; focused Watchlists UI Vitest 10 files/69 tests passed; focused backend Watchlists pytest 54 passed, 5 skipped, 1 xpassed; PR review focused UI Vitest 3 files/33 tests passed; PR review focused backend pytest 20 passed; WebUI Watchlists demo-readiness Playwright 3 passed; Python compileall passed for touched Python files; git diff --check passed; Bandit on touched Watchlists/Scheduler Python paths reported 0 results/errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

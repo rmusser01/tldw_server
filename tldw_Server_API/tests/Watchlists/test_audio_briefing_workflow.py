@@ -302,11 +302,6 @@ class TestTriggerAudioBriefing:
                 side_effect=run_sync_in_test,
                 create=True,
             ) as mock_threadpool,
-            patch(
-                "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
-                new_callable=AsyncMock,
-                return_value=mock_scheduler,
-            ),
         ):
             result = await trigger_audio_briefing(
                 user_id=1,
@@ -322,6 +317,7 @@ class TestTriggerAudioBriefing:
                     "persona_id": "host_style",
                 },
                 db=db,
+                scheduler=mock_scheduler,
             )
 
         assert result == "task_abc123"
@@ -333,6 +329,7 @@ class TestTriggerAudioBriefing:
         assert args == ("workflow_run",)
         assert kwargs["queue_name"] == "workflows"
         assert kwargs["idempotency_key"] == "watchlist-audio-briefing:1:42:7"
+        assert kwargs["max_retries"] == 1
         assert kwargs["metadata"] == {
             "source": "watchlist_audio_briefing",
             "watchlist_job_id": 42,

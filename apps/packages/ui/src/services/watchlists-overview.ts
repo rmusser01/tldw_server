@@ -211,7 +211,7 @@ const getSourceErrorCount = (run: Pick<WatchlistRun, "stats">): number => {
   if (!Array.isArray(statuses)) return 0
   return statuses.filter((entry) => {
     const normalized = String(asRecord(entry)?.status || "").trim().toLowerCase()
-    return normalized.startsWith("error")
+    return normalized.startsWith("error") || normalized.startsWith("partial:")
   }).length
 }
 

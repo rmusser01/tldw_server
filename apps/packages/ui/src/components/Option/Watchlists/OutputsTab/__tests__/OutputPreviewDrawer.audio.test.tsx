@@ -201,6 +201,38 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(await screen.findByText("# Briefing")).toBeInTheDocument()
   })
 
+  it("renders sanitized audio status when non-audio content is empty", async () => {
+    serviceMocks.downloadWatchlistOutput.mockResolvedValue("")
+
+    render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({
+          type: "brief",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "enqueue_failed",
+            audio_briefing_error:
+              "Authorization: Bearer value_to_redact failed at /Users/local/server.py"
+          }
+        })}
+      />
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+    })
+
+    expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
+    expect(screen.getByText("Enqueue failed")).toBeInTheDocument()
+    expect(screen.getByText(/Error:/)).toBeInTheDocument()
+    expect(screen.queryByText(/value_to_redact/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Users\/local/)).not.toBeInTheDocument()
+    expect(screen.getByText("No content available")).toBeInTheDocument()
+  })
+
   it("restores focus to the launch control when the drawer closes", async () => {
     const trigger = document.createElement("button")
     trigger.type = "button"

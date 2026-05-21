@@ -336,7 +336,9 @@ const setupWatchlistsReadinessRoutes = async (
 
     if (method === "GET" && pathname === "/api/v1/watchlists/runs") {
       const q = searchParams.get("q")
-      const filtered = q ? state.runs.filter((run) => run.status === q) : state.runs
+      const filtered = q
+        ? state.runs.filter((run) => String(run.status || "") === q)
+        : state.runs
       await jsonResponse(route, {
         items: filtered,
         total: filtered.length,
@@ -634,7 +636,7 @@ test.describe("Watchlists demo readiness gate", () => {
       { title: "Failed audio report", status: "Failed", detail: "TTS provider timeout" },
       { title: "Skipped audio report", status: "Skipped", detail: "no briefing text" }
     ]) {
-      const row = page.locator(".ant-table-row").filter({ hasText: expected.title })
+      const row = page.getByRole("row").filter({ hasText: expected.title }).first()
       await expect(row).toBeVisible()
       await row.getByRole("button", { name: "Preview" }).click()
       const previewDrawer = page.getByRole("dialog", { name: expected.title })

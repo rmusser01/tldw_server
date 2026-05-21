@@ -77,8 +77,8 @@ const BEARER_LOG_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
 const getSafeLogErrorMessage = (err: unknown): string => {
   const message = sanitizeServerErrorMessage(err, "Request failed")
   return message
-    .replace(SENSITIVE_LOG_VALUE_PATTERN, "$1=[REDACTED]")
     .replace(BEARER_LOG_VALUE_PATTERN, "Bearer [REDACTED]")
+    .replace(SENSITIVE_LOG_VALUE_PATTERN, "$1=[REDACTED]")
 }
 
 const readStoredDisclosureState = (key: string): boolean | null => {
@@ -214,7 +214,7 @@ export const OutputsTab: React.FC = () => {
         })
       }
     } catch (err) {
-      console.error("Failed to fetch outputs:", err)
+      console.error("Failed to fetch outputs:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.fetchError", "Failed to load outputs"))
       setOutputsLiveAnnouncement(
         t("watchlists:outputs.live.loadError", "Reports refresh failed.")
@@ -243,7 +243,7 @@ export const OutputsTab: React.FC = () => {
       })
       setJobs(result.items || [])
     } catch (err) {
-      console.error("Failed to fetch jobs:", err)
+      console.error("Failed to fetch jobs:", getSafeLogErrorMessage(err))
     }
   }, [selectedWatchlistId])
 
@@ -259,7 +259,7 @@ export const OutputsTab: React.FC = () => {
       const result = await fetchWatchlistTemplates()
       setTemplates(Array.isArray(result.items) ? result.items : [])
     } catch (err) {
-      console.error("Failed to fetch templates:", err)
+      console.error("Failed to fetch templates:", getSafeLogErrorMessage(err))
       setTemplates([])
     } finally {
       setTemplatesLoading(false)
@@ -448,7 +448,7 @@ export const OutputsTab: React.FC = () => {
         })
       )
     } catch (err) {
-      console.error("Failed to download output:", err)
+      console.error("Failed to download output:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.downloadError", "Failed to download output"))
       setOutputsLiveAnnouncement(
         t("watchlists:outputs.live.downloadError", "Failed to download {{title}}.", {

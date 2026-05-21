@@ -948,6 +948,13 @@ export const OverviewTab: React.FC = () => {
         )
         const detail = extractPipelineErrorMessage(err)
         setPipelineSetupError(detail ? `${fallbackMessage}: ${detail}` : fallbackMessage)
+        void trackWatchlistsOnboardingTelemetry({
+          type: "pipeline_setup_failed",
+          stage: pipelineFailureStage,
+          mode,
+          runNow: shouldRunNowForTelemetry
+        })
+        return
       }
       void trackWatchlistsOnboardingTelemetry({
         type: "pipeline_setup_failed",

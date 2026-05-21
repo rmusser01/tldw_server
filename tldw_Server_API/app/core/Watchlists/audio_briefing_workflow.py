@@ -155,6 +155,7 @@ async def trigger_audio_briefing(
     run_id: int,
     output_prefs: dict[str, Any],
     db: Any,
+    scheduler: Any | None = None,
 ) -> str | None:
     """Trigger the audio briefing workflow for a completed watchlist run.
 
@@ -164,6 +165,7 @@ async def trigger_audio_briefing(
         run_id: The watchlist run ID that just completed.
         output_prefs: The job's output_prefs dict.
         db: The WatchlistsDB instance.
+        scheduler: Optional scheduler instance. Defaults to the global Scheduler.
 
     Returns:
         The Scheduler task ID if successfully submitted, None otherwise.
@@ -181,7 +183,11 @@ async def trigger_audio_briefing(
             offset=0,
         )
     except Exception as exc:
-        logger.warning(f"Audio briefing: could not load scraped items for run {run_id}: {exc}")
+        logger.warning(
+            "Audio briefing: could not load scraped items for run {} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
         return None
 
     if not scraped_items:
@@ -215,9 +221,10 @@ async def trigger_audio_briefing(
 
     # Submit as a scheduler workflow task.
     try:
-        from tldw_Server_API.app.core.Scheduler import get_global_scheduler
+        if scheduler is None:
+            from tldw_Server_API.app.core.Scheduler import get_global_scheduler
 
-        scheduler = await get_global_scheduler()
+            scheduler = await get_global_scheduler()
         metadata = {
             "source": "watchlist_audio_briefing",
             "watchlist_job_id": job_id,
@@ -236,6 +243,7 @@ async def trigger_audio_briefing(
             queue_name="workflows",
             idempotency_key=f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}",
             metadata=scheduler_metadata,
+            max_retries=1,
         )
         logger.info(
             f"Audio briefing workflow submitted for watchlist run {run_id}, "
@@ -243,5 +251,9 @@ async def trigger_audio_briefing(
         )
         return task_id
     except Exception as exc:
-        logger.warning(f"Audio briefing: failed to submit workflow for run {run_id}: {exc}")
+        logger.warning(
+            "Audio briefing: failed to submit workflow for run {} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
         return None

@@ -463,7 +463,7 @@ async def test_run_stats_record_safe_source_error_when_active_source_fetch_fails
     db = WatchlistsDatabase.for_user(user_id)
     source = db.create_source(
         name="Private Feed",
-        url="https://news.example/feed.xml?api_key=feed-secret&token=hidden-token",
+        url="https://news.example/feed.xml?api_key=value_to_redact&token=another_value_to_redact",
         source_type="rss",
         active=True,
         settings_json=json.dumps({"limit": 5}),
@@ -487,7 +487,7 @@ async def test_run_stats_record_safe_source_error_when_active_source_fetch_fails
         return {
             "status": 403,
             "items": [],
-            "error": "403 forbidden for api_key=feed-secret token=hidden-token",
+            "error": "403 forbidden for api_key=value_to_redact token=another_value_to_redact",
         }
 
     monkeypatch.setattr(pipeline, "fetch_rss_feed_history", _forbidden_feed)
@@ -506,26 +506,82 @@ async def test_run_stats_record_safe_source_error_when_active_source_fetch_fails
     assert stats["source_statuses"][0]["items_ingested"] == 0
     error_text = str(stats["source_statuses"][0].get("error") or "")
     assert error_text
-    assert "feed-secret" not in error_text
-    assert "hidden-token" not in error_text
+    assert "value_to_redact" not in error_text
+    assert "another_value_to_redact" not in error_text
     assert "api_key" not in error_text.lower()
     assert "token=" not in error_text.lower()
 
 
 def test_safe_source_error_text_redacts_common_secret_formats():
     text = _safe_source_error_text(
-        "Authorization: Bearer sk-test-secret password: hunter2 token=hidden "
-        "https://example.test/feed?api_key=feed-secret"
+        "Authorization: Bearer value_to_redact password: password_value_to_redact "
+        "token=token_value_to_redact https://example.test/feed?api_key=query_value_to_redact"
     )
 
-    assert "sk-test-secret" not in text
-    assert "hunter2" not in text
-    assert "hidden" not in text
-    assert "feed-secret" not in text
+    assert "value_to_redact" not in text
+    assert "password_value_to_redact" not in text
+    assert "token_value_to_redact" not in text
+    assert "query_value_to_redact" not in text
     assert "api_key" not in text.lower()
     assert "password:" not in text.lower()
     assert "token=" not in text.lower()
     assert "Bearer [redacted]" in text
+
+
+@pytest.mark.asyncio
+async def test_site_source_records_partial_extraction_status(monkeypatch):
+    user_id = 9442
+    db = WatchlistsDatabase.for_user(user_id)
+    source = db.create_source(
+        name="Partial Site",
+        url="https://news.example/",
+        source_type="site",
+        active=True,
+        settings_json=json.dumps({"top_n": 2, "discover_method": "frontpage"}),
+        tags=["partial-site"],
+        group_ids=[],
+    )
+    job = db.create_job(
+        name="Partial Site Digest",
+        description=None,
+        scope_json=json.dumps({"sources": [source.id]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+
+    async def _top_links(*args, **kwargs):
+        return ["https://news.example/ok", "https://news.example/missing"]
+
+    def _article(url: str):
+        if url.endswith("/missing"):
+            return None
+        return {
+            "title": "Extracted Story",
+            "url": url,
+            "content": "Extracted story body",
+            "author": None,
+        }
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.fetchers.fetch_site_top_links",
+        _top_links,
+    )
+    monkeypatch.setattr(pipeline, "fetch_site_article", _article)
+
+    result = await run_watchlist_job(user_id, job.id)
+
+    assert result["items_found"] == 2
+    assert result["items_ingested"] == 1
+    run = db.get_run(result["run_id"])
+    stats = json.loads(run.stats_json or "{}")
+    assert stats["source_errors"] == 1
+    assert stats["source_statuses"][0]["status"] == "partial:extraction"
+    assert stats["source_statuses"][0]["error"] == "1 of 2 URLs failed extraction"
 
 
 def test_run_details_preserve_source_failure_stats(client_with_user):

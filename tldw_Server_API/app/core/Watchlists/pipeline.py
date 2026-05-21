@@ -146,7 +146,8 @@ async def _maybe_await(value):
 
 
 _SENSITIVE_ERROR_TOKEN_RE = re.compile(
-    r"(?i)\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s&]+"
+    r"(?i)(?:^|[?&\s,;])(?:api[_-]?key|auth[_-]?token|access[_-]?token|"
+    r"refresh[_-]?token|token|secret|password|credential)\s*[:=]\s*[A-Za-z0-9._~+/=%-]+"
 )
 _AUTHORIZATION_BEARER_RE = re.compile(
     r"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+"
@@ -157,6 +158,7 @@ _BEARER_SECRET_RE = re.compile(
 
 
 def _safe_source_error_text(value: Any) -> str:
+    """Return bounded source-error text with common credentials and local paths removed."""
     text = str(value or "").strip()
     if not text:
         return ""
@@ -167,8 +169,11 @@ def _safe_source_error_text(value: Any) -> str:
         parsed = urlparse(text)
         if parsed.scheme and parsed.netloc:
             text = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
-    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
-        pass
+    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "watchlists.source_error_url_parse_failed: error_type={}",
+            type(exc).__name__,
+        )
     return text[:500]
 
 
@@ -1353,6 +1358,8 @@ async def run_watchlist_job(
                     skip_article_fetch = bool(scrape_rules.get("skip_article_fetch")) if isinstance(scrape_rules, dict) else False
 
                     items_found += len(urls_to_fetch)
+                    extraction_failure_count = 0
+                    extraction_success_count = 0
                     for page_url in urls_to_fetch:
                         if _run_is_cancelled(db, run.id):
                             logger.info(f"watchlists.run_cancelled: stopping run {run.id} during site item processing")
@@ -1398,8 +1405,7 @@ async def run_watchlist_job(
                             if prefetch.get("author") and not article.get("author"):
                                 article["author"] = prefetch.get("author")
                         if not article:
-                            source_status = "error:extraction"
-                            source_error = source_error or "No article content extracted"
+                            extraction_failure_count += 1
                             _record_scraped(
                                 status="error",
                                 url=page_url,
@@ -1412,6 +1418,7 @@ async def run_watchlist_job(
                             )
                             continue
 
+                        extraction_success_count += 1
                         article["url"] = article.get("url") or page_url
                         if not article.get("title"):
                             article["title"] = prefetch.get("title") if prefetch and prefetch.get("title") else src.name
@@ -1589,6 +1596,16 @@ async def run_watchlist_job(
                                 media_uuid=ingested_media_uuid,
                                 published_at=(prefetch.get("published") or prefetch.get("published_raw")) if prefetch else None,
                             )
+                    if extraction_failure_count:
+                        if extraction_success_count:
+                            source_status = "partial:extraction"
+                            source_error = (
+                                f"{extraction_failure_count} of "
+                                f"{extraction_failure_count + extraction_success_count} URLs failed extraction"
+                            )
+                        else:
+                            source_status = "error:extraction"
+                            source_error = f"No article content extracted from {extraction_failure_count} URL(s)"
                     with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
                         db.update_source_scrape_meta(int(src.id), last_scraped_at=_utcnow_iso(), status="ok", consec_errors=0)
                     # Apply retention policy if configured
@@ -1598,7 +1615,11 @@ async def run_watchlist_job(
                     source_status = "skipped:unknown_type"
                     continue
             except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Source processing failed (id={getattr(src, 'id', '?')}): {e}")
+                logger.debug(
+                    "Source processing failed (id={}) error_type={}",
+                    getattr(src, "id", "?"),
+                    type(e).__name__,
+                )
                 source_status = "error"
                 source_error = _safe_source_error_text(e) or type(e).__name__
                 with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
@@ -1643,7 +1664,7 @@ async def run_watchlist_job(
         source_errors = sum(
             1
             for source_status_entry in source_statuses
-            if str(source_status_entry.get("status") or "").startswith("error")
+            if str(source_status_entry.get("status") or "").startswith(("error", "partial:"))
         )
         stats = {
             "items_found": items_found,
@@ -1730,7 +1751,11 @@ async def run_watchlist_job(
                 if audio_task_id:
                     stats["audio_briefing_task_id"] = audio_task_id
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Audio briefing trigger failed for job {job_id}: {exc}")
+            logger.warning(
+                "Audio briefing trigger failed for job {} (error_type={})",
+                job_id,
+                type(exc).__name__,
+            )
 
         # Persist post-run augmentation fields (e.g., auto_output_id, audio_briefing_task_id).
         try:
