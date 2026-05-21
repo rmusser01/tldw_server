@@ -452,14 +452,12 @@ async function createCharacterViaApi(): Promise<CharacterRecord> {
     )}`,
   )
 
-  const id =
-    isRecord(result.body) && typeof result.body.id === "number"
-      ? result.body.id
-      : null
+  const resultBody = isRecord(result.body)
+    ? (result.body as Record<string, unknown>)
+    : null
+  const id = typeof resultBody?.id === "number" ? resultBody.id : null
   const version =
-    isRecord(result.body) && typeof result.body.version === "number"
-      ? result.body.version
-      : null
+    typeof resultBody?.version === "number" ? resultBody.version : null
   return { id, name, version }
 }
 

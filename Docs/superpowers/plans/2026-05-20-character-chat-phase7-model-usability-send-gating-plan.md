@@ -849,7 +849,7 @@ git commit -m "test: cover character chat readiness gating e2e"
 - Modify: implementation Backlog task
 - Optional modify: `Docs/Product/WebUI/Character_Chat_Roleplay_First_Class_PRD_2026_05_18.md` only if acceptance wording needs a factual status update
 
-- [ ] **Step 1: Run focused unit/component suite**
+- [x] **Step 1: Run focused unit/component suite**
 
 Run from `apps/tldw-frontend`:
 
@@ -859,19 +859,40 @@ bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.
 
 Expected: pass.
 
-- [ ] **Step 2: Run TypeScript check for the frontend package**
+Actual: passed on 2026-05-21 with `7` files and `94` tests.
+
+- [x] **Step 2: Run TypeScript check for the frontend package**
 
 Use the existing frontend command. If the package has known inherited TypeScript debt, record which failures are inherited and which are touched-scope regressions.
 
-- [ ] **Step 3: Run real-backend Playwright verification**
+Actual: `bunx tsc --noEmit --pretty false` still fails on inherited baseline TypeScript debt in:
+
+- `apps/packages/ui/src/components/Media/read-along/MediaReadAlongPopover.tsx`
+- `apps/packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/EmbeddingsModelSelectionConfig.tsx`
+- `apps/packages/ui/src/components/Option/WorkspacePlayground/StudioPane/index.tsx`
+- `apps/packages/ui/src/hooks/keyboard/useShortcutConfig.ts`
+- `apps/packages/ui/src/hooks/usePersonaLiveControl.tsx`
+- `apps/tldw-frontend/e2e/workflows/tier-4-admin/admin-llamacpp.spec.ts`
+
+Task 8 also fixed one touched-scope TypeScript issue in the new Phase 7 E2E spec by narrowing the created-character API response before reading `id` and `version`; after that fix, no TypeScript errors remain in touched files.
+
+- [x] **Step 3: Run real-backend Playwright verification**
 
 Run the Phase 7 E2E command from Task 7. Capture the exact pass/skip/blocker state for no-provider, provider-failure, and successful-send scenarios.
 
-- [ ] **Step 4: Run Bandit only if backend Python was touched**
+Actual on 2026-05-21 against `http://127.0.0.1:8000`: backend health returned `status: ok`, and `TLDW_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY bunx playwright test e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts --project=journeys --reporter=line` passed with `1 passed, 2 skipped`.
+
+- No-provider/send-gating passed against a real backend-created character and real backend model metadata.
+- Provider-failure skipped because no explicit forced provider-failure model was configured.
+- Successful-send skipped because no non-local/non-custom callable model was configured; local/custom-risk providers were intentionally not used as proof.
+
+- [x] **Step 4: Run Bandit only if backend Python was touched**
 
 Phase 7 should be frontend-only. If no Python files changed, record "Bandit skipped: documentation/frontend-only changes." If Python files were changed unexpectedly, run Bandit against the touched backend scope before finishing.
 
-- [ ] **Step 5: Update Backlog task final summary**
+Actual: Bandit skipped; Task 8 touched frontend E2E TypeScript plus docs/backlog only, and the Phase 7 implementation remains frontend/docs-only.
+
+- [x] **Step 5: Update Backlog task final summary**
 
 Record:
 
@@ -881,7 +902,7 @@ Record:
 - whether successful-send signoff used a real configured provider or was blocked by environment
 - any deferred non-Phase-7 work
 
-- [ ] **Step 6: Final diff hygiene**
+- [x] **Step 6: Final diff hygiene**
 
 Run:
 
@@ -892,10 +913,12 @@ git status --short
 
 Expected: no whitespace errors; only intended files are modified.
 
-- [ ] **Step 7: Commit final docs/task updates**
+Actual: `git diff --check` passed. `git status --short` showed only the intended Task 8 plan, backlog, and E2E TypeScript narrowing changes, plus two unrelated untracked watchlist template files left untouched.
+
+- [x] **Step 7: Commit final docs/task updates**
 
 ```bash
-git add <task-file> <optional-doc-file>
+git add Docs/superpowers/plans/2026-05-20-character-chat-phase7-model-usability-send-gating-plan.md "backlog/tasks/task-457 - Implement-Character-Chat-Phase-7-model-usability-and-send-gating.md" apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts
 git commit -m "docs: record character chat phase7 verification"
 ```
 
