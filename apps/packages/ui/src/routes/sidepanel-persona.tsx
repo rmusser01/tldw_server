@@ -2070,6 +2070,8 @@ const SidepanelPersona = ({
         "policies",
         <LazyPoliciesPanel
           selectedPersonaId={selectedPersonaId}
+          personaCapabilities={selectedCatalogPersona?.capabilities || []}
+          personaDefaultTools={selectedCatalogPersona?.default_tools || []}
           hasPendingPlan={Boolean(pendingPlan)}
         />,
         {

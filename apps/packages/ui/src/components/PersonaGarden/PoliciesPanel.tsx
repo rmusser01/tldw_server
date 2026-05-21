@@ -5,6 +5,8 @@ import { Button, Checkbox, Input, Select, Tag, Typography } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { toAllowedPath } from "@/services/tldw/path-utils"
 
+import { McpToolPicker } from "./McpToolPicker"
+
 type PersonaPolicyRuleKind = "mcp_tool" | "skill"
 
 type PersonaPolicyRule = {
@@ -17,6 +19,8 @@ type PersonaPolicyRule = {
 
 type PoliciesPanelProps = {
   selectedPersonaId?: string
+  personaCapabilities?: string[]
+  personaDefaultTools?: string[]
   hasPendingPlan: boolean
 }
 
@@ -38,6 +42,8 @@ const emptyPolicyRule = (): PersonaPolicyRule => ({
 
 export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
   selectedPersonaId = "",
+  personaCapabilities = [],
+  personaDefaultTools = [],
   hasPendingPlan
 }) => {
   const { t } = useTranslation(["sidepanel", "common"])
@@ -192,6 +198,44 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
             })}
       </div>
 
+      {personaCapabilities.length > 0 || personaDefaultTools.length > 0 ? (
+        <div
+          data-testid="persona-policy-catalog-context"
+          className="mt-3 rounded-md border border-border bg-background px-3 py-2"
+        >
+          {personaDefaultTools.length > 0 ? (
+            <div className="space-y-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.policies.defaultTools", {
+                  defaultValue: "Persona defaults"
+                })}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {personaDefaultTools.map((toolName) => (
+                  <Tag key={toolName} color="blue">
+                    {toolName}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {personaCapabilities.length > 0 ? (
+            <div className={personaDefaultTools.length > 0 ? "mt-2 space-y-1" : "space-y-1"}>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+                {t("sidepanel:personaGarden.policies.capabilities", {
+                  defaultValue: "Capabilities"
+                })}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {personaCapabilities.map((capability) => (
+                  <Tag key={capability}>{capability}</Tag>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {!normalizedPersonaId ? (
         <Typography.Text type="secondary" className="text-xs">
           {t("sidepanel:personaGarden.policies.noneSelected", {
@@ -234,17 +278,24 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
                   updateRule(index, { rule_kind: value as PersonaPolicyRuleKind })
                 }
               />
-              <Input
-                data-testid={`persona-policy-rule-name-${index}`}
-                size="small"
-                value={rule.rule_name}
-                placeholder={t("sidepanel:personaGarden.policies.namePlaceholder", {
-                  defaultValue: "Tool or skill name"
-                })}
-                onChange={(event) =>
-                  updateRule(index, { rule_name: event.target.value })
-                }
-              />
+              {rule.rule_kind === "mcp_tool" ? (
+                <McpToolPicker
+                  value={rule.rule_name}
+                  onChange={(value) => updateRule(index, { rule_name: value })}
+                />
+              ) : (
+                <Input
+                  data-testid={`persona-policy-rule-name-${index}`}
+                  size="small"
+                  value={rule.rule_name}
+                  placeholder={t("sidepanel:personaGarden.policies.namePlaceholder", {
+                    defaultValue: "Tool or skill name"
+                  })}
+                  onChange={(event) =>
+                    updateRule(index, { rule_name: event.target.value })
+                  }
+                />
+              )}
               <Checkbox
                 data-testid={`persona-policy-rule-allowed-${index}`}
                 checked={rule.allowed}

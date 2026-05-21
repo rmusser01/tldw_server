@@ -19,6 +19,8 @@ export type PersonaInfo = {
   avatar_url?: string | null
   system_prompt?: string | null
   greeting?: string | null
+  capabilities?: string[]
+  default_tools?: string[]
   extensions?: Record<string, unknown> | null
   buddy_summary?: PersonaBuddySummary | null
   metadata?: Record<string, unknown> | null

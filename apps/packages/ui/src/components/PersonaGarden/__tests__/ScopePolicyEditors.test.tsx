@@ -19,6 +19,26 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("../McpToolPicker", () => ({
+  McpToolPicker: ({
+    value,
+    onChange
+  }: {
+    value: string
+    onChange: (value: string) => void
+  }) => (
+    <select
+      data-testid="mock-mcp-tool-picker"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <option value="">Select a tool</option>
+      <option value="knowledge.search">knowledge.search</option>
+      <option value="notes.search">notes.search</option>
+    </select>
+  )
+}))
+
 import { PoliciesPanel } from "../PoliciesPanel"
 import { ScopesPanel } from "../ScopesPanel"
 
@@ -149,8 +169,8 @@ describe("Persona Garden scope and policy editors", () => {
 
     render(<PoliciesPanel selectedPersonaId="persona-1" hasPendingPlan={false} />)
 
-    const nameInput = await screen.findByTestId("persona-policy-rule-name-0")
-    fireEvent.change(nameInput, { target: { value: "notes.search" } })
+    const picker = await screen.findByTestId("mock-mcp-tool-picker")
+    fireEvent.change(picker, { target: { value: "notes.search" } })
     fireEvent.click(screen.getByTestId("persona-policy-rule-confirm-0"))
     fireEvent.change(screen.getByTestId("persona-policy-rule-max-calls-0"), {
       target: { value: "3" }
@@ -213,5 +233,87 @@ describe("Persona Garden scope and policy editors", () => {
     expect(await screen.findByText("policy validation failed")).toBeInTheDocument()
     expect(screen.getByDisplayValue("summarize")).toBeInTheDocument()
     expect(screen.getByText("A pending tool plan is available on the Live Session tab.")).toBeInTheDocument()
+  })
+
+  it("uses MCP picker selections for mcp_tool policy rule names", async () => {
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: unknown }) => {
+      if (path === "/api/v1/persona/profiles/persona-1/policy-rules" && !init) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "persona-1",
+            rules: [
+              {
+                rule_kind: "mcp_tool",
+                rule_name: "knowledge.search",
+                allowed: true,
+                require_confirmation: false,
+                max_calls_per_turn: null
+              }
+            ]
+          })
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/policy-rules" &&
+        init?.method === "PUT"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "persona-1",
+            replaced_count: 1,
+            rules: (init.body as any).rules
+          })
+        })
+      }
+      return Promise.resolve({ ok: false, error: `unhandled ${path}`, json: async () => ({}) })
+    })
+
+    render(<PoliciesPanel selectedPersonaId="persona-1" hasPendingPlan={false} />)
+
+    const picker = await screen.findByTestId("mock-mcp-tool-picker")
+    fireEvent.change(picker, { target: { value: "notes.search" } })
+    fireEvent.click(screen.getByTestId("persona-policy-save-button"))
+
+    await waitFor(() => {
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/persona-1/policy-rules",
+        expect.objectContaining({
+          method: "PUT",
+          body: {
+            rules: [
+              expect.objectContaining({
+                rule_kind: "mcp_tool",
+                rule_name: "notes.search"
+              })
+            ]
+          }
+        })
+      )
+    })
+  })
+
+  it("shows persona catalog default tool and capability context when available", async () => {
+    mocks.fetchWithAuth.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        persona_id: "persona-1",
+        rules: []
+      })
+    })
+
+    render(
+      <PoliciesPanel
+        selectedPersonaId="persona-1"
+        hasPendingPlan={false}
+        personaCapabilities={["agentic", "mcp_tools_configured"]}
+        personaDefaultTools={["knowledge.search", "notes.search"]}
+      />
+    )
+
+    expect(await screen.findByText("knowledge.search")).toBeInTheDocument()
+    expect(screen.getByText("notes.search")).toBeInTheDocument()
+    expect(screen.getByText("mcp_tools_configured")).toBeInTheDocument()
   })
 })
