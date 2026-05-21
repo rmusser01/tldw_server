@@ -391,8 +391,8 @@ const VisualWorkspaceSectionHeading: React.FC<{
 
 const focusPersonaVisualSection = (element: HTMLElement | null): void => {
   if (!element) return
+  element.focus({ preventScroll: true })
   element.scrollIntoView?.({ block: "start", behavior: "smooth" })
-  element.focus()
 }
 
 const getGenerationReadinessCopy = (
@@ -1839,10 +1839,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       HTMLButtonElement
     >('[data-testid="persona-visual-activate-button"]')
     if (activateButton && !activateButton.disabled) {
-      activateButton.focus()
+      focusPersonaVisualSection(activateButton)
       return
     }
-    activationControlsRef.current?.focus()
+    focusPersonaVisualSection(activationControlsRef.current)
   }, [])
 
   const focusManagementAttentionTarget = React.useCallback(

@@ -45,6 +45,9 @@ Verification:
 - `git diff --check` passed.
 - `bunx tsc --noEmit -p tsconfig.json` was attempted from `apps/packages/ui` and failed on existing package-wide TypeScript debt outside the touched PersonaGarden files; no errors referenced the touched files in the visible output.
 - Bandit is not applicable to this frontend-only TypeScript/Backlog slice.
+
+Review fix:
+- Addressed Gemini inline feedback by focusing attention targets with `preventScroll: true` before smooth scrolling, and by routing validation/activation attention through the same smooth-scroll focus helper as the other Persona Visual attention targets.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
