@@ -14,6 +14,7 @@ references:
 - TASK-462
 - 'issue #1510'
 - 'PR #1901'
+- 'PR #1903'
 ---
 
 ## Description
