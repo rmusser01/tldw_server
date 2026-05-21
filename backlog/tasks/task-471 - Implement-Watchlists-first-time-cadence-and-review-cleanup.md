@@ -23,6 +23,8 @@ modified_files:
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-contract.test.ts
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/__tests__/pipeline-wizard-state.test.ts
 - backlog/tasks/task-471 - Implement-Watchlists-first-time-cadence-and-review-cleanup.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/1921
 ---
 
 ## Description

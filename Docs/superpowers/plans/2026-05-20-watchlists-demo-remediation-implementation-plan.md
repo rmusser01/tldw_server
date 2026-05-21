@@ -1138,7 +1138,7 @@ bunx vitest run \
 
 Observed from `apps/packages/ui`: PASS, 6 files and 35 tests.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 Run:
 
@@ -1155,6 +1155,8 @@ git add \
   apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/SchedulePicker.help.test.tsx
 git commit -m "feat: support variable watchlist cadence setup"
 ```
+
+Committed in PR #1921.
 
 ## Task 7: Digest And Newsletter Output Contract
 
