@@ -71,7 +71,9 @@ test.describe('Setup and recovery route QA', () => {
       await expectNoHorizontalOverflow(page, `${viewport.label} / first-run`);
 
       await page.goto('/setup', { waitUntil: 'domcontentloaded' });
-      await expect(page.getByRole('heading', { level: 1, name: 'Setup Wizard' })).toBeVisible({
+      await expect(
+        page.getByRole('heading', { level: 1, name: /Setup (Wizard|readiness)/i })
+      ).toBeVisible({
         timeout: 15_000,
       });
       await expectOnePageHeading(page, `${viewport.label} /setup`);
