@@ -1,7 +1,7 @@
 ---
 id: TASK-463
 title: Address PR 1901 Buddy interaction review comments
-status: In Progress
+status: Done
 labels:
 - review-fix
 - persona
@@ -32,7 +32,7 @@ Resolve still-actionable review feedback on PR #1901 for the Persona Buddy live 
 - [x] #2 Focus timestamps are consistently UTC-oriented ISO strings.
 - [x] #3 Focused-state reads/updates avoid unnecessary all-session scans and repeated per-row update loops on critical live-control paths.
 - [x] #4 Focused regression tests pass for the changed backend behavior, with frontend touched checks rerun if needed.
-- [ ] #5 Review threads on PR #1901 are resolved only after fixes are pushed and verified.
+- [x] #5 Review threads on PR #1901 are resolved only after fixes are pushed and verified.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -60,18 +60,19 @@ Verification:
 - `bun run verify:openapi` -> passed with the existing reviewed exception paths only
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/core/Persona/live_control.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py -f json -o /tmp/bandit_pr1901_review_fixes.json` -> passed
 - `git diff --check` -> passed
+- PR #1901 review threads were re-queried after push; all current threads are resolved. One scope-creep thread was resolved with an explicit PR-scope rationale because the approved PRD/plan intentionally targets this text-first live-control slice.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed actionable PR #1901 review feedback for Persona Buddy live-control reliability and UI gating. The branch now rate-limits live-control routes, avoids terminal-session idempotency collisions, preserves fresh preference state during focus updates, uses backend JSON predicates for focused-session lookup, and hides Buddy live controls when the server capability is unavailable. Stale review findings for settings access and UTC timestamps were verified as already fixed in current code.
+Addressed and pushed the actionable PR #1901 review feedback for Persona Buddy live-control reliability and UI gating. The branch now rate-limits live-control routes, avoids terminal-session idempotency collisions, preserves fresh target preference state during focus updates without broad per-row refresh loops, uses backend JSON predicates for focused-session lookup, and hides Buddy live controls when the server capability is unavailable. All PR review threads were rechecked and resolved after the pushed fixes; GitHub checks were still pending at closeout.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
