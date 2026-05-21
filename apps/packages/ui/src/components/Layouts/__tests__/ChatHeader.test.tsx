@@ -53,7 +53,6 @@ const createProps = (overrides: Partial<React.ComponentProps<typeof ChatHeader>>
   onOpenSettings: vi.fn(),
   onToggleTheme: vi.fn(),
   themeMode: "dark" as const,
-  onClearChat: vi.fn(),
   onStartSavedChat: vi.fn(),
   onStartTemporaryChat: vi.fn(),
   onStartCharacterChat: vi.fn(),
@@ -147,6 +146,28 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onStartSavedChat).toHaveBeenCalledTimes(1)
     expect(props.onStartTemporaryChat).toHaveBeenCalledTimes(1)
     expect(props.onStartCharacterChat).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides chat session actions when callbacks are omitted", () => {
+    render(
+      <ChatHeader
+        {...createProps({
+          onStartSavedChat: undefined,
+          onStartTemporaryChat: undefined,
+          onStartCharacterChat: undefined
+        })}
+      />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "New saved chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Temporary chat (not saved)" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Character chat" })
+    ).not.toBeInTheDocument()
   })
 
   it("hides temporary and character quick actions below the small breakpoint", () => {

@@ -264,8 +264,8 @@ export function CommandPalette({
         id: "nav-mcp-hub",
         label: t("common:commandPalette.goToMcpHub", "Go to MCP Hub"),
         icon: <Settings className="size-4" />,
-        action: () => { navigate("/settings/mcp-hub"); setOpen(false) },
-        targetPath: "/settings/mcp-hub",
+        action: () => { navigate("/mcp-hub"); setOpen(false) },
+        targetPath: "/mcp-hub",
         category: "navigation",
         keywords: ["mcp", "hub", "acp", "policy", "server"],
       },
@@ -481,6 +481,11 @@ export function CommandPalette({
     return [...defaultCommands, ...additionalCommands, ...settingCommands]
   }, [defaultCommands, additionalCommands, settingCommands])
 
+  const getCanonicalCommandTargetPath = useCallback((targetPath: string) => {
+    if (targetPath === "/settings/mcp-hub") return "/mcp-hub"
+    return targetPath
+  }, [])
+
   const dedupeByTargetPath = useCallback((commands: CommandItem[]) => {
     const dedupedCommands: CommandItem[] = []
     const targetPathIndex = new Map<string, number>()
@@ -491,9 +496,10 @@ export function CommandPalette({
         continue
       }
 
-      const existingIndex = targetPathIndex.get(command.targetPath)
+      const canonicalTargetPath = getCanonicalCommandTargetPath(command.targetPath)
+      const existingIndex = targetPathIndex.get(canonicalTargetPath)
       if (existingIndex === undefined) {
-        targetPathIndex.set(command.targetPath, dedupedCommands.length)
+        targetPathIndex.set(canonicalTargetPath, dedupedCommands.length)
         dedupedCommands.push(command)
         continue
       }
@@ -510,7 +516,7 @@ export function CommandPalette({
     }
 
     return dedupedCommands
-  }, [])
+  }, [getCanonicalCommandTargetPath])
 
   // Filter commands based on query
   const filteredCommands = useMemo(() => {

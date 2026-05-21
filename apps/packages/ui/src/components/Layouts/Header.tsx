@@ -27,6 +27,7 @@ import {
   isShareLinkRevoked,
   sortShareLinksByCreatedDesc,
 } from "./chat-share-links"
+import { getHeaderActionPolicy } from "./header-action-policy"
 
 type Props = {
   onToggleSidebar?: () => void
@@ -74,11 +75,11 @@ export const Header: React.FC<Props> = ({
   const [shareLabel, setShareLabel] = React.useState("")
   const [shareError, setShareError] = React.useState<string | null>(null)
   const [copiedShareId, setCopiedShareId] = React.useState<string | null>(null)
-  const normalizedPath =
-    location.pathname.length > 1 && location.pathname.endsWith("/")
-      ? location.pathname.slice(0, -1)
-      : location.pathname
-  const isChatRoute = normalizedPath === "/chat"
+  const headerActionPolicy = React.useMemo(
+    () => getHeaderActionPolicy(location.pathname),
+    [location.pathname]
+  )
+  const isChatRoute = headerActionPolicy.showChatSessionActions
 
   React.useEffect(() => {
     ;(async () => {
@@ -356,19 +357,32 @@ export const Header: React.FC<Props> = ({
         sidebarCollapsed={sidebarCollapsed}
         onOpenCommandPalette={openCommandPalette}
         onOpenShortcutsModal={openShortcutsModal}
-        onOpenShareModal={isChatRoute ? openShareModal : undefined}
-        shareStatusLabel={isChatRoute ? shareStatusLabel : null}
+        onOpenShareModal={
+          headerActionPolicy.showShareConversation ? openShareModal : undefined
+        }
+        shareStatusLabel={
+          headerActionPolicy.showShareConversation ? shareStatusLabel : null
+        }
         shareButtonDisabled={shareButtonDisabled}
         onOpenSettings={() => navigate(hostedMode ? "/account" : "/settings/tldw")}
         onToggleTheme={toggleDarkMode}
         themeMode={themeMode}
-        onClearChat={clearChat}
-        onStartSavedChat={startSavedChat}
-        onStartTemporaryChat={startTemporaryChat}
-        onStartCharacterChat={startCharacterChat}
+        onStartSavedChat={
+          headerActionPolicy.showChatSessionActions ? startSavedChat : undefined
+        }
+        onStartTemporaryChat={
+          headerActionPolicy.showChatSessionActions
+            ? startTemporaryChat
+            : undefined
+        }
+        onStartCharacterChat={
+          headerActionPolicy.showChatSessionActions
+            ? startCharacterChat
+            : undefined
+        }
         activeCharacterName={selectedCharacter?.name || null}
-        showChatTitle={isChatRoute}
-        showSessionModeBadge={isChatRoute}
+        showChatTitle={headerActionPolicy.showChatTitle}
+        showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}
