@@ -104,6 +104,53 @@ def test_run_detail_includes_filter_totals(client_with_user):
     assert "filter_tallies" not in (detail_with_tallies.get("stats") or {})
 
 
+def test_run_detail_stats_preserve_existing_flat_filter_counters():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import _build_run_detail_stats
+
+    detail_stats = _build_run_detail_stats(
+        {
+            "items_found": 4,
+            "items_ingested": 2,
+            "filters_include": "3",
+            "filters_exclude": 1.0,
+            "filters_flag": 2,
+            "filter_tallies": {"keyword:foo": 6},
+        },
+        items_found=4,
+        items_ingested=2,
+    )
+
+    assert detail_stats["filters_include"] == 3
+    assert detail_stats["filters_exclude"] == 1
+    assert detail_stats["filters_flag"] == 2
+    assert "filter_tallies" not in detail_stats
+
+
+def test_run_detail_stats_coerce_filter_action_counts():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import _build_run_detail_stats
+
+    detail_stats = _build_run_detail_stats(
+        {
+            "items_found": 4,
+            "items_ingested": 2,
+            "filters_include": None,
+            "filters_exclude": False,
+            "filters_flag": "not-a-number",
+            "filters_actions": {
+                "include": "5",
+                "exclude": 2.0,
+                "flag": True,
+            },
+        },
+        items_found=4,
+        items_ingested=2,
+    )
+
+    assert detail_stats["filters_include"] == 5
+    assert detail_stats["filters_exclude"] == 2
+    assert detail_stats["filters_flag"] == 0
+
+
 def test_run_detail_includes_include_and_exclude_totals(client_with_user):
 
 

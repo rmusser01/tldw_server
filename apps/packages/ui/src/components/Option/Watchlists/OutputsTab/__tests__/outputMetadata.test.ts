@@ -201,6 +201,23 @@ describe("outputMetadata helpers", () => {
     expect(summary.scriptArtifact?.uri).toBeUndefined()
   })
 
+  it("prioritizes audio-specific status over generic report status", () => {
+    expect(
+      getAudioStatusSummary({
+        status: "completed",
+        audio_status: "failed"
+      }).status
+    ).toBe("failed")
+
+    expect(
+      getAudioStatusSummary({
+        status: "unknown",
+        audio_briefing_status: "Pending",
+        audio_briefing_task_id: "task-123"
+      }).status
+    ).toBe("queued")
+  })
+
   it("returns artifact labels and tag colors by output kind", () => {
     expect(getOutputArtifactLabel({ format: "mp3", type: "tts_audio" })).toBe("Audio briefing")
     expect(getOutputArtifactTagColor({ format: "mp3", type: "tts_audio" })).toBe("purple")

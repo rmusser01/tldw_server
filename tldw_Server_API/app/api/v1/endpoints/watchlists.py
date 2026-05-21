@@ -4484,6 +4484,50 @@ async def cancel_run(
     )
 
 
+def _build_run_detail_stats(
+    stats: dict[str, Any],
+    *,
+    items_found: int,
+    items_ingested: int,
+) -> dict[str, Any]:
+    """Build run-detail stats without dropping legacy flat filter counters."""
+    detail_stats: dict[str, Any] = {
+        key: value
+        for key, value in stats.items()
+        if key != "filter_tallies"
+    }
+    detail_stats.update({
+        "items_found": items_found,
+        "items_ingested": items_ingested,
+    })
+    for key in ("filters_include", "filters_exclude", "filters_flag"):
+        detail_stats[key] = _coerce_run_detail_filter_count(detail_stats.get(key)) or 0
+    try:
+        if isinstance(stats.get("filters_matched"), int):
+            detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
+        fa = stats.get("filters_actions")
+        if isinstance(fa, dict):
+            for k in ("include", "exclude", "flag"):
+                count = _coerce_run_detail_filter_count(fa.get(k))
+                if count is not None:
+                    detail_stats[f"filters_{k}"] = count
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        pass
+    return detail_stats
+
+
+def _coerce_run_detail_filter_count(value: Any) -> int | None:
+    """Coerce JSON numeric filter counters while rejecting booleans and invalid values."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 @router.get("/runs/{run_id}/details", response_model=RunDetail, summary="Get run details with stats and logs")
 async def get_run_details(
     run_id: int = Path(..., ge=1),
@@ -4544,29 +4588,11 @@ async def get_run_details(
             log_text = None
             truncated = False
     # Build stats for detail view, preserving raw stats while keeping opt-in tallies gated.
-    detail_stats: dict[str, Any] = {
-        key: value
-        for key, value in stats.items()
-        if key not in {"filter_tallies", "filters_include", "filters_exclude", "filters_flag"}
-    }
-    detail_stats.update({
-        "items_found": items_found,
-        "items_ingested": items_ingested,
-        "filters_include": 0,
-        "filters_exclude": 0,
-        "filters_flag": 0,
-    })
-    try:
-        if isinstance(stats.get("filters_matched"), int):
-            detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
-        fa = stats.get("filters_actions")
-        if isinstance(fa, dict):
-            for k in ("include", "exclude", "flag"):
-                v = fa.get(k)
-                if isinstance(v, int):
-                    detail_stats[f"filters_{k}"] = int(v)
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-        pass
+    detail_stats = _build_run_detail_stats(
+        stats,
+        items_found=items_found,
+        items_ingested=items_ingested,
+    )
     # Optional tallies
     tallies_out = None
     if include_tallies:

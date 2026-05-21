@@ -528,6 +528,32 @@ def test_safe_source_error_text_redacts_common_secret_formats():
     assert "Bearer [redacted]" in text
 
 
+def test_safe_source_error_text_redacts_json_style_secret_formats():
+    text = _safe_source_error_text(
+        "fetch failed {\"token\":\"json token value;still\", \"api_key\": \"json,api&value\", "
+        "'password': 'json password value'} token=\"quoted token value;still\" "
+        "Authorization: Bearer \"auth bearer value;still\" "
+        "{\"Authorization\": \"Bearer json bearer value\", \"bearer\": \"Bearer nested bearer value\"}"
+    )
+
+    for leaked in (
+        "json token",
+        "token value",
+        "json,api",
+        "api&value",
+        "json password",
+        "quoted token",
+        "auth bearer",
+        "json bearer",
+        "nested bearer",
+    ):
+        assert leaked not in text
+    assert text.count("[redacted]") >= 6
+    assert "api_key" not in text.lower()
+    assert "password" not in text.lower()
+    assert "token=" not in text.lower()
+
+
 def test_safe_source_error_text_removes_url_basic_auth():
     text = _safe_source_error_text(
         "https://demo_user:value_to_redact@example.test/feed?api_key=query_value_to_redact"

@@ -438,9 +438,22 @@ describe("watchlists overview service", () => {
           version: 1,
           expired: false,
           created_at: "2026-02-18T10:06:00Z"
+        },
+        {
+          id: 703,
+          run_id: 101,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio_status: "failed"
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:07:00Z"
         }
       ],
-      total: 2,
+      total: 3,
       has_more: false
     })
 
@@ -450,16 +463,16 @@ describe("watchlists overview service", () => {
     expect(result.runs.failed).toBe(0)
     expect(result.runs.sourceErrors).toBe(1)
     expect(result.runs.zeroItemSourceErrors).toBe(1)
-    expect(result.outputs.audioIssues).toBe(2)
+    expect(result.outputs.audioIssues).toBe(3)
     expect(result.health.statuses.sources).toBe("attention")
     expect(result.health.statuses.runs).toBe("attention")
     expect(result.health.statuses.outputs).toBe("attention")
     expect(result.health.attention).toEqual({
-      total: 4,
+      total: 5,
       sources: 1,
       jobs: 0,
       runs: 1,
-      outputs: 2
+      outputs: 3
     })
     expect(result.systemHealth).toBe("degraded")
   })
