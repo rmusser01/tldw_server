@@ -33,17 +33,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Common/Workflow/steps/SummarizePageWorkflow.tsx:Alert",
-    "path": "src/components/Common/Workflow/steps/SummarizePageWorkflow.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Common/Workflow/steps/SummarizePageWorkflow.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentPickerModal.tsx:Alert#antd-alert-documentpickermodal-type-error-line-573-1sibda5",
     "path": "src/components/DocumentWorkspace/DocumentPickerModal.tsx",
     "rule": "antd-product-state-import",
