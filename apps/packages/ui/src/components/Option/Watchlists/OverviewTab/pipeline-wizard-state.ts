@@ -6,13 +6,17 @@ import type {
 } from "@/types/watchlists"
 import {
   buildCronFromPreset,
+  formatScheduleTime,
   INTERVAL_HOURS_MAX,
   INTERVAL_HOURS_MIN,
   INTERVAL_MINUTES_MAX,
   INTERVAL_MINUTES_MIN,
+  validateCronSchedule,
+  type CronScheduleValidationResult,
   type ScheduleIntervalUnit,
   type WeekdayToken
 } from "../JobsTab/schedule-utils"
+import { MIN_SCHEDULE_INTERVAL_MINUTES } from "../JobsTab/schedule-frequency"
 import { getLocalTimezone } from "./quick-setup"
 import type { BriefingPipelineDraft } from "./pipeline-contract"
 
@@ -63,6 +67,11 @@ export interface PipelineWizardValidationResult {
   valid: boolean
   errors: string[]
 }
+
+export type PipelineWizardCronValidationError =
+  | "required"
+  | Exclude<CronScheduleValidationResult, null>
+  | null
 
 export interface PipelineWizardReviewSummary {
   sources: string
@@ -153,6 +162,14 @@ const isHttpUrl = (value: string): boolean => {
   }
 }
 
+export const validatePipelineWizardCron = (
+  value: string
+): PipelineWizardCronValidationError => {
+  const cron = trim(value)
+  if (!cron) return "required"
+  return validateCronSchedule(cron, MIN_SCHEDULE_INTERVAL_MINUTES)
+}
+
 export const normalizePipelineWizardSpeakers = (
   speakers: PipelineWizardAudioSpeakerDraft[] | undefined
 ): PipelineWizardAudioSpeakerDraft[] =>
@@ -215,8 +232,12 @@ export const validatePipelineWizardDraft = (
   }
 
   if (draft.scheduleMode === "advanced") {
-    const cron = trim(draft.scheduleAdvancedCron)
-    if (!cron || cron.split(/\s+/).length !== 5) errors.push("scheduleAdvancedCron")
+    const cronValidation = validatePipelineWizardCron(draft.scheduleAdvancedCron)
+    if (cronValidation === "too_frequent") {
+      errors.push("scheduleAdvancedCronTooFrequent")
+    } else if (cronValidation) {
+      errors.push("scheduleAdvancedCron")
+    }
   }
 
   if (draft.emailDeliveryEnabled) {
@@ -266,7 +287,9 @@ export const buildPipelineWizardSchedule = (
   if (draft.scheduleMode === "manual") return {}
   if (draft.scheduleMode === "advanced") {
     const cron = trim(draft.scheduleAdvancedCron)
-    return cron ? { schedule_expr: cron, timezone: getLocalTimezone() } : {}
+    return cron && !validatePipelineWizardCron(cron)
+      ? { schedule_expr: cron, timezone: getLocalTimezone() }
+      : {}
   }
   const preset =
     draft.scheduleMode === "interval"
@@ -349,12 +372,6 @@ export const toBriefingPipelineDraft = (
   }
 }
 
-const formatTime = (hour: number, minute: number): string => {
-  const normalizedHour = Math.max(0, Math.min(23, Math.floor(Number(hour) || 0)))
-  const normalizedMinute = Math.max(0, Math.min(59, Math.floor(Number(minute) || 0)))
-  return `${String(normalizedHour).padStart(2, "0")}:${String(normalizedMinute).padStart(2, "0")}`
-}
-
 const WEEKDAY_LABELS: Record<WeekdayToken, string> = {
   MON: "Monday",
   TUE: "Tuesday",
@@ -378,12 +395,12 @@ export const formatPipelineWizardCadence = (
   }
   if (draft.scheduleMode === "weekly") {
     const weekday = copy.weekdayLabels?.[draft.scheduleWeekday] || WEEKDAY_LABELS[draft.scheduleWeekday]
-    const time = formatTime(draft.scheduleHour, draft.scheduleMinute)
+    const time = formatScheduleTime(draft.scheduleHour, draft.scheduleMinute)
     if (copy.weekly) return copy.weekly(weekday, time)
     return `Weekly on ${weekday} at ${time}`
   }
   if (draft.scheduleMode === "weekdays") {
-    const time = formatTime(draft.scheduleHour, draft.scheduleMinute)
+    const time = formatScheduleTime(draft.scheduleHour, draft.scheduleMinute)
     if (copy.weekdays) return copy.weekdays(time)
     return `Weekdays at ${time}`
   }
@@ -391,7 +408,7 @@ export const formatPipelineWizardCadence = (
     const cron = trim(draft.scheduleAdvancedCron)
     return copy.advanced ? copy.advanced(cron) : `Custom cron: ${cron}`
   }
-  const time = formatTime(draft.scheduleHour, draft.scheduleMinute)
+  const time = formatScheduleTime(draft.scheduleHour, draft.scheduleMinute)
   return copy.daily ? copy.daily(time) : `Daily at ${time}`
 }
 

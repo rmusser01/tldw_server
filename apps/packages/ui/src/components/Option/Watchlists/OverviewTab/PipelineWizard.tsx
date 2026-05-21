@@ -30,6 +30,7 @@ import {
   type PipelineWizardDraft,
   type PipelineWizardScheduleMode,
   type PipelineWizardSourceMode,
+  validatePipelineWizardCron,
   validatePipelineWizardDraft
 } from "./pipeline-wizard-state"
 
@@ -250,6 +251,36 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     [draft, reviewSummaryCopy, sources]
   )
 
+  const hasAdvancedCronError =
+    stepErrors.includes("scheduleAdvancedCron") ||
+    stepErrors.includes("scheduleAdvancedCronTooFrequent")
+  const advancedCronValidationError =
+    draft.scheduleMode === "advanced" && hasAdvancedCronError
+      ? stepErrors.includes("scheduleAdvancedCronTooFrequent")
+        ? "too_frequent"
+        : validatePipelineWizardCron(draft.scheduleAdvancedCron)
+      : null
+  const advancedCronHelp = (() => {
+    if (!advancedCronValidationError) return undefined
+    if (advancedCronValidationError === "invalid_token") {
+      return t(
+        "watchlists:overview.pipelineSetup.validation.cronExpressionInvalidToken",
+        "Cron tokens can only include letters, numbers, *, /, -, ?, and comma."
+      )
+    }
+    if (advancedCronValidationError === "too_frequent") {
+      return t(
+        "watchlists:overview.pipelineSetup.validation.cronExpressionTooFrequent",
+        "Schedule is too frequent. Minimum interval is every {{minutes}} minutes.",
+        { minutes: INTERVAL_MINUTES_MIN }
+      )
+    }
+    return t(
+      "watchlists:overview.pipelineSetup.validation.cronExpression",
+      "Use exactly 5 cron fields: minute hour day-of-month month day-of-week."
+    )
+  })()
+
   const stepItems = useMemo(
     () => [
       { title: t("watchlists:overview.pipelineSetup.steps.source", "Source") },
@@ -273,7 +304,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
           "scheduleIntervalValue",
           "scheduleHour",
           "scheduleMinute",
-          "scheduleAdvancedCron"
+          "scheduleAdvancedCron",
+          "scheduleAdvancedCronTooFrequent"
         ]
       }
       if (currentStep === 2) return ["templateName", "emailRecipients"]
@@ -308,7 +340,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         "scheduleIntervalValue",
         "scheduleHour",
         "scheduleMinute",
-        "scheduleAdvancedCron"
+        "scheduleAdvancedCron",
+        "scheduleAdvancedCronTooFrequent"
       ].includes(firstError)) setCurrentStep(1)
       else if (["templateName", "emailRecipients"].includes(firstError)) setCurrentStep(2)
       else setCurrentStep(3)
@@ -549,13 +582,8 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
             {draft.scheduleMode === "advanced" && (
               <Form.Item
                 label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")}
-                validateStatus={stepErrors.includes("scheduleAdvancedCron") ? "error" : undefined}
-                help={stepErrors.includes("scheduleAdvancedCron")
-                  ? t(
-                    "watchlists:overview.pipelineSetup.validation.cronExpression",
-                    "Enter a 5-field cron expression."
-                  )
-                  : undefined}
+                validateStatus={hasAdvancedCronError ? "error" : undefined}
+                help={advancedCronHelp}
               >
                 <Input
                   aria-label={t("watchlists:overview.pipelineSetup.fields.cronExpression", "Cron expression")}

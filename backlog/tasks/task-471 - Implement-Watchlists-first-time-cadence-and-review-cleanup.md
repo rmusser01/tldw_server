@@ -4,7 +4,7 @@ title: Implement Watchlists first-time cadence and review cleanup
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-21 19:49
+updated_date: 2026-05-21 20:10
 labels:
 - watchlists
 - webui
@@ -14,6 +14,9 @@ dependencies: []
 priority: high
 modified_files:
 - Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md
+- apps/packages/ui/src/components/Option/Watchlists/JobsTab/SchedulePicker.tsx
+- apps/packages/ui/src/components/Option/Watchlists/JobsTab/schedule-utils.ts
+- apps/packages/ui/src/components/Option/Watchlists/JobsTab/__tests__/schedule-utils.test.ts
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/quick-setup.ts
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx
 - apps/packages/ui/src/components/Option/Watchlists/OverviewTab/pipeline-contract.ts
@@ -51,12 +54,14 @@ Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-pla
 
 <!-- SECTION:NOTES:BEGIN -->
 Added red tests for variable cadence drafts, weekdays/advanced wizard cadence, one-source summary, audio-off summary behavior, and pure pipeline review-summary cadence labels. Initial focused runs failed as expected because current dev lacked cadence-draft serialization, the wizard did not expose weekdays/advanced cron modes, and buildPipelineReviewSummary still labeled scheduleCadence drafts from schedulePreset. Implemented cadence-draft conversion through existing cron schedule fields, added weekdays and advanced cron wizard modes, and kept wizard/contract review summaries aligned with selected source, cadence, delivery, and optional 1-4 speaker audio state. Verification from apps/packages/ui: focused Task 6 suite passed with 6 files and 35 tests; Watchlists static guard passed with 1 file and 3 tests; git diff --check passed. Bandit skipped because this slice touched TypeScript, Markdown, and Backlog task metadata only.
+
+Reopened for PR #1921 review follow-up after Gemini, CodeRabbit, and Qodo flagged still-valid cadence issues: advanced cron validation was weaker than the existing SchedulePicker guardrails, advanced cron serialization accepted malformed values, submission/review schedule precedence could diverge, and cadence time parsing was duplicated.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the remaining Watchlists Task 6 cadence gaps on current dev. Quick setup and pipeline drafts now serialize manual, interval minutes/hours, daily, weekdays, weekly, and advanced cron cadence through the existing cron schedule fields. PipelineWizard now exposes weekdays and advanced cron schedule choices, validates advanced cron input, and keeps review summaries aligned with selected cadence and optional 1-4 speaker audio. Added regression coverage for cadence payloads, wizard state, wizard UI, and summary labels. Verification: focused Task 6 Vitest suite passed with 6 files and 35 tests; Watchlists static guard passed with 1 file and 3 tests; git diff --check passed. Bandit skipped because this slice touched TypeScript, Markdown, and Backlog task metadata only.
+Implemented the remaining Watchlists Task 6 cadence gaps and PR #1921 review fixes on current dev. Quick setup and pipeline drafts now serialize variable cadence through the existing cron schedule fields, advanced cron values share the SchedulePicker format/min-frequency validation, and malformed/too-frequent cron is blocked before payload serialization. PipelineWizard exposes weekdays and advanced cron choices, distinguishes format versus frequency errors, and keeps review summaries aligned with selected cadence and optional 1-4 speaker audio. Pipeline payload and review summary precedence now match when both scheduleExpr and scheduleCadence are present, cadence time parsing is shared through schedule-utils, and the pure pipeline review summary accepts localization copy hooks. Verification: focused Task 6 Vitest suite passed with 6 files and 42 tests; Watchlists static guard passed with 1 file and 3 tests; git diff --check passed. Bandit skipped because this slice touched TypeScript and Backlog task metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

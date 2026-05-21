@@ -6,6 +6,8 @@ import type {
 import {
   buildCronFromPreset,
   normalizeWeekdayToken,
+  parseScheduleTime,
+  validateCronSchedule,
   type ScheduleIntervalUnit
 } from "../JobsTab/schedule-utils"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
@@ -51,21 +53,6 @@ const presetToCron: Record<Exclude<QuickSetupSchedulePreset, "none">, string> = 
   weekdays: "0 8 * * MON-FRI"
 }
 
-const parseCadenceTime = (
-  value: string | undefined,
-  fallbackHour = 8,
-  fallbackMinute = 0
-): { hour: number; minute: number } => {
-  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})$/)
-  if (!match) return { hour: fallbackHour, minute: fallbackMinute }
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  return {
-    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : fallbackHour,
-    minute: Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : fallbackMinute
-  }
-}
-
 const normalizeCadenceIntervalUnit = (
   unit: WatchlistCadenceIntervalUnit
 ): ScheduleIntervalUnit => {
@@ -84,9 +71,11 @@ export const resolveQuickSetupSchedule = (
     if (schedule.kind === "manual") return {}
     if (schedule.kind === "advanced") {
       const cron = String(schedule.cron || "").trim()
-      return cron ? { schedule_expr: cron, timezone: getLocalTimezone() } : {}
+      return cron && !validateCronSchedule(cron)
+        ? { schedule_expr: cron, timezone: getLocalTimezone() }
+        : {}
     }
-    const time = parseCadenceTime("time" in schedule ? schedule.time : undefined)
+    const time = parseScheduleTime("time" in schedule ? schedule.time : undefined)
     if (schedule.kind === "interval") {
       return {
         schedule_expr: buildCronFromPreset({

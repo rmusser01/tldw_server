@@ -83,6 +83,20 @@ describe("watchlists overview quick setup helpers", () => {
     timezoneSpy.mockRestore()
   })
 
+  it("does not serialize invalid advanced cron drafts", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "America/Los_Angeles" })
+      }) as Intl.DateTimeFormat)
+
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 *" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 * * WED;rm" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "*/1 * * * *" })).toEqual({})
+
+    timezoneSpy.mockRestore()
+  })
+
   it("falls back to UTC when timezone is unavailable", () => {
     const timezoneSpy = vi
       .spyOn(Intl, "DateTimeFormat")

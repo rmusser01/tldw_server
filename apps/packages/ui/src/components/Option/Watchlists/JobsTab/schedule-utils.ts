@@ -1,4 +1,7 @@
-import { MIN_SCHEDULE_INTERVAL_MINUTES } from "./schedule-frequency"
+import {
+  analyzeScheduleFrequency,
+  MIN_SCHEDULE_INTERVAL_MINUTES
+} from "./schedule-frequency"
 
 export type SchedulePresetKey = "interval" | "daily" | "weekdays" | "weekly"
 
@@ -19,6 +22,13 @@ export const INTERVAL_MINUTES_MIN = MIN_SCHEDULE_INTERVAL_MINUTES
 export const INTERVAL_MINUTES_MAX = 59
 export const INTERVAL_HOURS_MIN = 1
 export const INTERVAL_HOURS_MAX = 23
+const CRON_FIELDS = 5
+export const CRON_TOKEN_PATTERN = /^[A-Z0-9*,/?-]+$/i
+export type CronFormatValidationResult = "field_count" | "invalid_token" | null
+export type CronScheduleValidationResult =
+  | Exclude<CronFormatValidationResult, null>
+  | "too_frequent"
+  | null
 
 const WEEKDAY_MAP: Record<string, WeekdayToken> = {
   "0": "SUN",
@@ -51,6 +61,55 @@ const clampInteger = (value: unknown, min: number, max: number): number => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return min
   return Math.min(max, Math.max(min, Math.floor(parsed)))
+}
+
+export const parseScheduleTime = (
+  value: string | undefined,
+  fallbackHour = 8,
+  fallbackMinute = 0
+): { hour: number; minute: number } => {
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return { hour: fallbackHour, minute: fallbackMinute }
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  return {
+    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : fallbackHour,
+    minute: Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : fallbackMinute
+  }
+}
+
+export const formatScheduleTime = (hour: number, minute: number): string => {
+  const normalizedHour = clampInteger(hour, 0, 23)
+  const normalizedMinute = clampInteger(minute, 0, 59)
+  return `${String(normalizedHour).padStart(2, "0")}:${String(normalizedMinute).padStart(2, "0")}`
+}
+
+export const formatScheduleTimeValue = (
+  value: string | undefined,
+  fallbackHour = 8,
+  fallbackMinute = 0
+): string => {
+  const time = parseScheduleTime(value, fallbackHour, fallbackMinute)
+  return formatScheduleTime(time.hour, time.minute)
+}
+
+export const validateCronFormat = (expression: string): CronFormatValidationResult => {
+  const normalized = expression.trim()
+  const tokens = normalized ? normalized.split(/\s+/) : []
+  if (tokens.length !== CRON_FIELDS) return "field_count"
+  if (tokens.some((token) => !CRON_TOKEN_PATTERN.test(token))) return "invalid_token"
+  return null
+}
+
+export const validateCronSchedule = (
+  expression: string,
+  minAllowedMinutes = MIN_SCHEDULE_INTERVAL_MINUTES
+): CronScheduleValidationResult => {
+  const formatError = validateCronFormat(expression)
+  if (formatError) return formatError
+  return analyzeScheduleFrequency(expression, minAllowedMinutes).tooFrequent
+    ? "too_frequent"
+    : null
 }
 
 export const normalizeWeekdayToken = (value: unknown): WeekdayToken => {
