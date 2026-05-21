@@ -49,7 +49,12 @@ vi.mock("@/utils/streaming-chunks", () => ({
   consumeStreamingChunk: (...args: unknown[]) => mocks.consumeStreamingChunkMock(...args)
 }))
 
-import { createCharacterChatMode } from "../useCharacterChatMode"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
+
+import {
+  classifyCharacterChatFailureRecovery,
+  createCharacterChatMode
+} from "../useCharacterChatMode"
 
 const createSetterBundle = () => ({
   setAbortController: vi.fn(),
@@ -226,5 +231,135 @@ describe("createCharacterChatMode contract", () => {
     )
     expect(setters.setServerChatId).toHaveBeenCalledWith("chat-77")
     expect(setters.setServerChatCharacterId).toHaveBeenCalledWith(42)
+  })
+
+  it("classifies structured provider setup failures without treating every 503 as configuration", () => {
+    const providerSetupError = Object.assign(
+      new Error("provider_not_configured: OpenAI API key is missing"),
+      {
+        status: 503,
+        response: {
+          data: {
+            code: "provider_not_configured",
+            detail: "OpenAI API key is missing"
+          }
+        }
+      }
+    )
+
+    expect(classifyCharacterChatFailureRecovery(providerSetupError)).toMatchObject({
+      kind: "provider_unconfigured",
+      action: "open-model-settings"
+    })
+
+    const transient503 = Object.assign(new Error("Service unavailable"), {
+      status: 503
+    })
+
+    expect(classifyCharacterChatFailureRecovery(transient503)).toMatchObject({
+      kind: "transient",
+      action: "retry"
+    })
+  })
+
+  it("maps provider setup stream failures to model-settings recovery copy", async () => {
+    const setters = createSetterBundle()
+    let messagesState: any[] = []
+    setters.setMessages.mockImplementation((next) => {
+      messagesState = typeof next === "function" ? next(messagesState) : next
+    })
+    const providerSetupError = Object.assign(
+      new Error("provider_not_configured: OpenAI API key is missing"),
+      {
+        status: 503,
+        response: {
+          data: {
+            code: "provider_not_configured",
+            detail: "OpenAI API key is missing"
+          }
+        }
+      }
+    )
+    mocks.streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      throw providerSetupError
+    })
+    const saveMessageOnError = vi.fn(async () => "history-1")
+    const controller = new AbortController()
+    const mode = createCharacterChatMode({
+      ...setters,
+      t: translate as any,
+      notification: { error: vi.fn() },
+      selectedCharacter: {
+        id: 42,
+        name: "Mira",
+        avatar_url: "https://example.test/mira.png"
+      } as any,
+      temporaryChat: false,
+      historyId: "history-1",
+      serverChatId: null,
+      serverChatCharacterId: null,
+      serverChatState: "in-progress",
+      serverChatTopic: "first-class-roleplay",
+      serverChatClusterId: null,
+      serverChatSource: null,
+      serverChatExternalRef: null,
+      currentChatModelSettings: {
+        apiProvider: "openai",
+        setSystemPrompt: vi.fn()
+      },
+      invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: false,
+      greetingSelectionId: null,
+      greetingsChecksum: null,
+      useCharacterDefault: false,
+      directedCharacterId: 88,
+      resolvedMessageSteeringPrompts: null,
+      getEffectiveSelectedModel: vi.fn(() => "tldw:gpt-4o"),
+      saveMessageOnSuccess: vi.fn(async () => "history-1"),
+      saveMessageOnError,
+      discardCurrentTurnOnAbortRef: { current: false }
+    } as any)
+
+    await mode({
+      message: "Hello Mira",
+      image: "",
+      isRegenerate: false,
+      messages: [],
+      history: [],
+      signal: controller.signal,
+      model: "tldw:gpt-4o",
+      controller,
+      messageSteering: {
+        continueAsUser: false,
+        impersonateUser: false,
+        forceNarrate: false
+      }
+    })
+
+    const assistantError = messagesState.find(
+      (entry) => entry?.isBot && entry?.id === "generated-1"
+    )
+    const payload = decodeChatErrorPayload(String(assistantError?.message || ""))
+
+    expect(payload).toMatchObject({
+      summary: "Character chat model setup needs attention.",
+      recoveryAction: "open-model-settings",
+      recoveryLabel: "Open model settings"
+    })
+    expect(payload?.hint).toContain("Open model settings")
+    expect(payload?.detail).toContain("provider_not_configured")
+    expect(saveMessageOnError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        botMessage: assistantError?.message,
+        userMessage: "Hello Mira",
+        selectedModel: "tldw:gpt-4o"
+      })
+    )
+    expect(messagesState).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ isBot: false, message: "Hello Mira" }),
+        expect.objectContaining({ isBot: true, id: "generated-1" })
+      ])
+    )
   })
 })

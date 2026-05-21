@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation } from "react-router-dom"
 
 import {
@@ -61,6 +61,42 @@ describe("PlaygroundChatErrorBanner", () => {
     fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
     expect(screen.getByTestId("current-location")).toHaveTextContent("/settings/health")
     expect(screen.getByRole("button", { name: "Dismiss error" })).toBeInTheDocument()
+  })
+
+  it("uses model-settings recovery when the encoded error is locally recoverable", () => {
+    const modelSettingsListener = vi.fn()
+    window.addEventListener("tldw:open-model-settings", modelSettingsListener)
+
+    try {
+      render(
+        <MemoryRouter>
+          <PlaygroundChatErrorBanner
+            error={{
+              summary: "Character chat model setup needs attention.",
+              hint: "Open model settings and configure the provider.",
+              detail: "provider_not_configured",
+              recoveryAction: "open-model-settings",
+              recoveryLabel: "Open model settings",
+              key: "assistant-error-1:model"
+            } as any}
+            diagnosticsLabel="Health & diagnostics"
+            dismissLabel="Dismiss error"
+            onDismiss={() => undefined}
+          />
+        </MemoryRouter>
+      )
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open model settings" })
+      )
+
+      expect(modelSettingsListener).toHaveBeenCalledTimes(1)
+      expect(
+        screen.queryByRole("button", { name: "Health & diagnostics" })
+      ).toBeNull()
+    } finally {
+      window.removeEventListener("tldw:open-model-settings", modelSettingsListener)
+    }
   })
 
   it("resolves the newest encoded assistant error", () => {

@@ -720,7 +720,7 @@ git commit -m "feat: show truthful character chat model labels"
 - Test: `apps/packages/ui/src/hooks/chat/__tests__/useCharacterChatMode.contract.test.ts`
 - Test: nearest Playground error/recovery component test
 
-- [ ] **Step 1: Inspect current character failure path**
+- [x] **Step 1: Inspect current character failure path**
 
 Read:
 
@@ -731,7 +731,7 @@ sed -n '220,560p' apps/packages/ui/src/hooks/chat/useCharacterChatMode.ts
 
 Find where provider/configuration failures from `/complete-v2` are caught and surfaced. Do not add a duplicate error system if the hook already returns a typed result.
 
-- [ ] **Step 2: Add failing tests for provider setup failures**
+- [x] **Step 2: Add failing tests for provider setup failures**
 
 Add or extend tests so a backend `503` or structured provider/config error maps to:
 
@@ -740,7 +740,7 @@ Add or extend tests so a backend `503` or structured provider/config error maps 
 - preserved character and draft state
 - no generic retry-only guidance when the failure is clearly configuration-related
 
-- [ ] **Step 3: Implement a small classifier**
+- [x] **Step 3: Implement a small classifier**
 
 If no suitable helper exists, add a local pure helper in the hook file or a nearby utility:
 
@@ -753,11 +753,11 @@ type CharacterChatFailureRecovery =
 
 Classification should use structured backend fields first, then conservative message matching for known provider/config phrases. Do not classify arbitrary `503` errors as provider setup if the response lacks evidence.
 
-- [ ] **Step 4: Surface recovery through existing error UI**
+- [x] **Step 4: Surface recovery through existing error UI**
 
 Use the existing Playground notice/error surface. Do not introduce a modal. The message should keep the user in the Character Chat workflow and offer model settings when recovery is local.
 
-- [ ] **Step 5: Run failure-recovery tests**
+- [x] **Step 5: Run failure-recovery tests**
 
 Run:
 
@@ -767,7 +767,7 @@ bunx vitest run ../packages/ui/src/hooks/chat/__tests__/useCharacterChatMode.con
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```bash
 git add apps/packages/ui/src/hooks/chat/useCharacterChatMode.ts apps/packages/ui/src/hooks/chat/__tests__/useCharacterChatMode.contract.test.ts apps/packages/ui/src/components/Option/Playground/Playground.tsx
