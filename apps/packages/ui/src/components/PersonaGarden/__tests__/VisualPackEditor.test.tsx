@@ -635,6 +635,174 @@ describe("VisualPackEditor", () => {
     expect(screen.getByTestId("persona-visual-generation-readiness")).toHaveFocus()
   })
 
+  it("opens import attention from the management header without a selected pack", async () => {
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [], active_pack: null })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "queued",
+          stage: "queued"
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/import-previews/preview-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          preview_id: "preview-1",
+          job_id: "preview-job-1",
+          portability_job_id: "portability-preview-1",
+          operation: "import_preview",
+          target_persona_id: "persona-1",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          bundle_summary: { pack_title: "Imported Visuals", asset_count: 2 },
+          validation_warnings: [],
+          conflicts: [],
+          proposed_plan: { target_mode: "create_new" },
+          required_choices: []
+        })
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      throw new Error(`Unhandled path: ${path}`)
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    const archive = new File(["portable archive"], "portable.tldw-persona-vpack", {
+      type: "application/octet-stream"
+    })
+    fireEvent.change(await selectNativeImportSource(), {
+      target: { files: [archive] }
+    })
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-import-preview-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-import-preview-refresh-button"))
+    const header = await screen.findByTestId("persona-visual-management-header")
+    await waitFor(() => expect(header).toHaveTextContent("Import preview ready"))
+    fireEvent.click(screen.getByTestId("persona-visual-management-attention-action"))
+    expect(screen.getByTestId("persona-visual-import-preview-input")).toHaveFocus()
+  })
+
+  it("opens export attention from the management header", async () => {
+    const activePack = makeVisualPack({
+      id: "active-pack",
+      title: "Rendered now",
+      status: "active"
+    })
+
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string }) => {
+      const method = init?.method || "GET"
+      if (path === "/api/v1/persona/profiles/persona-1/visual-packs" && method === "GET") {
+        return okResponse({ packs: [activePack], active_pack: activePack })
+      }
+      if (path === "/api/v1/persona/visual-starter-packs" && method === "GET") {
+        return okResponse(starterCatalogPayload)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/generated-candidates" &&
+        method === "GET"
+      ) {
+        return okResponse({ candidates: [] })
+      }
+      if (path.endsWith("/generation-readiness") && method === "GET") {
+        return okResponse(readyGenerationReadiness)
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/export" &&
+        method === "POST"
+      ) {
+        return okResponse({
+          job_id: "export-job-1",
+          portability_job_id: "portability-1",
+          operation: "export",
+          persona_id: "persona-1",
+          pack_id: "active-pack",
+          status: "queued",
+          stage: "queued",
+          download_url: null
+        })
+      }
+      if (
+        path === "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/exports/export-job-1" &&
+        method === "GET"
+      ) {
+        return okResponse({
+          job_id: "export-job-1",
+          portability_job_id: "portability-1",
+          operation: "export",
+          persona_id: "persona-1",
+          pack_id: "active-pack",
+          status: "completed",
+          visual_status: "completed",
+          stage: "completed",
+          download_url:
+            "/api/v1/persona/profiles/persona-1/visual-packs/active-pack/exports/export-job-1/download"
+        })
+      }
+      if (path === "/api/v1/persona/catalog" && method === "GET") {
+        return okResponse([{ id: "persona-1", name: "Garden Helper" }])
+      }
+      if (path === "/api/v1/persona/visual-library" && method === "GET") {
+        return okResponse({ items: [] })
+      }
+      throw new Error(`Unhandled path: ${path}`)
+    })
+
+    render(
+      <VisualPackEditor
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Garden Helper"
+        isActive
+      />
+    )
+
+    await screen.findByTestId("persona-visual-management-header")
+    fireEvent.click(screen.getByTestId("persona-visual-export-button"))
+    await waitFor(() =>
+      expect(screen.getByTestId("persona-visual-export-status")).toHaveTextContent(
+        "queued"
+      )
+    )
+
+    fireEvent.click(screen.getByTestId("persona-visual-export-refresh-button"))
+    const header = screen.getByTestId("persona-visual-management-header")
+    await waitFor(() => expect(header).toHaveTextContent("Export ready"))
+    fireEvent.click(screen.getByTestId("persona-visual-management-attention-action"))
+    expect(screen.getByTestId("persona-visual-section-portable-actions")).toHaveFocus()
+  })
+
   it("groups post-setup Persona Visual controls into workspace sections", async () => {
     const activePack = makeVisualPack({
       id: "active-pack",

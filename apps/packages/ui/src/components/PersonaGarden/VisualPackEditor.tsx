@@ -389,10 +389,13 @@ const VisualWorkspaceSectionHeading: React.FC<{
   </div>
 )
 
-const focusPersonaVisualSection = (element: HTMLElement | null): void => {
+const focusPersonaVisualSection = (
+  element: HTMLElement | null,
+  block: ScrollLogicalPosition = "start"
+): void => {
   if (!element) return
   element.focus({ preventScroll: true })
-  element.scrollIntoView?.({ block: "start", behavior: "smooth" })
+  element.scrollIntoView?.({ block, behavior: "smooth" })
 }
 
 const getGenerationReadinessCopy = (
@@ -1810,14 +1813,11 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [])
 
   const focusLibraryPanel = React.useCallback(() => {
-    libraryPanelRef.current?.scrollIntoView?.({ block: "start" })
-    libraryPanelRef.current?.focus()
+    focusPersonaVisualSection(libraryPanelRef.current)
   }, [])
 
   const focusImportPreviewInput = React.useCallback(() => {
-    importPreviewInputRef.current?.scrollIntoView?.({ block: "center" })
-    importPreviewInputRef.current?.click()
-    importPreviewInputRef.current?.focus()
+    focusPersonaVisualSection(importPreviewInputRef.current, "center")
   }, [])
 
   const openImportArchivePicker = React.useCallback(() => {
@@ -1825,7 +1825,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
       source: "native_import",
       requestId: (current?.requestId ?? 0) + 1
     }))
-    globalThis.setTimeout(focusImportPreviewInput, 0)
+    globalThis.setTimeout(() => {
+      focusImportPreviewInput()
+      importPreviewInputRef.current?.click()
+    }, 0)
   }, [focusImportPreviewInput])
 
   const focusDuplicateControls = React.useCallback(() => {
@@ -1859,6 +1862,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           focusPersonaVisualSection(jobsReviewSectionRef.current)
           break
         case "import":
+          focusImportPreviewInput()
+          break
         case "export":
           focusPersonaVisualSection(portableActionsSectionRef.current)
           break
@@ -1872,7 +1877,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           break
       }
     },
-    [focusActivationControls, focusLibraryPanel]
+    [focusActivationControls, focusImportPreviewInput, focusLibraryPanel]
   )
 
   const handleCreateDraft = async () => {

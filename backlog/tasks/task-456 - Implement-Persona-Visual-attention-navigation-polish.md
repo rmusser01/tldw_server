@@ -48,6 +48,9 @@ Verification:
 
 Review fix:
 - Addressed Gemini inline feedback by focusing attention targets with `preventScroll: true` before smooth scrolling, and by routing validation/activation attention through the same smooth-scroll focus helper as the other Persona Visual attention targets.
+- Addressed Qodo inline feedback by routing import attention to the import preview input when no pack is selected, keeping export attention on portable actions, and adding import/export attention coverage.
+- `bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "management header|library attention|validation attention|generation attention|import attention|export attention|workspace sections"` passed with 7 focused tests.
+- `bunx vitest run src/components/PersonaGarden/__tests__/personaVisualManagementSummary.test.ts src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx` passed with 72 tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
