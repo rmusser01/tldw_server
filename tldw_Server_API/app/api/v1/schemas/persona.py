@@ -1093,6 +1093,10 @@ class PersonaStateRestoreRequest(BaseModel):
     entry_id: str = Field(..., min_length=1, max_length=200)
 
 
+class PersonaStateArchiveRequest(BaseModel):
+    entry_id: str = Field(..., min_length=1, max_length=200)
+
+
 class PersonaConnectionCreate(BaseModel):
     id: str | None = Field(default=None, min_length=1, max_length=200)
     name: str = Field(..., min_length=1, max_length=200)

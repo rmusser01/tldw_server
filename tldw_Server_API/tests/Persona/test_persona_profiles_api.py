@@ -882,6 +882,20 @@ def test_persona_profile_state_history_and_restore(persona_db: CharactersRAGDB):
         assert len(active_entries) == 1
         assert active_entries[0]["is_active"] is True
         assert active_entries[0]["content"] == v1
+        active_entry_id = active_entries[0]["entry_id"]
+
+        archive = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/state/archive",
+            json={"entry_id": active_entry_id},
+        )
+        assert archive.status_code == 200, archive.text
+        assert archive.json()["soul_md"] is None
+
+        history_after_archive = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/state/history?field=soul_md&include_archived=false&limit=20"
+        )
+        assert history_after_archive.status_code == 200, history_after_archive.text
+        assert history_after_archive.json()["entries"] == []
 
     fastapi_app.dependency_overrides.clear()
 
@@ -916,6 +930,11 @@ def test_persona_profile_state_history_scoping_and_validation(persona_db: Charac
             json={"entry_id": "forged-entry"},
         )
         assert restore.status_code == 404
+        archive = user_two_client.post(
+            f"/api/v1/persona/profiles/{persona_id}/state/archive",
+            json={"entry_id": "forged-entry"},
+        )
+        assert archive.status_code == 404
 
     fastapi_app.dependency_overrides.clear()
 

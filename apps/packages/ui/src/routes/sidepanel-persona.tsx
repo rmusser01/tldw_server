@@ -1773,6 +1773,19 @@ const SidepanelPersona = ({
                     >
                       {t("sidepanel:persona.stateRestore", "Restore")}
                     </Button>
+                    {entry.is_active ? (
+                      <Button
+                        data-testid={`persona-state-archive-${entry.entry_id}`}
+                        size="small"
+                        danger
+                        loading={stateDocs.archivingStateEntryId === entry.entry_id}
+                        onClick={() => {
+                          void stateDocs.archivePersonaStateHistoryEntry(entry.entry_id)
+                        }}
+                      >
+                        {t("sidepanel:persona.stateArchive", "Archive")}
+                      </Button>
+                    ) : null}
                   </div>
                   <div className="mt-1 whitespace-pre-wrap text-text">
                     {String(entry.content || "")}

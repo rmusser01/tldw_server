@@ -6073,7 +6073,8 @@ describe("SidepanelPersona", () => {
     })
   })
 
-  it("loads, saves, and restores persona state docs from sidepanel controls", async () => {
+  it("loads, saves, restores, and archives persona state docs from sidepanel controls", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm")
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
@@ -6099,6 +6100,13 @@ describe("SidepanelPersona", () => {
                 content: "archived soul version",
                 is_active: false,
                 version: 1
+              },
+              {
+                entry_id: "hist-active",
+                field: "identity_md",
+                content: "initial identity",
+                is_active: true,
+                version: 2
               }
             ]
           })
@@ -6111,6 +6119,17 @@ describe("SidepanelPersona", () => {
             persona_id: "research_assistant",
             soul_md: "restored soul version",
             identity_md: "initial identity",
+            heartbeat_md: "initial heartbeat"
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant/state/archive")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "research_assistant",
+            soul_md: "restored soul version",
+            identity_md: null,
             heartbeat_md: "initial heartbeat"
           })
         })
@@ -6167,63 +6186,95 @@ describe("SidepanelPersona", () => {
       })
     })
 
-    render(<SidepanelPersona />)
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
-    await waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1)
-    })
-    MockWebSocket.instances[0].emitOpen()
-    await openStateDocsTab()
+    try {
+      render(<SidepanelPersona />)
+      fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1)
+      })
+      MockWebSocket.instances[0].emitOpen()
+      await openStateDocsTab()
 
-    const soulInput = await waitForStateDocsEditor()
-    const identityInput = screen.getByTestId(
-      "persona-state-identity-input"
-    ) as HTMLTextAreaElement
-    const heartbeatInput = screen.getByTestId(
-      "persona-state-heartbeat-input"
-    ) as HTMLTextAreaElement
+      const soulInput = await waitForStateDocsEditor()
+      const identityInput = screen.getByTestId(
+        "persona-state-identity-input"
+      ) as HTMLTextAreaElement
+      const heartbeatInput = screen.getByTestId(
+        "persona-state-heartbeat-input"
+      ) as HTMLTextAreaElement
 
-    await waitFor(() => {
-      expect(soulInput.value).toBe("initial soul")
-      expect(identityInput.value).toBe("initial identity")
-      expect(heartbeatInput.value).toBe("initial heartbeat")
-    })
+      await waitFor(() => {
+        expect(soulInput.value).toBe("initial soul")
+        expect(identityInput.value).toBe("initial identity")
+        expect(heartbeatInput.value).toBe("initial heartbeat")
+      })
 
-    fireEvent.change(soulInput, { target: { value: "updated soul draft" } })
-    fireEvent.click(screen.getByTestId("persona-state-save-button"))
+      fireEvent.change(soulInput, { target: { value: "updated soul draft" } })
+      fireEvent.click(screen.getByTestId("persona-state-save-button"))
 
-    await waitFor(() => {
-      const putCall = mocks.fetchWithAuth.mock.calls.find(
-        ([calledPath, calledInit]) =>
-          String(calledPath).includes("/persona/profiles/research_assistant/state") &&
-          String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
-            "PUT"
-      )
-      expect(putCall).toBeTruthy()
+      await waitFor(() => {
+        const putCall = mocks.fetchWithAuth.mock.calls.find(
+          ([calledPath, calledInit]) =>
+            String(calledPath).includes("/persona/profiles/research_assistant/state") &&
+            String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+              "PUT"
+        )
+        expect(putCall).toBeTruthy()
+        expect(
+          (putCall?.[1] as { body?: { soul_md?: string } } | undefined)?.body?.soul_md
+        ).toBe("updated soul draft")
+      })
+
+      fireEvent.click(screen.getByTestId("persona-state-history-button"))
+      await screen.findByText("archived soul version")
+
+      fireEvent.click(screen.getByTestId("persona-state-restore-hist-1"))
+      await waitFor(() => {
+        const restoreCall = mocks.fetchWithAuth.mock.calls.find(
+          ([calledPath, calledInit]) =>
+            String(calledPath).includes("/persona/profiles/research_assistant/state/restore") &&
+            String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+              "POST"
+        )
+        expect(restoreCall).toBeTruthy()
+        expect(
+          (
+            restoreCall?.[1] as { body?: { entry_id?: string } } | undefined
+          )?.body?.entry_id
+        ).toBe("hist-1")
+        expect(soulInput.value).toBe("restored soul version")
+      })
+
+      confirmSpy.mockReturnValueOnce(false)
+      fireEvent.click(screen.getByTestId("persona-state-archive-hist-active"))
+      expect(confirmSpy).toHaveBeenCalled()
       expect(
-        (putCall?.[1] as { body?: { soul_md?: string } } | undefined)?.body?.soul_md
-      ).toBe("updated soul draft")
-    })
-
-    fireEvent.click(screen.getByTestId("persona-state-history-button"))
-    await screen.findByText("archived soul version")
-
-    fireEvent.click(screen.getByTestId("persona-state-restore-hist-1"))
-    await waitFor(() => {
-      const restoreCall = mocks.fetchWithAuth.mock.calls.find(
-        ([calledPath, calledInit]) =>
-          String(calledPath).includes("/persona/profiles/research_assistant/state/restore") &&
-          String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
-            "POST"
+        mocks.fetchWithAuth
+      ).not.toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/research_assistant/state/archive",
+        expect.anything()
       )
-      expect(restoreCall).toBeTruthy()
-      expect(
-        (
-          restoreCall?.[1] as { body?: { entry_id?: string } } | undefined
-        )?.body?.entry_id
-      ).toBe("hist-1")
-      expect(soulInput.value).toBe("restored soul version")
-    })
+
+      confirmSpy.mockReturnValueOnce(true)
+      fireEvent.click(screen.getByTestId("persona-state-archive-hist-active"))
+      await waitFor(() => {
+        const archiveCall = mocks.fetchWithAuth.mock.calls.find(
+          ([calledPath, calledInit]) =>
+            String(calledPath).includes("/persona/profiles/research_assistant/state/archive") &&
+            String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+              "POST"
+        )
+        expect(archiveCall).toBeTruthy()
+        expect(
+          (
+            archiveCall?.[1] as { body?: { entry_id?: string } } | undefined
+          )?.body?.entry_id
+        ).toBe("hist-active")
+        expect(identityInput.value).toBe("")
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
   })
 
   it("targets catalog-resolved persona for profile and state writes when connected", async () => {

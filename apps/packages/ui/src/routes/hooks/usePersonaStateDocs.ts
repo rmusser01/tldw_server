@@ -57,6 +57,7 @@ export interface UsePersonaStateDocsReturn {
   personaStateHistoryOrder: "newest" | "oldest"
   setPersonaStateHistoryOrder: React.Dispatch<React.SetStateAction<"newest" | "oldest">>
   restoringStateEntryId: string | null
+  archivingStateEntryId: string | null
 
   // ── Editor expansion ──
   personaStateEditorExpanded: boolean
@@ -73,6 +74,7 @@ export interface UsePersonaStateDocsReturn {
   loadPersonaStateHistory: (personaIdOverride?: string) => Promise<boolean>
   savePersonaStateDocs: () => Promise<boolean | undefined>
   restorePersonaStateHistoryEntry: (entryId: string) => Promise<boolean>
+  archivePersonaStateHistoryEntry: (entryId: string) => Promise<boolean>
   revertPersonaStateDraft: () => void
   confirmDiscardUnsavedStateDrafts: (reason?: UnsavedStateDiscardReason) => boolean
 }
@@ -123,6 +125,7 @@ export function usePersonaStateDocs(
   const [personaStateHistoryOrder, setPersonaStateHistoryOrder] =
     React.useState<"newest" | "oldest">(_readHistoryOrderPreference)
   const [restoringStateEntryId, setRestoringStateEntryId] = React.useState<string | null>(null)
+  const [archivingStateEntryId, setArchivingStateEntryId] = React.useState<string | null>(null)
 
   // ── Editor expansion ──
   const [personaStateEditorExpanded, setPersonaStateEditorExpanded] =
@@ -435,6 +438,63 @@ export function usePersonaStateDocs(
     ]
   )
 
+  // ── Archive history entry ──
+
+  const archivePersonaStateHistoryEntry = React.useCallback(
+    async (entryId: string) => {
+      const personaId = getTargetPersonaId()
+      const trimmedEntryId = String(entryId || "").trim()
+      if (!personaId || !trimmedEntryId || archivingStateEntryId) return false
+      const confirmed = _confirmWithBrowserPrompt(
+        t(
+          "sidepanel:persona.stateArchiveConfirm",
+          "Archive this active state version? This removes it from current Persona state without deleting history."
+        )
+      )
+      if (!confirmed) {
+        return false
+      }
+      setArchivingStateEntryId(trimmedEntryId)
+      setError(null)
+      try {
+        const archiveResp = await tldwClient.fetchWithAuth(
+          `/api/v1/persona/profiles/${encodeURIComponent(personaId)}/state/archive` as any,
+          {
+            method: "POST",
+            body: { entry_id: trimmedEntryId },
+          }
+        )
+        if (!archiveResp.ok) {
+          throw new Error(
+            archiveResp.error || "Failed to archive persona state version"
+          )
+        }
+        const archivePayload =
+          (await archiveResp.json()) as PersonaStateDocsResponse
+        applyPersonaStatePayload(archivePayload)
+        await loadPersonaStateHistory(personaId)
+        appendLog("notice", "Archived persona state version")
+        return true
+      } catch (err: any) {
+        setError(
+          String(err?.message || "Failed to archive persona state version")
+        )
+        return false
+      } finally {
+        setArchivingStateEntryId(null)
+      }
+    },
+    [
+      appendLog,
+      applyPersonaStatePayload,
+      archivingStateEntryId,
+      getTargetPersonaId,
+      loadPersonaStateHistory,
+      setError,
+      t,
+    ]
+  )
+
   // ── Revert ──
 
   const revertPersonaStateDraft = React.useCallback(() => {
@@ -522,6 +582,7 @@ export function usePersonaStateDocs(
     personaStateHistoryOrder,
     setPersonaStateHistoryOrder,
     restoringStateEntryId,
+    archivingStateEntryId,
     personaStateEditorExpanded,
     setPersonaStateEditorExpanded,
     hasUnsavedPersonaStateChanges,
@@ -532,6 +593,7 @@ export function usePersonaStateDocs(
     loadPersonaStateHistory,
     savePersonaStateDocs,
     restorePersonaStateHistoryEntry,
+    archivePersonaStateHistoryEntry,
     revertPersonaStateDraft,
     confirmDiscardUnsavedStateDrafts,
   }

@@ -75,6 +75,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaSetupEventWriteResponse,
     PersonaSetupState,
     PersonaStateHistoryResponse,
+    PersonaStateArchiveRequest,
     PersonaStateResponse,
     PersonaStateRestoreRequest,
     PersonaStateUpdateRequest,
@@ -6393,6 +6394,73 @@ async def restore_persona_profile_state_entry(
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         _increment_persona_state_metric(action="restore", result="error")
         raise _to_http_exception(exc, action="restore persona profile state entry") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/state/archive",
+    response_model=PersonaStateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def archive_persona_profile_state_entry(
+    persona_id: str,
+    payload: PersonaStateArchiveRequest = Body(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaStateResponse:
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    target_entry_id = str(payload.entry_id or "").strip()
+    if not target_entry_id:
+        raise HTTPException(status_code=400, detail="entry_id is required")
+
+    try:
+        profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
+        if profile is None:
+            _increment_persona_state_metric(action="archive", result="not_found")
+            raise HTTPException(status_code=404, detail="Persona profile not found")
+
+        rows = db.list_persona_memory_entries(
+            user_id=user_id,
+            persona_id=persona_id,
+            include_archived=True,
+            include_deleted=False,
+            limit=_get_persona_state_history_max_entries(),
+            offset=0,
+        )
+        target_row: dict[str, Any] | None = None
+        for row in rows:
+            row_id = str(row.get("id") or "").strip()
+            if row_id != target_entry_id:
+                continue
+            if str(row.get("memory_type") or "").strip() not in _PERSONA_STATE_MEMORY_TYPES:
+                continue
+            target_row = row
+            break
+        if target_row is None:
+            _increment_persona_state_metric(action="archive", result="entry_not_found")
+            raise HTTPException(status_code=404, detail="State history entry not found")
+
+        if not _coerce_bool(target_row.get("archived"), default=False):
+            archived = db.set_persona_memory_archived(
+                entry_id=target_entry_id,
+                user_id=user_id,
+                persona_id=persona_id,
+                archived=True,
+            )
+            if not archived:
+                _increment_persona_state_metric(action="archive", result="entry_not_found")
+                raise HTTPException(status_code=404, detail="State history entry not found")
+
+        current_rows = _get_persona_state_rows(db, user_id=user_id, persona_id=persona_id)
+        _increment_persona_state_metric(action="archive", result="success")
+        return _persona_state_response_from_rows(persona_id=persona_id, rows=current_rows)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        _increment_persona_state_metric(action="archive", result="error")
+        raise _to_http_exception(exc, action="archive persona profile state entry") from exc
 
 
 @router.get(
