@@ -479,7 +479,7 @@ git commit -m "feat: align character chat model readiness surfaces"
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundSendControl.character-gating.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx`
 
-- [ ] **Step 1: Add failing `PlaygroundSendControl` tests**
+- [x] **Step 1: Add failing `PlaygroundSendControl` tests**
 
 Create `PlaygroundSendControl.character-gating.test.tsx`:
 
@@ -521,7 +521,7 @@ it("turns blocked character SEND into a setup action without submitting", async 
 })
 ```
 
-- [ ] **Step 2: Run the send-control test and verify red**
+- [x] **Step 2: Run the send-control test and verify red**
 
 Run:
 
@@ -531,7 +531,7 @@ bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/Playgr
 
 Expected: fails because `characterChatSendBlocker` does not exist.
 
-- [ ] **Step 3: Add send blocker prop to `PlaygroundSendControl`**
+- [x] **Step 3: Add send blocker prop to `PlaygroundSendControl`**
 
 Add:
 
@@ -553,7 +553,7 @@ Behavior:
 - The textarea/draft remains untouched.
 - Existing compare-mode, queue, streaming, and offline behavior remains unchanged for non-character blockers.
 
-- [ ] **Step 4: Thread send blocker from `Playground.tsx` into `PlaygroundForm.tsx`**
+- [x] **Step 4: Thread send blocker from `Playground.tsx` into `PlaygroundForm.tsx`**
 
 Extend `PlaygroundForm` props:
 
@@ -591,7 +591,7 @@ const characterChatSendBlocker = React.useMemo(
 
 Place this memo after `handleCharacterChatReadinessAction` is declared, or move that action callback above the memo first. Then pass the blocker to `PlaygroundForm`.
 
-- [ ] **Step 5: Guard every submit entry point in `PlaygroundForm.tsx`**
+- [x] **Step 5: Guard every submit entry point in `PlaygroundForm.tsx`**
 
 Create one guarded handler:
 
@@ -614,7 +614,7 @@ Use it for:
 
 Do not alter `usePlaygroundSubmit` for this phase unless tests prove a hidden submit path still bypasses the gate. The gate belongs near the UI action because users must keep typing and editing drafts.
 
-- [ ] **Step 6: Add integration coverage that blocked character SEND does not submit**
+- [x] **Step 6: Add integration coverage that blocked character SEND does not submit**
 
 Extend `PlaygroundForm.role-play-starter.integration.test.tsx` or create a focused sibling test. Mock `onSubmit` and render Character Chat with:
 
@@ -629,7 +629,7 @@ Click SEND and assert:
 - draft text is still present
 - selected character text is still present
 
-- [ ] **Step 7: Run focused composer tests**
+- [x] **Step 7: Run focused composer tests**
 
 Run:
 
@@ -639,7 +639,7 @@ bunx vitest run ../packages/ui/src/components/Option/Playground/__tests__/Playgr
 
 Expected: pass.
 
-- [ ] **Step 8: Commit Task 4**
+- [x] **Step 8: Commit Task 4**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Playground/Playground.tsx apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx apps/packages/ui/src/components/Option/Playground/PlaygroundSendControl.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundSendControl.character-gating.test.tsx apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundForm.role-play-starter.integration.test.tsx

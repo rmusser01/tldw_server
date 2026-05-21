@@ -175,6 +175,7 @@ import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
 import {
   PlaygroundAttachmentButton,
   PlaygroundSendControl,
+  type PlaygroundSendBlocker,
 } from "./PlaygroundSendControl";
 import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
 import type { RolePlaySetupApplyPayload } from "./RolePlaySetupDrawer";
@@ -255,6 +256,7 @@ type Props = {
   stickyDockEnabled?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
   onDraftPresenceChange?: (hasDraft: boolean) => void;
+  characterChatSendBlocker?: PlaygroundSendBlocker | null;
 };
 
 type DefaultCharacterPreferenceQueryResult = {
@@ -445,6 +447,7 @@ export const PlaygroundForm = ({
   stickyDockEnabled = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
+  characterChatSendBlocker = null,
 }: Props) => {
   const { t: translate } = useTranslation(["playground", "common", "option"]);
   const t = React.useCallback(
@@ -2970,11 +2973,19 @@ export const PlaygroundForm = ({
     notificationApi,
     t,
   });
+  const handleComposerSend = React.useCallback(() => {
+    if (characterChatSendBlocker?.active) {
+      stopListening();
+      characterChatSendBlocker.onAction();
+      return;
+    }
+    submitForm();
+  }, [characterChatSendBlocker, stopListening, submitForm]);
   React.useEffect(() => {
     voiceChatSubmitFormRef.current = () => {
-      submitForm();
+      handleComposerSend();
     };
-  }, [submitForm]);
+  }, [handleComposerSend]);
 
   const handleKnowledgeAsk = React.useCallback(
     (text: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -3659,7 +3670,7 @@ export const PlaygroundForm = ({
     ) {
       e.preventDefault();
       stopListening();
-      submitForm();
+      handleComposerSend();
     }
   };
 
@@ -4530,7 +4541,8 @@ export const PlaygroundForm = ({
       compareNeedsMoreModels={compareNeedsMoreModels}
       onStopStreaming={stopStreamingRequest}
       onStopListening={stopListening}
-      onSubmitForm={submitForm}
+      onSubmitForm={handleComposerSend}
+      characterChatSendBlocker={characterChatSendBlocker}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}
@@ -4721,7 +4733,7 @@ export const PlaygroundForm = ({
                     onSubmit={(event) => {
                       event.preventDefault();
                       stopListening();
-                      submitForm();
+                      handleComposerSend();
                     }}
                     className="flex w-full min-w-0 flex-col items-center"
                   >
@@ -5636,7 +5648,7 @@ export const PlaygroundForm = ({
                                 onMessageChange={(value) =>
                                   form.setFieldValue("message", value)
                                 }
-                                onSend={() => submitForm()}
+                                onSend={handleComposerSend}
                                 sending={isSending}
                                 stopStreaming={stopStreamingRequest}
                                 tokens={tokensProp}
@@ -5665,7 +5677,7 @@ export const PlaygroundForm = ({
                                 onMessageChange={(value) =>
                                   form.setFieldValue("message", value)
                                 }
-                                onSend={() => submitForm()}
+                                onSend={handleComposerSend}
                                 sending={isSending}
                                 stopStreaming={stopStreamingRequest}
                                 tokens={tokensProp}
@@ -5681,7 +5693,7 @@ export const PlaygroundForm = ({
                                 onMessageChange={(value) =>
                                   form.setFieldValue("message", value)
                                 }
-                                onSend={() => submitForm()}
+                                onSend={handleComposerSend}
                                 sending={isSending}
                                 stopStreaming={stopStreamingRequest}
                                 tokens={tokensProp}

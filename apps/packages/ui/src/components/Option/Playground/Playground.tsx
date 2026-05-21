@@ -16,6 +16,7 @@ import {
   type RuntimeToolChoice,
 } from "./PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
+import type { PlaygroundSendBlocker } from "./PlaygroundSendControl";
 import {
   CharacterChatReadinessPanel,
   type MissingCharacterRecovery,
@@ -2537,6 +2538,30 @@ export const Playground = () => {
       openServerSettingsFromCockpit,
     ],
   );
+  const characterChatSendBlocker = React.useMemo<PlaygroundSendBlocker | null>(
+    () =>
+      characterWorkflowActive &&
+      characterChatReadiness.status === "blocked" &&
+      characterChatReadiness.missingRequirement === "chat-model" &&
+      characterChatReadinessCopy
+        ? {
+            active: true,
+            title: characterChatReadinessCopy.title,
+            actionLabel: characterChatReadinessCopy.actionLabel,
+            onAction: () =>
+              handleCharacterChatReadinessAction(
+                characterChatReadiness.recommendedAction ??
+                  "open-model-settings",
+              ),
+          }
+        : null,
+    [
+      characterChatReadiness,
+      characterChatReadinessCopy,
+      characterWorkflowActive,
+      handleCharacterChatReadinessAction,
+    ],
+  );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
     openMcpSettings({
       returnFocusSelector: COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR,
@@ -3266,6 +3291,7 @@ export const Playground = () => {
                   handleSelectAttachedResearchContextHistory
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
+                characterChatSendBlocker={characterChatSendBlocker}
               />
             </div>
           </div>

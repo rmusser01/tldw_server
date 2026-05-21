@@ -56,6 +56,10 @@ const playgroundFormConnectionState = vi.hoisted(() => ({
 const selectedAssistantMock = vi.hoisted(() => ({
   setSelectedAssistant: vi.fn(async (_next: unknown) => undefined)
 }))
+const selectedCharacterState = vi.hoisted(() => ({
+  value: null as any,
+  setSelectedCharacter: vi.fn(async (_next: unknown) => undefined)
+}))
 
 const createMessageOptionState = () => ({
   onSubmit: onSubmitMock,
@@ -589,7 +593,10 @@ vi.mock("@/hooks/useDraftPersistence", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
-  useSelectedCharacter: () => [null, vi.fn()]
+  useSelectedCharacter: () => [
+    selectedCharacterState.value,
+    selectedCharacterState.setSelectedCharacter
+  ]
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -957,6 +964,8 @@ beforeEach(() => {
   onSubmitMock.mockClear()
   createChatCompletionMock.mockClear()
   selectedAssistantMock.setSelectedAssistant.mockClear()
+  selectedCharacterState.value = null
+  selectedCharacterState.setSelectedCharacter.mockClear()
   playgroundFormMessageOptionState.value = createMessageOptionState()
   playgroundFormConnectionState.phase = "connected"
   playgroundFormConnectionState.isConnected = true
@@ -1029,5 +1038,49 @@ describe("PlaygroundForm role-play starter", () => {
         screen.getByRole("button", { name: /helpful ai assistant/i })
       )
     })
+  })
+
+  it("turns blocked character chat composer SEND into setup without dropping the draft", async () => {
+    const user = userEvent.setup()
+    const onAction = vi.fn()
+    selectedCharacterState.value = {
+      id: "ada",
+      name: "Ada Lovelace"
+    }
+
+    render(
+      <PlaygroundForm
+        droppedFiles={[]}
+        characterChatSendBlocker={{
+          active: true,
+          title: "Configure the selected model provider before chatting as Ada Lovelace",
+          actionLabel: "Open model settings",
+          onAction
+        }}
+      />
+    )
+
+    const composer = screen.getByTestId("composer-textarea")
+    await user.type(composer, "Continue the analytical role-play scene.")
+
+    const setupButton = within(
+      screen.getByTestId("composer-inline-send-control")
+    ).getByRole("button", {
+      name: /open model settings/i
+    })
+    expect(setupButton).toHaveAttribute(
+      "title",
+      expect.stringContaining("Ada Lovelace")
+    )
+
+    await user.click(setupButton)
+
+    expect(onAction).toHaveBeenCalledTimes(1)
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(composer).toHaveValue("Continue the analytical role-play scene.")
+    expect(setupButton).toHaveAttribute(
+      "title",
+      expect.stringContaining("Ada Lovelace")
+    )
   })
 })
