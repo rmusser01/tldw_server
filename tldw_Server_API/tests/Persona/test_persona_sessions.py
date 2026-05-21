@@ -4,11 +4,11 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+from tldw_Server_API.app.core import config as config_module
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.Persona.session_materialization import materialize_persona_session
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
-
+from tldw_Server_API.app.core.Persona.session_materialization import materialize_persona_session
 
 pytestmark = pytest.mark.unit
 
@@ -72,6 +72,25 @@ def test_persona_sessions_list_and_detail_roundtrip(monkeypatch, persona_db: Cha
         assert len(detail_payload["turns"]) >= 1
 
     fastapi_app.dependency_overrides.clear()
+
+
+def test_materialized_session_reads_memory_top_k_from_settings_attributes(monkeypatch, persona_db: CharactersRAGDB):
+    class AttributeSettings:
+        PERSONA_MEMORY_TOP_K = "6"
+
+    manager = SessionManager()
+    monkeypatch.setattr(config_module, "settings", AttributeSettings())
+
+    materialized = materialize_persona_session(
+        persona_db,
+        session_manager=manager,
+        user_id="1",
+        persona_id="research_assistant",
+    )
+
+    row = persona_db.get_persona_session(materialized.session_id, user_id="1", include_deleted=False)
+    assert row is not None
+    assert row["preferences"]["memory_top_k"] == 6
 
 
 def test_persona_sessions_list_and_detail_fall_back_to_persisted_preferences(

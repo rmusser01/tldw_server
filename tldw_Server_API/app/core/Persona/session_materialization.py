@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-import uuid
 
 from loguru import logger
 
@@ -17,7 +17,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.Persona.policy_evaluator import normalize_policy_rules
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.Personalization.companion_activity import normalize_persona_activity_surface
-
 
 DEFAULT_PERSONA_ID = "research_assistant"
 DEFAULT_PERSONA_NAME = "Research Assistant"
@@ -67,8 +66,14 @@ def _get_persona_memory_top_k() -> int:
     try:
         from tldw_Server_API.app.core.config import settings as app_settings
 
-        value = int(app_settings.get("PERSONA_MEMORY_TOP_K", 3))
-    except Exception:
+        get_setting = getattr(app_settings, "get", None)
+        raw_value = (
+            get_setting("PERSONA_MEMORY_TOP_K", 3)
+            if callable(get_setting)
+            else getattr(app_settings, "PERSONA_MEMORY_TOP_K", 3)
+        )
+        value = int(raw_value)
+    except (AttributeError, ImportError, TypeError, ValueError):
         value = 3
     return max(1, min(value, 10))
 

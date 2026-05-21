@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from threading import RLock
 import time
+from datetime import datetime, timezone
+from threading import RLock
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -15,13 +16,13 @@ from tldw_Server_API.app.core.Persona.session_materialization import (
 )
 from tldw_Server_API.app.core.Personalization.companion_activity import normalize_persona_activity_surface
 
-
 LIVE_CONTROL_PREFS_KEY = "persona_live_control"
 _TERMINAL_STATUSES = {"closed", "archived"}
 _CAPABILITIES = {"text": True, "voice": False, "browser_microphone_required": False}
 _generation_lock = RLock()
 _last_focus_generation = 0
 _SESSION_SCAN_PAGE_SIZE = 200
+_FOCUSED_SESSION_LOOKUP_LIMIT = 1000
 
 
 class PersonaLiveStreamRegistry:
@@ -75,6 +76,10 @@ def _next_focus_generation() -> int:
         candidate = int(time.time() * 1000)
         _last_focus_generation = max(candidate, _last_focus_generation + 1)
         return _last_focus_generation
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _session_preferences(row: dict[str, Any]) -> dict[str, Any]:
@@ -207,6 +212,31 @@ def _iter_persona_session_rows(
     return rows
 
 
+def _focused_session_rows(
+    db: CharactersRAGDB,
+    *,
+    user_id: str,
+    persona_id: str | None = None,
+    surface: str | None = None,
+) -> list[dict[str, Any]]:
+    focused_lookup = getattr(db, "list_focused_persona_sessions", None)
+    if callable(focused_lookup):
+        return focused_lookup(
+            user_id=user_id,
+            persona_id=persona_id,
+            activity_surface=normalize_persona_activity_surface(surface) if surface is not None else None,
+            include_deleted=False,
+            limit=_FOCUSED_SESSION_LOOKUP_LIMIT,
+        )
+    rows = _iter_persona_session_rows(
+        db,
+        user_id=user_id,
+        persona_id=persona_id,
+        surface=surface,
+    )
+    return [row for row in rows if bool(_focus_metadata(row).get("focused"))]
+
+
 def build_live_session_summary(
     db: CharactersRAGDB,
     *,
@@ -235,7 +265,9 @@ def build_live_session_summary(
         "status": status,
         "is_focused": bool(is_focused),
         "focused_at": str(focus.get("focused_at") or "").strip() or None if is_focused else None,
-        "focus_generation": int(focus["focus_generation"]) if is_focused and focus.get("focus_generation") is not None else None,
+        "focus_generation": (
+            int(focus["focus_generation"]) if is_focused and focus.get("focus_generation") is not None else None
+        ),
         "last_activity_at": str(row.get("last_modified") or row.get("created_at") or "").strip() or None,
         "pending_approval_count": 0,
         "active_tool_name": None,
@@ -284,7 +316,7 @@ def list_live_session_summaries(
         limit=limit,
         offset=0,
     )
-    focus_rows = _iter_persona_session_rows(
+    focus_rows = _focused_session_rows(
         db,
         user_id=user_id,
         persona_id=persona_id,
@@ -426,23 +458,26 @@ def focus_live_session(
     if _is_terminal(row):
         raise ValueError("Cannot focus a terminal persona session.")
     generation = _next_focus_generation()
-    focused_at = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.gmtime())
-    rows = _iter_persona_session_rows(db, user_id=user_id)
-    for existing in rows:
+    focused_at = _utc_now_iso()
+    previously_focused_rows = _focused_session_rows(db, user_id=user_id)
+    _update_preferences(
+        db,
+        row=row,
+        user_id=user_id,
+        preferences=_live_preferences_patch(
+            row,
+            focus={"focused": True, "focused_at": focused_at, "focus_generation": generation},
+        ),
+    )
+    for existing in previously_focused_rows:
         existing_id = str(existing.get("id") or "").strip()
-        if not existing_id:
+        if not existing_id or existing_id == session_id:
             continue
-        if existing_id == session_id:
-            focus = {"focused": True, "focused_at": focused_at, "focus_generation": generation}
-        elif _focus_metadata(existing).get("focused"):
-            focus = {"focused": False}
-        else:
-            continue
-        _update_live_control_preferences(
+        _update_preferences(
             db,
             row=existing,
             user_id=user_id,
-            focus=focus,
+            preferences=_live_preferences_patch(existing, focus={"focused": False}),
         )
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     return build_live_session_summary(

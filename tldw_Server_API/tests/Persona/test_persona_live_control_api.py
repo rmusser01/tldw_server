@@ -13,11 +13,11 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Persona import live_control as live_control_module
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
 from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
 from tldw_Server_API.app.core.Persona.live_control import persona_live_stream_registry
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
-
 
 pytestmark = pytest.mark.unit
 
@@ -398,6 +398,19 @@ def test_live_session_focus_a_then_b_only_marks_b_focused(monkeypatch, persona_d
     assert [item["session_id"] for item in focused] == ["sess-b"]
 
 
+def test_live_session_focus_uses_utc_iso_focus_timestamp(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
+
+    with _client_for_user(1, persona_db) as client:
+        response = client.post("/api/v1/persona/live/sessions/sess-a/focus")
+
+    assert response.status_code == 200
+    focused_at = response.json()["session"]["focused_at"]
+    assert focused_at.endswith("+00:00")
+
+
 def test_live_session_focus_and_stop_return_not_found_for_other_user_session(
     monkeypatch,
     persona_db: CharactersRAGDB,
@@ -651,6 +664,32 @@ def test_live_session_focus_only_touches_target_and_previously_focused(
     assert untouched_after["last_modified"] == untouched_before["last_modified"]
 
 
+def test_live_session_focus_does_not_paginate_all_sessions(
+    monkeypatch,
+    persona_db: CharactersRAGDB,
+):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr(live_control_module, "_SESSION_SCAN_PAGE_SIZE", 2)
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    for idx in range(5):
+        _create_session(persona_db, user_id="1", persona_id="persona_a", session_id=f"sess-{idx}")
+
+    original_list = persona_db.list_persona_sessions
+
+    def fail_on_scan_page(*args, **kwargs):
+        if int(kwargs.get("offset") or 0) > 0:
+            raise AssertionError("focus should not paginate every persona session")
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(persona_db, "list_persona_sessions", fail_on_scan_page)
+
+    with _client_for_user(1, persona_db) as client:
+        response = client.post("/api/v1/persona/live/sessions/sess-4/focus")
+
+    assert response.status_code == 200
+    assert response.json()["session"]["session_id"] == "sess-4"
+
+
 def test_live_session_list_reports_focus_outside_returned_page(monkeypatch, persona_db: CharactersRAGDB):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
@@ -677,6 +716,52 @@ def test_live_session_list_reports_focus_outside_returned_page(monkeypatch, pers
             persona_id="persona_a",
             session_id=f"sess-newer-{idx}",
         )
+
+    with _client_for_user(1, persona_db) as client:
+        listed = client.get("/api/v1/persona/live/sessions?limit=3")
+
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert payload["focused_session_id"] == focused_session_id
+    assert focused_session_id not in {item["session_id"] for item in payload["sessions"]}
+
+
+def test_live_session_list_does_not_paginate_all_sessions_for_focus(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr(live_control_module, "_SESSION_SCAN_PAGE_SIZE", 2)
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    focused_session_id = "sess-old-focused"
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id=focused_session_id,
+        preferences={
+            "persona_live_control": {
+                "focus": {
+                    "focused": True,
+                    "focused_at": "2026-05-20T00:00:00+00:00",
+                    "focus_generation": 999,
+                }
+            }
+        },
+    )
+    for idx in range(5):
+        _create_session(
+            persona_db,
+            user_id="1",
+            persona_id="persona_a",
+            session_id=f"sess-newer-{idx}",
+        )
+
+    original_list = persona_db.list_persona_sessions
+
+    def fail_on_scan_page(*args, **kwargs):
+        if int(kwargs.get("offset") or 0) > 0:
+            raise AssertionError("focus lookup should not paginate every persona session")
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(persona_db, "list_persona_sessions", fail_on_scan_page)
 
     with _client_for_user(1, persona_db) as client:
         listed = client.get("/api/v1/persona/live/sessions?limit=3")

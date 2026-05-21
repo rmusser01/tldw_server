@@ -24515,6 +24515,7 @@ for _persona_state_store_method in (
     "create_persona_session",
     "get_persona_session",
     "list_persona_sessions",
+    "list_focused_persona_sessions",
     "update_persona_session",
     "add_persona_memory_entry",
     "list_persona_memory_entries",
