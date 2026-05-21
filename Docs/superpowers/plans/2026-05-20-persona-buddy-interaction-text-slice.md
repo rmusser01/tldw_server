@@ -742,7 +742,7 @@ git commit -m "feat(ui): add Buddy shell text controls"
 **Files:**
 - Create: `apps/tldw-frontend/e2e/workflows/persona-buddy-interaction.spec.ts`
 
-- [ ] **Step 1: Write failing Playwright test**
+- [x] **Step 1: Write failing Playwright test**
 
 Create an E2E test that:
 
@@ -755,7 +755,7 @@ Create an E2E test that:
 7. Asserts the WebSocket payload includes `session_id`, `client_message_id`, and `text`.
 8. Asserts Choose/Change Buddy routes to Visuals.
 
-- [ ] **Step 2: Run failing Playwright test**
+- [x] **Step 2: Run failing Playwright test**
 
 Run from `apps/tldw-frontend`:
 
@@ -765,7 +765,9 @@ bunx playwright test e2e/workflows/persona-buddy-interaction.spec.ts --reporter=
 
 Expected: FAIL until the UI is wired.
 
-- [ ] **Step 3: Fix mocks/selectors and run again**
+Observed: the first sandboxed run failed because the Next dev server could not bind `0.0.0.0:8080`; the escalated default-port run then showed a stale reused server. Running on an isolated `127.0.0.1:18080` server exposed selector/viewport issues in the new test.
+
+- [x] **Step 3: Fix mocks/selectors and run again**
 
 Run:
 
@@ -775,7 +777,13 @@ bunx playwright test e2e/workflows/persona-buddy-interaction.spec.ts --reporter=
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit E2E slice**
+Observed PASS with:
+
+```bash
+TLDW_WEB_URL=http://127.0.0.1:18080 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18080' bunx playwright test e2e/workflows/persona-buddy-interaction.spec.ts --reporter=line
+```
+
+- [x] **Step 4: Commit E2E slice**
 
 ```bash
 git add apps/tldw-frontend/e2e/workflows/persona-buddy-interaction.spec.ts
