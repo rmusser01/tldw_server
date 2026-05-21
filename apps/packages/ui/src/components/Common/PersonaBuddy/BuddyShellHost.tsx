@@ -19,6 +19,7 @@ import {
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type {
   PersonaBuddyPositionBucket,
+  PersonaBuddyLiveControlView,
   PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
@@ -557,6 +558,13 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       visualState
     ]
   )
+  const liveControlView: PersonaBuddyLiveControlView | null =
+    liveControlEnabled
+      ? {
+          ...liveControl,
+          voiceState: renderContext.live_voice_state ?? null
+        }
+      : null
 
   React.useEffect(() => {
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
@@ -621,7 +629,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       visualPack={visualPack}
       visualState={visualState}
       visualDiagnostic={visualDiagnostic}
-      liveControl={liveControlEnabled ? liveControl : null}
+      liveControl={liveControlView}
       onVisualRenderError={handleVisualRenderError}
       position={position}
       onToggle={() => setOpen(!isOpen)}

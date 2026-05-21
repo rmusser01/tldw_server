@@ -27,6 +27,11 @@ export interface PersonaBuddyLiveSessionSummary {
   personaName: string
   lifecycle: string
   pendingApprovalCount: number
+  capabilities?: {
+    text?: boolean
+    voice?: boolean
+    browserMicrophoneRequired?: boolean
+  } | null
   suggestedVisualState?: string | null
 }
 
@@ -36,6 +41,8 @@ export interface PersonaBuddyLiveControlView {
   focusedSession: PersonaBuddyLiveSessionSummary | null
   streamState: string
   canSendText: boolean
+  voiceAvailable?: boolean
+  voiceState?: string | null
   pendingFocusSessionId: string | null
   startTextSession: (personaId?: string | null) => Promise<unknown>
   stopSession: (sessionId?: string | null) => Promise<unknown>

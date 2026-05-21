@@ -938,11 +938,6 @@ describe("BuddyShellHost", () => {
       streamState: "open",
       canSendText: true
     }
-    usePersonaBuddyShellStore.setState((state) => ({
-      ...state,
-      isOpen: true
-    }))
-
     renderHost({
       context: {
         surface_id: "persona-garden",
@@ -955,10 +950,61 @@ describe("BuddyShellHost", () => {
       root: "sidepanel"
     })
 
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+    )
+
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("persona-buddy-text-input")).not.toBeInTheDocument()
     expect(liveControlMocks.calls.at(-1)).toMatchObject({ autoLoad: false })
+  })
+
+  it("passes route voice state into the Buddy live controls", () => {
+    liveControlMocks.state = {
+      ...liveControlMocks.state,
+      focusedSessionId: "live-session-1",
+      focusedSession: buildLiveSession({
+        capabilities: {
+          text: true,
+          voice: true,
+          browserMicrophoneRequired: true
+        }
+      }),
+      sessions: [
+        buildLiveSession({
+          capabilities: {
+            text: true,
+            voice: true,
+            browserMicrophoneRequired: true
+          }
+        })
+      ],
+      streamState: "open",
+      canSendText: true,
+      voiceAvailable: true
+    }
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "listening"
+      },
+      root: "sidepanel"
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+    )
+
+    expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
+      "href",
+      "/persona?persona_id=persona-1&tab=live"
+    )
   })
 
   it("keeps urgent badge visible while drag movement override is active", async () => {

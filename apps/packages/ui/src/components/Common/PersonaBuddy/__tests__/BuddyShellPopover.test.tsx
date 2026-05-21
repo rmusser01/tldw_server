@@ -180,4 +180,104 @@ describe("BuddyShellPopover", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /reject/i })).not.toBeInTheDocument()
   })
+
+  it("routes voice-capable sessions to the full Live listening surface", () => {
+    renderPopover({
+      liveControl: {
+        sessions: [
+          buildLiveSession({
+            capabilities: {
+              text: true,
+              voice: true,
+              browserMicrophoneRequired: true
+            }
+          })
+        ],
+        focusedSession: buildLiveSession({
+          capabilities: {
+            text: true,
+            voice: true,
+            browserMicrophoneRequired: true
+          }
+        }),
+        focusedSessionId: "live-session-1",
+        streamState: "open",
+        canSendText: true,
+        voiceAvailable: true,
+        voiceState: "idle",
+        pendingFocusSessionId: null,
+        startTextSession: vi.fn(),
+        stopSession: vi.fn(),
+        focusSession: vi.fn(),
+        sendText: vi.fn()
+      }
+    })
+
+    expect(screen.getByRole("link", { name: "Listen" })).toHaveAttribute(
+      "href",
+      "/persona?persona_id=persona-1&tab=live"
+    )
+    expect(screen.queryByRole("link", { name: "Stop listening" })).not.toBeInTheDocument()
+  })
+
+  it("routes active voice sessions to the full Live stop-listening surface", () => {
+    renderPopover({
+      liveControl: {
+        sessions: [
+          buildLiveSession({
+            capabilities: {
+              text: true,
+              voice: true,
+              browserMicrophoneRequired: true
+            }
+          })
+        ],
+        focusedSession: buildLiveSession({
+          capabilities: {
+            text: true,
+            voice: true,
+            browserMicrophoneRequired: true
+          }
+        }),
+        focusedSessionId: "live-session-1",
+        streamState: "open",
+        canSendText: true,
+        voiceAvailable: true,
+        voiceState: "listening",
+        pendingFocusSessionId: null,
+        startTextSession: vi.fn(),
+        stopSession: vi.fn(),
+        focusSession: vi.fn(),
+        sendText: vi.fn()
+      }
+    })
+
+    expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
+      "href",
+      "/persona?persona_id=persona-1&tab=live"
+    )
+    expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
+  })
+
+  it("hides voice controls when the focused session is not voice-capable", () => {
+    renderPopover({
+      liveControl: {
+        sessions: [buildLiveSession()],
+        focusedSession: buildLiveSession(),
+        focusedSessionId: "live-session-1",
+        streamState: "open",
+        canSendText: true,
+        voiceAvailable: false,
+        voiceState: "idle",
+        pendingFocusSessionId: null,
+        startTextSession: vi.fn(),
+        stopSession: vi.fn(),
+        focusSession: vi.fn(),
+        sendText: vi.fn()
+      }
+    })
+
+    expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Stop listening" })).not.toBeInTheDocument()
+  })
 })
