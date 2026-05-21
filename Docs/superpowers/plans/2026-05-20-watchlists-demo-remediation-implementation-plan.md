@@ -871,8 +871,9 @@ git commit -m "fix: reflect watchlist source failures in health"
 - Create: `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md`
 - Create: `apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts`
 - Modify: `apps/extension/tests/e2e/watchlists.spec.ts`
+- Modify: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx`
 
-- [ ] **Step 1: Write demo runbook skeleton**
+- [x] **Step 1: Write demo runbook skeleton**
 
 Create `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md` with sections:
 
@@ -889,7 +890,7 @@ Create `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md` with sections:
 ## Known Degradations
 ```
 
-- [ ] **Step 2: Add source preflight commands**
+- [x] **Step 2: Add source preflight commands**
 
 Record the source-test command shape:
 
@@ -903,14 +904,14 @@ curl -sf \
 
 The runbook must say local loopback feeds are not valid demo sources unless backend policy explicitly allows them.
 
-- [ ] **Step 3: Add audio preflight distinction**
+- [x] **Step 3: Add audio preflight distinction**
 
 Document two separate gates:
 
 - Scheduler enqueue gate: `generate_audio=true` produces a task id and `/runs/{run_id}/audio` returns a meaningful status.
 - Final playback gate: provider, model, voice, script, per-speaker audio, and final mix all complete and produce a playable/downloadable artifact.
 
-- [ ] **Step 4: Write WebUI Playwright smoke**
+- [x] **Step 4: Write WebUI Playwright smoke**
 
 Create `watchlists-demo-readiness.spec.ts` that uses mocked or live-configured endpoints to assert:
 
@@ -919,7 +920,7 @@ Create `watchlists-demo-readiness.spec.ts` that uses mocked or live-configured e
 - output creation failure renders in-app error, not a runtime overlay.
 - audio status renders pending/failed/skipped truthfully.
 
-- [ ] **Step 5: Extend extension strict smoke**
+- [x] **Step 5: Extend extension strict smoke**
 
 In `apps/extension/tests/e2e/watchlists.spec.ts`, add or update a test to verify:
 
@@ -927,7 +928,7 @@ In `apps/extension/tests/e2e/watchlists.spec.ts`, add or update a test to verify
 - the shared route can render Activity/Reports status.
 - output generation errors do not crash the extension page.
 
-- [ ] **Step 6: Run WebUI smoke**
+- [x] **Step 6: Run WebUI smoke**
 
 Run:
 
@@ -937,6 +938,8 @@ npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=l
 ```
 
 Expected: PASS.
+
+Actual: PASS, 2 tests passed with mocked same-origin Watchlists endpoints.
 
 - [ ] **Step 7: Run extension strict watchlists smoke**
 
@@ -949,7 +952,9 @@ npx playwright test tests/e2e/watchlists.spec.ts --reporter=line
 
 Expected: PASS with no skipped watchlists tests.
 
-- [ ] **Step 8: Run backend demo-scope tests**
+Actual: BLOCKED before test execution. Playwright global setup hangs in `wxt build`; an isolated `bun run build:chrome:prod` reproduced the same WXT build hang and timed out after 120 seconds after duplicate-import warnings, before `.output/chrome-mv3` was produced.
+
+- [x] **Step 8: Run backend demo-scope tests**
 
 Run:
 
@@ -965,7 +970,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 9: Run touched Python Bandit**
+Actual: PASS, 29 passed, 4 skipped, 1 xpassed.
+
+- [x] **Step 9: Run touched Python Bandit**
 
 Run:
 
@@ -980,6 +987,8 @@ python -m bandit -r \
 
 Expected: no new findings in touched code.
 
+Actual: PASS, `/tmp/bandit_watchlists_demo_rescue.json` reported no errors and no results.
+
 - [ ] **Step 10: Commit**
 
 Run:
@@ -988,7 +997,8 @@ Run:
 git add \
   Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md \
   apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts \
-  apps/extension/tests/e2e/watchlists.spec.ts
+  apps/extension/tests/e2e/watchlists.spec.ts \
+  apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
 git commit -m "test: add watchlists demo readiness gate"
 ```
 

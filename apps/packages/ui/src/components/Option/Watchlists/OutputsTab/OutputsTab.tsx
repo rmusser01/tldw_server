@@ -70,6 +70,16 @@ import {
 
 const OUTPUTS_ADVANCED_FILTERS_STORAGE_KEY = "watchlists:outputs:advanced-filters:v1"
 
+const getSafeLogErrorMessage = (err: unknown): string => {
+  if (err instanceof Error) return err.message
+  if (typeof err === "string") return err
+  try {
+    return JSON.stringify(err) ?? String(err)
+  } catch {
+    return String(err)
+  }
+}
+
 const readStoredDisclosureState = (key: string): boolean | null => {
   if (typeof window === "undefined") return null
   try {
@@ -477,7 +487,7 @@ export const OutputsTab: React.FC = () => {
       setRegenOpen(false)
       loadOutputs()
     } catch (err) {
-      console.error("Failed to regenerate output:", err)
+      console.error("Failed to regenerate output:", getSafeLogErrorMessage(err))
       message.error(t("watchlists:outputs.regenerateError", "Failed to regenerate output"))
       setOutputsLiveAnnouncement(
         t("watchlists:outputs.live.regenerateError", "Failed to regenerate {{title}}.", {
