@@ -670,6 +670,142 @@ describe("SidepanelPersona", () => {
     )
   })
 
+  it("confirms before exporting the selected live session transcript", async () => {
+    const createObjectURLSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:persona-session-export")
+    const revokeObjectURLSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {})
+
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { body?: any }) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: "research_assistant", name: "Research Assistant" }]
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "research_assistant",
+            use_persona_state_context_default: true
+          })
+        })
+      }
+      if (path.includes("/persona/sessions?persona_id=research_assistant")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      if (path === "/api/v1/persona/session") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            session_id: "sess-export",
+            persona: { id: init?.body?.persona_id || "research_assistant" }
+          })
+        })
+      }
+      if (path === "/api/v1/persona/sessions/sess-export?limit_turns=0") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ preferences: {} })
+        })
+      }
+      if (path === "/api/v1/persona/sessions/sess-export/export") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            session_id: "sess-export",
+            persona_id: "research_assistant",
+            format: "json",
+            created_at: "2026-05-21T00:00:00Z",
+            updated_at: "2026-05-21T00:00:01Z",
+            turn_count: 1,
+            redaction_markers: ["metadata.auth_token"],
+            turns: [
+              {
+                turn_id: "turn-1",
+                timestamp: "2026-05-21T00:00:01Z",
+                role: "user",
+                event_type: "user_message",
+                content: "hello",
+                metadata: {}
+              }
+            ]
+          })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    try {
+      render(<SidepanelPersona />)
+
+      await waitForLiveSessionPanel()
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1)
+      })
+      MockWebSocket.instances[0].emitOpen()
+
+      const exportButton = await screen.findByTestId("persona-transcript-export-button")
+      fireEvent.click(exportButton)
+
+      expect(await screen.findByText("Export selected Persona session?")).toBeInTheDocument()
+      expect(screen.getByText("Session: sess-export")).toBeInTheDocument()
+      expect(
+        mocks.fetchWithAuth
+      ).not.toHaveBeenCalledWith(
+        "/api/v1/persona/sessions/sess-export/export",
+        { method: "GET" }
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Disconnect/i }))
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("persona-transcript-export-confirmation")
+        ).not.toBeInTheDocument()
+      })
+      await screen.findByTestId("persona-transcript-export-button")
+
+      fireEvent.click(screen.getByTestId("persona-transcript-export-button"))
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+      expect(createObjectURLSpy).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByTestId("persona-transcript-export-button"))
+      fireEvent.click(await screen.findByRole("button", { name: "Confirm export" }))
+
+      await waitFor(() => {
+        expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+          "/api/v1/persona/sessions/sess-export/export",
+          { method: "GET" }
+        )
+      })
+      expect(createObjectURLSpy).toHaveBeenCalledTimes(1)
+      const blob = createObjectURLSpy.mock.calls[0]?.[0] as Blob
+      expect(blob.type).toBe("application/json")
+      expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:persona-session-export")
+      expect(
+        await screen.findByText("Transcript export downloaded.")
+      ).toBeInTheDocument()
+    } finally {
+      createObjectURLSpy.mockRestore()
+      revokeObjectURLSpy.mockRestore()
+    }
+  })
+
   it("publishes route-local buddy context ahead of stale persisted assistant state", async () => {
     window.localStorage.setItem(
       SELECTED_ASSISTANT_STORAGE_KEY,
@@ -4245,7 +4381,7 @@ describe("SidepanelPersona", () => {
 
     render(<SidepanelPersona mode="companion" />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1)
     })
@@ -4350,7 +4486,7 @@ describe("SidepanelPersona", () => {
 
     render(<SidepanelPersona />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
 
     await waitFor(() => {
       expect(mocks.fetchWithAuth).toHaveBeenCalled()
@@ -4495,6 +4631,12 @@ describe("SidepanelPersona", () => {
         return Promise.resolve({
           ok: true,
           json: async () => []
+        })
+      }
+      if (path.includes("/persona/session")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ session_id: "sess-memory-status" })
         })
       }
       return Promise.resolve({
@@ -5224,7 +5366,7 @@ describe("SidepanelPersona", () => {
     })
 
     render(<SidepanelPersona />)
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
 
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1)
@@ -5780,6 +5922,60 @@ describe("SidepanelPersona", () => {
     })
   })
 
+  it("shows live memory mode status from the selected persona and controls", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "persona-key"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [
+            {
+              id: "research_assistant",
+              name: "Research Assistant",
+              mode: "persistent_scoped"
+            }
+          ]
+        })
+      }
+      if (path.includes("/persona/sessions")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => []
+        })
+      }
+      if (path.includes("/persona/session")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ session_id: "sess-memory-mode-status" })
+        })
+      }
+      return Promise.resolve({
+        ok: false,
+        error: `unhandled path: ${path}`,
+        json: async () => ({})
+      })
+    })
+
+    render(<SidepanelPersona />)
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+
+    const memoryStatus = await screen.findByTestId("persona-memory-status")
+    await waitFor(() => {
+      expect(memoryStatus).toHaveTextContent("Mode: persistent scoped")
+    })
+    expect(memoryStatus).toHaveTextContent("Memory: on")
+    expect(memoryStatus).toHaveTextContent("Top-k: 3")
+    expect(memoryStatus).toHaveTextContent("State context: available")
+
+    fireEvent.click(screen.getByTestId("persona-memory-toggle"))
+
+    expect(memoryStatus).toHaveTextContent("Memory: off")
+  })
+
   it("updates persona state-context profile default and applies it to outgoing messages", async () => {
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -5896,7 +6092,8 @@ describe("SidepanelPersona", () => {
     })
   })
 
-  it("loads, saves, and restores persona state docs from sidepanel controls", async () => {
+  it("loads, saves, restores, and archives persona state docs from sidepanel controls", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm")
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
@@ -5922,6 +6119,13 @@ describe("SidepanelPersona", () => {
                 content: "archived soul version",
                 is_active: false,
                 version: 1
+              },
+              {
+                entry_id: "hist-active",
+                field: "identity_md",
+                content: "initial identity",
+                is_active: true,
+                version: 2
               }
             ]
           })
@@ -5934,6 +6138,17 @@ describe("SidepanelPersona", () => {
             persona_id: "research_assistant",
             soul_md: "restored soul version",
             identity_md: "initial identity",
+            heartbeat_md: "initial heartbeat"
+          })
+        })
+      }
+      if (path.includes("/persona/profiles/research_assistant/state/archive")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            persona_id: "research_assistant",
+            soul_md: "restored soul version",
+            identity_md: null,
             heartbeat_md: "initial heartbeat"
           })
         })
@@ -5990,63 +6205,95 @@ describe("SidepanelPersona", () => {
       })
     })
 
-    render(<SidepanelPersona />)
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
-    await waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1)
-    })
-    MockWebSocket.instances[0].emitOpen()
-    await openStateDocsTab()
+    try {
+      render(<SidepanelPersona />)
+      fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+      await waitFor(() => {
+        expect(MockWebSocket.instances).toHaveLength(1)
+      })
+      MockWebSocket.instances[0].emitOpen()
+      await openStateDocsTab()
 
-    const soulInput = await waitForStateDocsEditor()
-    const identityInput = screen.getByTestId(
-      "persona-state-identity-input"
-    ) as HTMLTextAreaElement
-    const heartbeatInput = screen.getByTestId(
-      "persona-state-heartbeat-input"
-    ) as HTMLTextAreaElement
+      const soulInput = await waitForStateDocsEditor()
+      const identityInput = screen.getByTestId(
+        "persona-state-identity-input"
+      ) as HTMLTextAreaElement
+      const heartbeatInput = screen.getByTestId(
+        "persona-state-heartbeat-input"
+      ) as HTMLTextAreaElement
 
-    await waitFor(() => {
-      expect(soulInput.value).toBe("initial soul")
-      expect(identityInput.value).toBe("initial identity")
-      expect(heartbeatInput.value).toBe("initial heartbeat")
-    })
+      await waitFor(() => {
+        expect(soulInput.value).toBe("initial soul")
+        expect(identityInput.value).toBe("initial identity")
+        expect(heartbeatInput.value).toBe("initial heartbeat")
+      })
 
-    fireEvent.change(soulInput, { target: { value: "updated soul draft" } })
-    fireEvent.click(screen.getByTestId("persona-state-save-button"))
+      fireEvent.change(soulInput, { target: { value: "updated soul draft" } })
+      fireEvent.click(screen.getByTestId("persona-state-save-button"))
 
-    await waitFor(() => {
-      const putCall = mocks.fetchWithAuth.mock.calls.find(
-        ([calledPath, calledInit]) =>
-          String(calledPath).includes("/persona/profiles/research_assistant/state") &&
-          String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
-            "PUT"
-      )
-      expect(putCall).toBeTruthy()
+      await waitFor(() => {
+        const putCall = mocks.fetchWithAuth.mock.calls.find(
+          ([calledPath, calledInit]) =>
+            String(calledPath).includes("/persona/profiles/research_assistant/state") &&
+            String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+              "PUT"
+        )
+        expect(putCall).toBeTruthy()
+        expect(
+          (putCall?.[1] as { body?: { soul_md?: string } } | undefined)?.body?.soul_md
+        ).toBe("updated soul draft")
+      })
+
+      fireEvent.click(screen.getByTestId("persona-state-history-button"))
+      await screen.findByText("archived soul version")
+
+      fireEvent.click(screen.getByTestId("persona-state-restore-hist-1"))
+      await waitFor(() => {
+        const restoreCall = mocks.fetchWithAuth.mock.calls.find(
+          ([calledPath, calledInit]) =>
+            String(calledPath).includes("/persona/profiles/research_assistant/state/restore") &&
+            String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+              "POST"
+        )
+        expect(restoreCall).toBeTruthy()
+        expect(
+          (
+            restoreCall?.[1] as { body?: { entry_id?: string } } | undefined
+          )?.body?.entry_id
+        ).toBe("hist-1")
+        expect(soulInput.value).toBe("restored soul version")
+      })
+
+      confirmSpy.mockReturnValueOnce(false)
+      fireEvent.click(screen.getByTestId("persona-state-archive-hist-active"))
+      expect(confirmSpy).toHaveBeenCalled()
       expect(
-        (putCall?.[1] as { body?: { soul_md?: string } } | undefined)?.body?.soul_md
-      ).toBe("updated soul draft")
-    })
-
-    fireEvent.click(screen.getByTestId("persona-state-history-button"))
-    await screen.findByText("archived soul version")
-
-    fireEvent.click(screen.getByTestId("persona-state-restore-hist-1"))
-    await waitFor(() => {
-      const restoreCall = mocks.fetchWithAuth.mock.calls.find(
-        ([calledPath, calledInit]) =>
-          String(calledPath).includes("/persona/profiles/research_assistant/state/restore") &&
-          String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
-            "POST"
+        mocks.fetchWithAuth
+      ).not.toHaveBeenCalledWith(
+        "/api/v1/persona/profiles/research_assistant/state/archive",
+        expect.anything()
       )
-      expect(restoreCall).toBeTruthy()
-      expect(
-        (
-          restoreCall?.[1] as { body?: { entry_id?: string } } | undefined
-        )?.body?.entry_id
-      ).toBe("hist-1")
-      expect(soulInput.value).toBe("restored soul version")
-    })
+
+      confirmSpy.mockReturnValueOnce(true)
+      fireEvent.click(screen.getByTestId("persona-state-archive-hist-active"))
+      await waitFor(() => {
+        const archiveCall = mocks.fetchWithAuth.mock.calls.find(
+          ([calledPath, calledInit]) =>
+            String(calledPath).includes("/persona/profiles/research_assistant/state/archive") &&
+            String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+              "POST"
+        )
+        expect(archiveCall).toBeTruthy()
+        expect(
+          (
+            archiveCall?.[1] as { body?: { entry_id?: string } } | undefined
+          )?.body?.entry_id
+        ).toBe("hist-active")
+        expect(identityInput.value).toBe("")
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
   })
 
   it("targets catalog-resolved persona for profile and state writes when connected", async () => {
@@ -7086,8 +7333,26 @@ describe("SidepanelPersona", () => {
                   content: "history soul version",
                   is_active: false,
                   version: 1
+                },
+                {
+                  entry_id: "archive-guard-entry",
+                  field: "identity_md",
+                  content: "active identity version",
+                  is_active: true,
+                  version: 2
                 }
               ]
+            })
+          })
+        }
+        if (path.includes("/persona/profiles/research_assistant/state/archive")) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              persona_id: "research_assistant",
+              soul_md: "initial soul",
+              identity_md: null,
+              heartbeat_md: "initial heartbeat"
             })
           })
         }
@@ -7172,6 +7437,24 @@ describe("SidepanelPersona", () => {
     fireEvent.change(soulInput, {
       target: { value: "unsaved local draft before restore" }
     })
+
+    confirmSpy.mockClear()
+    confirmSpy.mockReturnValueOnce(false)
+    fireEvent.click(screen.getByTestId("persona-state-archive-archive-guard-entry"))
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled()
+    })
+    expect(String(confirmSpy.mock.calls[0]?.[0] || "")).toContain(
+      "Archive this state version and discard local drafts"
+    )
+    const declinedArchiveCall = mocks.fetchWithAuth.mock.calls.find(
+      ([calledPath, calledInit]) =>
+        String(calledPath).includes("/persona/profiles/research_assistant/state/archive") &&
+        String((calledInit as { method?: string } | undefined)?.method || "").toUpperCase() ===
+          "POST"
+    )
+    expect(declinedArchiveCall).toBeFalsy()
+    expect(soulInput.value).toBe("unsaved local draft before restore")
 
     confirmSpy.mockClear()
     confirmSpy.mockReturnValueOnce(false)

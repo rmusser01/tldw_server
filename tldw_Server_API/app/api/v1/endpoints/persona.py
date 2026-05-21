@@ -64,6 +64,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaScopeRulesReplaceRequest,
     PersonaScopeRulesResponse,
     PersonaSessionDetail,
+    PersonaSessionExportResponse,
     PersonaSessionRequest,
     PersonaSessionResponse,
     PersonaSessionSummary,
@@ -74,6 +75,7 @@ from tldw_Server_API.app.api.v1.schemas.persona import (
     PersonaSetupEventWriteResponse,
     PersonaSetupState,
     PersonaStateHistoryResponse,
+    PersonaStateArchiveRequest,
     PersonaStateResponse,
     PersonaStateRestoreRequest,
     PersonaStateUpdateRequest,
@@ -353,6 +355,11 @@ def _bounded_label(value: Any, *, allowed: set[str], fallback: str) -> str:
     return fallback
 
 
+def _persona_runtime_mode_value(value: Any) -> str:
+    """Normalize stored Persona runtime mode values for public responses."""
+    return _bounded_label(value, allowed=_PERSONA_RUNTIME_MODES, fallback="session_scoped")
+
+
 def _redacted_id_for_logs(raw_id: Any) -> str:
     text = str(raw_id or "").strip()
     if not text:
@@ -588,6 +595,16 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
+
+
+def _require_persona_export_allowed() -> None:
+    """Reject direct Persona export requests when export scope is disabled."""
+    allow_export, _allow_delete = _get_persona_rbac_flags()
+    if not allow_export:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Persona export is disabled by policy",
+        )
 
 
 def _get_persona_runtime_explorer_config() -> RuntimeExplorerConfig:
@@ -1387,9 +1404,7 @@ def _load_persona_policy_rules_for_session(
         if not session_row:
             return dict(default_payload)
         persona_id = str(session_row.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
-        runtime_mode = str(session_row.get("mode") or "session_scoped").strip().lower()
-        if runtime_mode not in _PERSONA_RUNTIME_MODES:
-            runtime_mode = "session_scoped"
+        runtime_mode = _persona_runtime_mode_value(session_row.get("mode"))
         persona_profile = db.get_persona_profile(persona_id, user_id=uid, include_deleted=False)
         persona_state_context_default = True
         if isinstance(persona_profile, dict):
@@ -1920,7 +1935,7 @@ def _persona_profile_to_response(
         origin_character_id=profile.get("origin_character_id"),
         origin_character_name=profile.get("origin_character_name"),
         origin_character_snapshot_at=profile.get("origin_character_snapshot_at"),
-        mode=str(profile.get("mode") or "session_scoped"),
+        mode=_persona_runtime_mode_value(profile.get("mode")),
         system_prompt=profile.get("system_prompt"),
         is_active=bool(profile.get("is_active", True)),
         use_persona_state_context_default=_coerce_bool(
@@ -2926,7 +2941,7 @@ def _replace_persona_state_docs(
 
 
 def _increment_persona_state_metric(*, action: str, result: str) -> None:
-    action_value = _bounded_label(action, allowed={"read", "write", "history", "restore"}, fallback="read")
+    action_value = _bounded_label(action, allowed={"read", "write", "history", "restore", "archive"}, fallback="read")
     result_value = _bounded_label(
         result,
         allowed={
@@ -2981,6 +2996,7 @@ def _persona_info_from_profile(
     return PersonaInfo(
         id=str(profile.get("id") or _DEFAULT_PERSONA_ID),
         name=str(profile.get("name") or _DEFAULT_PERSONA_NAME),
+        mode=_persona_runtime_mode_value(profile.get("mode")),
         description=description[:300] if description else None,
         voice="default",
         avatar_url=None,
@@ -3122,6 +3138,7 @@ def _persona_catalog_items() -> list[PersonaInfo]:
         PersonaInfo(
             id=_DEFAULT_PERSONA_ID,
             name=_DEFAULT_PERSONA_NAME,
+            mode="session_scoped",
             description=_DEFAULT_PERSONA_DESCRIPTION,
             voice="default",
             avatar_url=None,
@@ -3149,7 +3166,7 @@ def _persona_session_summary_from_db(
         turn_count=int((manager_row or {}).get("turn_count") or 0),
         pending_plan_count=int((manager_row or {}).get("pending_plan_count") or 0),
         preferences=preferences,
-        runtime_mode=str(row.get("mode") or "session_scoped"),
+        runtime_mode=_persona_runtime_mode_value(row.get("mode")),
         status=str(row.get("status") or "active"),
         reuse_allowed=bool(row.get("reuse_allowed", False)),
         scope_snapshot_id=_scope_snapshot_id_from_snapshot(scope_snapshot),
@@ -3177,12 +3194,101 @@ def _persona_session_detail_from_db(
         turn_count=turn_count,
         pending_plan_count=int((manager_snapshot or {}).get("pending_plan_count") or 0),
         preferences=preferences,
-        runtime_mode=str(row.get("mode") or "session_scoped"),
+        runtime_mode=_persona_runtime_mode_value(row.get("mode")),
         status=str(row.get("status") or "active"),
         reuse_allowed=bool(row.get("reuse_allowed", False)),
         scope_snapshot_id=_scope_snapshot_id_from_snapshot(scope_snapshot),
         scope_audit=_scope_audit_from_snapshot(scope_snapshot),
         turns=turns,
+    )
+
+
+_PERSONA_SESSION_EXPORT_REDACT_KEY_RE = re.compile(
+    r"(api[_-]?key|auth|authorization|binary|bytes|bytes_base64|developer[_-]?prompt|hidden|"
+    r"password|policy|secret|system[_-]?prompt|token|tool[_-]?config)",
+    re.IGNORECASE,
+)
+_PERSONA_SESSION_EXPORT_DROP = object()
+
+
+def _redacted_persona_export_metadata(
+    value: Any,
+    *,
+    path: str = "metadata",
+    markers: set[str],
+) -> Any:
+    """Return transcript-export-safe metadata while recording omitted paths.
+
+    JSON primitives, including null values represented by ``None``, are preserved.
+    Values under secret-like keys and values that cannot be safely serialized into
+    the export payload are omitted and recorded in ``markers``.
+    """
+    if path == "metadata" and not isinstance(value, dict):
+        markers.add(path)
+        return {}
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key in sorted(value):
+            key = str(raw_key)
+            marker_path = f"{path}.{key}"
+            if _PERSONA_SESSION_EXPORT_REDACT_KEY_RE.search(key):
+                markers.add(marker_path)
+                continue
+            sanitized = _redacted_persona_export_metadata(value[raw_key], path=marker_path, markers=markers)
+            if sanitized is not _PERSONA_SESSION_EXPORT_DROP:
+                redacted[key] = sanitized
+        return redacted
+    if isinstance(value, list):
+        sanitized_items: list[Any] = []
+        for idx, item in enumerate(value):
+            sanitized = _redacted_persona_export_metadata(item, path=f"{path}.{idx}", markers=markers)
+            if sanitized is not _PERSONA_SESSION_EXPORT_DROP:
+                sanitized_items.append(sanitized)
+        return sanitized_items
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    markers.add(path)
+    return _PERSONA_SESSION_EXPORT_DROP
+
+
+def _persona_session_export_from_db(
+    row: dict[str, Any],
+    *,
+    manager_snapshot: dict[str, Any] | None = None,
+) -> PersonaSessionExportResponse:
+    """Build the deterministic redacted export payload for one live session.
+
+    The caller is responsible for proving session ownership and providing the
+    in-memory session snapshot. This helper only shapes DB metadata, visible
+    transcript turns, and redaction markers into the response schema.
+    """
+    turns = list((manager_snapshot or {}).get("turns") or [])
+    redaction_markers: set[str] = set()
+    exported_turns: list[dict[str, Any]] = []
+    for turn in turns:
+        turn_type = str(turn.get("type") or "text")
+        exported_turns.append(
+            {
+                "turn_id": str(turn.get("turn_id") or "") or None,
+                "timestamp": str(turn.get("timestamp") or "") or None,
+                "role": str(turn.get("role") or "unknown"),
+                "event_type": turn_type,
+                "content": str(turn.get("content") or ""),
+                "metadata": _redacted_persona_export_metadata(
+                    turn.get("metadata") or {},
+                    markers=redaction_markers,
+                )
+                or {},
+            }
+        )
+    return PersonaSessionExportResponse(
+        session_id=str(row.get("id") or ""),
+        persona_id=str(row.get("persona_id") or ""),
+        created_at=str(row.get("created_at") or _utc_now_iso()),
+        updated_at=str(row.get("last_modified") or row.get("created_at") or _utc_now_iso()),
+        turn_count=len(exported_turns),
+        redaction_markers=sorted(redaction_markers),
+        turns=exported_turns,
     )
 
 
@@ -6241,12 +6347,16 @@ async def restore_persona_profile_state_entry(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaStateResponse:
+    """Restore a user-owned Persona state-history entry as the active state.
+
+    Only state-doc memory entries for the selected Persona can be restored. The
+    restored entry becomes active for its state field, sibling active entries
+    for that field are archived, and the updated state-doc view is returned.
+    """
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     target_entry_id = str(payload.entry_id or "").strip()
-    if not target_entry_id:
-        raise HTTPException(status_code=400, detail="entry_id is required")
 
     try:
         profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
@@ -6313,6 +6423,78 @@ async def restore_persona_profile_state_entry(
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         _increment_persona_state_metric(action="restore", result="error")
         raise _to_http_exception(exc, action="restore persona profile state entry") from exc
+
+
+@router.post(
+    "/profiles/{persona_id}/state/archive",
+    response_model=PersonaStateResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def archive_persona_profile_state_entry(
+    persona_id: str,
+    payload: PersonaStateArchiveRequest = Body(...),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaStateResponse:
+    """Archive a user-owned Persona state-history entry without deleting it.
+
+    Only state-doc memory entries for the selected Persona can be archived. The
+    action removes the entry from current state by marking it archived and
+    returns the updated state-doc view; missing Persona or entry ownership
+    failures return 404.
+    """
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    target_entry_id = str(payload.entry_id or "").strip()
+
+    try:
+        profile = db.get_persona_profile(persona_id, user_id=user_id, include_deleted=False)
+        if profile is None:
+            _increment_persona_state_metric(action="archive", result="not_found")
+            raise HTTPException(status_code=404, detail="Persona profile not found")
+
+        rows = db.list_persona_memory_entries(
+            user_id=user_id,
+            persona_id=persona_id,
+            include_archived=True,
+            include_deleted=False,
+            limit=_get_persona_state_history_max_entries(),
+            offset=0,
+        )
+        target_row: dict[str, Any] | None = None
+        for row in rows:
+            row_id = str(row.get("id") or "").strip()
+            if row_id != target_entry_id:
+                continue
+            if str(row.get("memory_type") or "").strip() not in _PERSONA_STATE_MEMORY_TYPES:
+                continue
+            target_row = row
+            break
+        if target_row is None:
+            _increment_persona_state_metric(action="archive", result="entry_not_found")
+            raise HTTPException(status_code=404, detail="State history entry not found")
+
+        if not _coerce_bool(target_row.get("archived"), default=False):
+            archived = db.set_persona_memory_archived(
+                entry_id=target_entry_id,
+                user_id=user_id,
+                persona_id=persona_id,
+                archived=True,
+            )
+            if not archived:
+                _increment_persona_state_metric(action="archive", result="entry_not_found")
+                raise HTTPException(status_code=404, detail="State history entry not found")
+
+        current_rows = _get_persona_state_rows(db, user_id=user_id, persona_id=persona_id)
+        _increment_persona_state_metric(action="archive", result="success")
+        return _persona_state_response_from_rows(persona_id=persona_id, rows=current_rows)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        _increment_persona_state_metric(action="archive", result="error")
+        raise _to_http_exception(exc, action="archive persona profile state entry") from exc
 
 
 @router.get(
@@ -7459,7 +7641,7 @@ async def persona_session(
             session_id=materialized.session_id,
             persona=persona,
             scopes=scopes,
-            runtime_mode=str(session_row.get("mode") or profile.get("mode") or "session_scoped"),
+            runtime_mode=_persona_runtime_mode_value(session_row.get("mode") or profile.get("mode")),
             scope_snapshot_id=scope_snapshot_id_from_snapshot(scope_snapshot),
             scope_audit=materialized.scope_audit,
         )
@@ -7683,6 +7865,45 @@ async def persona_session_detail(
         raise
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="get persona session detail") from exc
+
+
+@router.get(
+    "/sessions/{session_id}/export",
+    response_model=PersonaSessionExportResponse,
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+)
+async def persona_session_export(
+    session_id: str,
+    limit_turns: int = Query(default=1000, ge=0, le=1000),
+    _current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> PersonaSessionExportResponse:
+    """Export a redacted transcript for one selected Persona session owned by the user."""
+    if not is_persona_enabled():
+        raise HTTPException(status_code=404, detail="Persona disabled")
+    user_id = _require_current_user_id(_current_user)
+    _require_persona_export_allowed()
+    manager = get_session_manager()
+    try:
+        row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Persona session not found")
+        snapshot = manager.get_session_snapshot(
+            session_id=session_id,
+            user_id=user_id,
+            limit_turns=None if limit_turns <= 0 else limit_turns,
+        )
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Persona transcript is only available for active live sessions",
+            )
+        return _persona_session_export_from_db(row, manager_snapshot=snapshot)
+    except HTTPException:
+        raise
+    except (InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise _to_http_exception(exc, action="export persona session") from exc
 
 
 @router.websocket("/stream")

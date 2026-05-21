@@ -593,6 +593,7 @@ class PersonaVisualDeactivateResponse(BaseModel):
 class PersonaInfo(BaseModel):
     id: str
     name: str
+    mode: PersonaMode = "session_scoped"
     description: str | None = None
     voice: str | None = None
     avatar_url: str | None = None
@@ -662,6 +663,26 @@ class PersonaSessionSummary(BaseModel):
 
 class PersonaSessionDetail(PersonaSessionSummary):
     turns: list[dict[str, object]] = Field(default_factory=list)
+
+
+class PersonaSessionExportTurn(BaseModel):
+    turn_id: str | None = None
+    timestamp: str | None = None
+    role: str
+    event_type: str
+    content: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class PersonaSessionExportResponse(BaseModel):
+    session_id: str
+    persona_id: str
+    format: Literal["json"] = "json"
+    created_at: str
+    updated_at: str
+    turn_count: int = 0
+    redaction_markers: list[str] = Field(default_factory=list)
+    turns: list[PersonaSessionExportTurn] = Field(default_factory=list)
 
 
 class PersonaLiveSessionCreateRequest(BaseModel):
@@ -1070,6 +1091,20 @@ class PersonaStateHistoryResponse(BaseModel):
 
 class PersonaStateRestoreRequest(BaseModel):
     entry_id: str = Field(..., min_length=1, max_length=200)
+
+
+class PersonaStateArchiveRequest(BaseModel):
+    entry_id: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("entry_id", mode="before")
+    @classmethod
+    def _strip_required_entry_id(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("entry_id is required")
+        return stripped
 
 
 class PersonaConnectionCreate(BaseModel):
