@@ -53,8 +53,6 @@ Verification:
 Migrated VoiceTranscriptComposer's unsupported-browser voice transcript notice from AntD Alert to the canonical design-system Alert, added focused product-state coverage, removed the VoiceTranscriptComposer baseline exception, and addressed PR review feedback by mapping the unavailable state to the design-system Alert error variant. Product-state baseline exceptions remain 325.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
