@@ -63,7 +63,11 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
       (liveControl?.voiceAvailable || focusedSession.capabilities?.voice)
   )
   const voiceState = String(liveControl?.voiceState ?? "").trim().toLowerCase()
-  const isListening = voiceState === "listening"
+  const isListening =
+    liveControl?.voiceIsListening === true || voiceState === "listening"
+  const voiceActionLabel = isListening
+    ? t("personaBuddy.voiceStop", "Stop listening")
+    : t("personaBuddy.voiceListen", "Listen")
 
   const handleDraftChange = (
     event: React.ChangeEvent<HTMLTextAreaElement>
@@ -190,7 +194,7 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
               ) : (
                 <Mic aria-hidden="true" className="h-3.5 w-3.5" />
               )}
-              {isListening ? "Stop listening" : "Listen"}
+              {voiceActionLabel}
             </Link>
           ) : null}
 

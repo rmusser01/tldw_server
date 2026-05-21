@@ -235,6 +235,7 @@ const SidepanelPersona = ({
   )
   const [buddyShellLiveContext, setBuddyShellLiveContext] = React.useState({
     live_voice_state: "idle",
+    live_voice_is_listening: false,
     active_tool_name: "",
     active_tool_status: "",
     wake_armed: false,
@@ -277,6 +278,8 @@ const SidepanelPersona = ({
           null,
         live_session_id: sessionId,
         live_voice_state: buddyShellLiveContext.live_voice_state,
+        live_voice_is_listening:
+          buddyShellLiveContext.live_voice_is_listening,
         active_tool_name: buddyShellLiveContext.active_tool_name,
         active_tool_status: buddyShellLiveContext.active_tool_status,
         wake_armed: buddyShellLiveContext.wake_armed,
@@ -602,6 +605,7 @@ const SidepanelPersona = ({
   React.useEffect(() => {
     setBuddyShellLiveContext({
       live_voice_state: liveVoiceController.state,
+      live_voice_is_listening: liveVoiceController.isListening,
       active_tool_name: liveVoiceController.activeToolName,
       active_tool_status: liveVoiceController.activeToolStatus,
       wake_armed: liveVoiceController.wakeArmed,
@@ -610,6 +614,7 @@ const SidepanelPersona = ({
   }, [
     liveVoiceController.activeToolName,
     liveVoiceController.activeToolStatus,
+    liveVoiceController.isListening,
     liveVoiceController.recoveryMode,
     liveVoiceController.state,
     liveVoiceController.wakeArmed

@@ -259,6 +259,46 @@ describe("BuddyShellPopover", () => {
     expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
   })
 
+  it("treats pending voice starts as listening before route state changes", () => {
+    renderPopover({
+      liveControl: {
+        sessions: [
+          buildLiveSession({
+            capabilities: {
+              text: true,
+              voice: true,
+              browserMicrophoneRequired: true
+            }
+          })
+        ],
+        focusedSession: buildLiveSession({
+          capabilities: {
+            text: true,
+            voice: true,
+            browserMicrophoneRequired: true
+          }
+        }),
+        focusedSessionId: "live-session-1",
+        streamState: "open",
+        canSendText: true,
+        voiceAvailable: true,
+        voiceIsListening: true,
+        voiceState: "idle",
+        pendingFocusSessionId: null,
+        startTextSession: vi.fn(),
+        stopSession: vi.fn(),
+        focusSession: vi.fn(),
+        sendText: vi.fn()
+      }
+    })
+
+    expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
+      "href",
+      "/persona?persona_id=persona-1&tab=live"
+    )
+    expect(screen.queryByRole("link", { name: "Listen" })).not.toBeInTheDocument()
+  })
+
   it("hides voice controls when the focused session is not voice-capable", () => {
     renderPopover({
       liveControl: {

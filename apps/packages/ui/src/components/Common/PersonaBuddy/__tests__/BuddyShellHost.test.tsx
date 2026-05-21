@@ -992,7 +992,8 @@ describe("BuddyShellHost", () => {
         position_bucket: "sidepanel-desktop",
         persona_source: "route-local",
         buddy_summary: buildBuddySummary("persona-1"),
-        live_voice_state: "listening"
+        live_voice_state: "idle",
+        live_voice_is_listening: true
       },
       root: "sidepanel"
     })

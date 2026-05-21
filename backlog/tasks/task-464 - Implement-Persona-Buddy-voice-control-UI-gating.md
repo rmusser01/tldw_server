@@ -38,13 +38,15 @@ Added failing coverage first for Buddy popover voice-capable Listen routing, act
 
 Implemented a frontend-only gate: BuddyShellHost passes route voice state into the live-control view, BuddyShellPopover renders a full-Live route link only for voice-capable focused sessions, and no Buddy-shell microphone start/stop behavior was added.
 
+Review fix: threaded `live_voice_is_listening` from the route-owned voice controller through Buddy render context and host live-control view so pending microphone starts render as Stop listening even while `live_voice_state` remains idle. Also moved the new Listen/Stop listening labels through the existing i18n hook.
+
 Bandit was not run because the touched scope is TypeScript/frontend tests only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Persona Buddy voice control UI gating for the shared Buddy shell. Voice-capable focused live sessions now show Listen or Stop listening links that route to the full Persona Live tab, while voice=false sessions and disabled live-control capability do not expose voice controls. Verification: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/components/Common/PersonaBuddy/__tests__/BuddyShellPopover.test.tsx src/hooks/__tests__/usePersonaLiveControl.test.tsx (48 tests passed); git diff --check passed.
+Implemented Persona Buddy voice control UI gating for the shared Buddy shell. Voice-capable focused live sessions now show Listen or Stop listening links that route to the full Persona Live tab, while voice=false sessions and disabled live-control capability do not expose voice controls. Review fixes ensure pending voice starts use the Stop listening label and the new labels are localizable. Verification: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/components/Common/PersonaBuddy/__tests__/BuddyShellPopover.test.tsx src/hooks/__tests__/usePersonaLiveControl.test.tsx (49 tests passed); bunx vitest run src/routes/__tests__/sidepanel-persona.test.tsx (77 tests passed); git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

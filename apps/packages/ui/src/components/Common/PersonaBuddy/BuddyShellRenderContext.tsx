@@ -49,6 +49,7 @@ const areRenderContextsEqual = (
     areBuddySummariesEqual(left.buddy_summary, right.buddy_summary) &&
     left.live_session_id === right.live_session_id &&
     left.live_voice_state === right.live_voice_state &&
+    left.live_voice_is_listening === right.live_voice_is_listening &&
     left.active_tool_name === right.active_tool_name &&
     left.active_tool_status === right.active_tool_status &&
     left.wake_armed === right.wake_armed &&

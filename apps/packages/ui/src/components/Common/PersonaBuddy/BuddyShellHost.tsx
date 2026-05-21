@@ -562,6 +562,7 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
     liveControlEnabled
       ? {
           ...liveControl,
+          voiceIsListening: renderContext.live_voice_is_listening ?? undefined,
           voiceState: renderContext.live_voice_state ?? null
         }
       : null
