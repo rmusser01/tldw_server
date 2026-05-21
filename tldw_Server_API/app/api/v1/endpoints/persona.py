@@ -355,6 +355,11 @@ def _bounded_label(value: Any, *, allowed: set[str], fallback: str) -> str:
     return fallback
 
 
+def _persona_runtime_mode_value(value: Any) -> str:
+    """Normalize stored Persona runtime mode values for public responses."""
+    return _bounded_label(value, allowed=_PERSONA_RUNTIME_MODES, fallback="session_scoped")
+
+
 def _redacted_id_for_logs(raw_id: Any) -> str:
     text = str(raw_id or "").strip()
     if not text:
@@ -590,6 +595,16 @@ def _get_persona_rbac_flags() -> tuple[bool, bool]:
         allow_export = False
         allow_delete = False
     return allow_export, allow_delete
+
+
+def _require_persona_export_allowed() -> None:
+    """Reject direct Persona export requests when export scope is disabled."""
+    allow_export, _allow_delete = _get_persona_rbac_flags()
+    if not allow_export:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Persona export is disabled by policy",
+        )
 
 
 def _get_persona_runtime_explorer_config() -> RuntimeExplorerConfig:
@@ -1389,9 +1404,7 @@ def _load_persona_policy_rules_for_session(
         if not session_row:
             return dict(default_payload)
         persona_id = str(session_row.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
-        runtime_mode = str(session_row.get("mode") or "session_scoped").strip().lower()
-        if runtime_mode not in _PERSONA_RUNTIME_MODES:
-            runtime_mode = "session_scoped"
+        runtime_mode = _persona_runtime_mode_value(session_row.get("mode"))
         persona_profile = db.get_persona_profile(persona_id, user_id=uid, include_deleted=False)
         persona_state_context_default = True
         if isinstance(persona_profile, dict):
@@ -1922,7 +1935,7 @@ def _persona_profile_to_response(
         origin_character_id=profile.get("origin_character_id"),
         origin_character_name=profile.get("origin_character_name"),
         origin_character_snapshot_at=profile.get("origin_character_snapshot_at"),
-        mode=str(profile.get("mode") or "session_scoped"),
+        mode=_persona_runtime_mode_value(profile.get("mode")),
         system_prompt=profile.get("system_prompt"),
         is_active=bool(profile.get("is_active", True)),
         use_persona_state_context_default=_coerce_bool(
@@ -2983,11 +2996,7 @@ def _persona_info_from_profile(
     return PersonaInfo(
         id=str(profile.get("id") or _DEFAULT_PERSONA_ID),
         name=str(profile.get("name") or _DEFAULT_PERSONA_NAME),
-        mode=_bounded_label(
-            profile.get("mode"),
-            allowed=_PERSONA_RUNTIME_MODES,
-            fallback="session_scoped",
-        ),
+        mode=_persona_runtime_mode_value(profile.get("mode")),
         description=description[:300] if description else None,
         voice="default",
         avatar_url=None,
@@ -3157,7 +3166,7 @@ def _persona_session_summary_from_db(
         turn_count=int((manager_row or {}).get("turn_count") or 0),
         pending_plan_count=int((manager_row or {}).get("pending_plan_count") or 0),
         preferences=preferences,
-        runtime_mode=str(row.get("mode") or "session_scoped"),
+        runtime_mode=_persona_runtime_mode_value(row.get("mode")),
         status=str(row.get("status") or "active"),
         reuse_allowed=bool(row.get("reuse_allowed", False)),
         scope_snapshot_id=_scope_snapshot_id_from_snapshot(scope_snapshot),
@@ -3185,7 +3194,7 @@ def _persona_session_detail_from_db(
         turn_count=turn_count,
         pending_plan_count=int((manager_snapshot or {}).get("pending_plan_count") or 0),
         preferences=preferences,
-        runtime_mode=str(row.get("mode") or "session_scoped"),
+        runtime_mode=_persona_runtime_mode_value(row.get("mode")),
         status=str(row.get("status") or "active"),
         reuse_allowed=bool(row.get("reuse_allowed", False)),
         scope_snapshot_id=_scope_snapshot_id_from_snapshot(scope_snapshot),
@@ -3214,6 +3223,9 @@ def _redacted_persona_export_metadata(
     Values under secret-like keys and values that cannot be safely serialized into
     the export payload are omitted and recorded in ``markers``.
     """
+    if path == "metadata" and not isinstance(value, dict):
+        markers.add(path)
+        return {}
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
         for raw_key in sorted(value):
@@ -7629,7 +7641,7 @@ async def persona_session(
             session_id=materialized.session_id,
             persona=persona,
             scopes=scopes,
-            runtime_mode=str(session_row.get("mode") or profile.get("mode") or "session_scoped"),
+            runtime_mode=_persona_runtime_mode_value(session_row.get("mode") or profile.get("mode")),
             scope_snapshot_id=scope_snapshot_id_from_snapshot(scope_snapshot),
             scope_audit=materialized.scope_audit,
         )
@@ -7871,6 +7883,7 @@ async def persona_session_export(
     if not is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
+    _require_persona_export_allowed()
     manager = get_session_manager()
     try:
         row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)

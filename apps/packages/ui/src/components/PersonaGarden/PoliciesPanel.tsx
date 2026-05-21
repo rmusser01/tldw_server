@@ -57,10 +57,10 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
 
   React.useEffect(() => {
     let cancelled = false
-    setRules([])
     setError(null)
     setNotice(null)
     if (!normalizedPersonaId) {
+      setRules([])
       setLoading(false)
       return
     }

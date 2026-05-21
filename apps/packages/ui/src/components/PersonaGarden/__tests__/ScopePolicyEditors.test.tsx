@@ -161,6 +161,56 @@ describe("Persona Garden scope and policy editors", () => {
     await screen.findByText("No scope rules yet.")
   })
 
+  it("keeps existing scope rules visible while a new persona load is in flight", async () => {
+    let resolveSecondLoad:
+      | ((value: { ok: boolean; json: () => Promise<{ rules: unknown[] }> }) => void)
+      | undefined
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path === "/api/v1/persona/profiles/persona-1/scope-rules") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            rules: [{ rule_type: "media_tag", rule_value: "research", include: true }]
+          })
+        })
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/scope-rules") {
+        return new Promise((resolve) => {
+          resolveSecondLoad = resolve
+        })
+      }
+      return Promise.resolve({ ok: false, error: `unhandled ${path}`, json: async () => ({}) })
+    })
+
+    const { rerender } = render(
+      <ScopesPanel
+        selectedPersonaId="persona-1"
+        selectedPersonaName="Research Persona"
+      />
+    )
+
+    expect(await screen.findByDisplayValue("research")).toBeInTheDocument()
+
+    rerender(
+      <ScopesPanel
+        selectedPersonaId="persona-2"
+        selectedPersonaName="Ops Persona"
+      />
+    )
+
+    expect(await screen.findByText("Loading...")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("research")).toBeInTheDocument()
+    expect(screen.getByTestId("persona-scope-save-button")).toBeDisabled()
+
+    resolveSecondLoad?.({
+      ok: true,
+      json: async () => ({
+        rules: [{ rule_type: "media_tag", rule_value: "operations", include: true }]
+      })
+    })
+    expect(await screen.findByDisplayValue("operations")).toBeInTheDocument()
+  })
+
   it("loads and saves selected persona policy rules through the authenticated endpoint", async () => {
     mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: unknown }) => {
       if (path === "/api/v1/persona/profiles/persona-1/policy-rules" && !init) {
@@ -262,6 +312,64 @@ describe("Persona Garden scope and policy editors", () => {
     expect(await screen.findByText("policy validation failed")).toBeInTheDocument()
     expect(screen.getByDisplayValue("summarize")).toBeInTheDocument()
     expect(screen.getByText("A pending tool plan is available on the Live Session tab.")).toBeInTheDocument()
+  })
+
+  it("keeps existing policy rules visible while a new persona load is in flight", async () => {
+    let resolveSecondLoad:
+      | ((value: { ok: boolean; json: () => Promise<{ rules: unknown[] }> }) => void)
+      | undefined
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      if (path === "/api/v1/persona/profiles/persona-1/policy-rules") {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            rules: [
+              {
+                rule_kind: "skill",
+                rule_name: "summarize",
+                allowed: true,
+                require_confirmation: false
+              }
+            ]
+          })
+        })
+      }
+      if (path === "/api/v1/persona/profiles/persona-2/policy-rules") {
+        return new Promise((resolve) => {
+          resolveSecondLoad = resolve
+        })
+      }
+      return Promise.resolve({ ok: false, error: `unhandled ${path}`, json: async () => ({}) })
+    })
+
+    const { rerender } = render(
+      <PoliciesPanel selectedPersonaId="persona-1" selectedPersonaName="Research Persona" />
+    )
+
+    expect(await screen.findByDisplayValue("summarize")).toBeInTheDocument()
+
+    rerender(
+      <PoliciesPanel selectedPersonaId="persona-2" selectedPersonaName="Ops Persona" />
+    )
+
+    expect(await screen.findByText("Loading...")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("summarize")).toBeInTheDocument()
+    expect(screen.getByTestId("persona-policy-save-button")).toBeDisabled()
+
+    resolveSecondLoad?.({
+      ok: true,
+      json: async () => ({
+        rules: [
+          {
+            rule_kind: "skill",
+            rule_name: "draft_report",
+            allowed: true,
+            require_confirmation: true
+          }
+        ]
+      })
+    })
+    expect(await screen.findByDisplayValue("draft_report")).toBeInTheDocument()
   })
 
   it("uses MCP picker selections for mcp_tool policy rule names", async () => {

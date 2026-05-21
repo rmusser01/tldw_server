@@ -130,6 +130,19 @@ def test_persona_profile_scope_policy_crud(persona_db: CharactersRAGDB):
     fastapi_app.dependency_overrides.clear()
 
 
+def test_persona_profile_response_normalizes_invalid_mode():
+    response = persona_ep._persona_profile_to_response(
+        {
+            "id": "persona-invalid-mode",
+            "name": "Invalid Mode Persona",
+            "mode": "unexpected_mode",
+            "system_prompt": "Helper",
+        }
+    )
+
+    assert response.mode == "session_scoped"
+
+
 def test_persona_profile_projection_fails_open_when_buddy_lookup_breaks(
     persona_db: CharactersRAGDB,
     monkeypatch,

@@ -39,7 +39,7 @@ Expose existing Persona state-memory archive support for visible Persona Garden 
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 - Implemented Persona state-history archive control across backend API, Persona Garden UI, and focused regression tests.
-- Verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_profiles_api.py -k "state_history" -q`; `bunx vitest run src/routes/__tests__/sidepanel-persona.test.tsx --testNamePattern "loads, saves, restores, and archives"`; `python -m pytest tldw_Server_API/tests/Persona/test_persona_profiles_api.py -q`; `bunx vitest run src/routes/__tests__/sidepanel-persona.test.tsx`; `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/api/v1/schemas/persona.py -f json -o /tmp/bandit_persona_state_archive.json`; `git diff --check`.
+- Verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_profiles_api.py -k "state_history" -q`; `bunx vitest run apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx --testNamePattern "loads, saves, restores, and archives"`; `python -m pytest tldw_Server_API/tests/Persona/test_persona_profiles_api.py -q`; `bunx vitest run apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`; `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/api/v1/schemas/persona.py -f json -o /tmp/bandit_persona_state_archive.json`; `git diff --check`.
 - Known skips/blockers: none.
 <!-- SECTION:FINAL_SUMMARY:END -->
 

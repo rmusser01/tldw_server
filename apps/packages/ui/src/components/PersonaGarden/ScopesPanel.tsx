@@ -55,10 +55,10 @@ export const ScopesPanel: React.FC<ScopesPanelProps> = ({
 
   React.useEffect(() => {
     let cancelled = false
-    setRules([])
     setError(null)
     setNotice(null)
     if (!normalizedPersonaId) {
+      setRules([])
       setLoading(false)
       return
     }

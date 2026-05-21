@@ -96,6 +96,7 @@ def test_materialized_session_reads_memory_top_k_from_settings_attributes(monkey
 def test_persona_session_export_returns_selected_session_transcript(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
 
     with _client_for_user(1, persona_db) as client:
         created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
@@ -156,9 +157,47 @@ def test_persona_session_export_returns_selected_session_transcript(monkeypatch,
     fastapi_app.dependency_overrides.clear()
 
 
+def test_persona_session_export_rejects_when_export_disabled(monkeypatch, persona_db: CharactersRAGDB):
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (False, False))
+
+    with _client_for_user(1, persona_db) as client:
+        resp = client.get("/api/v1/persona/sessions/sess_export_disabled/export")
+        assert resp.status_code == 403
+        assert "export is disabled" in resp.json()["detail"]
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_persona_session_export_redacts_non_object_top_level_metadata():
+    markers: set[str] = set()
+
+    redacted = persona_ep._redacted_persona_export_metadata(
+        ["unexpected", {"auth_token": "hidden"}],
+        markers=markers,
+    )
+
+    assert redacted == {}
+    assert markers == {"metadata"}
+
+
+def test_persona_session_response_helpers_normalize_invalid_runtime_mode():
+    row = {
+        "id": "sess_invalid_mode",
+        "persona_id": "research_assistant",
+        "mode": "unexpected_mode",
+        "status": "active",
+        "reuse_allowed": False,
+        "scope_snapshot": {},
+    }
+
+    assert persona_ep._persona_session_summary_from_db(row).runtime_mode == "session_scoped"
+    assert persona_ep._persona_session_detail_from_db(row).runtime_mode == "session_scoped"
+
+
 def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
     persona_id = persona_db.create_persona_profile(
         {
             "id": "research_assistant",
@@ -191,6 +230,7 @@ def test_persona_session_export_is_user_scoped(monkeypatch, persona_db: Characte
 def test_persona_session_export_requires_live_snapshot(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
     persona_id = persona_db.create_persona_profile(
         {
             "id": "research_assistant",

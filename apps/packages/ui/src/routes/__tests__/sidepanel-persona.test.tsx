@@ -5947,6 +5947,12 @@ describe("SidepanelPersona", () => {
           json: async () => []
         })
       }
+      if (path.includes("/persona/session")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ session_id: "sess-memory-mode-status" })
+        })
+      }
       return Promise.resolve({
         ok: false,
         error: `unhandled path: ${path}`,
