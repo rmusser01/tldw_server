@@ -10,7 +10,28 @@ vi.mock("../../hooks", () => ({
   useRecentFlashcardReviewSessionsQuery: vi.fn()
 }))
 
+type RecentSessionsQueryResult = ReturnType<typeof useRecentFlashcardReviewSessionsQuery>
+type RecentSessionsQueryMock = Partial<RecentSessionsQueryResult>
+
 const sessionsMock = vi.fn()
+
+const mockRecentSessionsQuery = (result: RecentSessionsQueryMock) => {
+  vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue(
+    result as RecentSessionsQueryResult
+  )
+}
+
+const createRefetchMock = () => {
+  const mock = vi.fn()
+  const refetch = ((...args: Parameters<RecentSessionsQueryResult["refetch"]>) => {
+    mock(...args)
+    return Promise.resolve(
+      {} as Awaited<ReturnType<RecentSessionsQueryResult["refetch"]>>
+    )
+  }) as RecentSessionsQueryResult["refetch"]
+
+  return { mock, refetch }
+}
 
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   Object.defineProperty(window, "matchMedia", {
@@ -32,7 +53,7 @@ describe("RecentStudySessions", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     sessionsMock.mockReset()
-    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+    mockRecentSessionsQuery({
       data: [
         {
           id: 81,
@@ -49,7 +70,7 @@ describe("RecentStudySessions", () => {
       ],
       isLoading: false,
       isFetching: false
-    } as any)
+    })
   })
 
   it("lists completed sessions and reopens the selected snapshot when clicked", () => {
@@ -76,15 +97,15 @@ describe("RecentStudySessions", () => {
   })
 
   it("shows a retryable error state when loading fails", () => {
-    const refetchMock = vi.fn()
-    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+    const refetchMock = createRefetchMock()
+    mockRecentSessionsQuery({
       data: undefined,
       isLoading: false,
       isFetching: false,
       isError: true,
       error: new Error("Session service offline"),
-      refetch: refetchMock
-    } as any)
+      refetch: refetchMock.refetch
+    })
 
     render(
       <RecentStudySessions
@@ -95,9 +116,63 @@ describe("RecentStudySessions", () => {
       />
     )
 
+    expect(screen.getByText("Failed to load recent study sessions")).toBeInTheDocument()
     expect(screen.getByText("Session service offline")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Session service offline")
+        .closest('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
-    expect(refetchMock).toHaveBeenCalled()
+    expect(refetchMock.mock).toHaveBeenCalled()
+  })
+
+  it("renders loading and no-session product states through canonical design-system primitives", () => {
+    mockRecentSessionsQuery({
+      data: undefined,
+      isLoading: true,
+      isFetching: false,
+      isError: false
+    })
+
+    const { rerender } = render(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("Loading recent study sessions...")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Loading recent study sessions...")
+        .closest('[data-ds-component="LoadingState"]')
+    ).toBeInTheDocument()
+
+    mockRecentSessionsQuery({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false
+    })
+
+    rerender(
+      <RecentStudySessions
+        deckId={12}
+        selectedSessionId={null}
+        onOpenSession={sessionsMock}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("No completed study sessions yet.")).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("No completed study sessions yet.")
+        .closest('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
   })
 })

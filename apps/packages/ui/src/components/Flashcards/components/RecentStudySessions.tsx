@@ -1,6 +1,8 @@
 import React from "react"
-import { Button, Card, Empty, List, Space, Tag, Typography } from "antd"
+import { Button, Card, List, Space, Tag, Typography } from "antd"
 
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { LoadingState } from "@/components/ui/feedback/LoadingState"
 import { useRecentFlashcardReviewSessionsQuery } from "../hooks"
 
 const { Text } = Typography
@@ -21,8 +23,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
   onOpenSession,
   isActive
 }) => {
-  const recentSessionsQuery =
-    useRecentFlashcardReviewSessionsQuery(
+  const recentSessionsQuery = useRecentFlashcardReviewSessionsQuery(
     {
       deckId,
       status: "completed",
@@ -31,7 +32,7 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
     {
       enabled: isActive
     }
-    )
+  )
 
   const sessions = recentSessionsQuery.data ?? []
   const errorMessage =
@@ -42,16 +43,28 @@ export const RecentStudySessions: React.FC<RecentStudySessionsProps> = ({
   return (
     <Card size="small" title="Recent study sessions">
       {recentSessionsQuery.isLoading ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Loading recent study sessions..." />
+        <LoadingState
+          mode="spinner"
+          size="sm"
+          label="Loading recent study sessions..."
+        />
       ) : recentSessionsQuery.isError ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        <EmptyState
+          variant="inline"
+          size="sm"
+          title="Failed to load recent study sessions"
           description={errorMessage}
-        >
-          <Button onClick={() => void recentSessionsQuery.refetch()}>Retry</Button>
-        </Empty>
+          primaryAction={{
+            label: "Retry",
+            onClick: () => void recentSessionsQuery.refetch()
+          }}
+        />
       ) : sessions.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No completed study sessions yet." />
+        <EmptyState
+          variant="inline"
+          size="sm"
+          title="No completed study sessions yet."
+        />
       ) : (
         <List
           dataSource={sessions}

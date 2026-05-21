@@ -242,28 +242,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Flashcards/components/RecentStudySessions.tsx:Empty#antd-empty-recentstudysessions-loading-recent-study-sess-13qi672",
-    "path": "src/components/Flashcards/components/RecentStudySessions.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/Flashcards/components/RecentStudySessions.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Flashcards/components/RecentStudySessions.tsx:Empty#antd-empty-recentstudysessions-retry-line-47-16icsdx",
-    "path": "src/components/Flashcards/components/RecentStudySessions.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Empty",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Empty product-state UI in src/components/Flashcards/components/RecentStudySessions.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Flashcards/tabs/ImageOcclusionPanel.tsx:Alert#antd-alert-imageocclusionpanel-type-info-line-230-fgog2f",
     "path": "src/components/Flashcards/tabs/ImageOcclusionPanel.tsx",
     "rule": "antd-product-state-import",
