@@ -17,6 +17,22 @@ type WatchlistsRouteOptions = {
 
 const now = () => "2026-05-20T15:00:00Z"
 
+const watchlist = {
+  id: 42,
+  name: "Demo News Watchlist",
+  description: "Demo collection for briefing readiness checks",
+  objective: "Track demo news sources and generate briefings",
+  domain: "news",
+  status: "active",
+  priority: "medium",
+  tags: ["demo"],
+  archived_at: null,
+  deleted_at: null,
+  restore_expires_at: null,
+  created_at: now(),
+  updated_at: now()
+}
+
 const source = {
   id: 101,
   name: "Demo Feed",
@@ -177,7 +193,7 @@ const EXPECTED_OUTPUT_CREATE_400_CONSOLE =
   /Failed to load resource: the server responded with a status of 400 \(Bad Request\)/
 
 const fillGuidedQuickSetup = async (page: Page) => {
-  const quickSetupDialog = page.getByRole("dialog", { name: "Guided quick setup" })
+  const quickSetupDialog = page.getByRole("dialog", { name: "Add initial collection" })
   const openedAutomatically = await quickSetupDialog
     .waitFor({ state: "visible", timeout: 2000 })
     .then(() => true)
@@ -195,7 +211,7 @@ const fillGuidedQuickSetup = async (page: Page) => {
 
   await expect(quickSetupDialog.getByTestId("watchlists-overview-quick-setup-candidate-summary"))
     .toContainText("1 ingestable")
-  await quickSetupDialog.getByRole("button", { name: /Create setup/i }).click()
+  await quickSetupDialog.getByRole("button", { name: /Create collection/i }).click()
 }
 
 const setupWatchlistsReadinessRoutes = async (
@@ -206,6 +222,7 @@ const setupWatchlistsReadinessRoutes = async (
     localStorage.setItem("watchlists:show-all-views:v1", "true")
   })
   const state = {
+    watchlists: [watchlist],
     sources: [...(options.sources || [])],
     jobs: [...(options.jobs || [])],
     runs: [...(options.runs || [])],
@@ -228,6 +245,16 @@ const setupWatchlistsReadinessRoutes = async (
     const method = request.method()
     const pageNum = Number(searchParams.get("page") || "1")
     const size = Number(searchParams.get("size") || "25")
+
+    if (method === "GET" && pathname === "/api/v1/watchlists") {
+      await jsonResponse(route, {
+        items: state.watchlists,
+        total: state.watchlists.length,
+        page: pageNum,
+        size
+      })
+      return
+    }
 
     if (method === "GET" && pathname === "/api/v1/watchlists/sources") {
       await jsonResponse(route, {
@@ -440,6 +467,12 @@ const setupWatchlistsReadinessRoutes = async (
       return
     }
 
+    const alertsMatch = pathname.match(/^\/api\/v1\/watchlists\/(\d+)\/alerts$/)
+    if (method === "GET" && alertsMatch) {
+      await jsonResponse(route, { items: [], total: 0, page: pageNum, size })
+      return
+    }
+
     if (method === "POST" && pathname.startsWith("/api/v1/watchlists/telemetry/")) {
       await jsonResponse(route, { ok: true })
       return
@@ -531,12 +564,15 @@ test.describe("Watchlists demo readiness gate", () => {
 
     await pipelineDialog.getByLabel("Monitor name").fill("Demo Briefing")
     await expect(pipelineDialog.getByLabel("Monitor name")).toHaveValue("Demo Briefing")
+    await pipelineDialog.getByRole("button", { name: "Next" }).click()
+
     await expect(pipelineDialog.getByLabel("Template")).toHaveValue("briefing_md")
     await pipelineDialog.getByRole("button", { name: "Next" }).click()
 
-    await expect(
-      pipelineDialog.getByText("Confirm this pipeline before creating monitor, run, and output artifacts.")
-    ).toBeVisible()
+    await expect(pipelineDialog.getByLabel("Audio briefing")).toBeVisible()
+    await pipelineDialog.getByRole("button", { name: "Next" }).click()
+
+    await expect(pipelineDialog.getByTestId("watchlists-pipeline-review-summary")).toBeVisible()
     await pipelineDialog.getByRole("button", { name: "Create pipeline" }).click()
 
     await expect.poll(() => state.createdJobs.length).toBe(1)
@@ -594,9 +630,9 @@ test.describe("Watchlists demo readiness gate", () => {
     await assertNoRuntimeOverlay(page)
 
     for (const expected of [
-      { title: "Pending audio report", status: "Audio briefing queued", detail: "task_audio_pending" },
-      { title: "Failed audio report", status: "Audio briefing failed", detail: "TTS provider timeout" },
-      { title: "Skipped audio report", status: "Audio briefing skipped", detail: "no briefing text" }
+      { title: "Pending audio report", status: "Queued", detail: "task_audio_pending" },
+      { title: "Failed audio report", status: "Failed", detail: "TTS provider timeout" },
+      { title: "Skipped audio report", status: "Skipped", detail: "no briefing text" }
     ]) {
       const row = page.locator(".ant-table-row").filter({ hasText: expected.title })
       await expect(row).toBeVisible()

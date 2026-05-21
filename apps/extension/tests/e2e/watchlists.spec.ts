@@ -1112,7 +1112,7 @@ test.describe('Watchlists playground smoke', () => {
     await context.close()
   })
 
-  test('overview health and failed-run notification click-through', async () => {
+  test('overview health and failed-run click-through', async () => {
     test.setTimeout(120_000)
     const extPath = path.resolve('.output/chrome-mv3')
     const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
@@ -1278,13 +1278,9 @@ test.describe('Watchlists playground smoke', () => {
     await expect(page.getByText('Recent Failed Runs')).toBeVisible()
     await expect(page.getByText('Alert Monitor')).toBeVisible()
 
-    const failureNotice = page
-      .locator('.ant-notification-notice')
-      .filter({ hasText: 'Run failed' })
-      .first()
-    await expect(failureNotice).toBeVisible({ timeout: 10_000 })
-    await expect(failureNotice).toContainText('rate-limiting requests')
-    await failureNotice.getByRole('button', { name: 'View run' }).click()
+    const failedRunCard = page.locator('.ant-card').filter({ hasText: 'Recent Failed Runs' }).first()
+    await expect(failedRunCard).toContainText('Rate limit exceeded while fetching source')
+    await failedRunCard.getByRole('button', { name: 'View run' }).click()
 
     await expectWatchlistsDestination(page, 'Activity')
     const runDialog = page.getByRole('dialog', { name: 'Run Details' })

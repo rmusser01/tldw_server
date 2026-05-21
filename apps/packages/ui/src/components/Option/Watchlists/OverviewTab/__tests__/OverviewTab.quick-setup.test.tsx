@@ -1074,7 +1074,7 @@ describe("OverviewTab quick setup flow", () => {
     fireEvent.change(pipelineQueries().getByLabelText("Monitor name"), {
       target: { value: "Morning Brief" }
     })
-    clickPipelineNext()
+    await advancePipelineFromMonitorToReview()
     await waitFor(() => {
       expect(screen.getByTestId("watchlists-pipeline-test-generation")).toBeInTheDocument()
     })

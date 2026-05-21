@@ -175,7 +175,15 @@ describe("OutputPreviewDrawer audio support", () => {
       <OutputPreviewDrawer
         open
         onClose={vi.fn()}
-        output={buildOutput({ type: "brief", format: "md" })}
+        output={buildOutput({
+          type: "brief",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "pending",
+            audio_briefing_task_id: "task_audio_pending"
+          }
+        })}
       />
     )
 
@@ -187,6 +195,9 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(await screen.findByTestId("output-preview-provenance")).toHaveTextContent(
       "Monitor #7 • Run #9 • Artifact: Markdown"
     )
+    expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
+    expect(screen.getByText("Queued")).toBeInTheDocument()
+    expect(screen.getByText(/task_audio_pending/)).toBeInTheDocument()
     expect(await screen.findByText("# Briefing")).toBeInTheDocument()
   })
 

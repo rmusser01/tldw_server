@@ -277,6 +277,20 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
             })}
           </div>
         )}
+        {audioSummary.error && (
+          <div className="text-xs text-danger">
+            {t("watchlists:outputs.audioError", "Error: {{error}}", {
+              error: audioSummary.error
+            })}
+          </div>
+        )}
+        {audioSummary.taskId && (
+          <div className="text-xs text-text-muted">
+            {t("watchlists:outputs.audioTaskId", "Task: {{taskId}}", {
+              taskId: audioSummary.taskId
+            })}
+          </div>
+        )}
         <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
           {audioSummary.scriptArtifact && (
             renderArtifact(audioSummary.scriptArtifact, "script")
@@ -477,6 +491,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}

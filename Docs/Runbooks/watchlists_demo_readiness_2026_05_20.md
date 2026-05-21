@@ -88,4 +88,4 @@ Do not describe audio as playable, produced, or complete when only the Scheduler
 - Audio status may truthfully be pending, failed, or skipped during a demo; narrate that state directly.
 - Some remote sources may block scraping or return no usable items. Replace the source or show the diagnostic rather than retrying silently.
 - Extension verification depends on a current extension build and seeded server configuration.
-- Current verification on 2026-05-20 blocked before the extension route smoke: `wxt build` did not finish within 120 seconds during Chrome extension build, so do not claim the extension path is demo-ready until the extension build gate passes.
+- Current verification on 2026-05-21: the Chrome MV3 extension build completed and `tests/e2e/watchlists.spec.ts` passed 14 Watchlists smoke tests. Existing WXT/Rollup font, chunk-size, duplicate-import, and circular chunk warnings remain noisy but did not block the route smoke.

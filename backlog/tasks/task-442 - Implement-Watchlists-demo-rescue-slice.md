@@ -17,6 +17,10 @@ modified_files:
 - apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts
 - apps/extension/tests/e2e/watchlists.spec.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/OverviewTab.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OverviewTab/PipelineWizard.tsx
 ---
 
 ## Description
@@ -47,7 +51,7 @@ Task 4 implemented. Backend now persists source_statuses/source_errors in run st
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 5 review hardening completed after the first demo-readiness commit. The WebUI smoke now covers the first-time guided source preflight and source/monitor creation path, fails closed on unmatched Watchlists API mocks, uses normal Playwright actionability checks, scopes regenerate modal actions, and keeps diagnostics strict with only narrow expected mock-environment allowances. OutputsTab regenerate logging now sanitizes server errors and redacts key/token-looking values instead of stringifying arbitrary error objects. Runbook safe claims now separate WebUI verification from the blocked extension build gate. Verification: WebUI Playwright smoke 3 passed; focused OutputsTab/OutputPreviewDrawer Vitest 3 files/11 tests passed; git diff --check passed. Prior backend demo tests remain 29 passed, 4 skipped, 1 xpassed; Bandit on touched Watchlists Python paths reported 0 results/errors. Extension Playwright remains blocked because WXT build hangs before .output/chrome-mv3 is produced.
+Task 5 review hardening completed after the first demo-readiness commit and post-rebase repair. The WebUI smoke now covers the first-time guided source preflight and source/monitor creation path, fails closed on unmatched Watchlists API mocks, uses normal Playwright actionability checks, scopes regenerate modal actions, and keeps diagnostics strict with only narrow expected mock-environment allowances. OutputsTab regenerate logging sanitizes server errors and redacts key/token-looking values instead of stringifying arbitrary error objects. Post-rebase fixes restored persistent in-modal pipeline output-create errors, aligned the WebUI/extension smokes with the selected-Watchlist collection model and current five-step pipeline wizard, and made markdown report previews show truthful flat backend audio briefing metadata (`audio_briefing_status`, task id, and error) for queued/failed/skipped states. Runbook safe claims now reflect that the extension build and route smoke passed. Verification: WebUI Playwright smoke 3 passed; extension Watchlists Playwright smoke 14 passed; focused Watchlists UI Vitest 10 files/69 tests passed; focused backend Watchlists pytest 54 passed, 5 skipped, 1 xpassed; git diff --check passed; Bandit on touched Watchlists Python paths reported 0 results/errors.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -56,5 +60,5 @@ Task 5 review hardening completed after the first demo-readiness commit. The Web
 - [x] #2 Focused frontend and backend tests recorded.
 - [x] #3 Bandit run on touched Python paths or documented skip.
 - [x] #4 Backlog final summary updated.
-- [x] #5 Known skips or blockers documented.
+- [x] #5 Known skips, warnings, or blockers documented.
 <!-- DOD:END -->

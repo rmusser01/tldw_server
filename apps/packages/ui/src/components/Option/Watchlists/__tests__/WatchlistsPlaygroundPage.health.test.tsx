@@ -104,6 +104,7 @@ vi.mock("@/services/watchlists", () => ({
   createWatchlistOutput: vi.fn(),
   createWatchlistJob: vi.fn(),
   createWatchlistSource: vi.fn(),
+  deleteWatchlistSource: vi.fn(),
   deleteWatchlistJob: vi.fn(),
   fetchWatchlistRuns: vi.fn(),
   fetchWatchlistSources: vi.fn(),
@@ -111,6 +112,10 @@ vi.mock("@/services/watchlists", () => ({
   previewWatchlistTemplate: vi.fn(),
   testWatchlistSourceDraft: vi.fn(),
   triggerWatchlistRun: vi.fn()
+}))
+
+vi.mock("../OverviewTab/PipelineWizard", () => ({
+  PipelineWizard: () => null
 }))
 
 vi.mock("@/store/watchlists", () => ({
@@ -122,7 +127,8 @@ vi.mock("@/store/watchlists", () => ({
       openRunDetail: healthMocks.openRunDetail,
       openOutputPreview: healthMocks.openOutputPreview,
       openSourceForm: healthMocks.openSourceForm,
-      openJobForm: healthMocks.openJobForm
+      openJobForm: healthMocks.openJobForm,
+      selectedWatchlistId: 42
     })
 }))
 
