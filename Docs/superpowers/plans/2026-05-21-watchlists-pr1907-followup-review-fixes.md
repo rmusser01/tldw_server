@@ -21,3 +21,14 @@
 **Success Criteria**: TASK metadata parses consistently; verification results are recorded in TASK-468.
 **Tests**: Targeted Vitest, targeted pytest, Bandit on touched backend files.
 **Status**: Complete
+
+## Stage 5: PR Review Follow-Up
+**Goal**: Address PR #1915 review comments and failing check evidence after the first draft review.
+**Success Criteria**: Valid review findings are fixed or documented as not applicable; targeted tests cover the fixes.
+**Tests**: Targeted Vitest, targeted pytest, Bandit on touched backend files, relevant CI log inspection.
+**Status**: Complete
+
+Review follow-up notes:
+- Mixed-case audio status normalization, numeric filter counter coercion, quoted/JSON/bearer secret redaction, and non-empty TASK acceptance criteria were patched.
+- The Watchlists Accessibility Gate failure was traced to `RunDetailDrawer.stream-lifecycle.test.tsx` expecting `Pending` while the current UI contract shows queued audio tasks as `Queued`; the test now matches the product-facing status.
+- Full Suite jobs on the pre-fix commit were cancelled around the AuthNZ slice before Watchlists tests ran; they need to be rechecked after the follow-up commit pushes.

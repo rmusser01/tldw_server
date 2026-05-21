@@ -166,8 +166,9 @@ const asNonEmptyString = (value: unknown): string | undefined => {
 
 const asKnownAudioStatus = (value: unknown): string | undefined => {
   const status = asNonEmptyString(value)
-  if (!status || status.toLowerCase() === "unknown") return undefined
-  return status
+  const normalized = status?.toLowerCase()
+  if (!normalized || normalized === "unknown") return undefined
+  return normalized
 }
 
 const asSafeDownloadUrl = (value: unknown): string | undefined => {

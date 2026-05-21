@@ -530,14 +530,25 @@ def test_safe_source_error_text_redacts_common_secret_formats():
 
 def test_safe_source_error_text_redacts_json_style_secret_formats():
     text = _safe_source_error_text(
-        "fetch failed {\"token\":\"json_token_value\", \"api_key\": \"json_api_value\", "
-        "'password': 'json_password_value'} token=\"quoted_token_value\""
+        "fetch failed {\"token\":\"json token value;still\", \"api_key\": \"json,api&value\", "
+        "'password': 'json password value'} token=\"quoted token value;still\" "
+        "Authorization: Bearer \"auth bearer value;still\" "
+        "{\"Authorization\": \"Bearer json bearer value\", \"bearer\": \"Bearer nested bearer value\"}"
     )
 
-    assert "json_token_value" not in text
-    assert "json_api_value" not in text
-    assert "json_password_value" not in text
-    assert "quoted_token_value" not in text
+    for leaked in (
+        "json token",
+        "token value",
+        "json,api",
+        "api&value",
+        "json password",
+        "quoted token",
+        "auth bearer",
+        "json bearer",
+        "nested bearer",
+    ):
+        assert leaked not in text
+    assert text.count("[redacted]") >= 6
     assert "api_key" not in text.lower()
     assert "password" not in text.lower()
     assert "token=" not in text.lower()

@@ -11,6 +11,7 @@ modified_files:
 - Docs/superpowers/plans/2026-05-21-watchlists-pr1907-followup-review-fixes.md
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
+- apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
 - apps/packages/ui/src/services/watchlists-overview.ts
 - apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts
 - apps/packages/ui/src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.health.test.tsx
@@ -24,6 +25,7 @@ modified_files:
 references:
 - https://github.com/rmusser01/tldw_server/pull/1907
 - https://github.com/rmusser01/tldw_server/pull/1906
+- https://github.com/rmusser01/tldw_server/pull/1915
 ---
 
 ## Description
@@ -34,6 +36,11 @@ Fix still-valid Watchlists demo rescue review findings after PR #1906 landed: au
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Audio status summaries prefer audio-specific fields and normalize mixed-case statuses before display.
+- [x] #2 Watchlists overview counts failed audio outputs even when legacy metadata lacks explicit request flags.
+- [x] #3 Run detail stats preserve and coerce valid filter counters while hiding filter_tallies unless requested.
+- [x] #4 Source error redaction removes common quoted, JSON-style, and bearer-token secrets before storage/logging.
+- [x] #5 Targeted frontend, backend, diff, and Bandit verification is recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -45,7 +52,7 @@ Docs/superpowers/plans/2026-05-21-watchlists-pr1907-followup-review-fixes.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Verified against current origin/dev. Still-valid findings fixed: audio-specific status precedence, status-only failed audio outputs, run detail flat filter counter preservation, JSON-style secret redaction, missing health fixture alerts field, TASK-440 metadata, TASK-442 quoted updated_date. Findings already fixed in dev and intentionally left unchanged: Scheduler max_retries=1 and raw exception debug logging. Verification: targeted Vitest 27 passed; targeted pytest 4 passed; git diff --check passed; Bandit on touched backend files returned zero findings.
+PR #1915 review fixes applied locally: normalized mixed-case audio statuses, coerced run-detail filter action counts from ints/floats/numeric strings while skipping bools, strengthened quoted/JSON/bearer secret redaction, populated acceptance criteria, and aligned the RunDetailDrawer stream lifecycle expectation with the normalized queued audio-task label. Local verification passed for Watchlists a11y gate, focused Vitest, focused pytest, git diff --check, and Bandit on touched backend files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

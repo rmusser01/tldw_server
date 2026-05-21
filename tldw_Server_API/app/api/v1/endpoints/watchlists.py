@@ -4501,19 +4501,31 @@ def _build_run_detail_stats(
         "items_ingested": items_ingested,
     })
     for key in ("filters_include", "filters_exclude", "filters_flag"):
-        detail_stats.setdefault(key, 0)
+        detail_stats[key] = _coerce_run_detail_filter_count(detail_stats.get(key)) or 0
     try:
         if isinstance(stats.get("filters_matched"), int):
             detail_stats["filters_matched"] = int(stats.get("filters_matched") or 0)
         fa = stats.get("filters_actions")
         if isinstance(fa, dict):
             for k in ("include", "exclude", "flag"):
-                v = fa.get(k)
-                if isinstance(v, int):
-                    detail_stats[f"filters_{k}"] = int(v)
+                count = _coerce_run_detail_filter_count(fa.get(k))
+                if count is not None:
+                    detail_stats[f"filters_{k}"] = count
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         pass
     return detail_stats
+
+
+def _coerce_run_detail_filter_count(value: Any) -> int | None:
+    """Coerce JSON numeric filter counters while rejecting booleans and invalid values."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 @router.get("/runs/{run_id}/details", response_model=RunDetail, summary="Get run details with stats and logs")

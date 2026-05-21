@@ -150,14 +150,17 @@ _SENSITIVE_ERROR_TOKEN_RE = re.compile(
     r"['\"](?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|"
     r"token|secret|password|credential)['\"]\s*:\s*['\"][^'\"]+['\"]"
     r"|(?:^|[?&\s,;])(?:api[_-]?key|auth[_-]?token|access[_-]?token|"
-    r"refresh[_-]?token|token|secret|password|credential)\s*[:=]\s*['\"]?[^'\"\s,;&]+['\"]?"
+    r"refresh[_-]?token|token|secret|password|credential)\s*[:=]\s*"
+    r"(?:['\"][^'\"]*['\"]|[^'\"\s,;&]+)"
     r")"
 )
 _AUTHORIZATION_BEARER_RE = re.compile(
-    r"(?i)\bauthorization\s*:\s*bearer\s+[^'\"\s,;&]+"
+    r"(?i)(?:['\"]authorization['\"]\s*:\s*['\"]bearer\s+[^'\"]+['\"]|"
+    r"\bauthorization\s*:\s*bearer\s+(?:['\"][^'\"]+['\"]|[^'\"\s,;&]+))"
 )
 _BEARER_SECRET_RE = re.compile(
-    r"(?i)\bbearer\s+[^'\"\s,;&]+"
+    r"(?i)(?:['\"]bearer['\"]\s*:\s*['\"]bearer\s+[^'\"]+['\"]|"
+    r"\bbearer\s+(?:['\"][^'\"]+['\"]|[^'\"\s,;&]+))"
 )
 _STANDALONE_HTTP_URL_RE = re.compile(r"(?i)^https?://\S+$")
 

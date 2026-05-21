@@ -212,7 +212,7 @@ describe("outputMetadata helpers", () => {
     expect(
       getAudioStatusSummary({
         status: "unknown",
-        audio_briefing_status: "pending",
+        audio_briefing_status: "Pending",
         audio_briefing_task_id: "task-123"
       }).status
     ).toBe("queued")

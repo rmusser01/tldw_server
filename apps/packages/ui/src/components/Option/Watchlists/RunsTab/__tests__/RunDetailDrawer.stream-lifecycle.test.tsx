@@ -421,7 +421,7 @@ describe("RunDetailDrawer stream lifecycle", () => {
     })
     expect(screen.getByText("Audio briefing")).toBeInTheDocument()
     await waitFor(() => {
-      expect(screen.getByText("Pending")).toBeInTheDocument()
+      expect(screen.getByText("Queued")).toBeInTheDocument()
     })
   })
 
