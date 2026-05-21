@@ -65,7 +65,8 @@ Do not describe audio as playable, produced, or complete when only the Scheduler
 
 ## Demo Script Safe Claims
 
-- Safe: Watchlists can create feeds and monitors from the shared WebUI/extension route.
+- Safe after WebUI smoke passes: Watchlists can create feeds and monitors from `/watchlists` in the WebUI.
+- Safe for extension only after the extension build and route smoke pass: the extension can render the shared `/watchlists` route and preserve the same Activity/Reports recovery behavior.
 - Safe: Briefing monitor payloads use the backend `briefing_markdown` template name.
 - Safe: Reports can show pending, failed, skipped, or completed audio states without implying playback exists.
 - Safe: Source and run failures can put Watchlists into an attention state.

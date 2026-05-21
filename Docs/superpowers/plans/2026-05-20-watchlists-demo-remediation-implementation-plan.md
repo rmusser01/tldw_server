@@ -941,6 +941,8 @@ Expected: PASS.
 
 Actual: PASS, 2 tests passed with mocked same-origin Watchlists endpoints.
 
+Review follow-up actual: PASS, 3 tests passed after adding first-time guided source preflight/create coverage, fail-closed Watchlists mocks, scoped modal actions, and strict diagnostics with only narrow expected mock-environment allowances.
+
 - [ ] **Step 7: Run extension strict watchlists smoke**
 
 Run the existing strict command used by the repo for extension watchlists. If Chrome launch is blocked by sandboxing, rerun with the approved escalated Playwright command:
@@ -989,7 +991,7 @@ Expected: no new findings in touched code.
 
 Actual: PASS, `/tmp/bandit_watchlists_demo_rescue.json` reported no errors and no results.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 Run:
 
@@ -1000,6 +1002,36 @@ git add \
   apps/extension/tests/e2e/watchlists.spec.ts \
   apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
 git commit -m "test: add watchlists demo readiness gate"
+```
+
+Actual: committed in `bd3db7acf`.
+
+- [x] **Step 11: Review hardening follow-up**
+
+Addressed post-commit review findings:
+
+- WebUI readiness smoke now covers the guided first-time source preflight and source/monitor creation path instead of only seeded sources.
+- Watchlists mock routing now fails closed on unmatched `/api/v1/watchlists` API calls.
+- Playwright actions use normal actionability checks and modal-scoped buttons.
+- Regenerate-error logging uses the existing sanitized server-error path plus token/key redaction instead of stringifying arbitrary error objects.
+- Runbook safe claims separate WebUI readiness from the still-blocked extension build gate.
+
+Verification:
+
+```bash
+cd apps/tldw-frontend
+npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=line
+# 3 passed
+
+cd apps/packages/ui
+bunx vitest run \
+  src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.regenerate-modal.test.tsx \
+  src/components/Option/Watchlists/OutputsTab/__tests__/OutputsTab.accessibility-live-region.test.tsx \
+  src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
+# 3 files passed, 11 tests passed
+
+git diff --check
+# passed
 ```
 
 ## Task 6: First-Time Cadence And Review Cleanup

@@ -1,10 +1,10 @@
 ---
 id: TASK-442
 title: Implement Watchlists demo rescue slice
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-20 22:51
+updated_date: 2026-05-21 04:06
 labels:
 - watchlists
 - demo-readiness
@@ -13,6 +13,7 @@ dependencies: []
 priority: high
 modified_files:
 - Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md
+- Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md
 - apps/tldw-frontend/e2e/workflows/watchlists-demo-readiness.spec.ts
 - apps/extension/tests/e2e/watchlists.spec.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx
@@ -30,7 +31,7 @@ Implement PR A from the Watchlists demo remediation plan: template contract hotf
 - [x] #2 Watchlist audio briefing requests use Scheduler submit(...) and focused backend tests catch the enqueue API mismatch.
 - [x] #3 Watchlists UI exposes pending/skipped/enqueue_failed audio states without implying a finished playable artifact.
 - [x] #4 Active source fetch failures and source-error zero-item runs block clean System healthy state and surface warning evidence.
-- [ ] #5 Demo runbook and focused WebUI/extension smoke coverage document verified claims and hard stops.
+- [x] #5 Demo runbook and focused WebUI/extension smoke coverage document verified claims and hard stops.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -46,12 +47,12 @@ Task 4 implemented. Backend now persists source_statuses/source_errors in run st
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 5 added the Watchlists demo-readiness runbook, a focused WebUI same-origin Playwright smoke for pipeline creation and output/audio failure truthfulness, and an extension route smoke for the same Reports/Activity recovery path. During WebUI verification, caught output regeneration failures were still surfacing through the Next.js runtime overlay because OutputsTab logged the raw error object; OutputsTab now logs a safe string for that caught path while preserving the in-app error message and live region. Verification recorded: WebUI Playwright smoke 2 passed; focused OutputsTab/OutputPreviewDrawer Vitest 3 files/11 tests passed; backend watchlists demo/pipeline/audio pytest set 29 passed, 4 skipped, 1 xpassed; git diff --check passed; Bandit on touched Watchlists Python paths reported 0 results/errors. Extension Playwright could not execute because global setup hangs in WXT build; isolated bun run build:chrome:prod also timed out after 120 seconds after the same WXT duplicate-import warnings, before .output/chrome-mv3 was produced.
+Task 5 review hardening completed after the first demo-readiness commit. The WebUI smoke now covers the first-time guided source preflight and source/monitor creation path, fails closed on unmatched Watchlists API mocks, uses normal Playwright actionability checks, scopes regenerate modal actions, and keeps diagnostics strict with only narrow expected mock-environment allowances. OutputsTab regenerate logging now sanitizes server errors and redacts key/token-looking values instead of stringifying arbitrary error objects. Runbook safe claims now separate WebUI verification from the blocked extension build gate. Verification: WebUI Playwright smoke 3 passed; focused OutputsTab/OutputPreviewDrawer Vitest 3 files/11 tests passed; git diff --check passed. Prior backend demo tests remain 29 passed, 4 skipped, 1 xpassed; Bandit on touched Watchlists Python paths reported 0 results/errors. Extension Playwright remains blocked because WXT build hangs before .output/chrome-mv3 is produced.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed.
+- [x] #1 Acceptance criteria completed.
 - [x] #2 Focused frontend and backend tests recorded.
 - [x] #3 Bandit run on touched Python paths or documented skip.
 - [x] #4 Backlog final summary updated.
