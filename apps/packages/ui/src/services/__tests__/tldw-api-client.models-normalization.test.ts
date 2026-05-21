@@ -93,6 +93,14 @@ describe("TldwApiClient getModels normalization", () => {
               is_configured: false,
               provider_is_configured: false,
               catalog_only: true
+            },
+            {
+              name: "legacy-model",
+              provider: "custom",
+              type: "chat",
+              is_configured: "false",
+              provider_is_configured: 1,
+              catalog_only: null
             }
           ]
         }
@@ -110,6 +118,15 @@ describe("TldwApiClient getModels normalization", () => {
         is_configured: false,
         provider_is_configured: false,
         catalog_only: true
+      })
+    )
+    expect(models[1]).toEqual(
+      expect.objectContaining({
+        id: "legacy-model",
+        provider: "custom",
+        is_configured: undefined,
+        provider_is_configured: undefined,
+        catalog_only: undefined
       })
     )
   })

@@ -516,10 +516,12 @@ function findMatchingChatModelDescriptor(
     )
   }
 
-  const matchingDescriptors = descriptors.filter((descriptor) =>
-      [descriptor.modelId, descriptor.baseModelId, descriptor.providerQualifiedModelId]
-        .filter(Boolean)
-        .some((candidate) => selectedCandidates.has(candidate as string))
+  const matchingDescriptors = descriptors.filter(
+    (descriptor) =>
+      selectedCandidates.has(descriptor.modelId) ||
+      selectedCandidates.has(descriptor.baseModelId) ||
+      (descriptor.providerQualifiedModelId !== null &&
+        selectedCandidates.has(descriptor.providerQualifiedModelId))
   )
   return (
     matchingDescriptors.find((descriptor) =>

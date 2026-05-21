@@ -262,6 +262,65 @@ describe("createCharacterChatMode contract", () => {
     })
   })
 
+  it("bounds and redacts persisted character chat failure details", () => {
+    const largeProviderBody = [
+      "provider_not_configured",
+      "Bearer sk-secret-token-1234567890",
+      "x".repeat(6000)
+    ].join(" ")
+    const providerSetupError = Object.assign(
+      new Error("provider_not_configured: OpenAI API key is missing"),
+      {
+        status: 503,
+        response: {
+          data: {
+            code: "provider_not_configured",
+            body: largeProviderBody
+          }
+        }
+      }
+    )
+
+    const recovery = classifyCharacterChatFailureRecovery(providerSetupError)
+
+    expect(recovery.kind).toBe("provider_unconfigured")
+    expect(recovery.detail.length).toBeLessThanOrEqual(3000)
+    expect(recovery.detail).toContain("provider_not_configured")
+    expect(recovery.detail).toContain("Bearer [redacted]")
+    expect(recovery.detail).not.toContain("sk-secret-token-1234567890")
+  })
+
+  it("uses translated character chat recovery copy when a translator is supplied", () => {
+    const providerSetupError = Object.assign(
+      new Error("provider_not_configured"),
+      {
+        response: {
+          data: {
+            code: "provider_not_configured"
+          }
+        }
+      }
+    )
+    const t = vi.fn((key: string, options?: { defaultValue?: string }) =>
+      key.endsWith("providerUnconfigured.summary")
+        ? "Translated provider setup summary"
+        : options?.defaultValue ?? key
+    )
+
+    const recovery = classifyCharacterChatFailureRecovery(
+      providerSetupError,
+      t as any
+    )
+
+    expect(recovery.summary).toBe("Translated provider setup summary")
+    expect(t).toHaveBeenCalledWith(
+      "playground:characterChatFailure.providerUnconfigured.summary",
+      expect.objectContaining({
+        defaultValue: "Character chat model setup needs attention."
+      })
+    )
+  })
+
   it("maps provider setup stream failures to model-settings recovery copy", async () => {
     const setters = createSetterBundle()
     let messagesState: any[] = []

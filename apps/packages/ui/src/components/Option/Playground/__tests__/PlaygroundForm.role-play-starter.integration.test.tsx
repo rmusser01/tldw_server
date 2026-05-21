@@ -748,6 +748,20 @@ vi.mock("@/components/Knowledge", () => ({
   KnowledgePanel: () => null
 }))
 
+vi.mock("../PlaygroundKnowledgeSection", () => ({
+  PlaygroundKnowledgeSection: ({ onAsk }: { onAsk?: (text: string, options?: { ignorePinnedResults?: boolean }) => void }) => (
+    <button
+      data-testid="knowledge-ask"
+      type="button"
+      onClick={() =>
+        onAsk?.("Ask with this pinned source.", { ignorePinnedResults: true })
+      }
+    >
+      Ask knowledge
+    </button>
+  )
+}))
+
 vi.mock("@/components/Common/Beta", () => ({
   BetaTag: () => null
 }))
@@ -1087,6 +1101,37 @@ describe("PlaygroundForm role-play starter", () => {
     expect(setupButton).toHaveAttribute(
       "title",
       expect.stringContaining("Ada Lovelace")
+    )
+  })
+
+  it("keeps knowledge ask sends behind the character chat setup blocker", async () => {
+    const user = userEvent.setup()
+    const onAction = vi.fn()
+    selectedCharacterState.value = {
+      id: "ada",
+      name: "Ada Lovelace"
+    }
+
+    render(
+      <PlaygroundForm
+        droppedFiles={[]}
+        characterChatSendBlocker={{
+          active: true,
+          title: "Configure the selected model provider before chatting as Ada Lovelace",
+          actionLabel: "Open model settings",
+          onAction
+        }}
+      />
+    )
+
+    await user.click(screen.getByTestId("knowledge-ask"))
+
+    await waitFor(() => {
+      expect(onAction).toHaveBeenCalledTimes(1)
+    })
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "Ask with this pinned source."
     )
   })
 

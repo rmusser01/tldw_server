@@ -152,23 +152,7 @@ export const parseProviderQualifiedModelSelection = (
     }
   }
 
-  const separatorIndex = raw.indexOf(":")
-  if (separatorIndex <= 0 || separatorIndex === raw.length - 1) {
-    return fallback
-  }
-
-  const provider = normalizeKnownProvider(raw.slice(0, separatorIndex))
-  if (!provider) return fallback
-
-  const modelId = raw.slice(separatorIndex + 1).trim()
-  if (!modelId) return fallback
-
-  return {
-    raw,
-    modelId,
-    provider,
-    isProviderQualified: true
-  }
+  return fallback
 }
 
 export const resolveExplicitProviderForSelectedModel = ({

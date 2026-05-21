@@ -2986,14 +2986,19 @@ export const PlaygroundForm = ({
     notificationApi,
     t,
   });
-  const handleComposerSend = React.useCallback(() => {
+  const runCharacterChatSendBlocker = React.useCallback(() => {
     if (characterChatSendBlocker?.active) {
       stopListening();
       characterChatSendBlocker.onAction();
+    }
+  }, [characterChatSendBlocker, stopListening]);
+  const handleComposerSend = React.useCallback(() => {
+    if (characterChatSendBlocker?.active) {
+      runCharacterChatSendBlocker();
       return;
     }
     submitForm();
-  }, [characterChatSendBlocker, stopListening, submitForm]);
+  }, [characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
   React.useEffect(() => {
     voiceChatSubmitFormRef.current = () => {
       handleComposerSend();
@@ -3005,13 +3010,22 @@ export const PlaygroundForm = ({
       const trimmed = text.trim();
       if (!trimmed) return;
       setMessageValue(trimmed, { collapseLarge: true });
-      queueMicrotask(() =>
+      queueMicrotask(() => {
+        if (characterChatSendBlocker?.active) {
+          runCharacterChatSendBlocker();
+          return;
+        }
         submitFormRef.current({
           ignorePinnedResults: options?.ignorePinnedResults,
-        }),
-      );
+        });
+      });
     },
-    [setMessageValue, submitFormRef],
+    [
+      characterChatSendBlocker,
+      runCharacterChatSendBlocker,
+      setMessageValue,
+      submitFormRef,
+    ],
   );
 
   const persistence = usePlaygroundPersistence({

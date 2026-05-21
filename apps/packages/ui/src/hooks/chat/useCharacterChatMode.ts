@@ -78,9 +78,31 @@ export type CharacterChatFailureRecovery =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+const MAX_FAILURE_DETAIL_VALUES = 20;
+const MAX_FAILURE_DETAIL_VALUE_CHARS = 500;
+const MAX_FAILURE_DETAIL_CHARS = 3000;
+
+const redactFailureDetail = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "sk-[redacted]");
+
+const clampFailureDetail = (value: string, maxLength: number): string =>
+  value.length > maxLength
+    ? `${value.slice(0, Math.max(0, maxLength - 1))}…`
+    : value;
+
+const normalizeFailureDetailValue = (value: string): string =>
+  clampFailureDetail(
+    redactFailureDetail(value.trim()),
+    MAX_FAILURE_DETAIL_VALUE_CHARS,
+  );
+
 const pushStringValue = (values: string[], value: unknown) => {
+  if (values.length >= MAX_FAILURE_DETAIL_VALUES) return;
+
   if (typeof value === "string" && value.trim().length > 0) {
-    values.push(value.trim());
+    values.push(normalizeFailureDetailValue(value));
   } else if (typeof value === "number" || typeof value === "boolean") {
     values.push(String(value));
   }
@@ -93,7 +115,7 @@ const collectChatFailureStrings = (
 ): string[] => {
   pushStringValue(values, value);
 
-  if (!isRecord(value)) {
+  if (!isRecord(value) || values.length >= MAX_FAILURE_DETAIL_VALUES) {
     return values;
   }
 
@@ -124,10 +146,12 @@ const collectChatFailureStrings = (
     } else {
       pushStringValue(values, candidate);
     }
+    if (values.length >= MAX_FAILURE_DETAIL_VALUES) return values;
   }
 
   for (const key of ["response", "data", "body", "cause"]) {
     collectChatFailureStrings(value[key], values, seen);
+    if (values.length >= MAX_FAILURE_DETAIL_VALUES) return values;
   }
 
   return values;
@@ -136,13 +160,31 @@ const collectChatFailureStrings = (
 const buildCharacterFailureDetail = (error: unknown): string => {
   const values = Array.from(new Set(collectChatFailureStrings(error)));
   if (values.length > 0) {
-    return values.join(" | ");
+    return clampFailureDetail(values.join(" | "), MAX_FAILURE_DETAIL_CHARS);
   }
-  return error instanceof Error ? error.message : String(error || "");
+  return clampFailureDetail(
+    normalizeFailureDetailValue(
+      error instanceof Error ? error.message : String(error || ""),
+    ),
+    MAX_FAILURE_DETAIL_CHARS,
+  );
+};
+
+const translateRecoveryCopy = (
+  t: TFunction | undefined,
+  key: string,
+  defaultValue: string,
+): string => {
+  if (!t) return defaultValue;
+  const translated = t(`playground:characterChatFailure.${key}`, {
+    defaultValue,
+  });
+  return typeof translated === "string" ? translated : defaultValue;
 };
 
 export const classifyCharacterChatFailureRecovery = (
   error: unknown,
+  t?: TFunction,
 ): CharacterChatFailureRecovery => {
   const detail = buildCharacterFailureDetail(error);
   const lower = detail.toLowerCase();
@@ -166,9 +208,16 @@ export const classifyCharacterChatFailureRecovery = (
     return {
       kind: "provider_unconfigured",
       action: "open-model-settings",
-      summary: "Character chat model setup needs attention.",
-      message:
+      summary: translateRecoveryCopy(
+        t,
+        "providerUnconfigured.summary",
+        "Character chat model setup needs attention.",
+      ),
+      message: translateRecoveryCopy(
+        t,
+        "providerUnconfigured.message",
         "Open model settings and configure the selected model provider. Your character chat state and draft are kept so you can return and try again.",
+      ),
       detail,
     };
   }
@@ -186,9 +235,16 @@ export const classifyCharacterChatFailureRecovery = (
     return {
       kind: "model_unavailable",
       action: "open-model-settings",
-      summary: "The selected Character Chat model is not callable.",
-      message:
+      summary: translateRecoveryCopy(
+        t,
+        "modelUnavailable.summary",
+        "The selected Character Chat model is not callable.",
+      ),
+      message: translateRecoveryCopy(
+        t,
+        "modelUnavailable.message",
         "Open model settings and choose or configure a callable chat model. Your character chat state and draft are kept so you can return and try again.",
+      ),
       detail,
     };
   }
@@ -196,9 +252,16 @@ export const classifyCharacterChatFailureRecovery = (
   return {
     kind: "transient",
     action: "retry",
-    summary: "Character chat response failed.",
-    message:
+    summary: translateRecoveryCopy(
+      t,
+      "transient.summary",
+      "Character chat response failed.",
+    ),
+    message: translateRecoveryCopy(
+      t,
+      "transient.message",
       "Try again in a moment, or open Health & diagnostics to inspect server health.",
+    ),
     detail,
   };
 };
@@ -206,12 +269,13 @@ export const classifyCharacterChatFailureRecovery = (
 const buildCharacterChatAssistantErrorContent = (
   botMessage: string | undefined,
   rawError: unknown,
+  t: TFunction,
 ): string => {
   if (botMessage && String(botMessage).trim().length > 0) {
     return String(botMessage);
   }
 
-  const recovery = classifyCharacterChatFailureRecovery(rawError);
+  const recovery = classifyCharacterChatFailureRecovery(rawError, t);
   if (recovery.action === "open-model-settings") {
     return encodeChatErrorPayload({
       summary: recovery.summary,
@@ -1228,6 +1292,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       const assistantContent = buildCharacterChatAssistantErrorContent(
         fullText,
         e,
+        t,
       );
       const interruptionReason =
         e instanceof Error ? e.message : t("somethingWentWrong");

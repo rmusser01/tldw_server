@@ -252,23 +252,31 @@ export const Playground = () => {
       "standard",
     );
 
+  const refreshCharacterChatModels = React.useCallback(
+    async (isCancelled?: () => boolean) => {
+      setCharacterChatAvailableModels(null);
+      try {
+        const models = await fetchChatModels({
+          returnEmpty: true,
+          forceRefresh: true,
+        });
+        if (isCancelled?.()) return;
+        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
+      } catch {
+        if (isCancelled?.()) return;
+        setCharacterChatAvailableModels([]);
+      }
+    },
+    [],
+  );
+
   React.useEffect(() => {
     let cancelled = false;
-
-    void fetchChatModels({ returnEmpty: true, forceRefresh: true })
-      .then((models) => {
-        if (cancelled) return;
-        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCharacterChatAvailableModels([]);
-      });
-
+    void refreshCharacterChatModels(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshCharacterChatModels]);
   const [characterModeIntentActive, setCharacterModeIntentActive] =
     React.useState(false);
   const [chatLayoutMode, setChatLayoutMode] = useStorage<PlaygroundCockpitMode>(
@@ -2592,11 +2600,16 @@ export const Playground = () => {
       }
       if (action === "open-server-settings") {
         openServerSettingsFromCockpit();
+        return;
+      }
+      if (action === "retry") {
+        void refreshCharacterChatModels();
       }
     },
     [
       openCharacterSelectorFromReadiness,
       openModelSettingsFromCockpit,
+      refreshCharacterChatModels,
       openServerSettingsFromCockpit,
     ],
   );

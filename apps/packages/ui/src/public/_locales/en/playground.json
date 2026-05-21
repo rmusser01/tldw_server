@@ -41,6 +41,24 @@
   "formError_noEmbeddingModel": {
     "message": "Please set an embedding model on the Settings > Knowledge page"
   },
+  "characterChatFailure_providerUnconfigured_summary": {
+    "message": "Character chat model setup needs attention."
+  },
+  "characterChatFailure_providerUnconfigured_message": {
+    "message": "Open model settings and configure the selected model provider. Your character chat state and draft are kept so you can return and try again."
+  },
+  "characterChatFailure_modelUnavailable_summary": {
+    "message": "The selected Character Chat model is not callable."
+  },
+  "characterChatFailure_modelUnavailable_message": {
+    "message": "Open model settings and choose or configure a callable chat model. Your character chat state and draft are kept so you can return and try again."
+  },
+  "characterChatFailure_transient_summary": {
+    "message": "Character chat response failed."
+  },
+  "characterChatFailure_transient_message": {
+    "message": "Try again in a moment, or open Health & diagnostics to inspect server health."
+  },
   "form_textarea_placeholder": {
     "message": "Ask anything... (/ for commands)"
   },
@@ -1150,6 +1168,9 @@
   },
   "actor_sceneTemplateActive": {
     "message": "Scene template active: Actor respects template interaction settings."
+  },
+  "tts_routeTitle": {
+    "message": "Text to Speech"
   },
   "tts_title": {
     "message": "TTS Playground"

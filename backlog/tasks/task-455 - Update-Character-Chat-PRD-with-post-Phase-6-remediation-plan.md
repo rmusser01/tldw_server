@@ -24,6 +24,10 @@ Update the canonical first-class Character Chat PRD with the approved post-Phase
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] Preserve the canonical first-class Character Chat PRD while keeping shipped Phase 0-6 context separate from new remediation work.
+- [x] Document the post-Phase-6 real-backend findings as Phase 7-13 follow-up work with clear release dependencies.
+- [x] Include model-readiness, session-continuity, setup-access, sidepanel/extension parity, and real-provider signoff requirements.
+- [x] Record verification status and any non-code validation skips in the task final summary.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,10 +54,10 @@ Updated the canonical Character Chat PRD with the approved post-Phase-6 remediat
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded - self-review and `git diff --check` are recorded in the final summary.
+- [x] #3 Documentation updated when relevant - canonical PRD updated in `Docs/Product/WebUI/Character_Chat_Roleplay_First_Class_PRD_2026_05_18.md`.
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip - docs-only task, Bandit skipped as not applicable.
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented - real-provider availability remains an explicit successful-send blocker.
 <!-- DOD:END -->
