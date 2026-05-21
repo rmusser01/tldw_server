@@ -35,7 +35,7 @@ Write a design/spec artifact that reconciles the original Persona module PRD int
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Reviewed and hardened the Persona PRD reconciliation design. Added risk notes and constraints for transcript export redaction/ownership, non-escalating Scopes/Policies editing, safe MCP/tool discovery, evidence-backed shipped-status claims, and a suggested PRD patch sequence. Verification: git diff --check passed on the updated spec. Bandit skipped because this remains documentation-only.
+Spec review iteration 2 approved. Hardened the Persona PRD reconciliation design with persona-local already-authorized tool defaults, broader transcript export redaction, existing-backend-only memory controls, #1902 completeness gate, bounded visual/static state language, and explicit future-scope non-blocker wording. Verification: git diff --check passed on the updated spec. Bandit skipped because this remains documentation-only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
