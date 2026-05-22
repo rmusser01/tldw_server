@@ -2,6 +2,7 @@ import React, { useCallback, useState, useRef, useEffect, useLayoutEffect } from
 import { Document, pdfjs } from "react-pdf"
 import type { DocumentProps } from "react-pdf"
 import { Spin } from "antd"
+import { useTranslation } from "react-i18next"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { PdfPage } from "./PdfPage"
 import { TextSelectionPopover } from "../TextSelectionPopover"
