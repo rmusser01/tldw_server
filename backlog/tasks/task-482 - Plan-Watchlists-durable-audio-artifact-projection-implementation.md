@@ -44,6 +44,13 @@ Review hardening added:
 - Trigger tests should cover stale user-supplied request IDs.
 - `retry-audio` stale-state metadata updates need target-user Collections DB routing.
 
+Additional pre-execution review added:
+- Clarified that implementation tasks 1-7 are the MVP durable `/watchlists` UX; only proactive projection is the deferrable follow-up.
+- Required `/runs/{run_id}/audio` to resolve Workflows DB through the same factory path used by Scheduler/Workflows API, not by manually constructing a target-user SQLite path.
+- Required synchronous Watchlists/Collections/Workflows DB projection helpers to be called from async endpoints through `run_in_threadpool`.
+- Required Workflow run metadata extraction to support run `metadata_json`, definition `metadata`, and legacy inputs.
+- Required download URL generation to avoid unsupported `target_user_id` query params.
+
 Verification: `git diff --check` passed for the plan changes. Bandit was not run because this task only adds documentation and Backlog task metadata. The writing-plans reviewer subagent was not dispatched because this session requires explicit user permission before using subagents; local plan review was performed instead.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

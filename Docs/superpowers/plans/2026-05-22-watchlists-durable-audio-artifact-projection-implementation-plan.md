@@ -22,7 +22,7 @@ This spec touches several layers, but they are tightly coupled around one produc
 6. Update frontend durable graph and retry state handling.
 7. Add best-effort proactive projection only after lazy read-repair is solid.
 
-If time is constrained, ship tasks 1-6 first. Task 7 can be a follow-up PR because lazy read-repair is the reliability guarantee.
+If time is constrained, implementation tasks 1-7 are the MVP for the durable `/watchlists` user experience. Task 8, proactive projection, can be a follow-up PR because lazy read-repair is the reliability guarantee. A backend-only slice through implementation task 6 is acceptable only as an intermediate PR, not as the final durable UX.
 
 ## File Map
 
@@ -54,6 +54,7 @@ Backend:
 - Modify `tldw_Server_API/app/api/v1/endpoints/watchlists.py`
   - Inject/resolve `CollectionsDatabase` for `/runs/{run_id}/audio`.
   - Inject/resolve `CollectionsDatabase` for `/runs/{run_id}/retry-audio` when stale-state updates need canonical output metadata writes.
+  - Resolve Workflows DB through the same factory path as the Scheduler/Workflows API instead of manually constructing a target-user SQLite path.
   - Use projection helper for canonical lookup, lazy mirror write, mirrored fallback, retry stale-state handling, and target-user-safe links.
 
 Backend tests:
@@ -138,12 +139,13 @@ Expected: fails because `create_run()` does not accept `metadata` and `WorkflowR
 
 In `Workflows_DB.py`:
 
-- Bump `_CURRENT_SCHEMA_VERSION` from `8` to `9`.
+- Bump `_CURRENT_SCHEMA_VERSION` from its current value to the next integer (`8` to `9` on the current base).
 - Add `metadata_json: str | None = None` to `WorkflowRun`.
 - Add `metadata: dict[str, Any] | None = None` to `create_run(...)`.
 - Add `metadata_json` to initial `workflow_runs` schemas for SQLite and backend/PostgreSQL.
 - Add SQLite and backend migrations to add `workflow_runs.metadata_json`.
 - Insert `json.dumps(metadata or {})` into `workflow_runs.metadata_json`.
+- Prefer `TEXT` for `workflow_runs.metadata_json` in both SQLite and PostgreSQL backend schemas so `WorkflowRun.metadata_json` keeps the same string contract as `inputs_json` and `definition_snapshot_json`. If a backend migration uses `JSONB`, normalize backend row values to a JSON string before constructing `WorkflowRun`.
 
 Minimal shape:
 
@@ -488,8 +490,19 @@ Create pure helpers first:
 - `artifact_download_url(artifact_id: Any, *, target_user_id: int | None = None) -> str | None`
 - `summarize_audio_artifact(...) -> dict[str, Any]`
 - `build_audio_projection(...) -> dict[str, Any]`
+- `extract_workflow_run_metadata(workflow_run: Any) -> dict[str, Any]`
 
 Keep these pure and easy to test.
+
+`extract_workflow_run_metadata(...)` must read correlation data in this order:
+
+1. `workflow_run.metadata_json`
+2. `workflow_run.definition_snapshot_json["metadata"]`
+3. `workflow_run.inputs_json`
+
+This preserves new run-level metadata while supporting compatibility runs where only definition metadata or inputs carry the watchlist correlation fields.
+
+`artifact_download_url(...)` must not append unsupported `target_user_id` query parameters to `/api/v1/workflows/artifacts/{artifact_id}/download`. The existing Workflows endpoint authorizes same-tenant admins by run ownership. If tests show that is insufficient for a target-user Watchlists read, add a Watchlists-scoped proxy endpoint in a later task instead of emitting links that look valid but 404.
 
 - [ ] **Step 4: Implement metadata merge helpers**
 
@@ -513,6 +526,7 @@ Add functions that accept DB instances explicitly:
 
 - `mirror_audio_projection(run_db, collections_db, run, projection, *, user_id: int) -> bool`
 - `get_mirrored_audio_projection(run) -> dict[str, Any] | None`
+- `find_matching_workflow_run(workflow_db, *, tenant_id: str, user_id: str, run_id: int, audio_request_id: str | None) -> Any | None`
 - `find_canonical_watchlist_output(collections_db, run_id, audio_request_id=None) -> Any | None`
 
 Rules:
@@ -521,6 +535,7 @@ Rules:
 - Update canonical output metadata when a base non-audio output exists.
 - Skip writes when existing mirrored graph already matches.
 - Catch noncritical persistence failures and return `False`; callers should still return canonical responses.
+- Keep DB helpers synchronous. Async endpoints must call blocking read/write helpers via `run_in_threadpool(...)` rather than performing SQLite/Collections writes directly on the event loop.
 
 - [ ] **Step 6: Run projection tests**
 
@@ -557,6 +572,7 @@ Add tests for:
 
 - canonical Workflows artifacts mirror into run stats and canonical output metadata
 - Workflows DB lookup failure returns mirrored metadata
+- endpoint uses the same Workflows DB factory path as Scheduler/Workflows API, not `DatabasePaths.get_user_base_directory(...)/workflows/workflows.db`
 - target user path resolves target Collections DB
 - admin target links are target-aware or Watchlists-scoped
 - projection write failure still returns canonical response
@@ -591,6 +607,19 @@ target_collections_db = _resolve_collections_db_for_target_user(
 )
 ```
 
+Resolve the Workflow DB with the same factory used by `tldw_Server_API/app/core/Scheduler/handlers/workflows.py` and `tldw_Server_API/app/api/v1/endpoints/workflows.py`:
+
+```python
+from tldw_Server_API.app.core.DB_Management.DB_Manager import (
+    create_workflows_database,
+    get_content_backend_instance,
+)
+
+workflow_db = create_workflows_database(backend=get_content_backend_instance())
+```
+
+Do not manually construct `DatabasePaths.get_user_base_directory(resolved_user_id) / "workflows" / "workflows.db"` inside the endpoint. That path can diverge from where the Scheduler writes Workflow runs, especially outside single-user SQLite mode.
+
 - [ ] **Step 4: Replace inline artifact classification with projection helper**
 
 Keep endpoint behavior, but delegate:
@@ -601,6 +630,8 @@ Keep endpoint behavior, but delegate:
 - mirror persistence
 
 Do this incrementally. Preserve existing status fallback tests while moving logic.
+
+Call blocking projection lookups and mirror writes through `run_in_threadpool(...)` from this async endpoint.
 
 - [ ] **Step 5: Extend response schema**
 
