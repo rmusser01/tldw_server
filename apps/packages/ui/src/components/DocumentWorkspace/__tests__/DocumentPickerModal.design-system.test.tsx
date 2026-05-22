@@ -106,12 +106,6 @@ vi.mock("antd", () => {
         checked={checked}
         onChange={(event) => onChange(event.currentTarget.checked)}
       />
-    ),
-    Alert: ({ title, message, action }: any) => (
-      <div role="alert">
-        {title ?? message}
-        {action}
-      </div>
     )
   }
 })
