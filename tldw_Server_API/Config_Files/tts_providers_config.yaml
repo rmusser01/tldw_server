@@ -300,8 +300,7 @@ providers:
     enabled: false
     runtime: "sidecar"
     model: "omnivoice"
-    # Native OmniVoice output; public resampling happens in the main adapter.
-    sample_rate: 24000
+    sample_rate: 24000  # Native OmniVoice output; public resampling happens in the main adapter.
     max_concurrent_generations: 1
     extra_params:
       repo_path: "../OmniVoice"
