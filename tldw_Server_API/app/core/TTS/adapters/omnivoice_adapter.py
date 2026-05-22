@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import re
 import tempfile
 import wave
@@ -387,7 +388,7 @@ class OmniVoiceAdapter(TTSAdapter):
             if target_type is int:
                 return self._coerce_int_generation_value(key, value)
             if target_type is float:
-                return float(value)
+                return self._coerce_float_generation_value(key, value)
         except (TypeError, ValueError) as exc:
             raise TTSValidationError(
                 f"OmniVoice generation parameter {key} has invalid type",
@@ -425,6 +426,26 @@ class OmniVoiceAdapter(TTSAdapter):
             f"OmniVoice generation parameter {key} must be an integer",
             provider=self.PROVIDER_KEY,
         )
+
+    def _coerce_float_generation_value(self, key: str, value: Any) -> float:
+        if isinstance(value, bool):
+            raise TTSValidationError(
+                f"OmniVoice generation parameter {key} must be a finite number",
+                provider=self.PROVIDER_KEY,
+            )
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise TTSValidationError(
+                f"OmniVoice generation parameter {key} must be a finite number",
+                provider=self.PROVIDER_KEY,
+            ) from exc
+        if not math.isfinite(parsed):
+            raise TTSValidationError(
+                f"OmniVoice generation parameter {key} must be a finite number",
+                provider=self.PROVIDER_KEY,
+            )
+        return parsed
 
     def _resolve_reference_text(self, extras: dict[str, Any]) -> Optional[str]:
         for key in REFERENCE_TEXT_KEYS:
