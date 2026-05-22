@@ -1,7 +1,7 @@
 ---
 id: TASK-483
 title: Implement Watchlists durable audio artifact projection
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: 2026-05-22 21:00
@@ -193,14 +193,33 @@ Task 8 verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the Watchlists durable audio artifact projection MVP:
+- Workflow runs now persist correlation metadata, and Watchlists audio triggers generate request IDs that flow through Scheduler metadata, Workflow inputs, and artifact metadata.
+- Workflow script/speaker/final audio artifacts carry Watchlists correlation metadata and can be projected into a compact Watchlists audio graph.
+- `/watchlists/runs/{run_id}/audio` now performs lazy read-repair from canonical Workflows artifacts, mirrors projection metadata into run stats/output metadata, and falls back to mirrored state when canonical lookup is unavailable.
+- Audio retry marks old artifacts stale/superseded and prevents old final audio from appearing as the active retry request.
+- The WebUI/extension metadata helpers and drawers now render durable script/speaker/final artifacts, stale/superseded state, live request overrides, and path-safe artifact links.
+
+Deferred proactive projection after inspection because the existing `watchlists` Scheduler queue is registered but not guaranteed to have workers. Lazy read-repair plus mirrored fallback is the durable reliability path for this PR.
+
+Final verification:
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py tldw_Server_API/tests/Workflows/test_adapter_path_security.py tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `333 passed, 1 skipped`.
+- `cd apps/packages/ui && bunx vitest run src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx` passed, `43 passed`.
+- `source ../../.venv/bin/activate && python -m bandit -r <touched Python paths> -f json -o /tmp/bandit_watchlists_audio_projection_final.json` passed with `0` results and `0` errors.
+- `git diff --check` passed.
+- Both watchlists locale JSON files parsed successfully.
+
+Known skips/blockers:
+- One pre-existing local test skip remains in the focused Watchlists pipeline/API set.
+- Proactive projection remains deferred until there is an explicit served queue or event/poller mechanism that does not depend on Scheduler retry-as-poll behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
