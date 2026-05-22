@@ -85,7 +85,13 @@ def test_build_audio_projection_graph_sanitizes_artifact_summaries():
             ),
             _artifact(
                 "art_final",
-                metadata=_watchlist_meta(final_artifact=True, background_mixed=True, title="Final mix"),
+                metadata=_watchlist_meta(
+                    final_artifact=True,
+                    background_mixed=True,
+                    title="Final mix",
+                    uri="file:///tmp/final.mp3",
+                    provenance={"uri": "file:///tmp/provenance.json", "source": "workflow"},
+                ),
                 size_bytes=4096,
             ),
         ],
@@ -101,6 +107,8 @@ def test_build_audio_projection_graph_sanitizes_artifact_summaries():
     assert projection["final_artifact"]["artifact_id"] == "art_final"
     assert projection["final_artifact"]["title"] == "Final mix"
     assert "uri" not in projection["final_artifact"]
+    assert "uri" not in projection["final_artifact"]["metadata"]
+    assert "uri" not in projection["final_artifact"]["metadata"]["provenance"]
     assert projection["script_artifact"]["artifact_id"] == "art_script"
     assert "uri" not in projection["script_artifact"]
     assert [entry["speaker_id"] for entry in projection["speaker_artifacts"]] == ["HOST", "ANALYST"]
@@ -215,6 +223,39 @@ def test_status_and_download_url_normalization():
     assert normalize_audio_status("in_progress") == "running"
     assert normalize_audio_status(None, task_id="task_pending") == "pending"
     assert artifact_download_url("art id/1", target_user_id=2) == "/api/v1/workflows/artifacts/art%20id%2F1/download"
+
+
+def test_find_matching_workflow_run_prefers_idempotency_lookup():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import find_matching_workflow_run
+
+    matching_run = _workflow_run(metadata=_watchlist_meta())
+
+    class FakeWorkflowDB:
+        lookup_key: str | None = None
+
+        def get_run_by_idempotency(self, tenant_id: str, user_id: str, idempotency_key: str):
+            self.lookup_key = idempotency_key
+            assert tenant_id == "tenant_1"
+            assert user_id == "1"
+            return matching_run
+
+        def list_runs(self, **kwargs: Any):
+            raise AssertionError("paginated scan should not run when idempotency lookup finds the run")
+
+    db = FakeWorkflowDB()
+
+    assert (
+        find_matching_workflow_run(
+            db,
+            tenant_id="tenant_1",
+            user_id="1",
+            job_id=42,
+            run_id=91,
+            audio_request_id="wla_current",
+        )
+        is matching_run
+    )
+    assert db.lookup_key == "watchlist-audio-briefing:1:42:91:wla_current"
 
 
 def test_merge_and_stale_helpers_preserve_unrelated_metadata():

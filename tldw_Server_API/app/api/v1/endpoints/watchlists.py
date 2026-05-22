@@ -5563,14 +5563,14 @@ async def get_run_audio(
         target_user_id=target_user_id,
     )
     try:
-        r = target_db.get_run(run_id)
+        run = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
 
     # Check the run stats for audio_briefing_task_id
     stats: dict[str, Any] = {}
     try:
-        stats = json.loads(r.stats_json or "{}") if r.stats_json else {}
+        stats = json.loads(run.stats_json or "{}") if run.stats_json else {}
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         stats = {}
 
@@ -5598,7 +5598,7 @@ async def get_run_audio(
             mirror_audio_projection,
         )
 
-        mirrored_projection = get_mirrored_audio_projection(r)
+        mirrored_projection = get_mirrored_audio_projection(run)
         wf_db = await run_in_threadpool(_get_watchlists_workflow_db)
         tenant_id = await _resolve_watchlist_workflow_tenant_id(
             current_user=current_user,
@@ -5609,6 +5609,7 @@ async def get_run_audio(
             wf_db,
             tenant_id=tenant_id,
             user_id=str(resolved_user_id),
+            job_id=getattr(run, "job_id", None),
             run_id=run_id,
             audio_request_id=str(audio_request_id) if audio_request_id else None,
         )
@@ -5642,18 +5643,6 @@ async def get_run_audio(
             artifacts=artifacts,
         )
 
-        if target_collections_db is not None:
-            mirror_ok = await run_in_threadpool(
-                mirror_audio_projection,
-                target_db,
-                target_collections_db,
-                r,
-                projection,
-                user_id=int(resolved_user_id),
-            )
-            if not mirror_ok:
-                logger.warning("Watchlists audio projection mirror failed for run={}", run_id)
-
         response_status = projection.get("status") or "unknown"
         queue_name = None
         fallback_reason = projection.get("fallback_reason")
@@ -5664,6 +5653,18 @@ async def get_run_audio(
                 queue_name = scheduler_status.get("queue_name")
                 fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
                 projection = {**projection, "status": response_status, "fallback_reason": fallback_reason}
+
+        if target_collections_db is not None:
+            mirror_ok = await run_in_threadpool(
+                mirror_audio_projection,
+                target_db,
+                target_collections_db,
+                run,
+                projection,
+                user_id=int(resolved_user_id),
+            )
+            if not mirror_ok:
+                logger.warning("Watchlists audio projection mirror failed for run={}", run_id)
 
         audio_uri = _artifact_uri_by_id(artifacts, projection.get("artifact_id"))
         return _audio_projection_response(
@@ -5681,7 +5682,7 @@ async def get_run_audio(
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import get_mirrored_audio_projection
 
-        mirrored_projection = get_mirrored_audio_projection(r)
+        mirrored_projection = get_mirrored_audio_projection(run)
         if mirrored_projection:
             return _audio_projection_response(
                 mirrored_projection,

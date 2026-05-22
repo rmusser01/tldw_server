@@ -649,6 +649,114 @@ class TestGetRunAudioEndpoint:
         assert result["fallback_reason"] == "scheduler_task_error"
 
     @pytest.mark.asyncio
+    async def test_audio_projection_mirror_persists_scheduler_fallback_status(self):
+        """Mirrored audio metadata should include finalized Scheduler fallback status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=42,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps(
+                {
+                    "audio_briefing_task_id": "task_failed_after_script",
+                    "audio_request_id": "wla_current",
+                }
+            ),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        collections_db = MagicMock()
+        collections_db.list_output_artifacts.return_value = (
+            [SimpleNamespace(id=99, metadata_json=json.dumps({"template_name": "daily_digest"}))],
+            1,
+        )
+
+        user = MagicMock()
+        user.id = 1
+        user.role = "admin"
+
+        wf_run = SimpleNamespace(
+            id="wf_run_1",
+            status="running",
+            metadata_json=json.dumps(
+                {
+                    "watchlist_run_id": 1,
+                    "watchlist_job_id": 42,
+                    "audio_request_id": "wla_current",
+                }
+            ),
+        )
+        script_artifact = SimpleNamespace(
+            id="art_script_1",
+            type="audio_script",
+            uri="file:///tmp/briefing-script.md",
+            size_bytes=1200,
+            mime_type="text/markdown",
+            metadata_json=json.dumps(
+                {
+                    "source": "watchlist_audio_briefing",
+                    "watchlist_run_id": 1,
+                    "watchlist_job_id": 42,
+                    "audio_request_id": "wla_current",
+                    "script_artifact": True,
+                    "title": "Briefing script",
+                }
+            ),
+        )
+        mock_wf_db = MagicMock()
+        mock_wf_db.get_run_by_idempotency.return_value = None
+        mock_wf_db.list_runs.return_value = [wf_run]
+        mock_wf_db.list_artifacts.return_value = [script_artifact]
+
+        scheduler_task = SimpleNamespace(
+            id="task_failed_after_script",
+            status="failed",
+            queue_name="workflows",
+            error="tts_provider_failed",
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(
+                run_id=1,
+                target_user_id=None,
+                current_user=user,
+                db=db,
+                collections_db=collections_db,
+            )
+
+        assert result["status"] == "failed"
+        persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
+        persisted_output = json.loads(collections_db.update_output_artifact_metadata.call_args.kwargs["metadata_json"])
+        assert persisted_stats["audio"]["status"] == "failed"
+        assert persisted_stats["audio"]["fallback_reason"] == "scheduler_task_error"
+        assert persisted_output["audio"]["status"] == "failed"
+
+    @pytest.mark.asyncio
     async def test_scheduler_status_lookup_propagates_cancellation(self):
         """Cancelled status lookups should not be converted into a pending response."""
         from tldw_Server_API.app.api.v1.endpoints.watchlists import _get_audio_scheduler_task_status

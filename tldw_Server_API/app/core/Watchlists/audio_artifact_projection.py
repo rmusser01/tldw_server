@@ -103,6 +103,14 @@ def _artifact_id(artifact: Any) -> Any:
     return _get_value(artifact, "artifact_id") or _get_value(artifact, "id")
 
 
+def _scrub_artifact_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _scrub_artifact_metadata(item) for key, item in value.items() if key != "uri"}
+    if isinstance(value, list):
+        return [_scrub_artifact_metadata(item) for item in value]
+    return value
+
+
 def summarize_audio_artifact(
     artifact: Any,
     *,
@@ -111,7 +119,7 @@ def summarize_audio_artifact(
     mime_type: str | None = None,
 ) -> dict[str, Any]:
     """Return a mirrored-safe artifact summary without raw file URIs."""
-    art_meta = dict(metadata or _artifact_metadata(artifact))
+    art_meta = _scrub_artifact_metadata(dict(metadata or _artifact_metadata(artifact)))
     artifact_id = _artifact_id(artifact)
     title = _first_non_empty_string(
         art_meta.get("title"),
@@ -374,10 +382,34 @@ def find_matching_workflow_run(
     *,
     tenant_id: str,
     user_id: str,
+    job_id: int | str | None = None,
     run_id: int,
     audio_request_id: str | None,
 ) -> Any | None:
     """Find the Workflow run that belongs to a Watchlists run/request."""
+    idempotency_key = _watchlist_audio_idempotency_key(
+        user_id=user_id,
+        job_id=job_id,
+        run_id=run_id,
+        audio_request_id=audio_request_id,
+    )
+    if idempotency_key:
+        try:
+            lookup = getattr(workflow_db, "get_run_by_idempotency", None)
+            lookup_run = lookup(tenant_id, user_id, idempotency_key) if callable(lookup) else None
+        except _PROJECTION_NONCRITICAL_EXCEPTIONS:
+            lookup_run = None
+        if lookup_run is not None:
+            metadata = extract_workflow_run_metadata(lookup_run)
+            stored_key = _first_non_empty_string(_get_value(lookup_run, "idempotency_key"))
+            candidate_request_id = _first_non_empty_string(metadata.get("audio_request_id"))
+            if stored_key == idempotency_key:
+                return lookup_run
+            if str(metadata.get("watchlist_run_id")) == str(run_id) and (
+                not candidate_request_id or candidate_request_id == audio_request_id
+            ):
+                return lookup_run
+
     fallback_run = None
     page_size = 50
     offset = 0
@@ -403,6 +435,22 @@ def find_matching_workflow_run(
             break
         offset += page_size
     return fallback_run
+
+
+def _watchlist_audio_idempotency_key(
+    *,
+    user_id: str,
+    job_id: int | str | None,
+    run_id: int,
+    audio_request_id: str | None,
+) -> str | None:
+    request_id = _first_non_empty_string(audio_request_id)
+    job_id_text = _first_non_empty_string(job_id)
+    run_id_text = _first_non_empty_string(run_id)
+    user_id_text = _first_non_empty_string(user_id)
+    if not request_id or not job_id_text or not run_id_text or not user_id_text:
+        return None
+    return f"watchlist-audio-briefing:{user_id_text}:{job_id_text}:{run_id_text}:{request_id}"
 
 
 def find_canonical_watchlist_output(
