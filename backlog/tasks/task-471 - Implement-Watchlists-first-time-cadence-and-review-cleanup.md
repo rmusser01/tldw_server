@@ -4,7 +4,7 @@ title: Implement Watchlists first-time cadence and review cleanup
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-05-21 20:18
+updated_date: 2026-05-21 17:05
 labels:
 - watchlists
 - webui
@@ -57,13 +57,13 @@ Added red tests for variable cadence drafts, weekdays/advanced wizard cadence, o
 
 Reopened for PR #1921 review follow-up after Gemini, CodeRabbit, Qodo, and cubic flagged still-valid cadence issues: advanced cron validation was weaker than the existing SchedulePicker guardrails, advanced cron serialization accepted malformed values, submission/review schedule precedence could diverge, cadence time parsing was duplicated, and shared cron validation accepted out-of-range field values.
 
-Review follow-up centralized cron format, range, and frequency validation plus cadence time parsing in JobsTab schedule utilities, reused those guards from SchedulePicker, PipelineWizard, and quick setup serialization, aligned pipeline payload and review-summary schedule precedence, and added copy-injection for pure review-summary cadence labels so UI callers can localize generated labels. Verification after review fixes: focused Watchlists suite passed with 6 files and 42 tests; Watchlists static guard passed with 1 file and 3 tests; git diff --check passed. Bandit skipped because this follow-up touched TypeScript and Backlog task metadata only.
+Review follow-up centralized cron format, range, and frequency validation plus cadence time parsing in JobsTab schedule utilities, reused those guards from SchedulePicker, PipelineWizard, and quick setup serialization, aligned pipeline payload and review-summary schedule precedence, and added copy-injection for pure review-summary cadence labels so UI callers can localize generated labels. Verification after review fixes: focused Watchlists suite passed with 6 files and 42 tests; Watchlists static guard passed with 1 file and 3 tests; WebUI Watchlists Playwright demo-readiness smoke passed with 3 tests; git diff --check passed. Full package TypeScript still fails on inherited non-Watchlists baseline errors. Extension strict demo-readiness E2E was attempted after a successful extension build but skipped by the harness. Bandit skipped because this follow-up touched TypeScript and Backlog task metadata only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the remaining Watchlists Task 6 cadence gaps and PR #1921 review fixes on current dev. Quick setup and pipeline drafts now serialize variable cadence through the existing cron schedule fields, advanced cron values share the SchedulePicker format/range/min-frequency validation, and malformed, out-of-range, or too-frequent cron is blocked before payload serialization. PipelineWizard exposes weekdays and advanced cron choices, distinguishes format, range, and frequency errors, and keeps review summaries aligned with selected cadence and optional 1-4 speaker audio. Pipeline payload and review summary precedence now match when both scheduleExpr and scheduleCadence are present, cadence time parsing is shared through schedule-utils, and the pure pipeline review summary accepts localization copy hooks. Verification: focused Watchlists Vitest suite passed with 6 files and 42 tests; Watchlists static guard passed with 1 file and 3 tests; git diff --check passed. Bandit skipped because this slice touched TypeScript and Backlog task metadata only.
+Implemented the remaining Watchlists Task 6 cadence gaps and PR #1921 review fixes on current dev. Quick setup and pipeline drafts now serialize variable cadence through the existing cron schedule fields, advanced cron values share the SchedulePicker format/range/min-frequency validation, and malformed, out-of-range, or too-frequent cron is blocked before payload serialization. PipelineWizard exposes weekdays and advanced cron choices, distinguishes format, range, and frequency errors, and keeps review summaries aligned with selected cadence and optional 1-4 speaker audio. Pipeline payload and review summary precedence now match when both scheduleExpr and scheduleCadence are present, cadence time parsing is shared through schedule-utils, and the pure pipeline review summary accepts localization copy hooks. Verification: focused Watchlists Vitest suite passed with 6 files and 42 tests; Watchlists static guard passed with 1 file and 3 tests; WebUI Watchlists Playwright demo-readiness smoke passed with 3 tests; git diff --check passed. Full package TypeScript still fails on inherited non-Watchlists baseline errors. Extension strict demo-readiness E2E was attempted after a successful extension build but skipped by the harness. Bandit skipped because this slice touched TypeScript and Backlog task metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
