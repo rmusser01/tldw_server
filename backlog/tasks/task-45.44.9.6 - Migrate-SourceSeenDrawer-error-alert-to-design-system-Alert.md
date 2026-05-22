@@ -4,19 +4,19 @@ title: Migrate SourceSeenDrawer error alert to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-22 19:28'
+updated_date: 2026-05-22 19:28
 labels:
-  - design-system
-  - webui
-  - extension
-  - product-state
-  - watchlists
+- design-system
+- webui
+- extension
+- product-state
+- watchlists
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1666'
-  - >-
-    apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourceSeenDrawer.tsx
-  - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/issues/1666
+- apps/packages/ui/src/components/Option/Watchlists/SourcesTab/SourceSeenDrawer.tsx
+- apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/1944
 parent_task_id: TASK-45.44.9
 priority: medium
 ---
