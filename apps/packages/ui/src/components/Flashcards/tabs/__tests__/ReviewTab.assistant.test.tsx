@@ -14,6 +14,7 @@ import {
   useFlashcardShortcuts,
   useHasCardsQuery,
   useNextDueQuery,
+  useRecentFlashcardReviewSessionsQuery,
   useResetFlashcardSchedulingMutation,
   useReviewAnalyticsSummaryQuery,
   useReviewFlashcardMutation,
@@ -202,6 +203,13 @@ describe("ReviewTab study assistant panel", () => {
     } as any)
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn()
+    } as any)
     assistantQueryState = {
       data: {
         thread: {
@@ -374,6 +382,10 @@ describe("ReviewTab study assistant panel", () => {
         )
       ).toBeInTheDocument()
     })
+    const banner = screen
+      .getByText("Study assistant requires an LLM provider. Configure one in Settings → LLM Providers.")
+      .closest("[role='alert']")
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
     expect(screen.getByTestId("flashcards-review-show-answer")).toBeInTheDocument()
   })
 

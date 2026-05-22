@@ -1,8 +1,9 @@
 import React from "react"
-import { Alert, Button, Card, Empty, Input, Space, Tag, Typography } from "antd"
+import { Button, Card, Empty, Input, Space, Tag, Typography } from "antd"
 import { Lightbulb, MessageSquareText, Sparkles, Volume2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Link as RouterLink, useInRouterContext } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives"
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition"
 import { useTTS } from "@/hooks/useTTS"
 import type {
@@ -530,8 +531,7 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
       <Space orientation="vertical" size={12} className="w-full">
         {(assistantError || isError) && (
           <Alert
-            showIcon
-            type="warning"
+            variant="warning"
             title={
               assistantError ??
               classifiedQueryError ??
