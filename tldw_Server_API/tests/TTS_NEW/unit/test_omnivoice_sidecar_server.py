@@ -374,6 +374,27 @@ def test_sidecar_shutdown_calls_runtime_hook(tmp_path: Path, auth_headers: dict[
 
 
 @pytest.mark.unit
+def test_sidecar_shutdown_without_runtime_hook_returns_structured_unsupported(
+    fake_runtime_client,
+    auth_headers: dict[str, str],
+):
+    client, runtime = fake_runtime_client
+
+    response = client.post("/control/shutdown", headers=auth_headers)
+
+    assert response.status_code == 501  # nosec B101
+    assert response.json() == {  # nosec B101
+        "error": {
+            "code": "RUNTIME_SHUTDOWN_UNSUPPORTED",
+            "message": "OmniVoice runtime shutdown is not supported",
+            "retryable": False,
+        }
+    }
+    assert runtime.load_calls == 0  # nosec B101
+    assert runtime.synthesize_calls == []  # nosec B101
+
+
+@pytest.mark.unit
 def test_sidecar_synthesize_returns_runtime_wav_bytes_and_headers(
     fake_runtime_client,
     auth_headers: dict[str, str],
