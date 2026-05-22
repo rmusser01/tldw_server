@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import ipaddress
+import inspect
 import os
-import wave
-from io import BytesIO
-from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 
+from .omnivoice_runtime import OmniVoiceRuntime, OmniVoiceRuntimeError
 from .omnivoice_sidecar_protocol import (
     OmniVoiceHealthResponse,
+    OmniVoiceRuntimeStatus,
     OmniVoiceSynthesizeRequest,
-    OmniVoiceSynthesizeResponse,
     X_TLDW_SIDECAR_TOKEN_HEADER,
 )
 
@@ -32,20 +33,87 @@ def validate_loopback_host(host: str | None) -> str:
     return "127.0.0.1" if parsed.version == 4 else "::1"
 
 
-def _build_silent_wav(*, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
-    """Create a minimal valid WAV payload for the sidecar boundary contract."""
-    buffer = BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(channels)
-        wav_file.setsampwidth(sample_width)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(b"\x00" * sample_width * channels * 32)
-    return buffer.getvalue()
+def load_runtime_config_from_env() -> dict[str, Any]:
+    """Load OmniVoice runtime configuration from sidecar environment variables."""
+    return {
+        "model": os.environ.get("OMNIVOICE_MODEL", "omnivoice"),
+        "model_path": os.environ.get("OMNIVOICE_MODEL_PATH"),
+        "runtime_path": os.environ.get("OMNIVOICE_RUNTIME_PATH"),
+        "scratch_dir": os.environ.get("OMNIVOICE_SCRATCH_DIR"),
+        "device_map": os.environ.get("OMNIVOICE_DEVICE_MAP"),
+        "dtype": os.environ.get("OMNIVOICE_DTYPE"),
+    }
 
 
-def create_app(*, sidecar_token: str) -> FastAPI:
+def _runtime_error_status_code(exc: OmniVoiceRuntimeError) -> int:
+    if exc.code in {"MODEL_NOT_AVAILABLE", "MODEL_LOAD_FAILED", "RUNTIME_IMPORT_FAILED"}:
+        return status.HTTP_503_SERVICE_UNAVAILABLE
+    if exc.code in {
+        "INVALID_REFERENCE_AUDIO",
+        "INVALID_GENERATION_PARAMETER",
+        "REFERENCE_PATH_NOT_ALLOWED",
+    }:
+        return status.HTTP_422_UNPROCESSABLE_ENTITY
+    if exc.retryable:
+        return status.HTTP_503_SERVICE_UNAVAILABLE
+    return status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+def _runtime_error_response(exc: OmniVoiceRuntimeError) -> JSONResponse:
+    return JSONResponse(
+        status_code=_runtime_error_status_code(exc),
+        content={
+            "error": {
+                "code": exc.code,
+                "message": str(exc),
+                "retryable": exc.retryable,
+            }
+        },
+    )
+
+
+def _runtime_model_id(runtime: OmniVoiceRuntime) -> str | None:
+    model_id = getattr(runtime, "_model_id", None)
+    if model_id:
+        return str(model_id)
+    model = getattr(runtime, "model", None)
+    if isinstance(model, str) and model:
+        return model
+    configured_model = getattr(runtime, "config", {}).get("model") if hasattr(runtime, "config") else None
+    return str(configured_model) if configured_model else None
+
+
+def _runtime_model_path(runtime: OmniVoiceRuntime) -> str | None:
+    model_path = getattr(runtime, "_model_path", None)
+    return str(model_path) if model_path else None
+
+
+async def _runtime_status(runtime: OmniVoiceRuntime) -> OmniVoiceRuntimeStatus:
+    status_value = getattr(runtime, "status", "idle_stopped")
+    if callable(status_value):
+        status_value = status_value()
+        if inspect.isawaitable(status_value):
+            status_value = await status_value
+        if isinstance(status_value, OmniVoiceRuntimeStatus):
+            return status_value
+        if isinstance(status_value, dict):
+            return OmniVoiceRuntimeStatus(**status_value)
+
+    status_text = str(status_value or "idle_stopped")
+    ready = status_text == "ready" and getattr(runtime, "model", None) is not None
+    return OmniVoiceRuntimeStatus(
+        status=status_text,
+        ready=ready,
+        model=_runtime_model_id(runtime),
+        model_path=_runtime_model_path(runtime),
+        last_error_code=getattr(runtime, "last_error_code", None),
+    )
+
+
+def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -> FastAPI:
     """Create the narrow internal OmniVoice sidecar app."""
     app = FastAPI(title="OmniVoice Sidecar", version="0.1.0")
+    runtime = runtime or OmniVoiceRuntime(load_runtime_config_from_env())
 
     async def require_sidecar_token(
         supplied_token: str | None = Header(default=None, alias=X_TLDW_SIDECAR_TOKEN_HEADER),
@@ -56,51 +124,77 @@ def create_app(*, sidecar_token: str) -> FastAPI:
                 detail="Invalid sidecar token",
             )
 
+    @app.get("/status", response_model=OmniVoiceRuntimeStatus)
+    async def get_status(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus:
+        return await _runtime_status(runtime)
+
     @app.get("/health", response_model=OmniVoiceHealthResponse)
-    async def health(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse()
+    async def health(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus:
+        return await _runtime_status(runtime)
 
     @app.post("/control/warmup", response_model=OmniVoiceHealthResponse)
-    async def warmup(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse()
+    async def warmup(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus | JSONResponse:
+        try:
+            await runtime.load()
+        except OmniVoiceRuntimeError as exc:
+            return _runtime_error_response(exc)
+        return await _runtime_status(runtime)
 
     @app.post("/control/reload", response_model=OmniVoiceHealthResponse)
-    async def reload_runtime(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse()
+    async def reload_runtime(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus | JSONResponse:
+        try:
+            reload_method = getattr(runtime, "reload", None)
+            if callable(reload_method):
+                result = reload_method()
+                if inspect.isawaitable(result):
+                    await result
+            else:
+                if hasattr(runtime, "model"):
+                    runtime.model = None
+                if isinstance(getattr(runtime, "status", None), str):
+                    runtime.status = "idle_stopped"
+                if hasattr(runtime, "last_error_code"):
+                    runtime.last_error_code = None
+                await runtime.load()
+        except OmniVoiceRuntimeError as exc:
+            return _runtime_error_response(exc)
+        return await _runtime_status(runtime)
 
     @app.post("/control/shutdown", response_model=OmniVoiceHealthResponse)
-    async def shutdown(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
-        return OmniVoiceHealthResponse(status="shutting-down", ready=False)
+    async def shutdown(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus:
+        if isinstance(getattr(runtime, "status", None), str):
+            runtime.status = "shutting-down"
+        current_status = await _runtime_status(runtime)
+        return OmniVoiceRuntimeStatus(
+            status="shutting-down",
+            ready=False,
+            model=current_status.model,
+            model_path=current_status.model_path,
+            last_error_code=current_status.last_error_code,
+        )
 
-    @app.post("/v1/synthesize")
+    @app.post("/v1/synthesize", response_model=None)
     async def synthesize(
         request: OmniVoiceSynthesizeRequest,
         _: None = Depends(require_sidecar_token),
-    ) -> Response:
-        if request.mode == "clone":
-            if not request.reference_audio_path:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Clone reference audio path does not exist",
-                )
-            reference_path = Path(request.reference_audio_path)
-            if not reference_path.is_file():
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Clone reference audio path does not exist",
-                )
-        sample_rate = request.requested_sample_rate or 24000
-        metadata = OmniVoiceSynthesizeResponse(sample_rate=sample_rate, mode=request.mode)
-        audio_bytes = _build_silent_wav(sample_rate=sample_rate, channels=metadata.channels)
+    ) -> Response | JSONResponse:
+        try:
+            result = await runtime.synthesize(request)
+        except OmniVoiceRuntimeError as exc:
+            return _runtime_error_response(exc)
+
+        content_type = f"audio/{result.audio_format}"
         return Response(
-            content=audio_bytes,
-            media_type=metadata.content_type,
+            content=result.audio_bytes,
+            media_type=content_type,
             headers={
-                "X-OmniVoice-Audio-Format": metadata.audio_format,
-                "X-OmniVoice-Sample-Rate": str(metadata.sample_rate),
-                "X-OmniVoice-Channels": str(metadata.channels),
-                "X-OmniVoice-Provider": metadata.provider,
-                "X-OmniVoice-Mode": metadata.mode,
+                "X-OmniVoice-Audio-Format": result.audio_format,
+                "X-OmniVoice-Sample-Rate": str(result.sample_rate),
+                "X-OmniVoice-Channels": str(result.channels),
+                "X-OmniVoice-Provider": "omnivoice",
+                "X-OmniVoice-Mode": request.mode,
+                "X-OmniVoice-Model": result.model,
+                "X-OmniVoice-Cold-Start": str(result.cold_start).lower(),
             },
         )
 
