@@ -31,7 +31,8 @@ import {
   FileText,
   Globe,
   Headphones,
-  Settings2
+  Settings2,
+  UserCircle2
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { getVariable } from "@/utils/select-variable"
@@ -103,10 +104,6 @@ import { useSetting } from "@/hooks/useSetting"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
-import {
-  createQuickIngestSessionSeedFromOpenDetail,
-  type QuickIngestOpenDetail
-} from "@/utils/quick-ingest-open"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import { shallow } from "zustand/shallow"
@@ -120,11 +117,13 @@ import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 import { useConversationContextComposition } from "@/hooks/chat/useConversationContextComposition"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import {
   buildAvailableChatModelIds,
   findUnavailableChatModel,
   normalizeChatModelId
 } from "@/utils/chat-model-availability"
+import { createSafeStorage } from "@/utils/safe-storage"
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
   defaultCharacterStorage,
@@ -143,6 +142,8 @@ import { browser } from "wxt/browser"
 import type { Character } from "@/types/character"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
+import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterControlsSheet"
+import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
 
 type Props = {
   dropedFile: File | undefined
@@ -182,6 +183,8 @@ export const SidepanelForm = ({
     shouldEnableOptionalResource(state, "audio-health")
   )
   const [typing, setTyping] = React.useState<boolean>(false)
+  const [characterControlsOpen, setCharacterControlsOpen] =
+    React.useState(false)
   const { t } = useTranslation(["playground", "common", "option", "sidepanel"])
   const notification = useAntdNotification()
   const [chatWithWebsiteEmbedding] = useStorage(
@@ -491,14 +494,12 @@ export const SidepanelForm = ({
   const {
     quickIngestSession,
     createDraftQuickIngestSession,
-    upsertQuickIngestSession,
     showQuickIngestSession,
     hideQuickIngestSession
   } = useQuickIngestSessionStore(
     (state) => ({
       quickIngestSession: state.session,
       createDraftQuickIngestSession: state.createDraftSession,
-      upsertQuickIngestSession: state.upsertSession,
       showQuickIngestSession: state.showSession,
       hideQuickIngestSession: state.hideSession
     }),
@@ -688,14 +689,76 @@ export const SidepanelForm = ({
     setQueuedMessages,
     serverChatId
   } = useMessage()
+  const serverChatAssistantKind = useStoreMessageOption(
+    (state) => state.serverChatAssistantKind
+  )
+  const serverChatAssistantId = useStoreMessageOption(
+    (state) => state.serverChatAssistantId
+  )
+  const serverChatCharacterId = useStoreMessageOption(
+    (state) => state.serverChatCharacterId
+  )
   const { settings: conversationContextSettings, updateSettings } =
     useChatSettingsRecord({
       historyId,
       serverChatId
     })
+  const effectiveAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: serverChatAssistantKind,
+          assistantId: serverChatAssistantId,
+          characterId: serverChatCharacterId
+        },
+        settings: conversationContextSettings ?? null
+      }),
+    [
+      conversationContextSettings,
+      serverChatAssistantId,
+      serverChatAssistantKind,
+      serverChatCharacterId
+    ]
+  )
+  const sidepanelOverlayResumeStorageRef = React.useRef(
+    createSafeStorage({ area: "local" })
+  )
+  const overlayResumeMarkerKey = React.useMemo(
+    () => getSidepanelOverlayResumeMarkerKey(storageKey),
+    [storageKey]
+  )
+  const handlePrepareTrackedStart = React.useCallback(async () => {
+    if (!overlayResumeMarkerKey) return
+    try {
+      await sidepanelOverlayResumeStorageRef.current.remove(overlayResumeMarkerKey)
+    } catch {
+      // no-op
+    }
+  }, [overlayResumeMarkerKey])
   const previousServerChatIdRef = React.useRef<string | null | undefined>(
     serverChatId
   )
+
+  React.useEffect(() => {
+    if (!overlayResumeMarkerKey) return
+
+    const storage = sidepanelOverlayResumeStorageRef.current
+    const syncOverlayResumeMarker = async () => {
+      try {
+        if (effectiveAssistantState.mode === "overlay") {
+          await storage.set(overlayResumeMarkerKey, {
+            updatedAt: new Date().toISOString()
+          })
+          return
+        }
+        await storage.remove(overlayResumeMarkerKey)
+      } catch {
+        // no-op
+      }
+    }
+
+    void syncOverlayResumeMarker()
+  }, [effectiveAssistantState.mode, overlayResumeMarkerKey])
 
   React.useEffect(() => {
     const previous = previousServerChatIdRef.current
@@ -894,16 +957,12 @@ export const SidepanelForm = ({
     browserSupportsSpeechRecognition || hasServerStt || hasServerVoiceChat
 
   // Composer window events hook
-  const handleOpenQuickIngest = React.useCallback((detail?: QuickIngestOpenDetail) => {
-    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
+  const handleOpenQuickIngest = React.useCallback(() => {
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
-      if (seed) {
-        upsertQuickIngestSession(seed)
-      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession(seed ?? undefined)
+      createDraftQuickIngestSession()
     }
     setIngestOpen(true)
     requestAnimationFrame(() => {
@@ -912,8 +971,7 @@ export const SidepanelForm = ({
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession,
-    upsertQuickIngestSession
+    showQuickIngestSession
   ])
 
   const {
@@ -2003,23 +2061,18 @@ export const SidepanelForm = ({
     window.dispatchEvent(new CustomEvent("tldw:toggle-rag"))
   }, [])
 
-  const handleQuickIngestOpen = React.useCallback((detail?: QuickIngestOpenDetail) => {
-    const seed = createQuickIngestSessionSeedFromOpenDetail(detail)
+  const handleQuickIngestOpen = React.useCallback(() => {
     setAutoProcessQueuedIngest(false)
     if (quickIngestSession) {
-      if (seed) {
-        upsertQuickIngestSession(seed)
-      }
       showQuickIngestSession()
     } else {
-      createDraftQuickIngestSession(seed ?? undefined)
+      createDraftQuickIngestSession()
     }
     setIngestOpen(true)
   }, [
     createDraftQuickIngestSession,
     quickIngestSession,
-    showQuickIngestSession,
-    upsertQuickIngestSession
+    showQuickIngestSession
   ])
 
   const handleProcessQueuedIngest = React.useCallback(() => {
@@ -3074,6 +3127,27 @@ export const SidepanelForm = ({
                                         </button>
                                       </Tooltip>
                                     )}
+                                    <Tooltip
+                                      title={t(
+                                        "playground:characterRail.title",
+                                        "Character controls"
+                                      )}
+                                    >
+                                      <button
+                                        type="button"
+                                        data-testid="chat-character-controls-trigger"
+                                        onClick={() =>
+                                          setCharacterControlsOpen(true)
+                                        }
+                                        className="inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                        aria-label={t(
+                                          "playground:characterRail.title",
+                                          "Character controls"
+                                        )}
+                                      >
+                                        <UserCircle2 className="h-4 w-4" />
+                                      </button>
+                                    </Tooltip>
                                   </>
                                 ) : (
                                   <Tooltip title={t("tooltip.stopStreaming")}>
@@ -3395,6 +3469,32 @@ export const SidepanelForm = ({
                                     {t("playground:actions.speechShort", "Dictate")}
                                   </span>
                                 </div>
+                                <div className="flex flex-col items-center gap-1">
+                                  <Tooltip
+                                    title={t(
+                                      "playground:characterRail.title",
+                                      "Character controls"
+                                    )}
+                                  >
+                                    <button
+                                      type="button"
+                                      data-testid="chat-character-controls-trigger"
+                                      onClick={() =>
+                                        setCharacterControlsOpen(true)
+                                      }
+                                      className="h-11 w-11 min-h-[44px] min-w-[44px] rounded-full border border-border p-0 text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                                      aria-label={t(
+                                        "playground:characterRail.title",
+                                        "Character controls"
+                                      )}
+                                    >
+                                      <UserCircle2 className="h-4 w-4" />
+                                    </button>
+                                  </Tooltip>
+                                  <span className="text-[10px] font-medium leading-none text-text-subtle">
+                                    {t("playground:characterRail.shortLabel", "Character")}
+                                  </span>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -3589,6 +3689,18 @@ export const SidepanelForm = ({
       {openActorSettings && (
         <ActorPopout open={openActorSettings} setOpen={setOpenActorSettings} />
       )}
+      <Modal
+        open={characterControlsOpen}
+        onCancel={() => setCharacterControlsOpen(false)}
+        footer={null}
+        title={t("playground:characterRail.title", "Character controls")}
+        centered
+      >
+        <CharacterControlsSheet
+          beforeTrackedStart={handlePrepareTrackedStart}
+          onRequestClose={() => setCharacterControlsOpen(false)}
+        />
+      </Modal>
       {documentGeneratorOpen && (
         <DocumentGeneratorDrawer
           open={documentGeneratorOpen}
