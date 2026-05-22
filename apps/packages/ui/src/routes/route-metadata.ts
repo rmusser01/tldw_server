@@ -35,6 +35,7 @@ export type RouteMetadata = {
   path: string
   canonicalPath: string
   label: string
+  commandLabel?: string
   group: RouteGroup
   surface: RouteSurface
   availability: RouteAvailability[]
@@ -45,7 +46,14 @@ export type RouteMetadata = {
   nav: "primary" | "secondary" | "hidden"
   requiresAuth?: boolean
   requiresBackend?: boolean
+  requiresH1?: boolean
+  h1ExceptionReason?: string
   rationale: string
+}
+
+export type RouteHeadingPolicy = {
+  requiresH1: boolean
+  exceptionReason?: string
 }
 
 const webAndExtensionOptions: RouteAvailability[] = ["web", "extension_options"]
@@ -425,6 +433,7 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
     path: "/media",
     canonicalPath: "/media",
     label: "Media Library",
+    commandLabel: "Go to Media",
     group: "media_library",
     surface: "default_self_hosted",
     availability: webAndExtensionOptions,
@@ -1015,6 +1024,7 @@ const registryRoute = ({
   path,
   canonicalPath = path,
   label,
+  commandLabel,
   group,
   surface = "advanced_self_hosted",
   availability = webAndExtensionOptions,
@@ -1025,11 +1035,14 @@ const registryRoute = ({
   nav = "secondary",
   requiresAuth,
   requiresBackend,
+  requiresH1,
+  h1ExceptionReason,
   rationale
 }: RegistryRouteMetadataInput): RouteMetadata => ({
   path,
   canonicalPath,
   label,
+  commandLabel,
   group,
   surface,
   availability,
@@ -1040,6 +1053,8 @@ const registryRoute = ({
   nav,
   requiresAuth,
   requiresBackend,
+  requiresH1,
+  h1ExceptionReason,
   rationale
 })
 
@@ -1164,7 +1179,10 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
   settingsRoute(
     "/settings/health",
     "Health Settings",
-    "Health and connection diagnostics are nested under settings."
+    "Health and connection diagnostics are nested under settings.",
+    {
+      commandLabel: "Go to Health & Diagnostics"
+    }
   ),
   settingsRoute(
     "/settings/prompt-studio",
@@ -1730,6 +1748,60 @@ export const getRouteMetadata = (path: string): RouteMetadata | undefined => {
 
 export const getCanonicalRoutePath = (path: string): string | undefined =>
   getRouteMetadata(path)?.canonicalPath
+
+export const getRouteCommandPaletteLabel = (
+  route: RouteMetadata | string
+): string => {
+  const metadata = typeof route === "string" ? getRouteMetadata(route) : route
+
+  return metadata?.commandLabel ?? (metadata ? `Go to ${metadata.label}` : "")
+}
+
+const h1ExceptionSurfaceReasons: Partial<Record<RouteSurface, string>> = {
+  hosted_only: "Hosted-only route can be gated outside self-hosted smoke runs.",
+  extension_sidepanel:
+    "Extension sidepanel route uses a constrained shell instead of the standard page heading contract.",
+  internal_qa_debug:
+    "Internal QA/debug route is not part of normal user-facing page inventory.",
+  legacy_alias:
+    "Legacy alias route delegates ownership to its canonical route.",
+  redirect: "Redirect route delegates ownership to its destination route.",
+  deprecated: "Deprecated route is retained for compatibility and not normal IA."
+}
+
+export const getRouteHeadingPolicy = (
+  route: RouteMetadata | string
+): RouteHeadingPolicy => {
+  const metadata = typeof route === "string" ? getRouteMetadata(route) : route
+
+  if (!metadata) {
+    return {
+      requiresH1: false,
+      exceptionReason: "Route metadata is missing."
+    }
+  }
+
+  if (metadata.requiresH1 === true) {
+    return { requiresH1: true }
+  }
+
+  if (metadata.requiresH1 === false) {
+    return {
+      requiresH1: false,
+      exceptionReason: metadata.h1ExceptionReason ?? metadata.rationale
+    }
+  }
+
+  const exceptionReason = h1ExceptionSurfaceReasons[metadata.surface]
+  if (exceptionReason) {
+    return {
+      requiresH1: false,
+      exceptionReason: metadata.h1ExceptionReason ?? exceptionReason
+    }
+  }
+
+  return { requiresH1: true }
+}
 
 export const isRouteVisibleForSurface = (
   path: string,

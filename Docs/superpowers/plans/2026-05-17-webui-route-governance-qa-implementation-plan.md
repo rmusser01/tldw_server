@@ -335,7 +335,7 @@ git commit -m "test: govern route inventory coverage"
 - Modify: `apps/packages/ui/src/components/Common/CommandPalette.tsx`
 - Modify: `apps/packages/ui/src/components/Common/CommandPaletteHost.tsx`
 
-- [ ] **Step 1: Write heading governance test**
+- [x] **Step 1: Write heading governance test**
 
 Create `route-heading-governance.spec.ts`:
 
@@ -362,7 +362,7 @@ test.describe("Route heading governance", () => {
 
 Before implementation, this simple test will fail on valid alias and exception routes. Replace the raw `h1Count` assertion with route metadata exception logic before committing.
 
-- [ ] **Step 2: Run heading test to verify failures**
+- [x] **Step 2: Run heading test to verify failures**
 
 Run:
 
@@ -372,7 +372,7 @@ bunx playwright test apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.
 
 Expected: FAIL until metadata exceptions are wired.
 
-- [ ] **Step 3: Add metadata-backed heading exceptions**
+- [x] **Step 3: Add metadata-backed heading exceptions**
 
 Update the test so:
 
@@ -381,7 +381,7 @@ Update the test so:
 - Alias and redirect routes assert the final canonical path or redirect panel.
 - Internal/debug routes are excluded from user-facing heading enforcement.
 
-- [ ] **Step 4: Add command target tests**
+- [x] **Step 4: Add command target tests**
 
 Create `CommandPalette.route-targets.test.tsx` to assert:
 
@@ -391,7 +391,7 @@ Create `CommandPalette.route-targets.test.tsx` to assert:
 - No two route commands share the same label with different targets.
 - Aliases either do not appear as separate commands or are labeled as aliases.
 
-- [ ] **Step 5: Run heading and command tests**
+- [x] **Step 5: Run heading and command tests**
 
 Run:
 
@@ -409,12 +409,18 @@ bunx playwright test apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit heading and command governance**
+- [x] **Step 6: Commit heading and command governance**
 
 ```bash
 git add apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.ts apps/packages/ui/src/components/Common/__tests__/CommandPalette.route-targets.test.tsx apps/packages/ui/src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx apps/packages/ui/src/components/Common/CommandPalette.tsx apps/packages/ui/src/components/Common/CommandPaletteHost.tsx
 git commit -m "test: govern headings and command targets"
 ```
+
+Implementation outcome:
+- Added metadata-backed command labels and h1 policy helpers in route metadata.
+- Added command palette route-target governance and route heading governance tests.
+- Browser QA initially found `/media` and `/notes` heading failures; `/media` needed route test mocks, and `/notes` now exposes its existing title as the page `h1`.
+- Kept CommandPaletteHost and shortcut behavior unchanged because the new target contract passed without host changes.
 
 ### Task 3: Govern Sidepanel And Hosted Visibility
 

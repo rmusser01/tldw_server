@@ -340,9 +340,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           <div className="flex-shrink-0 border-b border-border p-4 bg-surface">
             {/* ---- Always visible: Header row ---- */}
             <div className="flex items-center justify-between mb-3">
-              <div className="text-xs uppercase tracking-[0.16em] text-text-muted">
-                {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
-                <span className="ml-2 text-text-subtle">
+              <div className="flex min-w-0 items-baseline">
+                <h1 className="text-xs uppercase tracking-[0.16em] text-text-muted">
+                  {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
+                </h1>
+                <span className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle">
                   {hasActiveFilters
                     ? t('option:notesSearch.headerCount', {
                         defaultValue: '{{visible}} of {{total}}',
