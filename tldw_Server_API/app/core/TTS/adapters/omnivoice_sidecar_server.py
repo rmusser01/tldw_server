@@ -89,8 +89,9 @@ def create_app(*, sidecar_token: str) -> FastAPI:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Clone reference audio path does not exist",
                 )
-        metadata = OmniVoiceSynthesizeResponse(sample_rate=request.sample_rate, mode=request.mode)
-        audio_bytes = _build_silent_wav(sample_rate=request.sample_rate, channels=metadata.channels)
+        sample_rate = request.requested_sample_rate or 24000
+        metadata = OmniVoiceSynthesizeResponse(sample_rate=sample_rate, mode=request.mode)
+        audio_bytes = _build_silent_wav(sample_rate=sample_rate, channels=metadata.channels)
         return Response(
             content=audio_bytes,
             media_type=metadata.content_type,
