@@ -2563,28 +2563,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx:Alert#antd-alert-flowcheckdiffpanel-type-info-no-diff-availabl-4fd87r",
-    "path": "src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx:Alert#antd-alert-flowcheckdiffpanel-type-warning-flow-issues-l-qjd9ai",
-    "path": "src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Watchlists/TemplatesTab/TemplatePreviewPane.tsx:Alert#antd-alert-templatepreviewpane-type-error-line-270-1somb8x",
     "path": "src/components/Option/Watchlists/TemplatesTab/TemplatePreviewPane.tsx",
     "rule": "antd-product-state-import",
