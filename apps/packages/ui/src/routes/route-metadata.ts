@@ -23,6 +23,7 @@ export type RouteGroup =
   | "safety"
   | "specialized"
   | "documentation"
+  | "marketing"
   | "account"
 
 export type RouteAvailability =
@@ -1264,6 +1265,224 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
     "Monitoring Admin",
     "Monitoring is an operator route for service status and diagnostics."
   ),
+  adminRoute(
+    "/admin/api-keys",
+    "API Keys Admin",
+    "API key administration is a Next-only operator page outside normal user navigation.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/billing",
+    "Billing Admin",
+    "Billing administration is an operator page and remains separate from hosted user billing.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/data-ops",
+    "Data Operations Admin",
+    "Data operations administration is a Next-only operator workflow.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/maintenance",
+    "Maintenance Admin",
+    "Maintenance controls are operator-only and should stay out of default user navigation.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/orgs",
+    "Organizations Admin",
+    "Organization administration is operator-owned and deployment-mode dependent.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/rate-limiting",
+    "Rate Limiting Admin",
+    "Rate-limit administration is an operator-only controls page.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/rbac",
+    "RBAC Admin",
+    "RBAC administration is an operator-only access-control page.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/usage",
+    "Usage Admin",
+    "Usage administration is an operator-only reporting page.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/watchlists-items",
+    "Watchlists Items Admin",
+    "Watchlist item administration is an operator drill-down page.",
+    {
+      availability: webOnly
+    }
+  ),
+  adminRoute(
+    "/admin/watchlists-runs",
+    "Watchlists Runs Admin",
+    "Watchlist run administration is an operator placeholder and drill-down page.",
+    {
+      availability: webOnly
+    }
+  ),
+  registryRoute({
+    path: "/auth/magic-link",
+    label: "Magic Link Sign-In",
+    group: "account",
+    surface: "hosted_only",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Hosted magic-link auth lives outside the self-hosted WebUI distribution."
+  }),
+  registryRoute({
+    path: "/auth/reset-password",
+    label: "Reset Password",
+    group: "account",
+    surface: "hosted_only",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Hosted password-reset auth lives outside the self-hosted WebUI distribution."
+  }),
+  registryRoute({
+    path: "/auth/verify-email",
+    label: "Verify Email",
+    group: "account",
+    surface: "hosted_only",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Hosted email verification lives outside the self-hosted WebUI distribution."
+  }),
+  registryRoute({
+    path: "/billing/success",
+    label: "Billing Success",
+    group: "account",
+    surface: "hosted_only",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Hosted billing completion is represented by a self-hosted placeholder."
+  }),
+  registryRoute({
+    path: "/billing/cancel",
+    label: "Billing Cancel",
+    group: "account",
+    surface: "hosted_only",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Hosted billing cancellation is represented by a self-hosted placeholder."
+  }),
+  registryRoute({
+    path: "/chat/agent",
+    canonicalPath: "/agent",
+    label: "Agent Chat",
+    group: "chat",
+    surface: "advanced_self_hosted",
+    availability: webOnly,
+    smoke: "include",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Legacy web wrapper for the sidepanel agent chat route remains in smoke inventory."
+  }),
+  registryRoute({
+    path: "/media/:id/view",
+    canonicalPath: "/media",
+    label: "Media Item View Redirect",
+    group: "media_library",
+    surface: "redirect",
+    availability: webOnly,
+    aliases: ["/media/123/view"],
+    redirectsTo: "/media",
+    smoke: "exclude",
+    commandPalette: "alias_only",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Dynamic media view redirects into the canonical media library surface."
+  }),
+  registryRoute({
+    path: "/connectors/browse",
+    label: "Connector Browse",
+    group: "operations",
+    surface: "labs_beta",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Connector browse is a placeholder child route under the connectors hub."
+  }),
+  registryRoute({
+    path: "/connectors/jobs",
+    label: "Connector Jobs",
+    group: "operations",
+    surface: "labs_beta",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Connector jobs is a placeholder child route under the connectors hub."
+  }),
+  registryRoute({
+    path: "/connectors/sources",
+    label: "Connector Sources",
+    group: "operations",
+    surface: "labs_beta",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Connector sources is a placeholder child route under the connectors hub."
+  }),
+  registryRoute({
+    path: "/for/journalists",
+    label: "For Journalists",
+    group: "marketing",
+    surface: "default_self_hosted",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Audience landing page is public web content rather than application navigation."
+  }),
+  registryRoute({
+    path: "/for/osint",
+    label: "For OSINT",
+    group: "marketing",
+    surface: "default_self_hosted",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Audience landing page is public web content rather than application navigation."
+  }),
+  registryRoute({
+    path: "/for/researchers",
+    label: "For Researchers",
+    group: "marketing",
+    surface: "default_self_hosted",
+    availability: webOnly,
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Audience landing page is public web content rather than application navigation."
+  }),
   registryRoute({
     path: "/sources/new",
     label: "New Source",
