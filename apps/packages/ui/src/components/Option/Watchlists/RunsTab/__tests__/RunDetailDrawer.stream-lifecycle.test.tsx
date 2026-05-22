@@ -441,11 +441,39 @@ describe("RunDetailDrawer stream lifecycle", () => {
 
     render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
 
-    expect(mocks.getWatchlistRunAudioMock).not.toHaveBeenCalled()
     await waitFor(() => {
       expect(screen.getByText("Audio briefing")).toBeInTheDocument()
       expect(screen.getByText("Configuration required")).toBeInTheDocument()
       expect(screen.getByText("Reason: tts_defaults_unavailable")).toBeInTheDocument()
+      expect(mocks.getWatchlistRunAudioMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it("shows a retry-created audio task before persisted run stats refresh", async () => {
+    mocks.getRunDetailsMock.mockResolvedValue({
+      ...baseRunDetails,
+      status: "completed",
+      finished_at: "2026-02-18T10:01:00Z",
+      stats: {
+        ...baseRunDetails.stats,
+        audio_briefing_requested: true,
+        audio_briefing_status: "queue_unavailable",
+        audio_briefing_reason: "audio_queue_unavailable"
+      }
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByText("No audio task created")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Retry audio" })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry audio" }))
+
+    await waitFor(() => {
+      expect(mocks.retryWatchlistRunAudioMock).toHaveBeenCalledWith(10)
+      expect(screen.getByText("Task retry-audio-10")).toBeInTheDocument()
     })
   })
 

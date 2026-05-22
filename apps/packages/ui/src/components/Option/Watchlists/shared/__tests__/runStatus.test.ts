@@ -12,6 +12,9 @@ describe("watchlist run status helpers", () => {
     expect(normalizeWatchlistRunStatus("succeeded")).toBe("completed")
     expect(normalizeWatchlistRunStatus("success")).toBe("completed")
     expect(normalizeWatchlistRunStatus(" Succeeded ")).toBe("completed")
+    expect(normalizeWatchlistRunStatus("canceled")).toBe("cancelled")
+    expect(normalizeWatchlistRunStatus("in-progress")).toBe("in_progress")
+    expect(normalizeWatchlistRunStatus("in progress")).toBe("in_progress")
   })
 
   it("classifies active, successful, and terminal statuses", () => {
@@ -21,6 +24,7 @@ describe("watchlist run status helpers", () => {
     expect(isWatchlistRunTerminal("succeeded")).toBe(true)
     expect(isWatchlistRunTerminal("failed")).toBe(true)
     expect(isWatchlistRunTerminal("cancelled")).toBe(true)
+    expect(isWatchlistRunTerminal("canceled")).toBe(true)
     expect(isWatchlistRunTerminal("running")).toBe(false)
   })
 })

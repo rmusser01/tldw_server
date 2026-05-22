@@ -1115,7 +1115,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }
 
   const renderAudioStatusPanel = () => {
-    if (!audioTaskId && !audioSummary.requested) return null
+    const displayAudioTaskId = audioStatus?.task_id || audioTaskId
+    if (!displayAudioTaskId && !audioSummary.requested) return null
 
     const hasFinalAudio = Boolean(audioSummary.downloadUrl || audioSummary.finalArtifact)
     const hasAudioArtifacts = Boolean(
@@ -1159,9 +1160,9 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               {t("watchlists:runs.detail.audioStatusTitle", "Audio briefing")}
             </div>
             <div className="text-xs text-text-muted">
-              {audioTaskId
+              {displayAudioTaskId
                 ? t("watchlists:runs.detail.audioTask", "Task {{taskId}}", {
-                    taskId: audioTaskId
+                    taskId: displayAudioTaskId
                   })
                 : t("watchlists:runs.detail.audioNoTask", "No audio task created")}
             </div>
@@ -1239,7 +1240,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           </div>
         )}
 
-        {(audioTaskId ||
+        {(displayAudioTaskId ||
           audioSummary.status === "queue_unavailable" ||
           audioSummary.status === "enqueue_failed" ||
           audioSummary.status === "failed") && (
