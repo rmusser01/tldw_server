@@ -33,16 +33,20 @@ Implement the first Persona-backed Chat Startup hardening slice from #1908: prev
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Updated `apps/packages/ui/src/hooks/chat/personaServerChat.ts` so `read_write` is preserved only when reusing an existing matching Persona-backed server chat.
 - New Persona-backed chats after stale Character or different-Persona reset now start with explicit `read_only` and a fresh `in-progress` metadata payload instead of carrying stale topic/source/cluster/external-ref state.
-- Updated `apps/packages/ui/src/hooks/chat/__tests__/personaServerChat.test.ts` to cover stale Character reset and stale different-Persona reset behavior.
-- Verified with `bunx vitest run src/hooks/chat/__tests__/personaServerChat.test.ts` from `apps/packages/ui`.
+- PR #1935 review follow-up: added `serverChatMetaLoaded` to the Persona startup helper and callers so a restored `serverChatId` with assistant metadata still hydrating is reused instead of reset or recreated prematurely.
+- Updated `apps/packages/ui/src/hooks/chat/__tests__/personaServerChat.test.ts` to cover stale Character reset, stale different-Persona reset, and restored-chat metadata-hydration behavior.
+- Verified red/green with `bunx vitest run src/hooks/chat/__tests__/personaServerChat.test.ts --reporter=verbose` from `apps/packages/ui`.
+- Verified integration with `bunx vitest run src/hooks/chat/__tests__/personaServerChat.test.ts src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx --reporter=verbose` from `apps/packages/ui`.
 - Verified with `git diff --check`.
+- Ran frontend lint through the WebUI config; the only error reported in touched files was pre-existing `no-extra-boolean-cast` in `useChatActions.ts:3121`, outside this patch hunk. The WebUI-wide lint command exits 0 with existing warnings.
+- `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails on existing shared UI baseline type debt outside this slice and reports no diagnostics for the Persona startup changes.
 - Bandit not applicable: no Python files changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the first Persona-backed chat startup hardening slice. The Persona server chat helper now isolates newly created Persona chats from stale non-matching assistant state, while preserving `read_write` only for an already matching Persona session.
+Closed the PR #1935 review follow-up for Persona chat startup memory isolation. The helper now waits for server chat metadata before treating a restored chat ID as stale, while still defaulting unknown/unhydrated Persona startup memory to read_only and preserving read_write only for loaded matching Persona sessions.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -49,6 +49,7 @@ describe("ensurePersonaServerChat", () => {
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
       serverChatPersonaMemoryMode: null,
+      serverChatMetaLoaded: false,
       serverChatState: "in-progress",
       serverChatTopic: null,
       serverChatClusterId: null,
@@ -106,6 +107,7 @@ describe("ensurePersonaServerChat", () => {
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
       serverChatPersonaMemoryMode: null,
+      serverChatMetaLoaded: false,
       serverChatState: "in-progress",
       serverChatTopic: null,
       serverChatClusterId: null,
@@ -145,6 +147,7 @@ describe("ensurePersonaServerChat", () => {
       serverChatAssistantKind: "persona",
       serverChatAssistantId: "garden-helper",
       serverChatPersonaMemoryMode: "read_write",
+      serverChatMetaLoaded: true,
       serverChatState: "in-progress",
       serverChatTopic: null,
       serverChatClusterId: null,
@@ -194,6 +197,7 @@ describe("ensurePersonaServerChat", () => {
       serverChatAssistantKind: "character",
       serverChatAssistantId: "42",
       serverChatPersonaMemoryMode: "read_write",
+      serverChatMetaLoaded: true,
       serverChatState: "resolved",
       serverChatTopic: "Old topic",
       serverChatClusterId: "old-cluster",
@@ -264,6 +268,7 @@ describe("ensurePersonaServerChat", () => {
       serverChatAssistantKind: "persona",
       serverChatAssistantId: "garden-helper",
       serverChatPersonaMemoryMode: "read_write",
+      serverChatMetaLoaded: true,
       serverChatState: "in-progress",
       serverChatTopic: null,
       serverChatClusterId: null,
@@ -294,6 +299,46 @@ describe("ensurePersonaServerChat", () => {
     expect(result).toEqual({
       chatId: "persona-chat-5",
       historyId: "history-5",
+      personaMemoryMode: "read_only"
+    })
+  })
+
+  it("does not reset a restored server chat before assistant metadata hydrates", async () => {
+    const setters = createSetterBundle()
+    const createChat = vi.fn()
+    const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history-restored")
+
+    const result = await ensurePersonaServerChat({
+      assistant: {
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper"
+      },
+      serverChatId: "restored-chat",
+      serverChatTitle: "Restored chat",
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatPersonaMemoryMode: "read_write",
+      serverChatMetaLoaded: false,
+      serverChatState: "resolved",
+      serverChatTopic: "Restored topic",
+      serverChatClusterId: "restored-cluster",
+      serverChatSource: "restored-source",
+      serverChatExternalRef: "restored-ref",
+      historyId: "history-restored",
+      temporaryChat: false,
+      createChat,
+      ensureServerChatHistoryId,
+      invalidateServerChatHistory: vi.fn(),
+      ...setters
+    })
+
+    expect(createChat).not.toHaveBeenCalled()
+    expect(setters.setServerChatId).not.toHaveBeenCalledWith(null)
+    expect(setters.setServerChatMetaLoaded).not.toHaveBeenCalledWith(false)
+    expect(result).toEqual({
+      chatId: "restored-chat",
+      historyId: "history-restored",
       personaMemoryMode: "read_only"
     })
   })

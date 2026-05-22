@@ -2469,6 +2469,7 @@ export const useMessage = () => {
               serverChatAssistantKind,
               serverChatAssistantId,
               serverChatPersonaMemoryMode,
+              serverChatMetaLoaded,
               serverChatState,
               serverChatTopic,
               serverChatClusterId,

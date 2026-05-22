@@ -14,6 +14,7 @@ type EnsurePersonaServerChatArgs = {
   serverChatAssistantKind: "character" | "persona" | null
   serverChatAssistantId: string | null
   serverChatPersonaMemoryMode: "read_only" | "read_write" | null
+  serverChatMetaLoaded?: boolean
   serverChatState: string | null
   serverChatTopic: string | null
   serverChatClusterId: string | null
@@ -101,6 +102,7 @@ export const ensurePersonaServerChat = async ({
   serverChatAssistantKind,
   serverChatAssistantId,
   serverChatPersonaMemoryMode,
+  serverChatMetaLoaded = false,
   serverChatState,
   serverChatTopic,
   serverChatClusterId,
@@ -139,6 +141,7 @@ export const ensurePersonaServerChat = async ({
   const assistantId = String(assistant.id)
   const isMatchingPersonaChat =
     Boolean(resolvedServerChatId) &&
+    serverChatMetaLoaded &&
     serverChatAssistantKind === "persona" &&
     Boolean(serverChatAssistantId) &&
     String(serverChatAssistantId) === assistantId
@@ -146,7 +149,9 @@ export const ensurePersonaServerChat = async ({
     ? serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
     : DEFAULT_PERSONA_MEMORY_MODE
   const shouldResetServerChat =
-    Boolean(resolvedServerChatId) && !isMatchingPersonaChat
+    Boolean(resolvedServerChatId) &&
+    serverChatMetaLoaded &&
+    !isMatchingPersonaChat
 
   if (shouldResetServerChat) {
     resetAssistantServerChatState({
