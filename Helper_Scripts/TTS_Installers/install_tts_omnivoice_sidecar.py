@@ -197,7 +197,18 @@ def _find_provider_block(lines: list[str], provider_name: str) -> tuple[Optional
                 next_stripped = next_line.strip()
                 next_indent = len(next_line) - len(next_line.lstrip(" "))
                 if not next_stripped or next_stripped.startswith("#"):
-                    if next_indent <= block_indent:
+                    lookahead = block_end + 1
+                    while lookahead < len(lines):
+                        lookahead_line = lines[lookahead]
+                        lookahead_stripped = lookahead_line.strip()
+                        if lookahead_stripped and not lookahead_stripped.startswith("#"):
+                            break
+                        lookahead += 1
+                    if lookahead >= len(lines):
+                        break
+                    lookahead_line = lines[lookahead]
+                    lookahead_indent = len(lookahead_line) - len(lookahead_line.lstrip(" "))
+                    if lookahead_indent <= block_indent:
                         break
                     block_end += 1
                     continue
