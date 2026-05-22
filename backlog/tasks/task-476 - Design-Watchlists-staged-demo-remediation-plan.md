@@ -11,8 +11,10 @@ references:
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx
 modified_files:
 - Docs/superpowers/specs/2026-05-22-watchlists-staged-demo-remediation-design.md
+- Docs/superpowers/plans/2026-05-18-watchlists-digest-audio-briefing-implementation-plan.md
 documentation:
 - Docs/superpowers/specs/2026-05-22-watchlists-staged-demo-remediation-design.md
+- Docs/superpowers/plans/2026-05-18-watchlists-digest-audio-briefing-implementation-plan.md
 ---
 
 ## Description

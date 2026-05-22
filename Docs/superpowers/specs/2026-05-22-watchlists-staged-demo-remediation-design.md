@@ -1,10 +1,34 @@
-# Watchlists Staged Demo Remediation Design
+# Watchlists Staged Demo Remediation Addendum
 
 ## Status
 
-Approved direction: staged remediation with a P0 demo-rescue PR first, followed by durable audio artifact, status UX, and power-user hardening PRs.
+Approved direction: use the existing Watchlists PRD and implementation plan as the parent product source of truth, then apply this document as a narrow demo-remediation addendum.
 
 Backlog task: `TASK-476`.
+
+## Relationship To Existing PRDs
+
+This document is not a replacement PRD.
+
+Parent product source of truth:
+
+- `Docs/superpowers/specs/2026-05-18-watchlists-digest-audio-briefing-prd-design.md`
+- `Docs/superpowers/plans/2026-05-18-watchlists-digest-audio-briefing-implementation-plan.md`
+
+Existing rescue/hardening layer:
+
+- `Docs/superpowers/specs/2026-05-20-watchlists-demo-remediation-staged-plans-design.md`
+- `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md`
+
+This addendum only updates the near-term remediation plan with the latest verified post-merge/demo dry-run blockers:
+
+- `workflow_run` tasks can be submitted to the `workflows` queue without a guaranteed worker.
+- `/api/v1/watchlists/runs/{run_id}/audio` can return `no_workflow_db` even when an audio Scheduler task exists.
+- Reports can show stale audio status because output preview does not poll the run-audio endpoint.
+- The UI can default to an inactive/imported watchlist rather than the active watchlist with demo data.
+- Audio defaults can imply Kokoro is usable when the local model is not installed.
+
+When implementation planning resumes, the 2026-05-18 PRD remains the product baseline. This addendum supplies the P0 correction set and acceptance criteria that should be applied before continuing broader durable-audio, first-time workflow, and power-user work.
 
 ## Scope
 

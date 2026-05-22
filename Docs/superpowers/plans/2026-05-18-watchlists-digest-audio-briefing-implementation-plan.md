@@ -13,6 +13,7 @@
 ## Source Documents
 
 - PRD: `Docs/superpowers/specs/2026-05-18-watchlists-digest-audio-briefing-prd-design.md`
+- Demo remediation addendum: `Docs/superpowers/specs/2026-05-22-watchlists-staged-demo-remediation-design.md`
 - Backlog: `TASK-425`
 - Key WebUI route: `apps/tldw-frontend/pages/watchlists.tsx`
 - Shared route/component entry: `apps/packages/ui/src/routes/option-watchlists.tsx`
@@ -21,6 +22,8 @@
 - Watchlists schemas: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
 - Watchlists pipeline: `tldw_Server_API/app/core/Watchlists/pipeline.py`
 - Audio workflow bridge: `tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py`
+
+Note: the 2026-05-18 PRD remains the parent product source of truth. The 2026-05-22 addendum narrows the immediate P0 implementation order around verified demo blockers: the `workflows` queue worker, run-audio status fallback, structured audio non-submission reasons, live Reports polling, and active watchlist selection.
 
 ## File Structure And Ownership
 
