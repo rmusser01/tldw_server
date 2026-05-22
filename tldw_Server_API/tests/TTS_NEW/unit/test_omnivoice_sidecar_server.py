@@ -83,6 +83,50 @@ class FakeOmniVoiceRuntime:
             ) from exc
 
 
+class FakeReloadableOmniVoiceRuntime(FakeOmniVoiceRuntime):
+    def __init__(self, *, scratch_dir: Path) -> None:
+        super().__init__(scratch_dir=scratch_dir)
+        self.reload_calls = 0
+
+    async def reload(self) -> None:
+        self.reload_calls += 1
+
+
+class FakeShutdownOmniVoiceRuntime(FakeOmniVoiceRuntime):
+    def __init__(self, *, scratch_dir: Path) -> None:
+        super().__init__(scratch_dir=scratch_dir)
+        self.shutdown_calls = 0
+
+    async def shutdown(self) -> None:
+        self.shutdown_calls += 1
+        self.status = "shutting-down"
+        self.model = None
+
+
+class FakeAttributeStatusRuntime:
+    def __init__(self, *, model_path: Path) -> None:
+        self.status = "ready"
+        self.last_error_code = None
+        self.model = object()
+        self._model_id = "local-model"
+        self._model_path = model_path
+        self.load_calls = 0
+
+    async def load(self) -> object:
+        self.load_calls += 1
+        return self.model
+
+    async def synthesize(self, request: OmniVoiceSynthesizeRequest) -> OmniVoiceSynthesizeResult:
+        return OmniVoiceSynthesizeResult(
+            audio_bytes=_build_test_wav(),
+            audio_format="wav",
+            sample_rate=24000,
+            channels=1,
+            cold_start=False,
+            model="local-model",
+        )
+
+
 @pytest.fixture
 def test_client():
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
@@ -130,8 +174,8 @@ def test_sidecar_accepts_authorized_health_probe(test_client: TestClient):
 
     assert response.status_code == 200  # nosec B101
     payload = response.json()
-    assert payload["status"] == "idle_stopped"  # nosec B101
-    assert payload["ready"] is False  # nosec B101
+    assert payload["status"] == "ok"  # nosec B101
+    assert payload["ready"] is True  # nosec B101
 
 
 @pytest.mark.unit
@@ -149,7 +193,24 @@ def test_sidecar_status_returns_runtime_status(fake_runtime_client, auth_headers
 
 
 @pytest.mark.unit
-def test_sidecar_health_is_authorized_and_status_backed_without_loading(
+def test_sidecar_status_redacts_attribute_runtime_model_path(tmp_path: Path, auth_headers: dict[str, str]):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
+
+    runtime = FakeAttributeStatusRuntime(model_path=tmp_path / "models" / "local-model")
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
+    with TestClient(app) as client:
+        response = client.get("/status", headers=auth_headers)
+
+    assert response.status_code == 200  # nosec B101
+    payload = response.json()
+    assert payload["status"] == "ready"  # nosec B101
+    assert payload["ready"] is True  # nosec B101
+    assert payload["model"] == "local-model"  # nosec B101
+    assert payload["model_path"] is None  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_health_is_authorized_and_does_not_touch_runtime(
     fake_runtime_client,
     auth_headers: dict[str, str],
 ):
@@ -159,9 +220,9 @@ def test_sidecar_health_is_authorized_and_status_backed_without_loading(
 
     assert response.status_code == 200  # nosec B101
     payload = response.json()
-    assert payload["status"] == "ready"  # nosec B101
+    assert payload["status"] == "ok"  # nosec B101
     assert payload["ready"] is True  # nosec B101
-    assert runtime.status_calls == 1  # nosec B101
+    assert runtime.status_calls == 0  # nosec B101
     assert runtime.load_calls == 0  # nosec B101
     assert runtime.synthesize_calls == []  # nosec B101
 
@@ -178,6 +239,57 @@ def test_sidecar_warmup_loads_runtime_and_reports_status(fake_runtime_client, au
     assert payload["ready"] is True  # nosec B101
     assert runtime.load_calls == 1  # nosec B101
     assert runtime.status_calls == 1  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_reload_calls_runtime_hook(tmp_path: Path, auth_headers: dict[str, str]):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
+
+    runtime = FakeReloadableOmniVoiceRuntime(scratch_dir=tmp_path)
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
+    with TestClient(app) as client:
+        response = client.post("/control/reload", headers=auth_headers)
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["status"] == "ready"  # nosec B101
+    assert runtime.reload_calls == 1  # nosec B101
+    assert runtime.load_calls == 0  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_reload_without_runtime_hook_returns_structured_unsupported(
+    fake_runtime_client,
+    auth_headers: dict[str, str],
+):
+    client, runtime = fake_runtime_client
+
+    response = client.post("/control/reload", headers=auth_headers)
+
+    assert response.status_code == 501  # nosec B101
+    assert response.json() == {  # nosec B101
+        "error": {
+            "code": "RUNTIME_RELOAD_UNSUPPORTED",
+            "message": "OmniVoice runtime reload is not supported",
+            "retryable": False,
+        }
+    }
+    assert runtime.load_calls == 0  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_shutdown_calls_runtime_hook(tmp_path: Path, auth_headers: dict[str, str]):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
+
+    runtime = FakeShutdownOmniVoiceRuntime(scratch_dir=tmp_path)
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
+    with TestClient(app) as client:
+        response = client.post("/control/shutdown", headers=auth_headers)
+
+    assert response.status_code == 200  # nosec B101
+    payload = response.json()
+    assert payload["status"] == "shutting-down"  # nosec B101
+    assert payload["ready"] is False  # nosec B101
+    assert runtime.shutdown_calls == 1  # nosec B101
 
 
 @pytest.mark.unit
