@@ -468,8 +468,26 @@ export const Playground = () => {
     () => getCharacterChatRouteIntent(location.search),
     [location.search],
   );
+  const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
   const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
+  const {
+    restoreSession,
+    sessionScopeReady,
+    hasPersistedSession,
+    persistedHistoryId,
+    persistedServerChatId,
+  } = usePlaygroundSessionPersistence();
+  const shouldRestorePersistedSessionOnInit =
+    shouldRestorePersistedPlaygroundSession({
+      hasPersistedSession,
+      persistedHistoryId,
+      persistedServerChatId,
+      currentHistoryId: historyId ?? null,
+      currentServerChatId: serverChatId ?? null,
+      currentMessagesLength: messages.length,
+      currentHistoryLength: history.length,
+    });
   const normalizedChatWorkflowMode =
     normalizeChatWorkflowMode(chatWorkflowMode);
   const characterWorkflowActive =
@@ -572,7 +590,25 @@ export const Playground = () => {
   }, [routeRequestsCharacterMode, setChatWorkflowMode]);
 
   React.useEffect(() => {
+    if (!routeCharacterIntentChatId) return;
+    if (serverChatId === routeCharacterIntentChatId) return;
+    setServerChatId(routeCharacterIntentChatId);
+    routeCharacterIntentAppliedRef.current = null;
+    routeCharacterIntentInFlightRef.current = null;
+    setRouteCharacterRecovery(null);
+  }, [routeCharacterIntentChatId, serverChatId, setServerChatId]);
+
+  React.useEffect(() => {
     if (!routeCharacterIntentId) return;
+    if (routeCharacterIntentChatId) return;
+    if (shouldRestorePersistedSessionOnInit) return;
+    const hasActiveConversation =
+      Boolean(serverChatId) ||
+      Boolean(stableHistoryId) ||
+      messages.length > 0 ||
+      history.length > 0 ||
+      composerHasDraft;
+    if (hasActiveConversation) return;
     if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
       return;
     }
@@ -627,7 +663,18 @@ export const Playground = () => {
         routeCharacterIntentRequestRef.current += 1;
       }
     };
-  }, [routeCharacterIntentId, routeCharacterRetryToken, setSelectedCharacter]);
+  }, [
+    composerHasDraft,
+    history.length,
+    messages.length,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
+    routeCharacterRetryToken,
+    serverChatId,
+    shouldRestorePersistedSessionOnInit,
+    setSelectedCharacter,
+    stableHistoryId,
+  ]);
 
   React.useEffect(() => {
     if (!routeCharacterIntentId) {
@@ -1159,31 +1206,24 @@ export const Playground = () => {
     persistAttachedResearchContext,
   ]);
 
-  // Session persistence for draft restoration
-  const {
-    restoreSession,
-    sessionScopeReady,
-    hasPersistedSession,
-    persistedHistoryId,
-    persistedServerChatId,
-  } = usePlaygroundSessionPersistence();
-
   const initializePlayground = React.useCallback(async () => {
-    // 1. Try session persistence first (restores exact state from nav-away)
-    const shouldRestorePersistedSession =
-      shouldRestorePersistedPlaygroundSession({
-        hasPersistedSession,
-        persistedHistoryId,
-        persistedServerChatId,
-        currentHistoryId: historyId ?? null,
-        currentServerChatId: serverChatId ?? null,
-        currentMessagesLength: messages.length,
-        currentHistoryLength: history.length,
-      });
+    if (routeCharacterIntentChatId) {
+      if (serverChatId !== routeCharacterIntentChatId) {
+        setServerChatId(routeCharacterIntentChatId);
+      }
+      return;
+    }
+    if (routeCharacterIntentId && !shouldRestorePersistedSessionOnInit) {
+      return;
+    }
 
-    if (shouldRestorePersistedSession) {
+    // 1. Try session persistence first (restores exact state from nav-away)
+    if (shouldRestorePersistedSessionOnInit) {
       const restored = await restoreSession();
       if (restored) return;
+    }
+    if (routeCharacterIntentId) {
+      return;
     }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
@@ -1216,18 +1256,18 @@ export const Playground = () => {
     }
   }, [
     history.length,
-    historyId,
-    hasPersistedSession,
     messages.length,
-    persistedHistoryId,
-    persistedServerChatId,
     restoreSession,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
     serverChatId,
     setHistory,
     setHistoryId,
     setMessages,
+    setServerChatId,
     setSelectedSystemPrompt,
     setSystemPrompt,
+    shouldRestorePersistedSessionOnInit,
   ]);
 
   React.useEffect(() => {

@@ -13,6 +13,16 @@ const mocks = vi.hoisted(() => ({
   usePersistenceMode: vi.fn()
 }))
 
+const translate = (
+  key: string,
+  defaultValue?: string,
+  options?: Record<string, unknown>
+) => {
+  const value = defaultValue || key
+  const name = options?.name
+  return typeof name === "string" ? value.replace("{{name}}", name) : value
+}
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mocks.initialize,
@@ -54,7 +64,7 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
     info: vi.fn(),
     success: vi.fn()
   },
-  t: (key: string, defaultValue?: string) => defaultValue || key,
+  t: translate,
   ...overrides
 })
 
@@ -148,6 +158,39 @@ describe("usePlaygroundPersistence", () => {
     await waitFor(() => {
       expect(mocks.initialize).toHaveBeenCalledTimes(1)
       expect(notificationApi.error).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("uses a WebUI character-aware fallback title for server persistence", async () => {
+    const notificationApi = {
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn()
+    }
+
+    renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          notificationApi,
+          history: [{ role: "assistant", content: "Welcome to the archive." }],
+          selectedCharacter: {
+            id: "mira",
+            name: "Mira"
+          }
+        })
+      }
+    )
+
+    await waitFor(() => {
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          character_id: "mira",
+          title: "Mira role-play",
+          source: "webui-character-chat"
+        })
+      )
     })
   })
 })

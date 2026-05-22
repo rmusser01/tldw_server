@@ -75,9 +75,19 @@ const createSetterBundle = () => ({
   setStreaming: vi.fn()
 })
 
-const translate = (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
-  if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-  return fallbackOrOptions?.defaultValue || key
+const translate = (
+  key: string,
+  fallbackOrOptions?: string | { defaultValue?: string; name?: string },
+  options?: { name?: string }
+) => {
+  const value =
+    typeof fallbackOrOptions === "string"
+      ? fallbackOrOptions
+      : fallbackOrOptions?.defaultValue || key
+  const name =
+    options?.name ||
+    (typeof fallbackOrOptions === "object" ? fallbackOrOptions.name : undefined)
+  return typeof name === "string" ? value.replace("{{name}}", name) : value
 }
 
 describe("createCharacterChatMode contract", () => {
@@ -193,7 +203,9 @@ describe("createCharacterChatMode contract", () => {
       expect.objectContaining({
         character_id: 42,
         state: "in-progress",
-        topic_label: "first-class-roleplay"
+        topic_label: "first-class-roleplay",
+        source: "webui-character-chat",
+        title: "Mira: Hello Mira"
       }),
       { scope }
     )
@@ -340,6 +352,7 @@ describe("createCharacterChatMode contract", () => {
       }
     )
     mocks.streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      yield* []
       throw providerSetupError
     })
     const saveMessageOnError = vi.fn(async () => "history-1")

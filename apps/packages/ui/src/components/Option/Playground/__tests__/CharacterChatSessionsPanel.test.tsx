@@ -190,8 +190,47 @@ describe("CharacterChatSessionsPanel", () => {
     expect(
       within(
         screen.getByRole("list", { name: "Other character sessions" }),
-      ).getByText("Garden Helper"),
+    ).getByText("Garden Helper"),
     ).toBeInTheDocument();
+  });
+
+  it("offers a primary resume-last action and shows character session metadata", () => {
+    const lastCharacterChat = makeChat("chat-last", {
+      title: "Campfire opening",
+      character_id: "mira",
+      character_name: "Mira",
+      topic_label: "Act I",
+      message_count: 6,
+      source: "webui-character-chat",
+    } as Partial<ServerChatHistoryItem>);
+    historyHookMock.mockReturnValue({
+      data: [lastCharacterChat],
+      total: 1,
+      isLoading: false,
+      sidebarRefreshState: "ready",
+      hasUsableData: true,
+      isShowingStaleData: false,
+    });
+
+    render(
+      <CharacterChatSessionsPanel
+        activeCharacterId="mira"
+        activeCharacterName="Mira"
+        activeServerChatId={null}
+      />,
+    );
+
+    const resumeLast = screen.getByRole("button", {
+      name: "Resume last character chat: Campfire opening",
+    });
+    fireEvent.click(resumeLast);
+    expect(selectServerChatMock).toHaveBeenCalledWith(lastCharacterChat);
+
+    const row = screen.getByText("Campfire opening").closest("li");
+    expect(row).toHaveTextContent("Mira");
+    expect(row).toHaveTextContent("Act I");
+    expect(row).toHaveTextContent("6 messages");
+    expect(row).toHaveTextContent("Saved");
   });
 
   it("shows local loading, empty, and refresh-error states distinct from saved setups", () => {

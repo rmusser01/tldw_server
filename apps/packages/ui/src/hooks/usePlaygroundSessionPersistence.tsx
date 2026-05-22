@@ -241,8 +241,11 @@ export function usePlaygroundSessionPersistence() {
     }
 
     const savedHistoryId = sessionStore.historyId
+    const savedServerChatId = sessionStore.serverChatId
     const savedQueue = sessionStore.queuedMessages ?? []
-    if (!savedHistoryId && savedQueue.length === 0) return false
+    if (!savedHistoryId && !savedServerChatId && savedQueue.length === 0) {
+      return false
+    }
 
     isRestoringRef.current = true
 
@@ -275,8 +278,13 @@ export function usePlaygroundSessionPersistence() {
       }
 
       // Restore settings from session store
-      if (sessionStore.serverChatId) {
-        setServerChatId(sessionStore.serverChatId)
+      if (savedServerChatId) {
+        if (!savedHistoryId) {
+          setHistoryId(null)
+          setHistory([])
+          setMessages([])
+        }
+        setServerChatId(savedServerChatId)
       }
       setChatMode(sessionStore.chatMode)
       setWebSearch(sessionStore.webSearch)

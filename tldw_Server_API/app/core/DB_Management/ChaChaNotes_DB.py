@@ -24298,6 +24298,7 @@ for _conversation_store_method in (
 for _character_store_method in (
     "add_character_card",
     "get_character_card_by_id",
+    "get_character_cards_by_ids",
     "get_character_card_by_name",
     "list_character_cards",
     "query_character_cards",

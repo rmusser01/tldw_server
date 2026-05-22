@@ -674,6 +674,12 @@
   "composer_persistence_serverDefaultTitle": {
     "message": "Extension chat"
   },
+  "composer_persistence_serverWebUiDefaultTitle": {
+    "message": "WebUI chat"
+  },
+  "composer_persistence_characterFallbackTitle": {
+    "message": "{{name}} role-play"
+  },
   "composer_persistence_serverSavedTitle": {
     "message": "Chat now saved on server"
   },
@@ -706,6 +712,9 @@
   },
   "composer_stateHelp": {
     "message": "Default state is “in-progress.” Update it as the conversation progresses."
+  },
+  "characterChat_sessionFallbackTitle": {
+    "message": "{{name}} role-play"
   },
   "composer_topicPlaceholder": {
     "message": "Topic label (optional)"

@@ -12,11 +12,37 @@ describe("character chat mode intent", () => {
   it("parses first-class character chat URL intent", () => {
     expect(getCharacterChatRouteIntent("?mode=character&characterId=char-1")).toEqual({
       mode: "character",
+      chatId: null,
       characterId: "char-1"
     })
     expect(getCharacterChatRouteIntent("?mode=character&character_id=42")).toEqual({
       mode: "character",
-      characterId: "42"
+      characterId: "42",
+      chatId: null
+    })
+  })
+
+  it("parses explicit character chat session ids ahead of character ids", () => {
+    expect(
+      getCharacterChatRouteIntent(
+        "?mode=character&chatId=chat-123&characterId=char-1"
+      )
+    ).toEqual({
+      mode: "character",
+      chatId: "chat-123",
+      characterId: "char-1"
+    })
+  })
+
+  it("falls back to chat id aliases when the canonical chat id is empty", () => {
+    expect(
+      getCharacterChatRouteIntent(
+        "?mode=character&chatId=&serverChatId=chat-123&characterId=char-1"
+      )
+    ).toEqual({
+      mode: "character",
+      chatId: "chat-123",
+      characterId: "char-1"
     })
   })
 
@@ -35,6 +61,7 @@ describe("character chat mode intent", () => {
       getCharacterChatRouteIntent("?mode=character&characterId=../secret")
     ).toEqual({
       mode: "character",
+      chatId: null,
       characterId: null
     })
   })

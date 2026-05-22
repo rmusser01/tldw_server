@@ -14,6 +14,70 @@ import uuid as _uuid
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 
+def test_chat_session_list_assistant_names_are_preloaded_in_bulk():
+    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import (
+        _attach_conversation_assistant_names_from_lookups,
+        _conversation_assistant_name_lookups,
+    )
+
+    class FakeDb:
+        def __init__(self):
+            self.character_bulk_calls = 0
+            self.persona_bulk_calls = 0
+
+        def get_character_cards_by_ids(self, character_ids):
+            self.character_bulk_calls += 1
+            assert character_ids == [1, 2]
+            return {
+                1: {"id": 1, "name": "Ada"},
+                2: {"id": 2, "name": "Babbage"},
+            }
+
+        def get_persona_profiles_by_ids(self, *, user_id, persona_ids, include_deleted=False):
+            self.persona_bulk_calls += 1
+            assert user_id == "user-1"
+            assert persona_ids == ["persona-1"]
+            assert include_deleted is False
+            return {"persona-1": {"id": "persona-1", "name": "Researcher"}}
+
+        def get_character_card_by_id(self, character_id):
+            raise AssertionError("list assistant-name resolution must not call per-row character lookup")
+
+        def get_persona_profile(self, persona_id, *, user_id, include_deleted=False):
+            raise AssertionError("list assistant-name resolution must not call per-row persona lookup")
+
+    conversations = [
+        {"id": "chat-1", "character_id": 1, "assistant_kind": "character"},
+        {"id": "chat-2", "character_id": None, "assistant_kind": "character", "assistant_id": "2"},
+        {"id": "chat-3", "character_id": None, "assistant_kind": "persona", "assistant_id": "persona-1"},
+    ]
+
+    db = FakeDb()
+    character_names, persona_names = _conversation_assistant_name_lookups(
+        db,
+        conversations,
+        "user-1",
+    )
+
+    labeled = [
+        _attach_conversation_assistant_names_from_lookups(
+            dict(conversation),
+            character_names=character_names,
+            persona_names=persona_names,
+        )
+        for conversation in conversations
+    ]
+
+    assert db.character_bulk_calls == 1
+    assert db.persona_bulk_calls == 1
+    assert labeled[0]["character_name"] == "Ada"
+    assert labeled[0]["assistant_name"] == "Ada"
+    assert labeled[1]["character_name"] == "Babbage"
+    assert labeled[1]["assistant_name"] == "Babbage"
+    assert labeled[2]["assistant_name"] == "Researcher"
+    assert "character_name" not in labeled[2]
+
+
 @pytest.mark.asyncio
 async def test_character_chat_flow_sessions_messages_worldbooks():
     # Use an isolated per-test DB base directory
@@ -34,6 +98,7 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             chars = r.json()
             assert isinstance(chars, list) and len(chars) >= 1
             character_id = chars[0]["id"]
+            character_name = chars[0]["name"]
 
             # 2) Create chat session
             create_payload = {"character_id": character_id, "title": "Test Chat"}
@@ -45,6 +110,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             assert chat["assistant_kind"] == "character"
             assert chat["assistant_id"] == str(character_id)
             assert chat["character_id"] == character_id
+            assert chat["character_name"] == character_name
+            assert chat["assistant_name"] == character_name
             assert chat["persona_memory_mode"] is None
 
             # 3) Update chat session title (optimistic lock)
@@ -58,6 +125,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             updated_chat = r.json()
             assert updated_chat["title"] == "Updated Test Chat"
             assert updated_chat["version"] == chat_version + 1
+            assert updated_chat["character_name"] == character_name
+            assert updated_chat["assistant_name"] == character_name
             chat_version = updated_chat["version"]
 
             # 3b) Chat settings read/write
@@ -94,6 +163,14 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             message_id = msg["id"]
             message_version = msg["version"]
 
+            r = await client.get("/api/v1/chats/", headers=headers)
+            assert r.status_code == 200
+            listed_chats = r.json()["chats"]
+            listed_chat = next((item for item in listed_chats if item["id"] == chat_id), None)
+            assert listed_chat is not None, f"chat with id {chat_id} not found in listed_chats"
+            assert listed_chat["character_name"] == character_name
+            assert listed_chat["assistant_name"] == character_name
+
             # 5) Get messages and verify
             r = await client.get(f"/api/v1/chats/{chat_id}/messages", headers=headers)
             assert r.status_code == 200
@@ -125,6 +202,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             r = await client.get(f"/api/v1/chats/{chat_id}", headers=headers)
             assert r.status_code == 200
             current_chat = r.json()
+            assert current_chat["character_name"] == character_name
+            assert current_chat["assistant_name"] == character_name
             r = await client.delete(
                 f"/api/v1/chats/{chat_id}",
                 headers=headers,

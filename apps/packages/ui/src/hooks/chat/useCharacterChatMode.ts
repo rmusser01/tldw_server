@@ -21,6 +21,10 @@ import {
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
 import { normalizeConversationState } from "@/utils/conversation-state";
 import {
+  WEBUI_CHARACTER_CHAT_SOURCE,
+  buildCharacterChatSessionTitle,
+} from "@/utils/character-chat-session";
+import {
   buildGreetingOptionsFromEntries,
   collectGreetingEntries,
   collectGreetings,
@@ -42,7 +46,6 @@ import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPers
 import type { Character } from "@/types/character";
 import type { ChatScope } from "@/types/chat-scope";
 import type { ChatHistory, Message } from "@/store/option";
-import type { SaveMessageData } from "@/types/chat-modes";
 import {
   attemptCharacterStreamRecoveryPersist,
   type TldwChatMeta,
@@ -694,13 +697,24 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       let chatId = shouldResetServerChat ? null : resolvedServerChatId;
       let createdNewChat = false;
       if (!chatId) {
+        const fallbackTitle = String(
+          t("playground:characterChat.sessionFallbackTitle", "{{name}} role-play", {
+            name: characterName,
+          }),
+        );
+        const title = buildCharacterChatSessionTitle({
+          characterName,
+          firstUserMessage: message,
+          fallbackTitle,
+        });
         const created = (await tldwClient.createChat(
           {
             character_id: activeCharacter.id,
+            title,
             state: serverChatState || "in-progress",
             topic_label: serverChatTopic || undefined,
             cluster_id: serverChatClusterId || undefined,
-            source: serverChatSource || undefined,
+            source: serverChatSource || WEBUI_CHARACTER_CHAT_SOURCE,
             external_ref: serverChatExternalRef || undefined,
           },
           scope ? { scope } : undefined,
