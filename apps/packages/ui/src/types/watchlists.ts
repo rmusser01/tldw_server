@@ -339,6 +339,12 @@ export interface WatchlistRunAudioStatus {
   speaker_artifacts?: Array<Record<string, unknown>>
   final_artifact?: Record<string, unknown> | null
   fallback_reason?: string | null
+  audio_request_id?: string | null
+  workflow_run_id?: string | number | null
+  schema_version?: number | null
+  synced_at?: string | null
+  stale?: boolean | null
+  superseded_by?: string | null
   error?: string | null
 }
 

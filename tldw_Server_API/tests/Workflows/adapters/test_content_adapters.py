@@ -2007,6 +2007,12 @@ class TestAudioBriefingComposeAdapter:
         monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
         artifacts: list[dict[str, Any]] = []
         base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+        base_context["workflow_metadata"] = {
+            "source": "watchlist_audio_briefing",
+            "watchlist_job_id": 42,
+            "watchlist_run_id": 7,
+            "audio_request_id": "wla_test_request",
+        }
 
         config = {
             "items": sample_items,
@@ -2028,6 +2034,10 @@ class TestAudioBriefingComposeAdapter:
         assert artifact["metadata"]["script_artifact"] is True
         assert artifact["metadata"]["voice_assignments"]["HOST"] == "af_bella"
         assert artifact["metadata"]["sections_count"] == len(result["sections"])
+        assert artifact["metadata"]["source"] == "watchlist_audio_briefing"
+        assert artifact["metadata"]["watchlist_job_id"] == 42
+        assert artifact["metadata"]["watchlist_run_id"] == 7
+        assert artifact["metadata"]["audio_request_id"] == "wla_test_request"
         script_path = artifact["uri"].removeprefix("file://")
         assert "Good morning, here is your daily briefing" in Path(script_path).read_text(encoding="utf-8")
 

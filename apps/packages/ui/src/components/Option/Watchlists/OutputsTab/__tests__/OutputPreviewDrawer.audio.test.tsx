@@ -122,6 +122,8 @@ describe("OutputPreviewDrawer audio support", () => {
           metadata: {
             audio: {
               status: "completed",
+              stale: true,
+              superseded_by: "wla_new",
               fallback_reason: "Speaker B voice failed; used fallback single voice.",
               script_artifact: {
                 title: "Briefing script",
@@ -158,6 +160,8 @@ describe("OutputPreviewDrawer audio support", () => {
 
     expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
     expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("Stale")).toBeInTheDocument()
+    expect(screen.getByText("Superseded by wla_new")).toBeInTheDocument()
     expect(screen.getByText("Briefing script")).toBeInTheDocument()
     expect(screen.getByText("Host")).toBeInTheDocument()
     expect(screen.getByText("Analyst")).toBeInTheDocument()

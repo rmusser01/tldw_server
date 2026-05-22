@@ -360,7 +360,17 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
             {t("watchlists:outputs.audioArtifactsLabel", "Audio artifacts")}
           </div>
           <Tag color={audioSummary.statusColor}>{audioSummary.statusLabel}</Tag>
+          {audioSummary.stale && (
+            <Tag color="gold">{t("watchlists:outputs.audioStale", "Stale")}</Tag>
+          )}
         </div>
+        {audioSummary.supersededBy && (
+          <div className="text-xs text-warning">
+            {t("watchlists:outputs.audioSupersededBy", "Superseded by {{requestId}}", {
+              requestId: audioSummary.supersededBy
+            })}
+          </div>
+        )}
         {audioSummary.fallbackReason && (
           <div className="text-xs text-warning">
             {t("watchlists:outputs.audioFallback", "Fallback: {{reason}}", {

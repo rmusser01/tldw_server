@@ -123,6 +123,20 @@ def resolve_context_user_id(context: dict[str, Any]) -> str | None:
     return resolve_user_id_value(raw, allow_none=True)
 
 
+def watchlist_artifact_metadata(context: dict[str, Any]) -> dict[str, Any]:
+    """Return Watchlists correlation metadata safe to copy onto artifacts."""
+    metadata = context.get("workflow_metadata")
+    if not isinstance(metadata, dict):
+        return {}
+    if metadata.get("source") != "watchlist_audio_briefing":
+        return {}
+    return {
+        key: metadata[key]
+        for key in ("source", "watchlist_job_id", "watchlist_run_id", "audio_request_id")
+        if metadata.get(key) is not None
+    }
+
+
 def artifacts_base_dir() -> Path:
     """Resolve the base directory used for workflow artifacts.
 

@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS workflows (
         idempotency_key TEXT,
         session_id TEXT,
         validation_mode TEXT DEFAULT 'block',
+        metadata_json TEXT,
         tokens_input INTEGER,
         tokens_output INTEGER,
         cost_usd DOUBLE PRECISION,
@@ -495,6 +496,7 @@ class WorkflowRun:
     definition_snapshot_json: str | None
     idempotency_key: str | None
     session_id: str | None
+    metadata_json: str | None = None
     cancel_requested: int | None = 0
     # Accounting fields (nullable)
     tokens_input: int | None = None
@@ -504,7 +506,7 @@ class WorkflowRun:
 
 
 class WorkflowsDatabase:
-    _CURRENT_SCHEMA_VERSION = 8
+    _CURRENT_SCHEMA_VERSION = 9
     """Workflow persistence adapter supporting SQLite and DatabaseBackend instances."""
 
     def __init__(
@@ -791,6 +793,7 @@ class WorkflowsDatabase:
             6: self._backend_migrate_to_v6,
             7: self._backend_migrate_to_v7,
             8: self._backend_migrate_to_v8,
+            9: self._backend_migrate_to_v9,
         }
 
     def _backend_migrate_to_v1(self, conn) -> None:
@@ -1162,6 +1165,16 @@ class WorkflowsDatabase:
             connection=conn,
         )
 
+    def _backend_migrate_to_v9(self, conn) -> None:
+        if not self.backend:
+            return
+        backend = self.backend
+        ident = backend.escape_identifier
+        backend.execute(
+            f"ALTER TABLE {ident('workflow_runs')} ADD COLUMN IF NOT EXISTS {ident('metadata_json')} TEXT",
+            connection=conn,
+        )
+
     def _initialize_schema_backend(self) -> None:
         if not self.backend:
             return
@@ -1323,7 +1336,30 @@ class WorkflowsDatabase:
             self._sqlite_migrate_to_v8()
             self._set_sqlite_schema_version(8)
             applied_version = 8
+        if applied_version < 9 <= target_version:
+            self._sqlite_migrate_to_v9()
+            self._set_sqlite_schema_version(9)
+            applied_version = 9
         return applied_version
+
+    def _sqlite_migrate_to_v9(self) -> None:
+        cur = self._conn.cursor()
+        try:
+            cur.execute("ALTER TABLE workflow_runs ADD COLUMN metadata_json TEXT")
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if "duplicate column name" in message or "already exists" in message:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                return
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.rollback()
+            raise
+        except sqlite3.Error:
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.rollback()
+            raise
 
     def _create_schema(self) -> None:
         current_version = self._get_sqlite_schema_version()
@@ -1376,6 +1412,7 @@ class WorkflowsDatabase:
                 idempotency_key TEXT,
                 session_id TEXT,
                 validation_mode TEXT DEFAULT 'block',
+                metadata_json TEXT,
                 tokens_input INTEGER,
                 tokens_output INTEGER,
                 cost_usd REAL,
@@ -1526,6 +1563,7 @@ class WorkflowsDatabase:
             "ALTER TABLE workflow_runs ADD COLUMN tokens_input INTEGER",
             "ALTER TABLE workflow_runs ADD COLUMN tokens_output INTEGER",
             "ALTER TABLE workflow_runs ADD COLUMN cost_usd REAL",
+            "ALTER TABLE workflow_runs ADD COLUMN metadata_json TEXT",
             "ALTER TABLE workflow_step_runs ADD COLUMN tenant_id TEXT",
             "ALTER TABLE workflow_step_runs ADD COLUMN assigned_to TEXT",
             "ALTER TABLE workflow_step_runs ADD COLUMN pid INTEGER",
@@ -1791,7 +1829,9 @@ class WorkflowsDatabase:
         idempotency_key: str | None = None,
         session_id: str | None = None,
         validation_mode: str = "block",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
+        metadata_json = json.dumps(metadata or {})
         params = (
             run_id,
             tenant_id,
@@ -1804,14 +1844,15 @@ class WorkflowsDatabase:
             idempotency_key,
             session_id,
             validation_mode,
+            metadata_json,
         )
 
         query = """
             INSERT INTO workflow_runs(
                 run_id, tenant_id, workflow_id, status, status_reason, user_id, inputs_json, outputs_json,
                 error, duration_ms, created_at, started_at, ended_at, definition_version, definition_snapshot_json,
-                idempotency_key, session_id, validation_mode
-            ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                idempotency_key, session_id, validation_mode, metadata_json
+            ) VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
         """
 
         if self._using_backend():

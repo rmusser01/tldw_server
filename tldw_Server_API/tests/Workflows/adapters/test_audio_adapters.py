@@ -257,6 +257,74 @@ async def test_tts_adapter_sanitizes_generation_errors(monkeypatch, tmp_path):
     assert result == {"error": "tts_unavailable"}
 
 
+@pytest.mark.asyncio
+async def test_tts_adapter_merges_watchlist_and_config_artifact_metadata(monkeypatch, tmp_path):
+    """Test generic TTS audio artifacts carry watchlist correlation and fallback metadata."""
+    from tldw_Server_API.app.core.Workflows.adapters.audio import run_tts_adapter
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("WORKFLOWS_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+
+    mock_tts_service = AsyncMock()
+
+    async def mock_generate_speech(req, provider=None):
+        yield b"fake_audio_bytes"
+
+    mock_tts_service.generate_speech = mock_generate_speech
+
+    async def mock_get_tts_service():
+        return mock_tts_service
+
+    artifacts: list[dict[str, Any]] = []
+    context = {
+        "user_id": "test",
+        "step_run_id": "step_tts_metadata",
+        "add_artifact": lambda **kwargs: artifacts.append(kwargs),
+        "workflow_metadata": {
+            "source": "watchlist_audio_briefing",
+            "watchlist_job_id": 42,
+            "watchlist_run_id": 7,
+            "audio_request_id": "wla_test_request",
+        },
+    }
+    config = {
+        "input": "Hello world",
+        "voice": "af_heart",
+        "model": "kokoro",
+        "artifact_metadata": {
+            "source": "malicious_override",
+            "watchlist_job_id": 999,
+            "watchlist_run_id": 888,
+            "audio_request_id": "wla_wrong_request",
+            "final_artifact": True,
+            "fallback_artifact": True,
+            "single_voice_fallback": True,
+            "fallback_reason": "multi_voice_tts_failed",
+        },
+    }
+
+    with patch(
+        "tldw_Server_API.app.core.Workflows.adapters.audio.tts.get_tts_service_v2",
+        mock_get_tts_service,
+    ):
+        result = await run_tts_adapter(config, context)
+
+    assert "error" not in result
+    assert len(artifacts) == 1
+    metadata = artifacts[0]["metadata"]
+    assert metadata["model"] == "kokoro"
+    assert metadata["voice"] == "af_heart"
+    assert metadata["format"] == "mp3"
+    assert metadata["source"] == "watchlist_audio_briefing"
+    assert metadata["watchlist_job_id"] == 42
+    assert metadata["watchlist_run_id"] == 7
+    assert metadata["audio_request_id"] == "wla_test_request"
+    assert metadata["final_artifact"] is True
+    assert metadata["fallback_artifact"] is True
+    assert metadata["single_voice_fallback"] is True
+    assert metadata["fallback_reason"] == "multi_voice_tts_failed"
+
+
 # ============================================================================
 # STT Adapter Tests
 # ============================================================================
@@ -2024,6 +2092,12 @@ class TestMultiVoiceTTSAdapter:
 
         artifacts: list[dict[str, Any]] = []
         base_context["add_artifact"] = lambda **kwargs: artifacts.append(kwargs)
+        base_context["workflow_metadata"] = {
+            "source": "watchlist_audio_briefing",
+            "watchlist_job_id": 42,
+            "watchlist_run_id": 7,
+            "audio_request_id": "wla_test_request",
+        }
         sections = [
             {"voice": "HOST", "text": "Welcome to the briefing."},
             {"voice": "REPORTER", "text": "The story details go here."},
@@ -2080,7 +2154,13 @@ class TestMultiVoiceTTSAdapter:
         ]
         assert speaker_artifacts[1]["metadata"]["sections_count"] == 1
         assert all(Path(artifact["uri"].removeprefix("file://")).exists() for artifact in speaker_artifacts)
-        assert any(artifact["metadata"].get("final_artifact") is True for artifact in artifacts)
+        final_artifacts = [artifact for artifact in artifacts if artifact["metadata"].get("final_artifact") is True]
+        assert len(final_artifacts) == 1
+        for artifact in speaker_artifacts + final_artifacts:
+            assert artifact["metadata"]["source"] == "watchlist_audio_briefing"
+            assert artifact["metadata"]["watchlist_job_id"] == 42
+            assert artifact["metadata"]["watchlist_run_id"] == 7
+            assert artifact["metadata"]["audio_request_id"] == "wla_test_request"
 
     @pytest.mark.asyncio
     async def test_multi_voice_tts_default_voice_fallback(self, base_context, tmp_path, monkeypatch):

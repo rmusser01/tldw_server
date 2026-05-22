@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     extract_openai_content,
     resolve_artifacts_dir,
+    watchlist_artifact_metadata,
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.content._config import AudioBriefingComposeConfig
@@ -323,6 +324,7 @@ def _register_script_artifact(
             size_bytes=script_path.stat().st_size,
             mime_type="text/markdown",
             metadata={
+                **watchlist_artifact_metadata(context),
                 "script_artifact": True,
                 "title": "Briefing script",
                 "sections_count": len(sections),

@@ -45,6 +45,7 @@ import { StatusTag } from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
 import {
+  type AudioArtifactSummary,
   createOutputMetadataLabels,
   getAudioStatusSummary
 } from "../OutputsTab/outputMetadata"
@@ -1116,11 +1117,35 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     if (!audioTaskId) return null
 
     const hasFinalAudio = Boolean(audioSummary.downloadUrl || audioSummary.finalArtifact)
+    const hasAudioArtifacts = Boolean(
+      audioSummary.scriptArtifact ||
+        audioSummary.speakerArtifacts.length > 0 ||
+        audioSummary.finalArtifact
+    )
     const statusText = audioStatusLoading
       ? t("watchlists:runs.detail.audioStatusLoading", LOADING_STATE_LABEL)
       : audioStatusError
         ? t("watchlists:runs.detail.audioStatusUnavailable", "Unknown")
         : audioSummary.statusLabel
+    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+      <div key={key}>
+        <div className="font-medium text-text">{artifact.label}</div>
+        {artifact.displayName ? <div>{artifact.displayName}</div> : null}
+        {artifact.downloadUrl ? (
+          <a
+            href={artifact.downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+            aria-label={t("watchlists:runs.detail.openAudioArtifactAria", "Open {{label}}", {
+              label: artifact.label
+            })}
+          >
+            {t("watchlists:runs.detail.openAudioArtifact", "Open")}
+          </a>
+        ) : null}
+      </div>
+    )
 
     return (
       <div
@@ -1138,10 +1163,23 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               })}
             </div>
           </div>
-          <Tag color={audioStatusError ? "red" : audioSummary.statusColor}>
-            {statusText}
-          </Tag>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag color={audioStatusError ? "red" : audioSummary.statusColor}>
+              {statusText}
+            </Tag>
+            {audioSummary.stale && (
+              <Tag color="gold">{t("watchlists:runs.detail.audioStale", "Stale")}</Tag>
+            )}
+          </div>
         </div>
+
+        {audioSummary.supersededBy && (
+          <div className="text-xs text-warning">
+            {t("watchlists:runs.detail.audioSupersededBy", "Superseded by {{requestId}}", {
+              requestId: audioSummary.supersededBy
+            })}
+          </div>
+        )}
 
         {audioStatusError ? (
           <div className="text-xs text-danger">{audioStatusError}</div>
@@ -1168,6 +1206,25 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                 {t("watchlists:runs.detail.audioDownloadFinal", "Download final audio")}
               </a>
             )}
+          </div>
+        )}
+
+        {hasAudioArtifacts && (
+          <div className="space-y-2" data-testid="watchlists-run-audio-artifacts">
+            <div className="text-sm font-medium text-text">
+              {t("watchlists:runs.detail.audioArtifactsLabel", "Audio artifacts")}
+            </div>
+            <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+              {audioSummary.scriptArtifact && (
+                renderArtifact(audioSummary.scriptArtifact, "script")
+              )}
+              {audioSummary.speakerArtifacts.map((artifact, index) => (
+                renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
+              ))}
+              {audioSummary.finalArtifact && (
+                renderArtifact(audioSummary.finalArtifact, "final")
+              )}
+            </div>
           </div>
         )}
 

@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Workflows.adapters._common import (
     resolve_artifacts_dir,
     resolve_workflow_file_path,
     resolve_workflow_file_uri,
+    watchlist_artifact_metadata,
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.audio._config import MultiVoiceTTSConfig
@@ -597,6 +598,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
         if callable(context.get("add_artifact")):
             import mimetypes
 
+            watchlist_metadata = watchlist_artifact_metadata(context)
             for speaker_group in _group_speaker_segments(speaker_segments):
                 valid_segments = [
                     segment
@@ -629,6 +631,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                     size_bytes=speaker_path.stat().st_size,
                     mime_type=speaker_mime or "application/octet-stream",
                     metadata={
+                        **watchlist_metadata,
                         "speaker_artifact": True,
                         "speaker_id": speaker_group["speaker_id"],
                         "label": speaker_group["label"],
@@ -652,6 +655,7 @@ async def run_multi_voice_tts_adapter(config: dict[str, Any], context: dict[str,
                 size_bytes=size_bytes,
                 mime_type=mime or "application/octet-stream",
                 metadata={
+                    **watchlist_metadata,
                     "model": default_model,
                     "sections_generated": sections_generated,
                     "format": ext,

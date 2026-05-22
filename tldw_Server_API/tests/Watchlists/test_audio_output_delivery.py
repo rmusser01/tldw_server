@@ -16,6 +16,22 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def test_output_row_metadata_uses_parser_for_object_rows():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import _output_row_metadata
+
+    class OutputRow:
+        metadata_json = json.dumps({"origin": "json_only"})
+
+        @staticmethod
+        def metadata():
+            return {"origin": "watchlists", "delivery_status": "sent"}
+
+    assert _output_row_metadata(OutputRow()) == {
+        "origin": "watchlists",
+        "delivery_status": "sent",
+    }
+
+
 class TestGetRunAudioEndpoint:
     """Tests for the /runs/{run_id}/audio endpoint."""
 
@@ -162,6 +178,179 @@ class TestGetRunAudioEndpoint:
         assert sensitive_error not in json.dumps(result)
 
     @pytest.mark.asyncio
+    async def test_canonical_workflow_audio_projection_is_mirrored(self):
+        """Canonical Workflow artifacts should be mirrored to run stats and output metadata."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=91,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps(
+                {
+                    "audio_briefing_task_id": "task_graph",
+                    "audio_request_id": "wla_current",
+                }
+            ),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+        db.update_run.return_value = run
+
+        output = SimpleNamespace(
+            id=70,
+            run_id=91,
+            job_id=1,
+            type="briefing_markdown",
+            format="md",
+            title="Daily digest",
+            metadata_json=json.dumps({"template_name": "daily_digest", "delivery_status": "sent"}),
+        )
+        collections_db = MagicMock()
+        collections_db.list_output_artifacts.return_value = ([output], 1)
+        collections_db.update_output_artifact_metadata.return_value = output
+
+        user = MagicMock()
+        user.role = "admin"
+        user.id = 1
+        user.tenant_id = "default"
+
+        wf_run = SimpleNamespace(
+            run_id="wf_run_91",
+            status="succeeded",
+            metadata_json=json.dumps(
+                {
+                    "source": "watchlist_audio_briefing",
+                    "watchlist_run_id": 91,
+                    "watchlist_job_id": 1,
+                    "audio_request_id": "wla_current",
+                }
+            ),
+        )
+        final_art = SimpleNamespace(
+            id="art_final",
+            type="tts_audio",
+            uri="file:///tmp/final.mp3",
+            size_bytes=4096,
+            mime_type="audio/mpeg",
+            metadata_json=json.dumps(
+                {
+                    "source": "watchlist_audio_briefing",
+                    "watchlist_run_id": 91,
+                    "watchlist_job_id": 1,
+                    "audio_request_id": "wla_current",
+                    "final_artifact": True,
+                    "title": "Final mix",
+                }
+            ),
+            created_at="2026-05-22T10:00:00Z",
+        )
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [wf_run]
+        mock_wf_db.list_artifacts_for_run.return_value = [final_art]
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.get_content_backend_instance",
+                return_value=object(),
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory"
+            ) as legacy_path,
+        ):
+            result = await get_run_audio(
+                run_id=91,
+                target_user_id=None,
+                current_user=user,
+                db=db,
+                collections_db=collections_db,
+            )
+
+        legacy_path.assert_not_called()
+        assert result["status"] == "completed"
+        assert result["workflow_run_id"] == "wf_run_91"
+        assert result["audio_request_id"] == "wla_current"
+        assert result["artifact_id"] == "art_final"
+        assert result["audio_uri"] is None
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_final/download"
+        persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
+        persisted_output = json.loads(collections_db.update_output_artifact_metadata.call_args.kwargs["metadata_json"])
+        assert persisted_stats["audio"]["final_artifact"]["artifact_id"] == "art_final"
+        assert "uri" not in persisted_stats["audio"]["final_artifact"]
+        assert persisted_output["template_name"] == "daily_digest"
+        assert persisted_output["delivery_status"] == "sent"
+        assert persisted_output["audio"]["artifact_id"] == "art_final"
+
+    @pytest.mark.asyncio
+    async def test_workflows_lookup_failure_returns_mirrored_audio_metadata(self):
+        """Existing mirrored audio graph should be returned when canonical lookup fails."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        mirrored_audio = {
+            "run_id": 91,
+            "task_id": "task_graph",
+            "status": "completed",
+            "workflow_run_id": "wf_run_91",
+            "audio_request_id": "wla_current",
+            "superseded_by": "wla_next",
+            "artifact_id": "art_final",
+            "download_url": "/api/v1/workflows/artifacts/art_final/download",
+            "script_artifact": None,
+            "speaker_artifacts": [],
+            "final_artifact": {"artifact_id": "art_final", "download_url": "/api/v1/workflows/artifacts/art_final/download"},
+        }
+        run = SimpleNamespace(
+            id=91,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps(
+                {
+                    "audio_briefing_task_id": "task_graph",
+                    "audio_request_id": "wla_current",
+                    "audio": mirrored_audio,
+                }
+            ),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+        user = MagicMock()
+        user.role = "admin"
+        user.id = 1
+        user.tenant_id = "default"
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
+                side_effect=RuntimeError("workflow db unavailable"),
+            ),
+        ):
+            result = await get_run_audio(run_id=91, target_user_id=None, current_user=user, db=db)
+
+        assert result["status"] == "completed"
+        assert result["artifact_id"] == "art_final"
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_final/download"
+        assert result["audio_uri"] is None
+        assert result["superseded_by"] == "wla_next"
+
+    @pytest.mark.asyncio
     async def test_scheduler_status_lookup_logs_failures_without_leaking_error_text(self):
         """Scheduler lookup fallback should be observable without exposing raw exception text."""
         from tldw_Server_API.app.core.Scheduler import SchedulerError
@@ -267,7 +456,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -320,7 +509,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
             patch(
@@ -385,7 +574,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
             patch(
@@ -459,7 +648,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
             patch(
@@ -477,6 +666,114 @@ class TestGetRunAudioEndpoint:
         assert result["download_url"] is None
         assert result["script_artifact"]["artifact_id"] == "art_script_1"
         assert result["fallback_reason"] == "scheduler_task_error"
+
+    @pytest.mark.asyncio
+    async def test_audio_projection_mirror_persists_scheduler_fallback_status(self):
+        """Mirrored audio metadata should include finalized Scheduler fallback status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=42,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps(
+                {
+                    "audio_briefing_task_id": "task_failed_after_script",
+                    "audio_request_id": "wla_current",
+                }
+            ),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        collections_db = MagicMock()
+        collections_db.list_output_artifacts.return_value = (
+            [SimpleNamespace(id=99, metadata_json=json.dumps({"template_name": "daily_digest"}))],
+            1,
+        )
+
+        user = MagicMock()
+        user.id = 1
+        user.role = "admin"
+
+        wf_run = SimpleNamespace(
+            id="wf_run_1",
+            status="running",
+            metadata_json=json.dumps(
+                {
+                    "watchlist_run_id": 1,
+                    "watchlist_job_id": 42,
+                    "audio_request_id": "wla_current",
+                }
+            ),
+        )
+        script_artifact = SimpleNamespace(
+            id="art_script_1",
+            type="audio_script",
+            uri="file:///tmp/briefing-script.md",
+            size_bytes=1200,
+            mime_type="text/markdown",
+            metadata_json=json.dumps(
+                {
+                    "source": "watchlist_audio_briefing",
+                    "watchlist_run_id": 1,
+                    "watchlist_job_id": 42,
+                    "audio_request_id": "wla_current",
+                    "script_artifact": True,
+                    "title": "Briefing script",
+                }
+            ),
+        )
+        mock_wf_db = MagicMock()
+        mock_wf_db.get_run_by_idempotency.return_value = None
+        mock_wf_db.list_runs.return_value = [wf_run]
+        mock_wf_db.list_artifacts.return_value = [script_artifact]
+
+        scheduler_task = SimpleNamespace(
+            id="task_failed_after_script",
+            status="failed",
+            queue_name="workflows",
+            error="tts_provider_failed",
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(
+                run_id=1,
+                target_user_id=None,
+                current_user=user,
+                db=db,
+                collections_db=collections_db,
+            )
+
+        assert result["status"] == "failed"
+        persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
+        persisted_output = json.loads(collections_db.update_output_artifact_metadata.call_args.kwargs["metadata_json"])
+        assert persisted_stats["audio"]["status"] == "failed"
+        assert persisted_stats["audio"]["fallback_reason"] == "scheduler_task_error"
+        assert persisted_output["audio"]["status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_scheduler_status_lookup_propagates_cancellation(self):
@@ -586,14 +883,14 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
             result = await get_run_audio(run_id=7, target_user_id=None, current_user=user, db=db)
 
         assert result["status"] == "completed"
-        assert result["audio_uri"] == "file:///tmp/briefing.mp3"
+        assert result["audio_uri"] is None
         assert result["artifact_id"] == "art_audio_1"
         assert result["download_url"] == "/api/v1/workflows/artifacts/art_audio_1/download"
         assert result["size_bytes"] == 1024000
@@ -624,8 +921,8 @@ class TestGetRunAudioEndpoint:
                 return_value=1,
             ),
             patch(
-                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
-                side_effect=RuntimeError("db path error /private/secret/workflows.db"),
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
+                side_effect=RuntimeError("workflow db error /private/secret/workflows.db"),
             ),
         ):
             result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
@@ -634,7 +931,7 @@ class TestGetRunAudioEndpoint:
         assert result["task_id"] == "task_fail"
         assert result["error"] == "artifact_lookup_failed"
         assert result["fallback_reason"] == "artifact_lookup_failed"
-        assert "db path error" not in json.dumps(result)
+        assert "workflow db error" not in json.dumps(result)
         assert "/private/secret" not in json.dumps(result)
 
     @pytest.mark.asyncio
@@ -690,7 +987,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -765,7 +1062,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -774,7 +1071,8 @@ class TestGetRunAudioEndpoint:
         assert result["status"] == "completed"
         assert result["task_id"] == "task_paged_hit"
         assert result["artifact_id"] == "art_audio_paged"
-        assert result["audio_uri"] == "file:///tmp/paged-briefing.mp3"
+        assert result["audio_uri"] is None
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_audio_paged/download"
         assert mock_wf_db.list_runs.call_count == 2
         first_call = mock_wf_db.list_runs.call_args_list[0].kwargs
         second_call = mock_wf_db.list_runs.call_args_list[1].kwargs
@@ -843,7 +1141,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -911,7 +1209,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -987,7 +1285,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -995,7 +1293,8 @@ class TestGetRunAudioEndpoint:
 
         assert result["status"] == "completed"
         assert result["artifact_id"] == "art_final"
-        assert result["audio_uri"] == "file:///tmp/briefing_mixed.mp3"
+        assert result["audio_uri"] is None
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_final/download"
 
     @pytest.mark.asyncio
     async def test_returns_structured_audio_artifact_graph(self):
@@ -1089,7 +1388,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):
@@ -1097,7 +1396,7 @@ class TestGetRunAudioEndpoint:
 
         assert result["status"] == "completed"
         assert result["artifact_id"] == "art_final_graph"
-        assert result["audio_uri"] == "file:///tmp/final.mp3"
+        assert result["audio_uri"] is None
         assert result["download_url"] == "/api/v1/workflows/artifacts/art_final_graph/download"
         assert result["script_artifact"]["artifact_id"] == "art_script"
         assert result["script_artifact"]["title"] == "Briefing script"
@@ -1164,7 +1463,7 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=True),
             patch(
-                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                "tldw_Server_API.app.core.DB_Management.DB_Manager.create_workflows_database",
                 return_value=mock_wf_db,
             ),
         ):

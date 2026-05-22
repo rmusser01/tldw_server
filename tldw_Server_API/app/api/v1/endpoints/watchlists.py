@@ -4962,6 +4962,76 @@ async def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit
     return list(rows or [])
 
 
+def _output_row_id(row: Any) -> Any:
+    """Return a stable output artifact identifier across dict and row-like shapes."""
+    if isinstance(row, dict):
+        return row.get("id")
+    return getattr(row, "id", None)
+
+
+def _output_row_metadata(row: Any) -> dict[str, Any]:
+    """Parse output metadata without dropping row-provided compatibility fields."""
+    if isinstance(row, dict):
+        return _parse_json_object(row.get("metadata_json") or row.get("metadata"))
+    return _parse_output_metadata(row)
+
+
+def _retry_audio_projection(run_id: int, audio_result: Any, status: str) -> dict[str, Any]:
+    """Build the active empty audio graph used immediately after a queued retry."""
+    return {
+        "run_id": run_id,
+        "task_id": str(audio_result.task_id) if audio_result.task_id else None,
+        "status": status,
+        "audio_request_id": audio_result.audio_request_id,
+        "script_artifact": None,
+        "speaker_artifacts": [],
+        "final_artifact": None,
+        "artifact_id": None,
+        "download_url": None,
+        "size_bytes": None,
+        "mime_type": None,
+        "stale": False,
+    }
+
+
+def _mirror_audio_retry_state_to_output(
+    collections_db: Any,
+    *,
+    run_id: int,
+    active_projection: dict[str, Any],
+    superseded_by: str | None,
+) -> bool:
+    """Mirror retry stale/active audio state into the canonical Watchlists output artifact."""
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        find_canonical_watchlist_output,
+        mark_audio_projection_stale,
+        merge_audio_projection_metadata,
+    )
+
+    try:
+        output = find_canonical_watchlist_output(collections_db, run_id)
+        if output is None:
+            return False
+        output_id = _output_row_id(output)
+        if output_id is None:
+            return False
+        output_metadata = _output_row_metadata(output)
+        output_metadata = mark_audio_projection_stale(output_metadata, superseded_by=superseded_by)
+        output_metadata = merge_audio_projection_metadata(output_metadata, active_projection)
+        collections_db.update_output_artifact_metadata(
+            output_id,
+            metadata_json=json.dumps(output_metadata, sort_keys=True),
+        )
+        return True
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "watchlists.retry_audio output metadata mirror failed for run={} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
+        return False
+
+
 @router.post(
     "/runs/{run_id}/retry-audio",
     response_model=RunStageRetryResponse,
@@ -4975,7 +5045,8 @@ async def retry_run_audio(
         description="Admin-only: retry audio for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db=Depends(get_watchlists_db_for_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
 ) -> RunStageRetryResponse:
     """Retry the audio briefing stage for a completed or failed watchlist run."""
     _enforce_runs_admin_if_configured(current_user)
@@ -4984,6 +5055,13 @@ async def retry_run_audio(
         current_db=db,
         target_user_id=target_user_id,
     )
+    target_collections_db = None
+    if _looks_like_collections_db(collections_db):
+        target_collections_db = _resolve_collections_db_for_target_user(
+            current_user=current_user,
+            current_db=collections_db,
+            target_user_id=resolved_user_id,
+        )
     try:
         run = target_db.get_run(run_id)
     except KeyError:
@@ -5002,7 +5080,12 @@ async def retry_run_audio(
 
     from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
         apply_audio_briefing_result_metadata,
+        persisted_audio_briefing_status,
         trigger_audio_briefing,
+    )
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        mark_audio_projection_stale,
+        merge_audio_projection_metadata,
     )
 
     if str(getattr(run, "status", "")).lower() in {"running", "queued"}:
@@ -5014,16 +5097,31 @@ async def retry_run_audio(
         output_prefs=output_prefs,
         db=target_db,
     )
+    if not audio_result.submitted:
+        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
+
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
+    run_stats = mark_audio_projection_stale(run_stats, superseded_by=audio_result.audio_request_id)
+    active_audio_projection = _retry_audio_projection(
+        run_id,
+        audio_result,
+        persisted_audio_briefing_status(audio_result),
+    )
+    run_stats = merge_audio_projection_metadata(run_stats, active_audio_projection)
     apply_audio_briefing_result_metadata(run_stats, audio_result, retry=True)
     try:
         await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("watchlists.retry_audio failed to persist retry state for run={}: {}", run_id, exc)
         raise HTTPException(status_code=500, detail="audio_retry_state_update_failed") from exc
-
-    if not audio_result.submitted:
-        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
+    if target_collections_db is not None:
+        await run_in_threadpool(
+            _mirror_audio_retry_state_to_output,
+            target_collections_db,
+            run_id=run_id,
+            active_projection=active_audio_projection,
+            superseded_by=audio_result.audio_request_id,
+        )
 
     return RunStageRetryResponse(
         run_id=run_id,
@@ -5356,6 +5454,78 @@ async def _audio_scheduler_status_or_pending(run_id: int, task_id: Any) -> dict[
     return _pending_audio_scheduler_fallback(run_id, task_id)
 
 
+def _get_watchlists_workflow_db() -> Any:
+    """Resolve the Workflows DB through the same factory path as Scheduler/Workflows APIs."""
+    from tldw_Server_API.app.core.DB_Management.DB_Manager import (
+        create_workflows_database,
+        get_content_backend_instance,
+    )
+
+    return create_workflows_database(backend=get_content_backend_instance())
+
+
+def _workflow_run_identifier(workflow_run: Any) -> Any:
+    """Return a Workflow run id across dict, SQLite, and backend row shapes."""
+    if isinstance(workflow_run, dict):
+        return workflow_run.get("run_id") or workflow_run.get("id")
+    return getattr(workflow_run, "run_id", None) or getattr(workflow_run, "id", None)
+
+
+def _list_workflow_audio_artifacts(workflow_db: Any, workflow_run_id: Any) -> list[Any]:
+    """List Workflow artifacts using whichever artifact API the backing DB exposes."""
+    if workflow_run_id is None:
+        return []
+    try:
+        artifacts = workflow_db.list_artifacts(run_id=workflow_run_id)
+        if isinstance(artifacts, list):
+            return artifacts
+    except AttributeError:
+        pass
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        return list(workflow_db.list_artifacts_for_run(str(workflow_run_id)) or [])
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return []
+
+
+def _audio_projection_response(
+    projection: dict[str, Any],
+    *,
+    run_id: int,
+    task_id: Any,
+    queue_name: str | None = None,
+) -> dict[str, Any]:
+    """Shape the public audio response without exposing raw filesystem artifact URIs."""
+    response = {
+        "run_id": run_id,
+        "task_id": projection.get("task_id") or (str(task_id) if task_id is not None else None),
+        "queue_name": queue_name,
+        "status": projection.get("status") or "unknown",
+        "audio_uri": None,
+        "download_url": projection.get("download_url"),
+        "artifact_id": projection.get("artifact_id"),
+        "size_bytes": projection.get("size_bytes"),
+        "mime_type": projection.get("mime_type"),
+        "script_artifact": projection.get("script_artifact"),
+        "speaker_artifacts": projection.get("speaker_artifacts") or [],
+        "final_artifact": projection.get("final_artifact"),
+        "fallback_reason": projection.get("fallback_reason"),
+        "audio_request_id": projection.get("audio_request_id"),
+        "workflow_run_id": projection.get("workflow_run_id"),
+        "schema_version": projection.get("schema_version", 1),
+        "synced_at": projection.get("synced_at"),
+        "stale": projection.get("stale"),
+        "superseded_by": projection.get("superseded_by"),
+    }
+    return response
+
+
+def _looks_like_collections_db(collections_db: Any) -> bool:
+    """Return whether an injected dependency behaves like the Collections DB facade."""
+    return callable(getattr(collections_db, "list_output_artifacts", None))
+
+
 @router.get(
     "/runs/{run_id}/audio",
     summary="Get audio briefing artifact for a run",
@@ -5369,8 +5539,9 @@ async def get_run_audio(
         description="Admin-only: fetch run audio info for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db=Depends(get_watchlists_db_for_user),
-):
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
     """Return audio briefing artifact metadata for a watchlist run.
 
     Looks up the workflow run that was triggered by this watchlist run
@@ -5383,14 +5554,14 @@ async def get_run_audio(
         target_user_id=target_user_id,
     )
     try:
-        r = target_db.get_run(run_id)
+        run = target_db.get_run(run_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_not_found") from None
 
     # Check the run stats for audio_briefing_task_id
     stats: dict[str, Any] = {}
     try:
-        stats = json.loads(r.stats_json or "{}") if r.stats_json else {}
+        stats = json.loads(run.stats_json or "{}") if run.stats_json else {}
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         stats = {}
 
@@ -5398,329 +5569,113 @@ async def get_run_audio(
     if not task_id:
         raise HTTPException(status_code=404, detail="no_audio_briefing_for_run")
 
-    # Try to find the workflow run and its artifacts
+    audio_request_id = stats.get("audio_request_id")
+    if not audio_request_id and isinstance(stats.get("audio"), dict):
+        audio_request_id = stats["audio"].get("audio_request_id")
+
+    target_collections_db = None
+    if _looks_like_collections_db(collections_db):
+        target_collections_db = _resolve_collections_db_for_target_user(
+            current_user=current_user,
+            current_db=collections_db,
+            target_user_id=resolved_user_id,
+        )
+
     try:
-        from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+        from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+            build_audio_projection,
+            find_matching_workflow_run,
+            get_mirrored_audio_projection,
+            mirror_audio_projection,
+        )
 
-        user_dir = DatabasePaths.get_user_base_directory(int(resolved_user_id))
-        wf_db_path = os.path.join(str(user_dir), "workflows", "workflows.db")
-        if not os.path.exists(wf_db_path):
-            return await _audio_scheduler_status_or_pending(run_id, task_id)
-
-        wf_db = WorkflowsDatabase(db_path=wf_db_path)
+        mirrored_projection = get_mirrored_audio_projection(run)
+        wf_db = await run_in_threadpool(_get_watchlists_workflow_db)
         tenant_id = await _resolve_watchlist_workflow_tenant_id(
             current_user=current_user,
             resolved_user_id=int(resolved_user_id),
         )
-        wf_user_id = str(resolved_user_id)
-        scan_page_size = 50
-        matching_run = None
-        matching_run_metadata: dict[str, Any] = {}
-
-        def _load_metadata(value: Any) -> dict[str, Any]:
-            if isinstance(value, dict):
-                return value
-            if isinstance(value, str):
-                try:
-                    parsed = json.loads(value)
-                except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-                    return {}
-                return parsed if isinstance(parsed, dict) else {}
-            return {}
-
-        def _run_metadata(run_obj: Any) -> dict[str, Any]:
-            if isinstance(run_obj, dict):
-                return _load_metadata(run_obj.get("metadata_json"))
-            return _load_metadata(getattr(run_obj, "metadata_json", None))
-
-        # Paginated scan to avoid false negatives when target run is beyond earlier pages.
-        page_idx = 0
-        while True:
-            offset = page_idx * scan_page_size
-            runs: list[Any] = []
-            try:
-                runs = wf_db.list_runs(
-                    tenant_id=tenant_id,
-                    user_id=wf_user_id,
-                    limit=scan_page_size,
-                    offset=offset,
-                )
-            except TypeError:
-                # Compatibility fallback for older list_runs signatures.
-                runs = wf_db.list_runs(limit=scan_page_size, offset=offset)
-
-            if not runs:
-                break
-
-            for wf_run in runs:
-                meta = _run_metadata(wf_run)
-                if str(meta.get("watchlist_run_id")) == str(run_id):
-                    matching_run = wf_run
-                    matching_run_metadata = meta
-                    break
-
-            if matching_run:
-                break
-            if len(runs) < scan_page_size:
-                break
-            page_idx += 1
-
+        matching_run = await run_in_threadpool(
+            find_matching_workflow_run,
+            wf_db,
+            tenant_id=tenant_id,
+            user_id=str(resolved_user_id),
+            job_id=getattr(run, "job_id", None),
+            run_id=run_id,
+            audio_request_id=str(audio_request_id) if audio_request_id else None,
+        )
         if not matching_run:
+            if mirrored_projection:
+                return _audio_projection_response(
+                    mirrored_projection,
+                    run_id=run_id,
+                    task_id=task_id,
+                )
             return await _audio_scheduler_status_or_pending(run_id, task_id)
 
-        # Check for artifacts
-        matching_run_id = None
-        if isinstance(matching_run, dict):
-            matching_run_id = matching_run.get("run_id") or matching_run.get("id")
-        else:
-            matching_run_id = getattr(matching_run, "run_id", None) or getattr(matching_run, "id", None)
+        matching_run_id = _workflow_run_identifier(matching_run)
         if not matching_run_id:
+            if mirrored_projection:
+                return _audio_projection_response(
+                    mirrored_projection,
+                    run_id=run_id,
+                    task_id=task_id,
+                )
             return await _audio_scheduler_status_or_pending(run_id, task_id)
 
-        artifacts: list[Any] = []
-        used_legacy_artifacts_api = False
-        try:
-            artifacts_candidate = wf_db.list_artifacts(run_id=matching_run_id)
-            if isinstance(artifacts_candidate, list):
-                artifacts = artifacts_candidate
-                used_legacy_artifacts_api = True
-        except AttributeError:
-            used_legacy_artifacts_api = False
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            used_legacy_artifacts_api = False
-
-        if not used_legacy_artifacts_api:
-            artifacts = wf_db.list_artifacts_for_run(str(matching_run_id))
-
-        def _coerce_artifact_id_rank(value: Any) -> int:
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                digits = "".join(ch for ch in value if ch.isdigit())
-                if digits:
-                    with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                        return int(digits)
-            return 0
-
-        def _coerce_created_at_rank(value: Any) -> float:
-            if value is None:
-                return 0.0
-            if isinstance(value, (int, float)):
-                return float(value)
-            if isinstance(value, str):
-                raw = value.strip()
-                if not raw:
-                    return 0.0
-                normalized = raw
-                if raw.endswith("Z"):
-                    normalized = raw[:-1] + "+00:00"
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    return datetime.fromisoformat(normalized).timestamp()
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    return float(raw)
-            return 0.0
-
-        def _first_metadata_string(*values: Any) -> str | None:
-            for value in values:
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-            return None
-
-        def _artifact_download_url(artifact_id: Any) -> str | None:
-            if artifact_id is None:
-                return None
-            artifact_id_str = str(artifact_id).strip()
-            if not artifact_id_str:
-                return None
-            return f"/api/v1/workflows/artifacts/{artifact_id_str}/download"
-
-        def _artifact_summary(
-            *,
-            art_id: Any,
-            art_type: Any,
-            art_uri: Any,
-            size_bytes: Any,
-            mime_type: Any,
-            art_meta: dict[str, Any],
-            fallback_title: str,
-        ) -> dict[str, Any]:
-            title = _first_metadata_string(
-                art_meta.get("title"),
-                art_meta.get("label"),
-                art_meta.get("name"),
-                fallback_title,
-            )
-            summary: dict[str, Any] = {
-                "artifact_id": art_id,
-                "type": art_type,
-                "uri": art_uri,
-                "download_url": _artifact_download_url(art_id),
-                "size_bytes": size_bytes,
-                "mime_type": mime_type,
-                "metadata": art_meta,
-            }
-            if title:
-                summary["title"] = title
-            speaker_id = _first_metadata_string(
-                art_meta.get("speaker_id"),
-                art_meta.get("speakerId"),
-                art_meta.get("voice_marker"),
-            )
-            if speaker_id:
-                summary["speaker_id"] = speaker_id
-            voice = _first_metadata_string(art_meta.get("voice"), art_meta.get("tts_voice"))
-            if voice:
-                summary["voice"] = voice
-            return summary
-
-        audio_candidates: list[dict[str, Any]] = []
-        script_artifact: dict[str, Any] | None = None
-        speaker_artifacts: list[dict[str, Any]] = []
-        fallback_reason = _first_metadata_string(
-            matching_run_metadata.get("fallback_reason"),
-            matching_run_metadata.get("audio_fallback_reason"),
-            matching_run_metadata.get("fallback_error"),
+        artifacts = await run_in_threadpool(_list_workflow_audio_artifacts, wf_db, matching_run_id)
+        projection = build_audio_projection(
+            run_id=run_id,
+            task_id=task_id,
+            audio_request_id=str(audio_request_id) if audio_request_id else None,
+            workflow_run=matching_run,
+            artifacts=artifacts,
         )
-        for idx, art in enumerate(artifacts or []):
-            if isinstance(art, dict):
-                art_meta = _load_metadata(art.get("metadata_json"))
-                art_type = art.get("type")
-                art_id = art.get("artifact_id") or art.get("id")
-                art_uri = art.get("uri")
-                size_bytes = art.get("size_bytes")
-                mime_type = art.get("mime_type")
-                created_at = art.get("created_at")
-            else:
-                art_meta = _load_metadata(getattr(art, "metadata_json", None))
-                art_type = getattr(art, "type", None)
-                art_id = getattr(art, "artifact_id", None) or getattr(art, "id", None)
-                art_uri = getattr(art, "uri", None)
-                size_bytes = getattr(art, "size_bytes", None)
-                mime_type = getattr(art, "mime_type", None)
-                created_at = getattr(art, "created_at", None)
-            if art_type == "tts_audio" or art_meta.get("multi_voice"):
-                final_hint = bool(
-                    art_meta.get("final_artifact")
-                    or art_meta.get("is_final")
-                    or art_meta.get("final")
-                    or art_meta.get("background_mixed")
-                    or art_meta.get("mixed")
-                )
-                fallback_hint = bool(
-                    art_meta.get("fallback_artifact")
-                    or art_meta.get("single_voice_fallback")
-                    or art_meta.get("fallback")
-                )
-                summary = _artifact_summary(
-                    art_id=art_id,
-                    art_type=art_type,
-                    art_uri=art_uri,
-                    size_bytes=size_bytes,
-                    mime_type=mime_type or "audio/mpeg",
-                    art_meta=art_meta,
-                    fallback_title="Final audio" if final_hint or fallback_hint else "Audio artifact",
-                )
-                is_speaker_artifact = bool(art_meta.get("speaker_artifact") or art_meta.get("speaker_id"))
-                if is_speaker_artifact:
-                    speaker_artifacts.append(
-                        _artifact_summary(
-                            art_id=art_id,
-                            art_type=art_type,
-                            art_uri=art_uri,
-                            size_bytes=size_bytes,
-                            mime_type=mime_type or "audio/mpeg",
-                            art_meta=art_meta,
-                            fallback_title=f"Speaker {len(speaker_artifacts) + 1}",
-                        )
-                    )
-                if fallback_reason is None:
-                    fallback_reason = _first_metadata_string(
-                        art_meta.get("fallback_reason"),
-                        art_meta.get("fallback_error"),
-                    )
-                if is_speaker_artifact and not final_hint and not fallback_hint:
-                    continue
-                audio_candidates.append(
-                    {
-                        "artifact_id": art_id,
-                        "uri": art_uri,
-                        "size_bytes": size_bytes,
-                        "mime_type": mime_type or "audio/mpeg",
-                        "summary": summary,
-                        "_rank": (
-                            1 if final_hint or fallback_hint else 0,
-                            _coerce_created_at_rank(created_at),
-                            idx,
-                            _coerce_artifact_id_rank(art_id),
-                        ),
-                    }
-                )
-                continue
 
-            if (
-                art_meta.get("script_artifact")
-                or art_meta.get("audio_briefing_script")
-                or art_type in {"audio_script", "briefing_script", "script"}
-            ):
-                if script_artifact is None:
-                    script_artifact = _artifact_summary(
-                        art_id=art_id,
-                        art_type=art_type,
-                        art_uri=art_uri,
-                        size_bytes=size_bytes,
-                        mime_type=mime_type or "text/markdown",
-                        art_meta=art_meta,
-                        fallback_title="Briefing script",
-                    )
-
-        audio_artifact = max(audio_candidates, key=lambda candidate: candidate["_rank"]) if audio_candidates else None
-
-        matching_run_status = (
-            matching_run.get("status") if isinstance(matching_run, dict) else getattr(matching_run, "status", "pending")
-        )
-        if audio_artifact:
-            final_artifact = audio_artifact.get("summary")
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": matching_run_status,
-                "audio_uri": audio_artifact["uri"],
-                "artifact_id": audio_artifact["artifact_id"],
-                "download_url": f"/api/v1/workflows/artifacts/{audio_artifact['artifact_id']}/download",
-                "size_bytes": audio_artifact["size_bytes"],
-                "mime_type": audio_artifact["mime_type"],
-                "script_artifact": script_artifact,
-                "speaker_artifacts": speaker_artifacts,
-                "final_artifact": final_artifact,
-                "fallback_reason": fallback_reason,
-            }
-
-        scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
-        response_status = matching_run_status
+        response_status = projection.get("status") or "unknown"
         queue_name = None
-        if scheduler_status:
-            response_status = scheduler_status.get("status") or response_status
-            queue_name = scheduler_status.get("queue_name")
-            fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
+        fallback_reason = projection.get("fallback_reason")
+        if not projection.get("final_artifact"):
+            scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+            if scheduler_status:
+                response_status = scheduler_status.get("status") or response_status
+                queue_name = scheduler_status.get("queue_name")
+                fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
+                projection = {**projection, "status": response_status, "fallback_reason": fallback_reason}
 
-        return {
-            "run_id": run_id,
-            "task_id": task_id,
-            "status": response_status,
-            "queue_name": queue_name,
-            "audio_uri": None,
-            "download_url": None,
-            "script_artifact": script_artifact,
-            "speaker_artifacts": speaker_artifacts,
-            "final_artifact": None,
-            "fallback_reason": fallback_reason,
-        }
+        if target_collections_db is not None:
+            mirror_ok = await run_in_threadpool(
+                mirror_audio_projection,
+                target_db,
+                target_collections_db,
+                run,
+                projection,
+                user_id=int(resolved_user_id),
+            )
+            if not mirror_ok:
+                logger.warning("Watchlists audio projection mirror failed for run={}", run_id)
+
+        return _audio_projection_response(
+            projection,
+            run_id=run_id,
+            task_id=task_id,
+            queue_name=queue_name,
+        )
 
     except HTTPException:
         raise
     except asyncio.CancelledError:
         raise
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import get_mirrored_audio_projection
+
+        mirrored_projection = get_mirrored_audio_projection(run)
+        if mirrored_projection:
+            return _audio_projection_response(
+                mirrored_projection,
+                run_id=run_id,
+                task_id=task_id,
+            )
         logger.opt(exception=exc).warning(f"Failed to look up audio artifact for run {run_id}")
         return {
             "run_id": run_id,

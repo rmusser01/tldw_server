@@ -17,6 +17,7 @@ import {
   getOutputArtifactTagColor,
   getOutputDeliveryStatuses,
   getOutputFileExtension,
+  getMergedOutputAudioStatusSummary,
   getOutputMimeType,
   getOutputAudioStatusSummary,
   getOutputReportPreset,
@@ -245,6 +246,70 @@ describe("outputMetadata helpers", () => {
     expect(summary.statusLabel).toBe("Queue unavailable")
     expect(summary.statusColor).toBe("gold")
     expect(summary.fallbackReason).toBe("workflows_queue_has_no_workers")
+  })
+
+  it("marks stale mirrored audio and keeps artifact downloads path-safe", () => {
+    const summary = getOutputAudioStatusSummary({
+      audio: {
+        status: "completed",
+        audio_request_id: "wla_old",
+        workflow_run_id: "wf_old",
+        schema_version: 1,
+        synced_at: "2026-05-22T10:00:00Z",
+        stale: true,
+        superseded_by: "wla_new",
+        final_artifact: {
+          title: "Old final mix",
+          uri: "file:///srv/tldw/watchlists/runs/9/final.mp3",
+          download_url: "/api/v1/workflows/artifacts/art-final/download"
+        }
+      }
+    })
+
+    expect(summary.audioRequestId).toBe("wla_old")
+    expect(summary.workflowRunId).toBe("wf_old")
+    expect(summary.schemaVersion).toBe(1)
+    expect(summary.syncedAt).toBe("2026-05-22T10:00:00Z")
+    expect(summary.stale).toBe(true)
+    expect(summary.supersededBy).toBe("wla_new")
+    expect(summary.finalArtifact).toMatchObject({
+      label: "Old final mix",
+      displayName: "final.mp3",
+      downloadUrl: "/api/v1/workflows/artifacts/art-final/download"
+    })
+    expect(summary.finalArtifact?.uri).toBeUndefined()
+  })
+
+  it("lets a newer live audio request override stale mirrored artifacts", () => {
+    const summary = getMergedOutputAudioStatusSummary(
+      {
+        audio: {
+          status: "completed",
+          audio_request_id: "wla_old",
+          artifact_id: "old-final",
+          download_url: "/api/v1/workflows/artifacts/old-final/download",
+          final_artifact: {
+            title: "Old final mix",
+            download_url: "/api/v1/workflows/artifacts/old-final/download"
+          }
+        }
+      },
+      {
+        run_id: 9,
+        task_id: "task-new",
+        status: "queued",
+        audio_request_id: "wla_new",
+        final_artifact: null,
+        speaker_artifacts: []
+      }
+    )
+
+    expect(summary.status).toBe("queued")
+    expect(summary.audioRequestId).toBe("wla_new")
+    expect(summary.taskId).toBe("task-new")
+    expect(summary.downloadUrl).toBeUndefined()
+    expect(summary.finalArtifact).toBeUndefined()
+    expect(summary.speakerArtifacts).toEqual([])
   })
 
   it("keeps locale resources aligned for structured audio status labels", () => {
