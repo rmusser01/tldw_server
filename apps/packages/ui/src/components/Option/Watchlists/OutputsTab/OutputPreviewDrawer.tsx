@@ -16,8 +16,12 @@ import { useNavigate } from "react-router-dom"
 import { setSetting } from "@/services/settings"
 import { DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import type { WatchlistChatHandoffPayload } from "@/services/tldw/watchlist-chat-handoff"
-import { downloadWatchlistOutput, downloadWatchlistOutputBinary } from "@/services/watchlists"
-import type { WatchlistOutput } from "@/types/watchlists"
+import {
+  downloadWatchlistOutput,
+  downloadWatchlistOutputBinary,
+  getWatchlistRunAudio
+} from "@/services/watchlists"
+import type { WatchlistOutput, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   getFocusableActiveElement,
@@ -30,6 +34,7 @@ import {
   getOutputFileExtension,
   getOutputAudioStatusSummary,
   getOutputDeliveryStatuses,
+  getMergedOutputAudioStatusSummary,
   getOutputMimeType,
   getOutputTemplateName,
   getOutputTemplateVersion,
@@ -37,6 +42,8 @@ import {
 } from "./outputMetadata"
 import { ReportEvidencePanel } from "./ReportEvidencePanel"
 
+const AUDIO_STATUS_POLL_INTERVAL_MS = 3000
+const AUDIO_STATUS_POLLABLE = new Set(["pending", "queued", "running", "in_progress"])
 const SENSITIVE_AUDIO_ERROR_VALUE_PATTERN =
   /\b(authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password)\b\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;)}\]]+)/gi
 const BEARER_AUDIO_ERROR_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
@@ -74,6 +81,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const audioObjectUrlRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"rendered" | "source">("rendered")
+  const [liveAudioStatus, setLiveAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
   const outputIsAudio = useMemo(() => isAudioOutput(output), [output])
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
@@ -212,12 +220,71 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     return getOutputDeliveryStatuses(output?.metadata)
   }, [output?.metadata])
 
-  const audioSummary = useMemo(() => {
+  const metadataAudioSummary = useMemo(() => {
     return getOutputAudioStatusSummary(output?.metadata)
   }, [output?.metadata])
+  const audioSummary = useMemo(() => {
+    return getMergedOutputAudioStatusSummary(output?.metadata, liveAudioStatus)
+  }, [liveAudioStatus, output?.metadata])
   const audioErrorMessage = useMemo(() => {
     return audioSummary.error ? sanitizeAudioErrorMessage(audioSummary.error) : null
   }, [audioSummary.error])
+
+  useEffect(() => {
+    let active = true
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const runId = output?.run_id
+    const metadataStatus = metadataAudioSummary.status.toLowerCase()
+    const metadataNeedsLiveStatus =
+      AUDIO_STATUS_POLLABLE.has(metadataStatus) ||
+      (metadataStatus === "unknown" && Boolean(metadataAudioSummary.taskId))
+    const shouldFetchLiveStatus =
+      open &&
+      !outputIsAudio &&
+      runId != null &&
+      metadataAudioSummary.requested &&
+      metadataNeedsLiveStatus
+
+    if (!shouldFetchLiveStatus) {
+      setLiveAudioStatus(null)
+      return () => {
+        active = false
+      }
+    }
+
+    setLiveAudioStatus(null)
+
+    const loadAudioStatus = async () => {
+      try {
+        const nextStatus = await getWatchlistRunAudio(runId)
+        if (!active) return
+        setLiveAudioStatus(nextStatus)
+        const normalizedStatus = (nextStatus.status || "").toLowerCase()
+        if (AUDIO_STATUS_POLLABLE.has(normalizedStatus)) {
+          timeoutId = setTimeout(loadAudioStatus, AUDIO_STATUS_POLL_INTERVAL_MS)
+        }
+      } catch (err) {
+        console.warn("Failed to resolve output audio status:", err)
+      }
+    }
+
+    void loadAudioStatus()
+
+    return () => {
+      active = false
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+    }
+  }, [
+    metadataAudioSummary.requested,
+    metadataAudioSummary.status,
+    metadataAudioSummary.taskId,
+    open,
+    output?.run_id,
+    outputIsAudio
+  ])
 
   const templateName = useMemo(() => {
     return getOutputTemplateName(output?.metadata)
@@ -301,6 +368,13 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           <div className="text-xs text-text-muted">
             {t("watchlists:outputs.audioTaskId", "Task: {{taskId}}", {
               taskId: audioSummary.taskId
+            })}
+          </div>
+        )}
+        {audioSummary.queueName && (
+          <div className="text-xs text-text-muted">
+            {t("watchlists:outputs.audioQueueName", "Queue: {{queue}}", {
+              queue: audioSummary.queueName
             })}
           </div>
         )}

@@ -8,7 +8,8 @@ import type { WatchlistOutput } from "@/types/watchlists"
 
 const serviceMocks = vi.hoisted(() => ({
   downloadWatchlistOutput: vi.fn(),
-  downloadWatchlistOutputBinary: vi.fn()
+  downloadWatchlistOutputBinary: vi.fn(),
+  getWatchlistRunAudio: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -41,7 +42,9 @@ vi.mock("@/services/watchlists", () => ({
   downloadWatchlistOutput: (...args: unknown[]) =>
     serviceMocks.downloadWatchlistOutput(...args),
   downloadWatchlistOutputBinary: (...args: unknown[]) =>
-    serviceMocks.downloadWatchlistOutputBinary(...args)
+    serviceMocks.downloadWatchlistOutputBinary(...args),
+  getWatchlistRunAudio: (...args: unknown[]) =>
+    serviceMocks.getWatchlistRunAudio(...args)
 }))
 
 const buildOutput = (overrides: Partial<WatchlistOutput> = {}): WatchlistOutput => ({
@@ -68,6 +71,14 @@ describe("OutputPreviewDrawer audio support", () => {
     vi.clearAllMocks()
     serviceMocks.downloadWatchlistOutput.mockResolvedValue("# Briefing")
     serviceMocks.downloadWatchlistOutputBinary.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
+    serviceMocks.getWatchlistRunAudio.mockResolvedValue({
+      run_id: 9,
+      task_id: "task_audio_pending",
+      queue_name: "workflows",
+      status: "queued",
+      audio_uri: null,
+      download_url: null
+    })
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:audio-output")
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined)
   })
@@ -190,6 +201,9 @@ describe("OutputPreviewDrawer audio support", () => {
     await waitFor(() => {
       expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
     })
+    await waitFor(() => {
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
+    })
 
     expect(serviceMocks.downloadWatchlistOutputBinary).not.toHaveBeenCalled()
     expect(await screen.findByTestId("output-preview-provenance")).toHaveTextContent(
@@ -197,8 +211,101 @@ describe("OutputPreviewDrawer audio support", () => {
     )
     expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
     expect(screen.getByText("Queued")).toBeInTheDocument()
+    expect(screen.getByText("Queue: workflows")).toBeInTheDocument()
     expect(screen.getByText(/task_audio_pending/)).toBeInTheDocument()
     expect(await screen.findByText("# Briefing")).toBeInTheDocument()
+  })
+
+  it("merges completed live audio status into text output preview", async () => {
+    serviceMocks.getWatchlistRunAudio.mockResolvedValue({
+      run_id: 9,
+      task_id: "task_audio_done",
+      queue_name: "workflows",
+      status: "completed",
+      audio_uri: "file:///srv/tldw/watchlists/runs/9/final.mp3",
+      download_url: "/api/v1/workflows/artifacts/art_final/download",
+      final_artifact: {
+        title: "Final mix",
+        uri: "file:///srv/tldw/watchlists/runs/9/final.mp3",
+        download_url: "/api/v1/workflows/artifacts/art_final/download"
+      }
+    })
+
+    render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({
+          type: "brief",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "pending",
+            audio_briefing_task_id: "task_audio_pending"
+          }
+        })}
+      />
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
+    })
+
+    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getByText("Final mix")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Final mix" })).toHaveAttribute(
+      "href",
+      "/api/v1/workflows/artifacts/art_final/download"
+    )
+  })
+
+  it("stops live audio polling when the drawer closes", async () => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+    try {
+      const { rerender } = render(
+        <OutputPreviewDrawer
+          open
+          onClose={vi.fn()}
+          output={buildOutput({
+            type: "brief",
+            format: "md",
+            metadata: {
+              audio_briefing_requested: true,
+              audio_briefing_status: "pending",
+              audio_briefing_task_id: "task_audio_pending"
+            }
+          })}
+        />
+      )
+
+      await waitFor(() => {
+        expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
+      })
+      await screen.findByText("Queue: workflows")
+
+      rerender(
+        <OutputPreviewDrawer
+          open={false}
+          onClose={vi.fn()}
+          output={buildOutput({
+            type: "brief",
+            format: "md",
+            metadata: {
+              audio_briefing_requested: true,
+              audio_briefing_status: "pending",
+              audio_briefing_task_id: "task_audio_pending"
+            }
+          })}
+        />
+      )
+
+      await waitFor(() => {
+        expect(clearTimeoutSpy).toHaveBeenCalled()
+      })
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
+    } finally {
+      clearTimeoutSpy.mockRestore()
+    }
   })
 
   it("renders sanitized audio status when non-audio content is empty", async () => {

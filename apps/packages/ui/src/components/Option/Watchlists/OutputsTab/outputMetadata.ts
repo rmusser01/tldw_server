@@ -58,6 +58,7 @@ export interface AudioStatusSummary {
   fallbackReason?: string
   error?: string
   taskId?: string
+  queueName?: string
   downloadUrl?: string
   scriptArtifact?: AudioArtifactSummary
   speakerArtifacts: AudioArtifactSummary[]
@@ -624,6 +625,9 @@ export const getAudioStatusSummary = (
     asNonEmptyString(record?.fallback_reason) ||
     asNonEmptyString(record?.fallbackReason)
   const error = asNonEmptyString(record?.error)
+  const queueName =
+    asNonEmptyString(record?.queue_name) ||
+    asNonEmptyString(record?.queueName)
   const explicitlyRequested = record?.requested === true || record?.audio_briefing_requested === true
   const requested =
     record !== null &&
@@ -647,6 +651,7 @@ export const getAudioStatusSummary = (
     fallbackReason,
     error,
     taskId,
+    queueName,
     downloadUrl,
     scriptArtifact,
     speakerArtifacts,
@@ -659,6 +664,16 @@ export const getOutputAudioStatusSummary = (
   labels?: OutputMetadataLabels
 ): AudioStatusSummary => {
   return getAudioStatusSummary(getAudioMetadataRecord(metadata), labels)
+}
+
+export const getMergedOutputAudioStatusSummary = (
+  metadata: unknown,
+  liveStatus: WatchlistRunAudioStatus | null | undefined,
+  labels?: OutputMetadataLabels
+): AudioStatusSummary => {
+  const liveSummary = liveStatus ? getAudioStatusSummary(liveStatus, labels) : null
+  if (liveSummary?.requested) return liveSummary
+  return getOutputAudioStatusSummary(metadata, labels)
 }
 
 interface BuildRegenerateOptions {
