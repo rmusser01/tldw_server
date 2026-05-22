@@ -7,6 +7,7 @@ import {
   validatePipelineWizardCron,
   validatePipelineWizardDraft
 } from "../pipeline-wizard-state"
+import { toPipelineJobCreatePayload } from "../pipeline-contract"
 
 describe("watchlists pipeline wizard state", () => {
   it("validates source, monitor, digest, delivery, and optional audio requirements", () => {
@@ -130,7 +131,7 @@ describe("watchlists pipeline wizard state", () => {
         scheduleExpr: "15 */5 * * *",
         timezone: "UTC",
         templateName: "newsletter_markdown",
-        createScheduledOutput: true,
+        createScheduledOutput: false,
         includeAudio: true,
         audioCast: {
           speaker_count: 2,
@@ -145,6 +146,45 @@ describe("watchlists pipeline wizard state", () => {
         }
       })
     )
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("keeps scheduled wizard monitors manual/test-only until scheduled reports are selected", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+
+    const scheduledDraft = {
+      ...createDefaultPipelineWizardDraft(),
+      sourceMode: "existing" as const,
+      sourceIds: [10],
+      monitorName: "Daily Brief",
+      scheduleMode: "daily" as const,
+      templateName: "briefing_md",
+      audioEnabled: false,
+      audioSpeakers: []
+    }
+
+    expect(toPipelineJobCreatePayload(toBriefingPipelineDraft(scheduledDraft)).output_prefs).not.toHaveProperty("auto_output")
+    expect(
+      toPipelineJobCreatePayload(
+        toBriefingPipelineDraft({
+          ...scheduledDraft,
+          createScheduledOutput: true
+        })
+      ).output_prefs
+    ).toMatchObject({
+      auto_output: {
+        enabled: true,
+        type: "briefing_markdown"
+      }
+    })
 
     timezoneSpy.mockRestore()
   })

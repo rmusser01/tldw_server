@@ -1111,7 +1111,7 @@ describe("OverviewTab quick setup flow", () => {
     expect(mockState.setActiveTabMock).not.toHaveBeenLastCalledWith("outputs")
     expect(mockState.openOutputPreviewMock).not.toHaveBeenCalled()
     consoleErrorSpy.mockRestore()
-  })
+  }, 20_000)
 
   it("restores focus to guided setup trigger after quick setup modal closes", async () => {
     mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())

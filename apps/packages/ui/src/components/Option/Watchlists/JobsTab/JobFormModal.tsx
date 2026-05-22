@@ -578,8 +578,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       hasRecurringSchedule &&
       createScheduledOutput
     )
+    existingAutoOutput.enabled = shouldAutoOutput
     if (shouldAutoOutput) {
-      existingAutoOutput.enabled = true
       existingAutoOutput.type =
         typeof existingAutoOutput.type === "string" && existingAutoOutput.type.trim().length > 0
           ? existingAutoOutput.type.trim()
@@ -599,6 +599,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       } else {
         delete existingAutoOutput.template_version
       }
+      basePrefs.auto_output = existingAutoOutput
+    } else if (isEditing && isRecord(basePrefs.auto_output)) {
       basePrefs.auto_output = existingAutoOutput
     } else {
       delete basePrefs.auto_output

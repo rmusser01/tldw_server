@@ -51,6 +51,7 @@ export interface PipelineWizardDraft {
   scheduleMinute: number
   scheduleWeekday: WeekdayToken
   scheduleAdvancedCron: string
+  createScheduledOutput: boolean
   templateName: string
   templateFormat?: "md" | "html"
   emailDeliveryEnabled: boolean
@@ -128,6 +129,7 @@ export const createDefaultPipelineWizardDraft = (): PipelineWizardDraft => ({
   scheduleMinute: 0,
   scheduleWeekday: "MON",
   scheduleAdvancedCron: "",
+  createScheduledOutput: false,
   templateName: "",
   emailDeliveryEnabled: false,
   emailRecipients: [],
@@ -359,7 +361,7 @@ export const toBriefingPipelineDraft = (
     schedulePreset: schedule.schedule_expr ? "daily" : "none",
     scheduleExpr: schedule.schedule_expr,
     timezone: schedule.timezone,
-    createScheduledOutput: Boolean(schedule.schedule_expr),
+    createScheduledOutput: Boolean(schedule.schedule_expr && draft.createScheduledOutput),
     templateName: trim(draft.templateName),
     ...(draft.templateFormat ? { templateFormat: draft.templateFormat } : {}),
     includeAudio: Boolean(draft.audioEnabled),

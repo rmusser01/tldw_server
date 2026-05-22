@@ -361,6 +361,7 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
     draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
   const intervalMax =
     draft.scheduleIntervalUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
+  const hasScheduledCadence = draft.scheduleMode !== "manual"
 
   return (
     <Modal
@@ -510,7 +511,11 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 aria-label={t("watchlists:overview.pipelineSetup.fields.schedule", "Schedule")}
                 value={draft.scheduleMode}
                 options={scheduleOptions}
-                onChange={(value) => updateDraft({ scheduleMode: value as PipelineWizardScheduleMode })}
+                onChange={(value) => updateDraft({
+                  scheduleMode: value as PipelineWizardScheduleMode,
+                  createScheduledOutput:
+                    value === "manual" ? false : draft.createScheduledOutput
+                })}
               />
             </Form.Item>
             {draft.scheduleMode === "interval" && (
@@ -620,6 +625,27 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
                 value={draft.templateName}
                 onChange={(event) => updateDraft({ templateName: event.target.value })}
               />
+            </Form.Item>
+            <Form.Item label={t("watchlists:overview.pipelineSetup.fields.createScheduledOutput", "Scheduled reports")}>
+              <div className="space-y-1">
+                <Switch
+                  aria-label={t("watchlists:overview.pipelineSetup.fields.createScheduledOutput", "Scheduled reports")}
+                  checked={draft.createScheduledOutput}
+                  disabled={!hasScheduledCadence}
+                  onChange={(checked) => updateDraft({ createScheduledOutput: checked })}
+                />
+                <p className="text-xs text-text-muted">
+                  {hasScheduledCadence
+                    ? t(
+                      "watchlists:overview.pipelineSetup.fields.createScheduledOutputHelp",
+                      "Create a digest after each scheduled monitor run."
+                    )
+                    : t(
+                      "watchlists:overview.pipelineSetup.fields.createScheduledOutputNeedsSchedule",
+                      "Choose a schedule before enabling scheduled reports."
+                    )}
+                </p>
+              </div>
             </Form.Item>
             <Form.Item label={t("watchlists:overview.pipelineSetup.fields.emailDelivery", "Email delivery")}>
               <Switch

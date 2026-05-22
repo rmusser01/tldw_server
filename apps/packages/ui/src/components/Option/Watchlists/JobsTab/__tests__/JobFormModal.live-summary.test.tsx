@@ -491,6 +491,64 @@ describe("JobFormModal live summary", () => {
     )
   }, 15_000)
 
+  it("sends an explicit disabled auto_output record when scheduled reports are turned off during edit", async () => {
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 78 })
+
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id: 78,
+          name: "Existing scheduled reports monitor",
+          description: "existing",
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "UTC",
+          active: true,
+          output_prefs: {
+            template: { default_name: "briefing_markdown" },
+            auto_output: {
+              enabled: true,
+              type: "briefing_markdown",
+              template_name: "briefing_markdown"
+            }
+          },
+          job_filters: null,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    const scheduledReportsSwitch = screen.getByTestId("job-form-create-scheduled-output-switch")
+    expect(scheduledReportsSwitch).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(scheduledReportsSwitch)
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
+    expect(payload.output_prefs).toEqual(
+      expect.objectContaining({
+        auto_output: expect.objectContaining({
+          enabled: false,
+          type: "briefing_markdown",
+          template_name: "briefing_markdown"
+        })
+      })
+    )
+  }, 15_000)
+
   it("shows practical audio setup guidance in monitor form", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 

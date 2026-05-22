@@ -218,7 +218,7 @@ const isEnabledRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" &&
   value !== null &&
   !Array.isArray(value) &&
-  (value as Record<string, unknown>).enabled !== false
+  (value as Record<string, unknown>).enabled === true
 
 export const summarizeOutputLinkage = (
   outputPrefs: JobOutputPrefs | null | undefined,
