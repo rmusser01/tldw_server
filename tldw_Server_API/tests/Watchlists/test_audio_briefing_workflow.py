@@ -70,6 +70,7 @@ class TestBuildWorkflowInputs:
     """Tests for _build_workflow_inputs."""
 
     def test_default_inputs(self):
+        from tldw_Server_API.app.core.TTS.tts_request_resolution import ResolvedTTSRequestDefaults
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             _build_workflow_inputs,
         )
@@ -77,13 +78,21 @@ class TestBuildWorkflowInputs:
         items = [{"title": "Test", "summary": "Summary"}]
         output_prefs = {"generate_audio": True}
 
-        inputs = _build_workflow_inputs(items, output_prefs)
+        with patch(
+            "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.resolve_tts_request_defaults",
+            return_value=ResolvedTTSRequestDefaults(
+                provider="configured_provider",
+                model="configured-model",
+                voice="configured-voice",
+            ),
+        ) as resolver:
+            inputs = _build_workflow_inputs(items, output_prefs)
 
         assert inputs["items"] == items
         assert inputs["target_audio_minutes"] == 10
         assert inputs["audio_language"] == "en"
-        assert inputs["tts_model"] == "KittenML/kitten-tts-nano-0.8"
-        assert inputs["tts_voice"] == "Bella"
+        assert inputs["tts_model"] == "configured-model"
+        assert inputs["tts_voice"] == "configured-voice"
         assert inputs["tts_speed"] == 1.0
         assert inputs["llm_provider"] is None
         assert inputs["llm_model"] is None
@@ -96,6 +105,7 @@ class TestBuildWorkflowInputs:
         assert inputs["background_volume"] == 0.15
         assert inputs["background_delay_ms"] == 0
         assert inputs["background_fade_seconds"] == 2.0
+        resolver.assert_called_once_with(provider=None, model=None, voice=None)
 
     def test_custom_inputs(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
@@ -512,6 +522,7 @@ class TestTriggerAudioBriefing:
 
     @pytest.mark.asyncio
     async def test_trigger_uses_resolved_model_when_only_voice_is_explicit(self):
+        from tldw_Server_API.app.core.TTS.tts_request_resolution import ResolvedTTSRequestDefaults
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             trigger_audio_briefing,
         )
@@ -523,20 +534,29 @@ class TestTriggerAudioBriefing:
         )
         scheduler = self.SubmitOnlyScheduler("task_voice_only")
 
-        result = await trigger_audio_briefing(
-            user_id=1,
-            job_id=1,
-            run_id=1,
-            output_prefs={"generate_audio": True, "audio_voice": "Bella"},
-            db=db,
-            scheduler=scheduler,
-        )
+        with patch(
+            "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.resolve_tts_request_defaults",
+            return_value=ResolvedTTSRequestDefaults(
+                provider="configured_provider",
+                model="configured-model",
+                voice="Bella",
+            ),
+        ) as resolver:
+            result = await trigger_audio_briefing(
+                user_id=1,
+                job_id=1,
+                run_id=1,
+                output_prefs={"generate_audio": True, "audio_voice": "Bella"},
+                db=db,
+                scheduler=scheduler,
+            )
 
         assert result.status == "submitted"
         payload = scheduler.submit.call_args.kwargs["payload"]
-        assert payload["inputs"]["tts_model"] == "KittenML/kitten-tts-nano-0.8"
+        assert payload["inputs"]["tts_model"] == "configured-model"
         assert payload["inputs"]["tts_model"] != "kokoro"
         assert payload["inputs"]["tts_voice"] == "Bella"
+        resolver.assert_called_once_with(provider=None, model=None, voice="Bella")
 
     @pytest.mark.asyncio
     async def test_trigger_returns_configuration_required_when_tts_defaults_empty(self):

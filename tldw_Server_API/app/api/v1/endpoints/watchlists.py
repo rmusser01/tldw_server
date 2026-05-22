@@ -5015,7 +5015,8 @@ async def retry_run_audio(
         raise HTTPException(status_code=409, detail="audio_retry_not_queued")
 
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
-    run_stats["audio_briefing_status"] = audio_result.status
+    persisted_audio_status = "queued" if audio_result.submitted else audio_result.status
+    run_stats["audio_briefing_status"] = persisted_audio_status
     if audio_result.task_id:
         run_stats["audio_briefing_task_id"] = audio_result.task_id
         run_stats["audio_briefing_retry_task_id"] = audio_result.task_id
@@ -5251,10 +5252,16 @@ async def get_run_diagnostics(
     output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=25)
     outputs = [_output_row_summary(row) for row in output_rows]
     audio_task_id = stats.get("audio_briefing_task_id")
-    audio_payload = {
-        "task_id": audio_task_id,
-        "status": stats.get("audio_briefing_status"),
-    } if audio_task_id else None
+    audio_status = stats.get("audio_briefing_status")
+    audio_reason = stats.get("audio_briefing_reason")
+    audio_payload = None
+    if audio_status or audio_task_id or audio_reason:
+        audio_payload = {
+            "task_id": audio_task_id,
+            "status": audio_status,
+        }
+        if audio_reason:
+            audio_payload["reason"] = audio_reason
 
     return RunDiagnosticsResponse(
         run_id=run_id,
@@ -6832,7 +6839,8 @@ async def create_output(
                 },
                 db=db,
             )
-            metadata["audio_briefing_status"] = audio_result.status
+            persisted_audio_status = "queued" if audio_result.submitted else audio_result.status
+            metadata["audio_briefing_status"] = persisted_audio_status
             if audio_result.task_id:
                 metadata["audio_briefing_task_id"] = audio_result.task_id
             if audio_result.reason:
@@ -6841,7 +6849,7 @@ async def create_output(
                 run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
                 if not isinstance(run_stats, dict):
                     run_stats = {}
-                run_stats["audio_briefing_status"] = audio_result.status
+                run_stats["audio_briefing_status"] = persisted_audio_status
                 if audio_result.task_id:
                     run_stats["audio_briefing_task_id"] = audio_result.task_id
                 if audio_result.reason:

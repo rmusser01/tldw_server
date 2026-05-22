@@ -100,7 +100,7 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     rerun_job.assert_not_called()
     db.update_run.assert_called_once()
     persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
-    assert persisted_stats["audio_briefing_status"] == "submitted"
+    assert persisted_stats["audio_briefing_status"] == "queued"
     assert persisted_stats["audio_briefing_task_id"] == "task-retry-10"
     assert persisted_stats["audio_briefing_retry_task_id"] == "task-retry-10"
 
@@ -353,7 +353,13 @@ async def test_run_diagnostics_bundle_includes_run_and_latest_output_metadata(mo
         status="failed",
         started_at="2026-05-19T04:00:00Z",
         finished_at="2026-05-19T04:03:00Z",
-        stats_json=json.dumps({"items_found": 5, "audio_briefing_task_id": "task-10"}),
+        stats_json=json.dumps(
+            {
+                "items_found": 5,
+                "audio_briefing_status": "queue_unavailable",
+                "audio_briefing_reason": "workflows_queue_has_no_workers",
+            }
+        ),
         error_msg="delivery_failed",
         log_path="/private/tmp/watchlists.log",
     )
@@ -406,6 +412,11 @@ async def test_run_diagnostics_bundle_includes_run_and_latest_output_metadata(mo
     assert result.outputs[0]["deliveries"][0]["delivery_count"] == 1
     assert "provider" not in result.outputs[0]["deliveries"][0]
     assert "subject" not in result.outputs[0]["deliveries"][0]
+    assert result.audio == {
+        "task_id": None,
+        "status": "queue_unavailable",
+        "reason": "workflows_queue_has_no_workers",
+    }
     assert "log_path" not in json.dumps(result.model_dump())
 
 

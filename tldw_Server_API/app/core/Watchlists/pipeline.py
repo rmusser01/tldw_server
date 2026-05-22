@@ -1770,7 +1770,7 @@ async def run_watchlist_job(
                     output_prefs=job_output_prefs,
                     db=db,
                 )
-                stats["audio_briefing_status"] = audio_result.status
+                stats["audio_briefing_status"] = "queued" if audio_result.submitted else audio_result.status
                 if audio_result.task_id:
                     stats["audio_briefing_task_id"] = audio_result.task_id
                 if audio_result.reason:

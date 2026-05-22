@@ -144,8 +144,6 @@ def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str, s
     """Resolve Watchlists audio prefs through the same defaults as /audio/speech."""
     provider = output_prefs.get("audio_provider") or output_prefs.get("tts_provider")
     model = output_prefs.get("audio_model")
-    if not provider and not model:
-        provider = "kitten_tts"
     try:
         resolved = resolve_tts_request_defaults(
             provider=provider,
