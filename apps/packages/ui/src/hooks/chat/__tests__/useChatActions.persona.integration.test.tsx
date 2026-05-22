@@ -7,10 +7,12 @@ import { useChatActions } from "../useChatActions"
 
 const {
   createChatMock,
-  normalChatModeMock
+  normalChatModeMock,
+  streamCharacterChatCompletionMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
-  normalChatModeMock: vi.fn()
+  normalChatModeMock: vi.fn(),
+  streamCharacterChatCompletionMock: vi.fn()
 }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -94,8 +96,8 @@ vi.mock("@/utils/selected-character-storage", () => ({
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
-    chatSettings: {},
-    updateChatSettings: vi.fn()
+    settings: {},
+    updateSettings: vi.fn()
   })
 }))
 
@@ -119,6 +121,7 @@ vi.mock("@/services/tldw/server-capabilities", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     createChat: createChatMock,
+    streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     initialize: vi.fn(async () => null)
   }
 }))
@@ -340,6 +343,51 @@ describe("useChatActions persona integration", () => {
           avatarUrl: undefined
         },
         serverChatId: "persona-chat-1"
+      })
+    )
+  })
+
+  it("keeps persona routing ahead of character fallback when persona chats carry a character id", async () => {
+    const options = {
+      ...createHookOptions(),
+      serverChatId: "persona-chat-existing",
+      serverChatAssistantKind: "persona" as const,
+      serverChatAssistantId: "garden-helper",
+      serverChatCharacterId: "char-shadow",
+      selectedCharacter: {
+        id: "char-stale",
+        name: "Stale Character",
+        system_prompt: "Stale prompt"
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Stay persona",
+        image: ""
+      })
+    })
+
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        character_id: expect.anything()
+      })
+    )
+    expect(normalChatModeMock).toHaveBeenCalledWith(
+      "Stay persona",
+      "",
+      false,
+      [],
+      [],
+      expect.any(AbortSignal),
+      expect.objectContaining({
+        assistantIdentity: {
+          name: "Garden Helper",
+          avatarUrl: undefined
+        },
+        serverChatId: "persona-chat-existing"
       })
     )
   })

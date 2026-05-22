@@ -3,19 +3,11 @@ import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useStoreMessageOption } from "@/store/option"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { normalizeConversationState } from "@/utils/conversation-state"
 import { updatePageTitle } from "@/utils/update-page-title"
-import { collectGreetings } from "@/utils/character-greetings"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
-import {
-  characterToAssistantSelection,
-  personaToAssistantSelection
-} from "@/types/assistant-selection"
-import type { Character } from "@/types/character"
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
 
 const resolveCharacterId = (value: unknown): string | number | null => {
@@ -29,63 +21,8 @@ const resolveCharacterId = (value: unknown): string | number | null => {
   return null
 }
 
-const normalizeSelectedCharacter = (raw: unknown): Character | null => {
-  if (!raw || typeof raw !== "object") return null
-  const candidate = raw as Record<string, unknown>
-  const idSource = resolveCharacterId(
-    candidate.id ?? candidate.slug ?? candidate.name ?? candidate.title
-  )
-  const nameSource = (
-    candidate.name ??
-    candidate.title ??
-    candidate.slug
-  ) as string | undefined
-  if (!idSource || typeof nameSource !== "string" || nameSource.trim().length === 0) {
-    return null
-  }
-  const greetings = collectGreetings(candidate as any)
-  return {
-    id: String(idSource),
-    name: nameSource.trim(),
-    avatar_url:
-      typeof candidate.avatar_url === "string" ? candidate.avatar_url : null,
-    image_base64:
-      typeof candidate.image_base64 === "string" ? candidate.image_base64 : null,
-    image_mime:
-      typeof candidate.image_mime === "string" ? candidate.image_mime : null,
-    system_prompt:
-      typeof candidate.system_prompt === "string"
-        ? candidate.system_prompt
-        : typeof candidate.systemPrompt === "string"
-          ? candidate.systemPrompt
-          : typeof candidate.instructions === "string"
-            ? candidate.instructions
-            : null,
-    greeting: greetings[0] ?? null,
-    slug: typeof candidate.slug === "string" ? candidate.slug : null,
-    title: typeof candidate.title === "string" ? candidate.title : null,
-    tags: Array.isArray(candidate.tags)
-      ? candidate.tags
-          .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
-          .filter((tag) => tag.length > 0)
-      : undefined,
-    extensions:
-      candidate.extensions &&
-      typeof candidate.extensions === "object" &&
-      !Array.isArray(candidate.extensions)
-        ? (candidate.extensions as Record<string, unknown>)
-        : null,
-    version:
-      typeof candidate.version === "number" && Number.isFinite(candidate.version)
-        ? candidate.version
-        : undefined
-  }
-}
-
 export const useSelectServerChat = () => {
   const navigate = useNavigate()
-  const [, setSelectedAssistant] = useSelectedAssistant(null)
-  const assistantSyncRequestRef = React.useRef(0)
   const {
     setHistory,
     setHistoryId,
@@ -112,13 +49,7 @@ export const useSelectServerChat = () => {
     setServerChatClusterId,
     setServerChatSource,
     setServerChatExternalRef,
-    setServerChatMetaLoaded,
-    setWebSearch,
-    setSelectedSystemPrompt,
-    setSelectedQuickPrompt,
-    setContextFiles,
-    setSelectedKnowledge,
-    setRagMediaIds
+    setServerChatMetaLoaded
   } = useStoreMessageOption(
     (state) => ({
       setIsSearchingInternet: state.setIsSearchingInternet,
@@ -137,13 +68,7 @@ export const useSelectServerChat = () => {
       setServerChatClusterId: state.setServerChatClusterId,
       setServerChatSource: state.setServerChatSource,
       setServerChatExternalRef: state.setServerChatExternalRef,
-      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
-      setWebSearch: state.setWebSearch,
-      setSelectedSystemPrompt: state.setSelectedSystemPrompt,
-      setSelectedQuickPrompt: state.setSelectedQuickPrompt,
-      setContextFiles: state.setContextFiles,
-      setSelectedKnowledge: state.setSelectedKnowledge,
-      setRagMediaIds: state.setRagMediaIds
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded
     }),
     shallow
   )
@@ -158,12 +83,6 @@ export const useSelectServerChat = () => {
       setHistoryId(null)
       setHistory([])
       setMessages([])
-      setWebSearch(false)
-      setSelectedSystemPrompt("")
-      setSelectedQuickPrompt(null as unknown as string)
-      setContextFiles([])
-      setSelectedKnowledge(null)
-      setRagMediaIds(null)
       setServerChatId(chat.id)
       setServerChatTitle(chat.title || "")
       const assistantIdentity = resolveServerChatAssistantIdentity(
@@ -176,60 +95,6 @@ export const useSelectServerChat = () => {
       setServerChatPersonaMemoryMode(assistantIdentity.personaMemoryMode)
       setServerChatLoadState("loading")
       setServerChatLoadError(null)
-      const syncRequestId = assistantSyncRequestRef.current + 1
-      assistantSyncRequestRef.current = syncRequestId
-      const syncSelectedAssistant = async () => {
-        if (assistantIdentity.assistantKind === "persona" && assistantIdentity.assistantId) {
-          try {
-            await tldwClient.initialize().catch(() => null)
-            const persona = await tldwClient.getPersonaProfile(
-              assistantIdentity.assistantId
-            )
-            if (assistantSyncRequestRef.current !== syncRequestId) return
-            await setSelectedAssistant(
-              personaToAssistantSelection({
-                ...persona,
-                id: assistantIdentity.assistantId,
-                name: persona?.name || "Persona"
-              })
-            )
-          } catch (error) {
-            if (assistantSyncRequestRef.current !== syncRequestId) return
-            console.warn("[useSelectServerChat] Failed to sync persona", {
-              chatId: chat.id,
-              assistantId: assistantIdentity.assistantId,
-              error
-            })
-            await setSelectedAssistant(
-              personaToAssistantSelection({
-                id: assistantIdentity.assistantId,
-                name: "Persona"
-              })
-            )
-          }
-          return
-        }
-        if (characterId == null) {
-          await setSelectedAssistant(null)
-          return
-        }
-        try {
-          await tldwClient.initialize().catch(() => null)
-          const character = await tldwClient.getCharacter(characterId)
-          if (assistantSyncRequestRef.current !== syncRequestId) return
-          const normalized = normalizeSelectedCharacter(character)
-          await setSelectedAssistant(characterToAssistantSelection(normalized))
-        } catch (error) {
-          if (assistantSyncRequestRef.current !== syncRequestId) return
-          console.warn("[useSelectServerChat] Failed to sync character", {
-            chatId: chat.id,
-            characterId,
-            error
-          })
-          await setSelectedAssistant(null)
-        }
-      }
-      void syncSelectedAssistant()
       setIsProcessing(false)
       setStreaming(false)
       setIsEmbedding(false)
@@ -259,10 +124,6 @@ export const useSelectServerChat = () => {
       setIsProcessing,
       setIsSearchingInternet,
       setMessages,
-      setSelectedAssistant,
-      setSelectedKnowledge,
-      setSelectedQuickPrompt,
-      setSelectedSystemPrompt,
       setServerChatAssistantId,
       setServerChatAssistantKind,
       setServerChatCharacterId,
@@ -278,10 +139,7 @@ export const useSelectServerChat = () => {
       setServerChatTitle,
       setServerChatTopic,
       setServerChatVersion,
-      setContextFiles,
-      setRagMediaIds,
-      setStreaming,
-      setWebSearch
+      setStreaming
     ]
   )
 }
