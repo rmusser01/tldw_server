@@ -46,7 +46,7 @@ def load_runtime_config_from_env() -> dict[str, Any]:
 
 
 def _runtime_error_status_code(exc: OmniVoiceRuntimeError) -> int:
-    if exc.code == "RUNTIME_RELOAD_UNSUPPORTED":
+    if exc.code in {"RUNTIME_RELOAD_UNSUPPORTED", "RUNTIME_SHUTDOWN_UNSUPPORTED"}:
         return status.HTTP_501_NOT_IMPLEMENTED
     if exc.code in {"MODEL_NOT_AVAILABLE", "MODEL_LOAD_FAILED", "RUNTIME_IMPORT_FAILED"}:
         return status.HTTP_503_SERVICE_UNAVAILABLE
@@ -208,24 +208,23 @@ def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -
     async def shutdown(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus | JSONResponse:
         try:
             shutdown_method = getattr(runtime, "shutdown", None)
-            if callable(shutdown_method):
-                result = shutdown_method()
-                if inspect.isawaitable(result):
-                    await result
+            if not callable(shutdown_method):
+                return _runtime_error_response(
+                    OmniVoiceRuntimeError(
+                        "RUNTIME_SHUTDOWN_UNSUPPORTED",
+                        "OmniVoice runtime shutdown is not supported",
+                        retryable=False,
+                    )
+                )
+            result = shutdown_method()
+            if inspect.isawaitable(result):
+                await result
         except OmniVoiceRuntimeError as exc:
             return _runtime_error_response(exc)
 
         current_status = await _runtime_status(runtime)
-        if callable(getattr(runtime, "shutdown", None)):
-            return OmniVoiceRuntimeStatus(
-                status=current_status.status,
-                ready=False,
-                model=current_status.model,
-                model_path=current_status.model_path,
-                last_error_code=current_status.last_error_code,
-            )
         return OmniVoiceRuntimeStatus(
-            status="shutting-down",
+            status=current_status.status,
             ready=False,
             model=current_status.model,
             model_path=current_status.model_path,
