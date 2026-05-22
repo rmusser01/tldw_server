@@ -385,7 +385,7 @@ class OmniVoiceAdapter(TTSAdapter):
             if target_type is bool:
                 return self._coerce_bool_generation_value(key, value)
             if target_type is int:
-                return int(value)
+                return self._coerce_int_generation_value(key, value)
             if target_type is float:
                 return float(value)
         except (TypeError, ValueError) as exc:
@@ -406,6 +406,23 @@ class OmniVoiceAdapter(TTSAdapter):
                 return False
         raise TTSValidationError(
             f"OmniVoice generation parameter {key} must be a boolean",
+            provider=self.PROVIDER_KEY,
+        )
+
+    def _coerce_int_generation_value(self, key: str, value: Any) -> int:
+        if isinstance(value, bool):
+            raise TTSValidationError(
+                f"OmniVoice generation parameter {key} must be an integer",
+                provider=self.PROVIDER_KEY,
+            )
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if re.fullmatch(r"[+-]?\d+", stripped):
+                return int(stripped)
+        raise TTSValidationError(
+            f"OmniVoice generation parameter {key} must be an integer",
             provider=self.PROVIDER_KEY,
         )
 

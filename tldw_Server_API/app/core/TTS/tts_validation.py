@@ -1063,7 +1063,7 @@ class TTSInputValidator:
                 self._validate_omnivoice_bool_generation_value(key, value)
                 return
             if expected_type is int:
-                parsed = int(value)
+                parsed = self._coerce_omnivoice_int_generation_value(key, value)
             else:
                 parsed = float(value)
         except Exception as exc:
@@ -1085,6 +1085,17 @@ class TTSInputValidator:
             if normalized in OMNIVOICE_TRUE_VALUES or normalized in OMNIVOICE_FALSE_VALUES:
                 return
         raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a boolean")
+
+    def _coerce_omnivoice_int_generation_value(self, key: str, value: Any) -> int:
+        if isinstance(value, bool):
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be an integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if re.fullmatch(r"[+-]?\d+", stripped):
+                return int(stripped)
+        raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be an integer")
 
     def _validate_voice_reference(
         self,
