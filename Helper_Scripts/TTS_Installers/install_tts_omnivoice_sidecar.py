@@ -129,13 +129,6 @@ def validate_local_model_path(model_path: Path) -> Path:
     return resolved
 
 
-def _resolve_path_from_repo_root(path: Path, repo_root: Path) -> Path:
-    expanded = path.expanduser()
-    if expanded.is_absolute():
-        return expanded.resolve()
-    return (repo_root / expanded).resolve()
-
-
 def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
     """Return a list of missing required runtime artifacts."""
 
@@ -350,12 +343,6 @@ def patch_tts_config(
     key_indent = provider_indent + "  "
     nested_indent = key_indent + "  "
     scratch_dir = layout.runtime_dir / "scratch"
-    repo_path_config = _safe_path_for_config(source_checkout, repo_root)
-    model_path_config = _safe_path_for_config(model_path, repo_root)
-    python_path_config = _safe_path_for_config(layout.interpreter_path, repo_root)
-    runtime_path_config = _safe_path_for_config(layout.runtime_dir, repo_root)
-    scratch_dir_config = _safe_path_for_config(scratch_dir, repo_root)
-    logs_path_config = _safe_path_for_config(layout.logs_dir, repo_root)
     block_lines = [
         f"{provider_indent}{PROVIDER_NAME}:",
         f"{key_indent}enabled: true",
@@ -364,12 +351,12 @@ def patch_tts_config(
         f"{key_indent}sample_rate: 24000",
         f"{key_indent}max_concurrent_generations: 1",
         f"{key_indent}extra_params:",
-        f'{nested_indent}repo_path: "{repo_path_config}"',
-        f'{nested_indent}model_path: "{model_path_config}"',
-        f'{nested_indent}python_path: "{python_path_config}"',
-        f'{nested_indent}runtime_path: "{runtime_path_config}"',
-        f'{nested_indent}scratch_dir: "{scratch_dir_config}"',
-        f'{nested_indent}logs_path: "{logs_path_config}"',
+        f'{nested_indent}repo_path: "{_path_for_config(source_checkout, repo_root)}"',
+        f'{nested_indent}model_path: "{_path_for_config(model_path, repo_root)}"',
+        f'{nested_indent}python_path: "{_path_for_config(layout.interpreter_path, repo_root)}"',
+        f'{nested_indent}runtime_path: "{_path_for_config(layout.runtime_dir, repo_root)}"',
+        f'{nested_indent}scratch_dir: "{_path_for_config(scratch_dir, repo_root)}"',
+        f'{nested_indent}logs_path: "{_path_for_config(layout.logs_dir, repo_root)}"',
         f'{nested_indent}host: "127.0.0.1"',
         f"{nested_indent}port: 8039",
         f"{nested_indent}autoselect_port: true",
@@ -500,9 +487,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _ensure_prerequisites()
 
     repo_root = resolve_repo_root()
-    model_path = _resolve_path_from_repo_root(Path(args.model_path), repo_root)
+    if not args.model_path:
+        raise SystemExit("OmniVoice model path is required; pass --model-path")
+
+    model_path = Path(args.model_path).expanduser().resolve()
     if not args.skip_model_check:
-        model_path = validate_local_model_path(model_path)
+        model_path = validate_local_model_path(Path(args.model_path))
 
     runtime_base = Path(args.runtime_base)
     config_path = _resolve_path_from_repo_root(Path(args.config_path), repo_root)
