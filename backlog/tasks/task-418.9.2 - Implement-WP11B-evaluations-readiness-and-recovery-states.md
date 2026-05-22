@@ -17,6 +17,7 @@ documentation:
 modified_files:
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - apps/packages/ui/src/components/Option/Evaluations/components/EvaluationRecoveryCallout.tsx
+- apps/packages/ui/src/components/Option/Evaluations/components/__tests__/EvaluationRecoveryCallout.test.tsx
 - apps/packages/ui/src/components/Option/Evaluations/tabs/DatasetsTab.tsx
 - apps/packages/ui/src/components/Option/Evaluations/tabs/EvaluationsTab.tsx
 - apps/packages/ui/src/components/Option/Evaluations/tabs/HistoryTab.tsx
@@ -54,13 +55,15 @@ Execute WP11B Task 2 from the WebUI study/safety/specialized implementation plan
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a shared `EvaluationRecoveryCallout` wrapper around `RecoveryCallout` for evaluations endpoint diagnostics. Converted list/detail load failures in Recipes, Evaluations, Runs, Datasets, Webhooks, History, and Synthetic Review to the shared recovery callout. Added an Open Recipes action to the evaluations empty state. Replaced remaining product-state AntD Alerts in touched evaluations tabs with `StatePanel` or plain content and removed stale evaluations entries from the product-state guard baseline. Fixed a `SyntheticReviewTab` render loop by using a stable empty queue array and returning current selection state for no-op cleanup updates. Tightened the embeddings recipe config's local dataset/media-search typing so the evaluations subtree no longer contributes TypeScript errors.
 
-Verification recorded: focused evaluations Vitest suite 39 tests passed; route-boundary Vitest 8 tests passed; design-system product-state guard passed; Playwright evaluations recipes/synthetic smoke tests passed; targeted Chromium QA observed Unavailable diagnostics for `/api/v1/evaluations/recipes`, `/api/v1/evaluations`, `/api/v1/evaluations/datasets`, and `/api/v1/evaluations/webhooks` with Register webhook still enabled. TypeScript check was attempted with increased heap; repo-wide baseline failures remain outside this slice, and the filtered evaluations output is now empty. Bandit was not run because this slice touched TypeScript/JSON/Backlog only, no Python code.
+PR #1943 review follow-up: internationalized the recovery callout default message and diagnostics labels, added FastAPI `detail`/`msg` extraction including arrays, and prevented duplicate diagnostics such as `HTTP 404: HTTP 404`.
+
+Verification recorded: focused evaluations Vitest suite 42 tests passed; route-boundary Vitest 8 tests passed; design-system product-state guard passed; Playwright evaluations recipes/synthetic smoke tests passed; targeted Chromium QA observed Unavailable diagnostics for `/api/v1/evaluations/recipes`, `/api/v1/evaluations`, `/api/v1/evaluations/datasets`, and `/api/v1/evaluations/webhooks` with Register webhook still enabled. TypeScript check was attempted with increased heap; repo-wide baseline failures remain outside this slice, and the filtered evaluations output is empty. Bandit was not run because this slice touched TypeScript/JSON/Backlog only, no Python code.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented WP11B evaluations readiness/recovery states for endpoint and worker unavailability, with preservation-oriented regression coverage across the affected tabs. Browser QA confirmed rendered recovery diagnostics for recipes, evaluations, datasets, and webhooks, and existing guided/synthetic evaluations smoke flows still pass.
+Implemented WP11B evaluations readiness/recovery states for endpoint and worker unavailability, with preservation-oriented regression coverage across the affected tabs. Browser QA confirmed rendered recovery diagnostics for recipes, evaluations, datasets, and webhooks, and existing guided/synthetic evaluations smoke flows still pass. PR review comments on recovery-callout i18n, FastAPI detail parsing, and duplicate HTTP detail formatting are addressed with component-level regression tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
