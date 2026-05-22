@@ -413,7 +413,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
           variant="warning"
           title="No document URL"
         >
-          Please select a document to view
+          {t("option:documentWorkspace.selectDocument", "Please select a document to view")}
         </DesignSystemAlert>
       </div>
     )
