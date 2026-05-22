@@ -11,6 +11,7 @@ import pytest
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 from tldw_Server_API.app.core.TTS.adapters import omnivoice_adapter as omnivoice_adapter_module
 from tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter import OmniVoiceAdapter
+from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError
 
 
@@ -138,12 +139,14 @@ async def test_omnivoice_generate_posts_narrow_internal_payload_and_returns_wav(
     assert response.audio_data == wav_bytes
     assert response.format == AudioFormat.WAV
     assert recorded["url"] == "http://127.0.0.1:8039/v1/synthesize"
+    parsed_payload = OmniVoiceSynthesizeRequest(**recorded["json"])
     assert recorded["json"] == {
         "text": "hello world",
         "mode": "auto",
         "voice": "auto",
-        "sample_rate": 24000,
+        "requested_sample_rate": 24000,
     }
+    assert parsed_payload.requested_sample_rate == 24000  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -194,13 +197,16 @@ async def test_omnivoice_clone_request_materializes_reference_audio_but_sends_na
     assert response.format == AudioFormat.PCM
     assert response.metadata["used_reference_audio"] is True
     assert "reference_audio_path" not in response.metadata
+    parsed_payload = OmniVoiceSynthesizeRequest(**recorded["json"])
     assert recorded["json"] == {
         "text": "clone me",
         "mode": "clone",
         "reference_audio_path": str(transient_path),
         "reference_text": "reference transcript",
-        "sample_rate": 24000,
+        "requested_sample_rate": 24000,
     }
+    assert parsed_payload.reference_audio_path == str(transient_path)  # nosec B101
+    assert parsed_payload.requested_sample_rate == 24000  # nosec B101
     assert transient_path.parent == tmp_path
     assert transient_path.exists() is False
 
