@@ -12,6 +12,7 @@ priority: high
 parent_task_id: TASK-418.10
 references:
 - TASK-418.10
+- https://github.com/rmusser01/tldw_server/pull/1953
 documentation:
 - Docs/superpowers/plans/2026-05-17-webui-route-governance-qa-implementation-plan.md
 - Docs/superpowers/plans/2026-05-17-webui-extension-ux-remediation-implementation-plan.md
