@@ -121,6 +121,46 @@ providers:
 
 
 @pytest.mark.unit
+def test_omnivoice_installer_preserves_following_top_level_comments(tmp_path):
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
+        build_runtime_layout,
+        patch_tts_config,
+    )
+
+    config_path = tmp_path / "tts_providers_config.yaml"
+    config_path.write_text(
+        """
+providers:
+  omnivoice:
+    enabled: false
+
+# Voice mappings for cross-provider compatibility
+voice_mappings:
+  generic: {}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=tmp_path)
+    source_checkout = tmp_path / "external" / "OmniVoice"
+    source_checkout.mkdir(parents=True)
+    model_path = tmp_path / "models" / "OmniVoice"
+    model_path.mkdir(parents=True)
+
+    changed = patch_tts_config(
+        config_path=config_path,
+        layout=layout,
+        source_checkout=source_checkout,
+        model_path=model_path,
+        repo_root=tmp_path,
+    )
+
+    content = config_path.read_text(encoding="utf-8")
+    assert changed is True
+    assert "\n# Voice mappings for cross-provider compatibility\nvoice_mappings:" in content
+
+
+@pytest.mark.unit
 def test_omnivoice_installer_inserts_valid_yaml_when_provider_block_is_missing(tmp_path):
     from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
         build_runtime_layout,
@@ -501,6 +541,13 @@ def test_omnivoice_installer_rejects_unsafe_config_path_scalars(tmp_path):
         )
 
     assert config_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
+def test_omnivoice_installer_serializes_windows_paths_with_posix_separators():
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import _safe_path_for_config
+
+    assert _safe_path_for_config(PureWindowsPath("C:/models/OmniVoice"), Path("/repo")) == "C:/models/OmniVoice"
 
 
 @pytest.mark.unit
