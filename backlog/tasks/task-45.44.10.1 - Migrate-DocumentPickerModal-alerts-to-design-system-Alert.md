@@ -13,6 +13,7 @@ references:
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentPickerModal.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - Docs/Design/tldw_web_design_system_contract.md
+- https://github.com/rmusser01/tldw_server/pull/1950
 modified_files:
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentPickerModal.tsx
 - apps/packages/ui/src/components/DocumentWorkspace/__tests__/DocumentPickerModal.design-system.test.tsx
@@ -55,7 +56,7 @@ Continue the Document and Workspace product-state design-system migration by rep
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated DocumentPickerModal's three product-state banners from AntD Alert to the shared design-system Alert primitive while preserving the upload-warning Open in Media action. Added focused regression coverage for offline, unsupported upload, and storage-warning states, and removed the three migrated baseline entries. Verification: red focused test failed on missing design-system Alert markers; green focused DocumentPickerModal test passed 3/3; product-state guard unit test passed 54/54; `bun run verify:design-system-state` passed with baseline exceptions reduced from 303 to 300 and Document/Workspace exceptions reduced to 9; baseline JSON parse passed; `git diff --check` passed. Bandit skipped because this slice touches only TypeScript/TSX, JSON, and Backlog metadata.
+Migrated DocumentPickerModal's three product-state banners from AntD Alert to the shared design-system Alert primitive while preserving the upload-warning Open in Media action. Added focused regression coverage for offline, unsupported upload, and storage-warning states, and removed the three migrated baseline entries. PR: https://github.com/rmusser01/tldw_server/pull/1950. Verification: red focused test failed on missing design-system Alert markers; green focused DocumentPickerModal test passed 3/3; product-state guard unit test passed 54/54; `bun run verify:design-system-state` passed with baseline exceptions reduced from 303 to 300 and Document/Workspace exceptions reduced to 9; baseline JSON parse passed; `git diff --check` passed. Bandit skipped because this slice touches only TypeScript/TSX, JSON, and Backlog metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
