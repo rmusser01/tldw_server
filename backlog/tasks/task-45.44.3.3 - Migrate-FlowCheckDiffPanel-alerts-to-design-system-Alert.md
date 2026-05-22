@@ -4,19 +4,19 @@ title: Migrate FlowCheckDiffPanel alerts to design-system Alert
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-22 19:46'
+updated_date: 2026-05-22 19:46
 labels:
-  - design-system
-  - webui
-  - extension
-  - product-state
-  - watchlists
+- design-system
+- webui
+- extension
+- product-state
+- watchlists
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1660'
-  - >-
-    apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx
-  - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/issues/1660
+- apps/packages/ui/src/components/Option/Watchlists/TemplatesTab/FlowCheckDiffPanel.tsx
+- apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/1946
 parent_task_id: TASK-45.44.3
 priority: medium
 ---
