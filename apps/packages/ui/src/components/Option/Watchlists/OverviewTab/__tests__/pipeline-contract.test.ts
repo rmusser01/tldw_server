@@ -68,13 +68,6 @@ describe("watchlists pipeline contract", () => {
         schedule_expr: "0 8 * * *",
         timezone: "UTC",
         output_prefs: expect.objectContaining({
-          auto_output: {
-            enabled: true,
-            type: "briefing_markdown",
-            format: "md",
-            template_name: "briefing_markdown",
-            template_version: 2
-          },
           template_name: "briefing_markdown",
           template: expect.objectContaining({
             default_name: "briefing_markdown"
@@ -122,11 +115,33 @@ describe("watchlists pipeline contract", () => {
     timezoneSpy.mockRestore()
   })
 
+  it("does not auto-generate scheduled output unless requested", () => {
+    expect(toPipelineJobCreatePayload(baseDraft).output_prefs).not.toHaveProperty("auto_output")
+  })
+
+  it("enables scheduled output when a pipeline draft explicitly requests scheduled reports", () => {
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        createScheduledOutput: true
+      }).output_prefs
+    ).toMatchObject({
+      auto_output: {
+        enabled: true,
+        type: "briefing_markdown",
+        format: "md",
+        template_name: "briefing_markdown",
+        template_version: 2
+      }
+    })
+  })
+
   it("does not auto-generate scheduled output for manual-only monitor drafts", () => {
     expect(
       toPipelineJobCreatePayload({
         ...baseDraft,
         schedulePreset: "none",
+        createScheduledOutput: true,
         includeAudio: false,
         emailRecipients: [],
         createChatbook: false

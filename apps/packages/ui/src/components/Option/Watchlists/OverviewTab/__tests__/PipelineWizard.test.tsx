@@ -135,12 +135,62 @@ describe("PipelineWizard", () => {
           monitorName: "Five Hour Brief",
           scheduleMode: "interval",
           scheduleIntervalValue: 5,
+          createScheduledOutput: false,
           templateName: "newsletter_markdown",
           audioEnabled: true,
           audioSpeakers: expect.arrayContaining([
             expect.objectContaining({ label: "Host" }),
             expect.objectContaining({ label: "Analyst" })
           ])
+        }),
+        { mode: "create" }
+      )
+    })
+  })
+
+  it("lets scheduled pipeline creation opt in to scheduled reports explicitly", async () => {
+    const { onSubmit } = renderWizard()
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("AI Feed")).toBeInTheDocument()
+    })
+
+    fireEvent.click(getDialogQueries().getByLabelText("AI Feed"))
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Monitor name")).toBeInTheDocument()
+    })
+    fireEvent.change(getDialogQueries().getByLabelText("Monitor name"), {
+      target: { value: "Scheduled Report Brief" }
+    })
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Template")).toBeInTheDocument()
+    })
+    const scheduledReportsSwitch = getDialogQueries().getByLabelText("Scheduled reports")
+    expect(scheduledReportsSwitch).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(scheduledReportsSwitch)
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(getDialogQueries().getByLabelText("Audio briefing")).toBeInTheDocument()
+    })
+    fireEvent.click(getDialogQueries().getByLabelText("Audio briefing"))
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-pipeline-review-summary")).toHaveTextContent("AI Feed")
+    })
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Create pipeline" }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          monitorName: "Scheduled Report Brief",
+          createScheduledOutput: true,
+          audioEnabled: false
         }),
         { mode: "create" }
       )
