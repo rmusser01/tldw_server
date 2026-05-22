@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Radio, Space } from "antd"
+import { Button, Radio, Space } from "antd"
 
+import { Alert } from "@/components/ui/primitives"
 import type { TemplateComposerFlowCheckMode, TemplateComposerFlowIssue } from "@/services/watchlists"
 
 interface FlowCheckDiffPanelProps {
@@ -40,12 +41,9 @@ export const FlowCheckDiffPanel: React.FC<FlowCheckDiffPanelProps> = ({
       </div>
 
       {issues.length > 0 ? (
-        <Alert
-          type="warning"
-          showIcon
-          title="Flow issues"
-          description={issues.map((issue) => issue.message).join("; ")}
-        />
+        <Alert variant="warning" title="Flow issues">
+          {issues.map((issue) => issue.message).join("; ")}
+        </Alert>
       ) : null}
 
       {trimmedDiff ? (
@@ -57,12 +55,9 @@ export const FlowCheckDiffPanel: React.FC<FlowCheckDiffPanelProps> = ({
           {trimmedDiff}
         </pre>
       ) : (
-        <Alert
-          type="info"
-          showIcon
-          title="No diff available yet"
-          description="Run flow-check to generate suggestions."
-        />
+        <Alert variant="info" title="No diff available yet">
+          Run flow-check to generate suggestions.
+        </Alert>
       )}
 
       <Space size={8}>

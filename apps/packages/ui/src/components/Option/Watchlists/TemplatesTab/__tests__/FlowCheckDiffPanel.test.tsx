@@ -59,4 +59,23 @@ describe("FlowCheckDiffPanel", () => {
     expect(onAcceptChunk).toHaveBeenCalledWith("all")
     expect(onRejectChunk).toHaveBeenCalledWith("all")
   })
+
+  it("renders flow-check callouts with design-system Alert wrappers", () => {
+    render(
+      <FlowCheckDiffPanel
+        diff=""
+        issues={[{ message: "Missing required section" }]}
+        onAcceptChunk={vi.fn()}
+        onRejectChunk={vi.fn()}
+      />
+    )
+
+    const issueText = screen.getByText("Missing required section", { exact: false })
+    const noDiffText = screen.getByText("Run flow-check to generate suggestions.", { exact: false })
+
+    expect(issueText).toBeInTheDocument()
+    expect(noDiffText).toBeInTheDocument()
+    expect(issueText.closest("[data-ds-component='Alert']")).toBeInTheDocument()
+    expect(noDiffText.closest("[data-ds-component='Alert']")).toBeInTheDocument()
+  })
 })
