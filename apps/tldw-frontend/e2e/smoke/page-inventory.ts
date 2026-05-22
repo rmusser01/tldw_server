@@ -37,12 +37,6 @@ export const PAGES: PageEntry[] = [
   { path: "/chat", name: "Chat", category: "chat", expectedTestId: "chat-input" },
   { path: "/chat/agent", name: "Agent Chat", category: "chat" },
   { path: "/persona", name: "Persona Chat", category: "chat" },
-  {
-    path: "/chat/settings",
-    name: "Chat Settings (Page)",
-    category: "chat",
-    skip: "Covered in Stage 5 release gate; intermittently stalls all-pages webpack route traversal in CI.",
-  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Media
@@ -50,7 +44,12 @@ export const PAGES: PageEntry[] = [
   { path: "/media", name: "Media", category: "media" },
   { path: "/media-multi", name: "Media Multi", category: "media" },
   { path: "/media-trash", name: "Media Trash", category: "media" },
-  { path: "/media/123/view", name: "Media View (Redirect)", category: "media" },
+  {
+    path: "/media/123/view",
+    name: "Media View (Redirect)",
+    category: "media",
+    skip: "Dynamic redirect alias covered by the route metadata contract."
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Settings (20+ pages)
@@ -107,7 +106,12 @@ export const PAGES: PageEntry[] = [
   { path: "/kanban", name: "Kanban", category: "workspace" },
   { path: "/data-tables", name: "Data Tables", category: "workspace" },
   { path: "/content-review", name: "Content Review", category: "workspace" },
-  { path: "/claims-review", name: "Claims Review", category: "workspace" },
+  {
+    path: "/claims-review",
+    name: "Claims Review",
+    category: "workspace",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
   { path: "/integrations", name: "Integrations", category: "workspace" },
   { path: "/scheduled-tasks", name: "Scheduled Tasks", category: "workspace" },
   { path: "/watchlists", name: "Watchlists", category: "workspace" },
@@ -122,7 +126,12 @@ export const PAGES: PageEntry[] = [
   { path: "/collections", name: "Collections", category: "workspace" },
   { path: "/evaluations", name: "Evaluations", category: "workspace" },
   { path: "/search", name: "Search", category: "workspace" },
-  { path: "/review", name: "Review", category: "workspace" },
+  {
+    path: "/review",
+    name: "Review",
+    category: "workspace",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
   { path: "/reading", name: "Reading", category: "workspace" },
   { path: "/items", name: "Items", category: "workspace" },
   { path: "/chunking-playground", name: "Chunking Playground", category: "workspace" },
@@ -136,7 +145,12 @@ export const PAGES: PageEntry[] = [
   { path: "/dictionaries", name: "Dictionaries", category: "knowledge" },
   { path: "/characters", name: "Characters", category: "knowledge" },
   { path: "/prompts", name: "Prompts", category: "knowledge" },
-  { path: "/prompt-studio", name: "Prompt Studio", category: "knowledge" },
+  {
+    path: "/prompt-studio",
+    name: "Prompt Studio",
+    category: "knowledge",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Audio
@@ -144,7 +158,12 @@ export const PAGES: PageEntry[] = [
   { path: "/tts", name: "TTS", category: "audio" },
   { path: "/stt", name: "STT", category: "audio" },
   { path: "/speech", name: "Speech", category: "audio" },
-  { path: "/audio", name: "Audio", category: "audio" },
+  {
+    path: "/audio",
+    name: "Audio",
+    category: "audio",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Connectors
@@ -244,7 +263,12 @@ export const PAGES: PageEntry[] = [
   // ═══════════════════════════════════════════════════════════════════════════
   // Settings (missing)
   // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/settings/image-gen", name: "Image Gen Settings", category: "settings" },
+  {
+    path: "/settings/image-gen",
+    name: "Image Gen Settings",
+    category: "settings",
+    skip: "Legacy redirect alias covered by the route metadata contract."
+  },
   { path: "/settings/image-generation", name: "Image Generation Settings", category: "settings" },
   { path: "/settings/mcp-hub", name: "MCP Hub Settings", category: "settings" },
   { path: "/settings/splash", name: "Splash Settings", category: "settings" },
@@ -263,11 +287,6 @@ export const PAGES: PageEntry[] = [
   { path: "/billing", name: "Billing", category: "other" },
   { path: "/billing/success", name: "Billing Success", category: "other" },
   { path: "/billing/cancel", name: "Billing Cancel", category: "other" },
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Settings Chat (page-level — distinct from settings/chat)
-  // ═══════════════════════════════════════════════════════════════════════════
-  { path: "/chat/settings", name: "Chat Settings Page", category: "chat", skip: "Covered in Stage 5 release gate" }
 ]
 
 /**
