@@ -393,6 +393,7 @@ export const useMessageOption = (
     serverChatAssistantKind,
     serverChatAssistantId,
     serverChatPersonaMemoryMode,
+    serverChatMetaLoaded,
     serverChatState,
     serverChatTopic,
     serverChatClusterId,

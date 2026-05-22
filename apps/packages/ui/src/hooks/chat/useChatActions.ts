@@ -267,6 +267,7 @@ type UseChatActionsOptions = {
   serverChatAssistantKind: "character" | "persona" | null
   serverChatAssistantId: string | null
   serverChatPersonaMemoryMode: "read_only" | "read_write" | null
+  serverChatMetaLoaded?: boolean
   serverChatState: ConversationState | null
   serverChatTopic: string | null
   serverChatClusterId: string | null
@@ -354,6 +355,7 @@ export const useChatActions = ({
   serverChatAssistantKind,
   serverChatAssistantId,
   serverChatPersonaMemoryMode,
+  serverChatMetaLoaded = false,
   serverChatState,
   serverChatTopic,
   serverChatClusterId,
@@ -955,6 +957,7 @@ export const useChatActions = ({
         serverChatAssistantKind,
         serverChatAssistantId,
         serverChatPersonaMemoryMode,
+        serverChatMetaLoaded,
         serverChatState,
         serverChatTopic,
         serverChatClusterId,
@@ -985,6 +988,7 @@ export const useChatActions = ({
       invalidateServerChatHistory,
       serverChatAssistantId,
       serverChatAssistantKind,
+      serverChatMetaLoaded,
       serverChatClusterId,
       serverChatExternalRef,
       serverChatId,

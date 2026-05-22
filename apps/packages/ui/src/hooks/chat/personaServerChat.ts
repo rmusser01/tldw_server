@@ -14,6 +14,7 @@ type EnsurePersonaServerChatArgs = {
   serverChatAssistantKind: "character" | "persona" | null
   serverChatAssistantId: string | null
   serverChatPersonaMemoryMode: "read_only" | "read_write" | null
+  serverChatMetaLoaded?: boolean
   serverChatState: string | null
   serverChatTopic: string | null
   serverChatClusterId: string | null
@@ -101,6 +102,7 @@ export const ensurePersonaServerChat = async ({
   serverChatAssistantKind,
   serverChatAssistantId,
   serverChatPersonaMemoryMode,
+  serverChatMetaLoaded = false,
   serverChatState,
   serverChatTopic,
   serverChatClusterId,
@@ -136,14 +138,20 @@ export const ensurePersonaServerChat = async ({
       ? serverChatIdOverride.trim()
       : null
   const resolvedServerChatId = overrideChatId || serverChatId
-  const personaMemoryMode =
-    serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
   const assistantId = String(assistant.id)
+  const isMatchingPersonaChat =
+    Boolean(resolvedServerChatId) &&
+    serverChatMetaLoaded &&
+    serverChatAssistantKind === "persona" &&
+    Boolean(serverChatAssistantId) &&
+    String(serverChatAssistantId) === assistantId
+  const personaMemoryMode = isMatchingPersonaChat
+    ? serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
+    : DEFAULT_PERSONA_MEMORY_MODE
   const shouldResetServerChat =
     Boolean(resolvedServerChatId) &&
-    (serverChatAssistantKind !== "persona" ||
-      !serverChatAssistantId ||
-      String(serverChatAssistantId) !== assistantId)
+    serverChatMetaLoaded &&
+    !isMatchingPersonaChat
 
   if (shouldResetServerChat) {
     resetAssistantServerChatState({
@@ -169,11 +177,11 @@ export const ensurePersonaServerChat = async ({
       assistant_kind: "persona",
       assistant_id: assistantId,
       persona_memory_mode: personaMemoryMode,
-      state: serverChatState || "in-progress",
-      topic_label: serverChatTopic || undefined,
-      cluster_id: serverChatClusterId || undefined,
-      source: serverChatSource || undefined,
-      external_ref: serverChatExternalRef || undefined
+      state: "in-progress",
+      topic_label: undefined,
+      cluster_id: undefined,
+      source: undefined,
+      external_ref: undefined
     }, scope ? { scope } : undefined)
 
     let rawId: string | number | undefined
