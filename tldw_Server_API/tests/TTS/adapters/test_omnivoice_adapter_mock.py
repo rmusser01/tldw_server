@@ -612,4 +612,7 @@ async def test_omnivoice_structured_sidecar_errors_map_to_typed_exceptions(monke
         )
 
     assert exc_info.value.error_code == "MODEL_NOT_AVAILABLE"  # nosec B101
+    assert exc_info.value.details["sidecar_error_message"] == (
+        "OmniVoice sidecar reported an internal error; see server logs."
+    )
     assert "secret" not in str(exc_info.value.details)  # nosec B101
