@@ -5690,10 +5690,19 @@ async def get_run_audio(
                 "fallback_reason": fallback_reason,
             }
 
+        scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+        response_status = matching_run_status
+        queue_name = None
+        if scheduler_status:
+            response_status = scheduler_status.get("status") or response_status
+            queue_name = scheduler_status.get("queue_name")
+            fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
+
         return {
             "run_id": run_id,
             "task_id": task_id,
-            "status": matching_run_status,
+            "status": response_status,
+            "queue_name": queue_name,
             "audio_uri": None,
             "download_url": None,
             "script_artifact": script_artifact,
