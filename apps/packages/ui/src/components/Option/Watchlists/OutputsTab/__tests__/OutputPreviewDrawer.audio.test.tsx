@@ -2,7 +2,7 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { OutputPreviewDrawer } from "../OutputPreviewDrawer"
 import type { WatchlistOutput } from "@/types/watchlists"
 
@@ -257,6 +257,108 @@ describe("OutputPreviewDrawer audio support", () => {
       "href",
       "/api/v1/workflows/artifacts/art_final/download"
     )
+  })
+
+  it("preserves metadata artifacts when live status only updates queue state", async () => {
+    serviceMocks.getWatchlistRunAudio.mockResolvedValue({
+      run_id: 9,
+      task_id: "task_audio_running",
+      queue_name: "workflows",
+      status: "running",
+      audio_uri: null,
+      download_url: null
+    })
+
+    render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({
+          type: "brief",
+          format: "md",
+          metadata: {
+            audio: {
+              status: "pending",
+              fallback_reason: "Speaker B voice is still pending.",
+              task_id: "task_audio_pending",
+              script_artifact: {
+                title: "Briefing script",
+                uri: "file:///srv/tldw/watchlists/runs/9/script.md",
+                download_url: "/api/v1/watchlists/runs/9/audio/script/download"
+              }
+            }
+          }
+        })}
+      />
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
+    })
+
+    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(screen.getByText("Briefing script")).toBeInTheDocument()
+    expect(screen.getByText(/Speaker B voice is still pending/)).toBeInTheDocument()
+    expect(screen.getByText("Queue: workflows")).toBeInTheDocument()
+  })
+
+  it("continues polling after transient live audio status failures", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const originalSetTimeout = globalThis.setTimeout
+    const scheduledAudioPolls: Array<() => void> = []
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        if (timeout === 3000 && typeof handler === "function") {
+          scheduledAudioPolls.push(() => handler(...args))
+          return 0 as unknown as ReturnType<typeof setTimeout>
+        }
+        return originalSetTimeout(handler, timeout, ...args)
+      }) as typeof setTimeout
+    )
+    try {
+      serviceMocks.getWatchlistRunAudio
+        .mockRejectedValueOnce(new Error("network hiccup"))
+        .mockResolvedValueOnce({
+          run_id: 9,
+          task_id: "task_audio_pending",
+          queue_name: "workflows",
+          status: "queued",
+          audio_uri: null,
+          download_url: null
+        })
+
+      const { unmount } = render(
+        <OutputPreviewDrawer
+          open
+          onClose={vi.fn()}
+          output={buildOutput({
+            type: "brief",
+            format: "md",
+            metadata: {
+              audio_briefing_requested: true,
+              audio_briefing_status: "pending",
+              audio_briefing_task_id: "task_audio_pending"
+            }
+          })}
+        />
+      )
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
+      expect(scheduledAudioPolls).toHaveLength(1)
+
+      await act(async () => {
+        scheduledAudioPolls[0]()
+      })
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(2)
+      expect(screen.getByText("Queue: workflows")).toBeInTheDocument()
+      unmount()
+    } finally {
+      setTimeoutSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
   })
 
   it("stops live audio polling when the drawer closes", async () => {

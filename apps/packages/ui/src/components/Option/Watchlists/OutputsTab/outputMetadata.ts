@@ -671,9 +671,28 @@ export const getMergedOutputAudioStatusSummary = (
   liveStatus: WatchlistRunAudioStatus | null | undefined,
   labels?: OutputMetadataLabels
 ): AudioStatusSummary => {
+  const metadataSummary = getOutputAudioStatusSummary(metadata, labels)
   const liveSummary = liveStatus ? getAudioStatusSummary(liveStatus, labels) : null
-  if (liveSummary?.requested) return liveSummary
-  return getOutputAudioStatusSummary(metadata, labels)
+  if (!liveSummary?.requested) return metadataSummary
+
+  const status = liveSummary.status !== "unknown" ? liveSummary.status : metadataSummary.status
+  return {
+    requested: true,
+    status,
+    statusLabel: getAudioStatusLabel(status, labels),
+    statusColor: getAudioStatusColor(status),
+    fallbackReason: liveSummary.fallbackReason ?? metadataSummary.fallbackReason,
+    error: liveSummary.error ?? metadataSummary.error,
+    taskId: liveSummary.taskId ?? metadataSummary.taskId,
+    queueName: liveSummary.queueName ?? metadataSummary.queueName,
+    downloadUrl: liveSummary.downloadUrl ?? metadataSummary.downloadUrl,
+    scriptArtifact: liveSummary.scriptArtifact ?? metadataSummary.scriptArtifact,
+    speakerArtifacts:
+      liveSummary.speakerArtifacts.length > 0
+        ? liveSummary.speakerArtifacts
+        : metadataSummary.speakerArtifacts,
+    finalArtifact: liveSummary.finalArtifact ?? metadataSummary.finalArtifact
+  }
 }
 
 interface BuildRegenerateOptions {

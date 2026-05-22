@@ -255,6 +255,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
 
     setLiveAudioStatus(null)
 
+    const scheduleNextPoll = () => {
+      timeoutId = setTimeout(loadAudioStatus, AUDIO_STATUS_POLL_INTERVAL_MS)
+    }
+
     const loadAudioStatus = async () => {
       try {
         const nextStatus = await getWatchlistRunAudio(runId)
@@ -262,10 +266,14 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
         setLiveAudioStatus(nextStatus)
         const normalizedStatus = (nextStatus.status || "").toLowerCase()
         if (AUDIO_STATUS_POLLABLE.has(normalizedStatus)) {
-          timeoutId = setTimeout(loadAudioStatus, AUDIO_STATUS_POLL_INTERVAL_MS)
+          scheduleNextPoll()
         }
       } catch (err) {
+        if (!active) return
         console.warn("Failed to resolve output audio status:", err)
+        if (metadataNeedsLiveStatus) {
+          scheduleNextPoll()
+        }
       }
     }
 
