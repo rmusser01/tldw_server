@@ -45,7 +45,7 @@ Docs/superpowers/plans/2026-05-22-watchlists-p0-demo-blockers-implementation-pla
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 2 review fix: run-audio fallback status now reads Scheduler task state only from an already-started global scheduler, avoiding read-only status lookups that initialize a no-worker Scheduler singleton. Added regression coverage for scheduler-unavailable fallback and no-global-scheduler startup.
+Task 2 review fixes: run-audio fallback status now reads Scheduler task state only from an already-started global scheduler, avoiding read-only status lookups that initialize a no-worker Scheduler singleton. Added regression coverage for scheduler-unavailable fallback and no-global-scheduler startup. Follow-up review fix now also uses Scheduler status when workflows.db exists but the matching workflow run is not visible yet, and Scheduler status lookup propagates asyncio.CancelledError instead of converting cancellation into pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
