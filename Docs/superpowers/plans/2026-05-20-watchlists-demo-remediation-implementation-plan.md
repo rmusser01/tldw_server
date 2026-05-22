@@ -1829,9 +1829,10 @@ git commit -m "feat: improve watchlists power-user throughput"
 
 **Files:**
 - Modify: `Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md`
-- Modify: `backlog/tasks/task-441 - Create-implementation-plan-for-Watchlists-demo-remediation-tracks.md`
+- Modify: `Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md`
+- Modify: `backlog/tasks/task-475 - Run-Watchlists-remediation-final-verification-gate.md`
 
-- [ ] **Step 1: Run full frontend watchlists gates**
+- [x] **Step 1: Run full frontend watchlists gates**
 
 Run:
 
@@ -1844,7 +1845,10 @@ bun run test:watchlists:a11y
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full backend watchlists gate**
+Result on 2026-05-21 from `codex/watchlists-final-verification`: PASS.
+`test:watchlists:typecheck` passed 3 tests, `test:watchlists:scale` passed 53 tests, and `test:watchlists:a11y` passed 91 tests.
+
+- [x] **Step 2: Run full backend watchlists gate**
 
 Run:
 
@@ -1855,7 +1859,9 @@ python -m pytest tldw_Server_API/tests/Watchlists -q
 
 Expected: PASS. Existing expected xfail/xpass behavior must be explained if present.
 
-- [ ] **Step 3: Run WebUI browser smoke**
+Result on 2026-05-21: PASS. `python -m pytest tldw_Server_API/tests/Watchlists -q` reported 498 passed, 9 skipped, 1 xpassed, and 147 warnings. The skipped tests are environment-gated integration/E2E cases in the Watchlists suite.
+
+- [x] **Step 3: Run WebUI browser smoke**
 
 Start backend and WebUI in the same-origin mode chosen in the runbook, then run:
 
@@ -1866,7 +1872,9 @@ npx playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=l
 
 Expected: PASS.
 
-- [ ] **Step 4: Run extension strict watchlists gate**
+Result on 2026-05-21: PASS after rerunning outside the sandbox port-bind restriction. The sandboxed attempt failed with `listen EPERM: operation not permitted 0.0.0.0:8080`; the escalated Playwright rerun passed 3 tests.
+
+- [x] **Step 4: Run extension strict watchlists gate**
 
 Run:
 
@@ -1877,7 +1885,9 @@ npx playwright test tests/e2e/watchlists.spec.ts --reporter=line
 
 Expected: PASS with no skipped watchlists tests. If sandbox blocks Chrome launch, rerun with the already approved escalated Playwright path and record that in the runbook.
 
-- [ ] **Step 5: Run Bandit on touched Python scope**
+Result on 2026-05-21: PASS with no skips after rerunning escalated with `TLDW_E2E_EXTENSION_HEADLESS=0`. The valid run passed 14 tests and `node scripts/assert-playwright-no-skips.mjs .watchlists-e2e-report.json` reported `passed=14 skipped=0 unexpected=0 flaky=0`. The first headless CI-mode attempt skipped all tests because Chromium could not keep the MV3 extension context alive in this environment.
+
+- [x] **Step 5: Run Bandit on touched Python scope**
 
 Run:
 
@@ -1891,6 +1901,8 @@ python -m bandit -r \
 ```
 
 Expected: no new findings in touched code.
+
+Result on 2026-05-21: PASS. `/tmp/bandit_watchlists_remediation_final.json` reported `results: []` and `errors: []`.
 
 - [ ] **Step 6: Do manual live demo dry run**
 
@@ -1907,25 +1919,30 @@ Using the runbook, verify:
 - active source failure blocks `System healthy`
 - extension claim matches what was tested
 
-- [ ] **Step 7: Update task final summary**
+Result on 2026-05-21: not completed as a live manual dry run. The automated WebUI and extension gates passed with controlled API responses; live source/provider/audio proof still requires the actual demo environment and must pass the runbook's Provider And Voice Preflight before claiming final playable audio.
 
-Update `TASK-441` with:
+- [x] **Step 7: Update task final summary**
+
+Update the active closeout task with:
 
 - plan path
 - review status
-- verification commands run for plan-only work
-- note that Bandit is not applicable to this plan-only task unless code tasks have also been executed
+- verification commands run for the final gate
+- any manual live-demo blocker
 
-- [ ] **Step 8: Commit final docs/task update**
+- [x] **Step 8: Commit final docs/task update**
 
 Run:
 
 ```bash
 git add \
   Docs/Runbooks/watchlists_demo_readiness_2026_05_20.md \
-  'backlog/tasks/task-441 - Create-implementation-plan-for-Watchlists-demo-remediation-tracks.md'
+  Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md \
+  'backlog/tasks/task-475 - Run-Watchlists-remediation-final-verification-gate.md'
 git commit -m "docs: finalize watchlists remediation verification gate"
 ```
+
+Result on 2026-05-21: prepared as the closeout branch commit for Task 12.
 
 ## Execution Notes
 
