@@ -241,6 +241,22 @@ describe("ImageOcclusionTransferPanel", () => {
     })
   })
 
+  it("renders generation errors through the design-system alert", async () => {
+    generateImageOcclusionAssetsMock.mockRejectedValueOnce(
+      new Error("Unable to prepare image occlusion assets.")
+    )
+
+    render(<ImageOcclusionTransferPanel />)
+
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+
+    const errorText = await screen.findByText("Unable to prepare image occlusion assets.")
+
+    expect(errorText.closest('[data-ds-component="Alert"]')).not.toBeNull()
+    expect(messageSpies.error).toHaveBeenCalledWith("Unable to prepare image occlusion assets.")
+  })
+
   it("creates a new occlusion deck with scheduler settings from the selector flow", async () => {
     const fastAcquisitionSettings = {
       new_steps_minutes: [1, 5, 15],

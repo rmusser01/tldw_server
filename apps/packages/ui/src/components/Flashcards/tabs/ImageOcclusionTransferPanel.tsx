@@ -1,8 +1,9 @@
-import { Alert, Button, Card, Form, Input, Select, Space, Typography } from "antd"
+import { Button, Card, Form, Input, Select, Space, Typography } from "antd"
 import { useQueryClient } from "@tanstack/react-query"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { processInChunks } from "@/utils/chunk-processing"
@@ -498,7 +499,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
 
       <ImageOcclusionPanel onChange={setPanelState} />
 
-      {error && <Alert type="error" showIcon title={error} />}
+      {error && <Alert variant="error" title={error} />}
 
       <Button
         type="primary"
