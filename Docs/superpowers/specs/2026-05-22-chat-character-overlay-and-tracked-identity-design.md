@@ -166,7 +166,7 @@ assistantOverlay?: {
   id: string
   name: string
   avatar_url?: string | null
-  system_prompt?: string | null
+  system_prompt_snapshot?: string | null
   updatedAt: string
 } | null
 ```
@@ -177,6 +177,24 @@ This should be:
 - accepted by the frontend optional-keys list in [chat-settings.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/services/chat-settings.ts:31);
 - validated in [_validate_chat_settings_payload](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py:1017);
 - persisted through the existing [update_chat_settings](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py:5787) flow.
+
+### Overlay Snapshot Semantics
+
+Overlay uses **snapshot-on-apply** semantics.
+
+When the user applies a character/persona as overlay:
+
+- resolve full source detail first; do not treat catalog-summary data as the final prompt source;
+- persist a prompt snapshot into `assistantOverlay.system_prompt_snapshot`;
+- persist `kind`, `id`, `name`, and `avatar_url` as provenance and display metadata only.
+
+At send time:
+
+- use the stored snapshot from chat settings;
+- do not live re-resolve the source character/persona by `kind/id`;
+- do not change overlay behavior because the underlying character/persona record changed later.
+
+This is required because the current persona catalog path used by [AssistantSelect.tsx](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/components/Common/AssistantSelect.tsx:188) does not provide the full prompt contract that overlay needs.
 
 ### Why Settings, Not Chat Identity
 
@@ -278,6 +296,7 @@ Behavior:
 - write `assistantOverlay` to chat settings;
 - do not mutate conversation identity;
 - do not clear messages, history, `serverChatId`, or `historyId`.
+- when `serverChatId` does not exist yet, persist overlay locally under the existing `scratch` / `local:<historyId>` chat-settings keys and reconcile it when the chat is first materialized on the server.
 
 ### Change Overlay
 
@@ -294,12 +313,14 @@ Behavior:
 - explicit action;
 - create or open a tracked character-backed conversation;
 - tracked identity lives on the chat record.
+- tracked defaults win: current plain-chat overlay, scene, style, and context state do not implicitly carry forward into the tracked chat unless a later explicit import/apply action is designed for that purpose.
 
 ### Start Tracked Persona Chat
 
 - explicit action;
 - create or open a tracked persona-backed conversation;
 - tracked identity lives on the chat record.
+- tracked defaults win: current plain-chat overlay, scene, style, and context state do not implicitly carry forward into the tracked chat unless a later explicit import/apply action is designed for that purpose.
 
 ### Open Tracked Session
 
@@ -340,14 +361,27 @@ Overlay is deliberately narrower than tracked character/persona chat behavior.
 
 ### Overlay Prompt Source
 
-For v1, overlay steering should reuse the selected assistant's prompt material from [AssistantSelection](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/types/assistant-selection.ts:9).
+For v1, overlay steering should resolve full source detail at apply time, snapshot the resolved personality prompt into chat settings, and then use that stored snapshot for subsequent sends.
 
 Use:
 
 - `assistantIdentity` for name/avatar in [normalChatMode.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts:122);
-- `systemPromptAppendix` in [normalChatMode.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts:144) and [normalChatMode.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts:488) to inject character/persona behavior instructions.
+- `systemPromptAppendix` in [normalChatMode.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts:144) and [normalChatMode.ts](/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/src/hooks/chat-modes/normalChatMode.ts:488) to inject the stored `assistantOverlay.system_prompt_snapshot`.
 
 This is intentionally narrower than the tracked chat completion builder in [character_chat_sessions.py](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py:4701).
+
+### Overlay Prompt Ordering
+
+Overlay prompt composition should be explicit and deterministic:
+
+1. resolve the base normal-chat system prompt using the current existing rules;
+2. append the overlay personality block from `assistantOverlay.system_prompt_snapshot`;
+3. inject actor/scene instructions;
+4. append any web-search system message.
+
+This keeps overlay behavior compatible with the current `systemPromptAppendix` hook while making the precedence contract explicit.
+
+In v1, overlay remains a personality layer. It does not replace explicit task, safety, tool, or context instructions supplied by the rest of the normal-chat path.
 
 ## Frontend Architecture Changes
 
@@ -396,7 +430,7 @@ Extend [_validate_chat_settings_payload](/Users/macbook-dev/Documents/GitHub/tld
 - `assistantOverlay.id`
 - `assistantOverlay.name`
 - optional `assistantOverlay.avatar_url`
-- optional `assistantOverlay.system_prompt`
+- optional `assistantOverlay.system_prompt_snapshot`
 - `assistantOverlay.updatedAt`
 
 The settings merge path in [update_chat_settings](/Users/macbook-dev/Documents/GitHub/tldw_server2/tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py:5787) should remain the persistence mechanism.
@@ -488,6 +522,7 @@ The frontend currently attempts persona memory mode updates from [ConversationTa
 
 - tracked chats still load as tracked;
 - plain chats can store overlay state;
+- plain chats can store overlay state before first server-chat creation and reconcile it later;
 - changing overlay does not clear the thread.
 
 ## Stage 2: Send Path Split
@@ -575,5 +610,6 @@ The frontend currently attempts persona memory mode updates from [ConversationTa
 - Changing overlay mid-chat does not reset the conversation.
 - Clearing overlay mid-chat does not reset the conversation.
 - Overlay state persists through chat settings and reload.
+- Overlay state can be applied before first send and survives server-chat materialization.
 - Overlay chats are not reclassified as tracked character/persona sessions.
 - The main character/persona control surface is a side rail, while the existing `/chat` UI remains in place.

@@ -1,19 +1,15 @@
 ---
-id: TASK-444
-title: Design /chat character overlay and tracked identity rail model
-status: In Progress
+id: TASK-450
+title: Add sidepanel mobile parity and final verification for chat overlay identity
+status: To Do
 labels:
-- design
+- implementation
 - chat
-- webui
+- frontend
 - extension
-- characters
-- personas
+- verification
 priority: high
 documentation:
-- Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md
-- Docs/superpowers/plans/2026-05-22-chat-character-overlay-and-tracked-identity-implementation-plan.md
-modified_files:
 - Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md
 - Docs/superpowers/plans/2026-05-22-chat-character-overlay-and-tracked-identity-implementation-plan.md
 ---
@@ -21,7 +17,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Write a design spec for /chat that preserves tracked character/persona chats while adding non-destructive character/persona personality overlays for normal conversations, with a side-rail control surface and no thread resets.
+Reuse the same tracked-vs-overlay assistant state contract in sidepanel/mobile chat surfaces and complete targeted verification, browser checks, and Bandit for the feature.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

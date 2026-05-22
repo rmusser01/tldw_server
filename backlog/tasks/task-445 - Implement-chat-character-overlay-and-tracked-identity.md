@@ -1,9 +1,9 @@
 ---
-id: TASK-444
-title: Design /chat character overlay and tracked identity rail model
+id: TASK-445
+title: Implement chat character overlay and tracked identity
 status: In Progress
 labels:
-- design
+- implementation
 - chat
 - webui
 - extension
@@ -13,15 +13,12 @@ priority: high
 documentation:
 - Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md
 - Docs/superpowers/plans/2026-05-22-chat-character-overlay-and-tracked-identity-implementation-plan.md
-modified_files:
-- Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md
-- Docs/superpowers/plans/2026-05-22-chat-character-overlay-and-tracked-identity-implementation-plan.md
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Write a design spec for /chat that preserves tracked character/persona chats while adding non-destructive character/persona personality overlays for normal conversations, with a side-rail control surface and no thread resets.
+Implement the /chat tracked-vs-overlay assistant identity model from the approved design spec and implementation plan, preserving tracked character/persona chats while adding snapshot-based personality overlays for normal conversations and a side-rail control surface.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

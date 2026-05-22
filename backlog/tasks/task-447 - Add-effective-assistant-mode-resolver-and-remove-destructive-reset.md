@@ -1,19 +1,14 @@
 ---
-id: TASK-444
-title: Design /chat character overlay and tracked identity rail model
-status: In Progress
+id: TASK-447
+title: Add effective assistant mode resolver and remove destructive reset
+status: To Do
 labels:
-- design
+- implementation
 - chat
-- webui
-- extension
-- characters
-- personas
+- frontend
+- state
 priority: high
 documentation:
-- Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md
-- Docs/superpowers/plans/2026-05-22-chat-character-overlay-and-tracked-identity-implementation-plan.md
-modified_files:
 - Docs/superpowers/specs/2026-05-22-chat-character-overlay-and-tracked-identity-design.md
 - Docs/superpowers/plans/2026-05-22-chat-character-overlay-and-tracked-identity-implementation-plan.md
 ---
@@ -21,7 +16,7 @@ modified_files:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Write a design spec for /chat that preserves tracked character/persona chats while adding non-destructive character/persona personality overlays for normal conversations, with a side-rail control surface and no thread resets.
+Introduce a pure tracked-vs-overlay assistant mode resolver and remove the destructive assistant-switch reset behavior from the /chat flow.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
