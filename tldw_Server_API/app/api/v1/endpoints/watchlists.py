@@ -76,7 +76,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
-from tldw_Server_API.app.core.Scheduler import get_global_scheduler
+from tldw_Server_API.app.core.Scheduler import get_existing_global_scheduler, SchedulerError
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
@@ -5299,8 +5299,12 @@ _SCHEDULER_AUDIO_STATUS_MAP = {
 async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | None:
     """Return a safe Scheduler status snapshot for a Watchlists audio task."""
     try:
-        scheduler = await get_global_scheduler(start_workers=False)
+        scheduler = await get_existing_global_scheduler()
+        if scheduler is None:
+            return None
         task = await scheduler.get_task(task_id)
+    except SchedulerError:
+        return None
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         return None
     if task is None:

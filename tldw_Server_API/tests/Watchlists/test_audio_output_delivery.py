@@ -97,9 +97,8 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_global_scheduler",
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
                 new=AsyncMock(return_value=scheduler),
-                create=True,
             ),
         ):
             result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
@@ -114,6 +113,7 @@ class TestGetRunAudioEndpoint:
     @pytest.mark.asyncio
     async def test_missing_workflows_db_returns_pending_when_scheduler_unavailable(self):
         """Missing Workflows DB should return safe pending fallback when scheduler lookup fails."""
+        from tldw_Server_API.app.core.Scheduler import SchedulerError
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
 
         run = SimpleNamespace(
@@ -132,6 +132,8 @@ class TestGetRunAudioEndpoint:
         user.role = "admin"
 
         sensitive_error = "scheduler failed at /tmp/secret/path with bearer token abc123"
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=SchedulerError(sensitive_error))
         with (
             patch(
                 "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
@@ -143,9 +145,8 @@ class TestGetRunAudioEndpoint:
             ),
             patch("os.path.exists", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_global_scheduler",
-                new=AsyncMock(side_effect=RuntimeError(sensitive_error)),
-                create=True,
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
             ),
         ):
             result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
@@ -158,6 +159,51 @@ class TestGetRunAudioEndpoint:
         assert result["download_url"] is None
         assert result["fallback_reason"] == "workflow_run_not_started"
         assert sensitive_error not in json.dumps(result)
+
+    @pytest.mark.asyncio
+    async def test_missing_workflows_db_does_not_start_global_scheduler_for_status_lookup(self):
+        """Read-only audio status should not initialize the process-global Scheduler."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+        from tldw_Server_API.app.core.Scheduler import scheduler as scheduler_module
+        from tldw_Server_API.app.core.Scheduler.scheduler import stop_global_scheduler
+
+        await stop_global_scheduler()
+        assert scheduler_module._GLOBAL_SCHEDULER is None
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_pending"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        try:
+            with (
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                    return_value=1,
+                ),
+                patch(
+                    "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                    return_value="/tmp/test_user",  # nosec B108
+                ),
+                patch("os.path.exists", return_value=False),
+            ):
+                result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+            assert result["status"] == "pending"
+            assert result["queue_name"] == "workflows"
+            assert scheduler_module._GLOBAL_SCHEDULER is None
+        finally:
+            await stop_global_scheduler()
 
     @pytest.mark.asyncio
     async def test_returns_pending_when_workflow_not_found(self):
