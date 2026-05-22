@@ -177,19 +177,11 @@ export const ensurePersonaServerChat = async ({
       assistant_kind: "persona",
       assistant_id: assistantId,
       persona_memory_mode: personaMemoryMode,
-      state: shouldResetServerChat
-        ? "in-progress"
-        : serverChatState || "in-progress",
-      topic_label: shouldResetServerChat
-        ? undefined
-        : serverChatTopic || undefined,
-      cluster_id: shouldResetServerChat
-        ? undefined
-        : serverChatClusterId || undefined,
-      source: shouldResetServerChat ? undefined : serverChatSource || undefined,
-      external_ref: shouldResetServerChat
-        ? undefined
-        : serverChatExternalRef || undefined
+      state: "in-progress",
+      topic_label: undefined,
+      cluster_id: undefined,
+      source: undefined,
+      external_ref: undefined
     }, scope ? { scope } : undefined)
 
     let rawId: string | number | undefined

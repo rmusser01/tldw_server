@@ -131,6 +131,56 @@ describe("ensurePersonaServerChat", () => {
     )
   })
 
+  it("starts a brand new persona chat with fresh metadata even when stale state remains in the store", async () => {
+    const setters = createSetterBundle()
+    const createChat = vi.fn().mockResolvedValue({
+      id: "persona-chat-fresh",
+      title: "Fresh persona chat",
+      assistant_kind: "persona",
+      assistant_id: "garden-helper",
+      persona_memory_mode: "read_only"
+    })
+
+    await ensurePersonaServerChat({
+      assistant: {
+        kind: "persona",
+        id: "garden-helper",
+        name: "Garden Helper"
+      },
+      serverChatId: null,
+      serverChatTitle: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatPersonaMemoryMode: "read_write",
+      serverChatMetaLoaded: false,
+      serverChatState: "resolved",
+      serverChatTopic: "Stale topic",
+      serverChatClusterId: "stale-cluster",
+      serverChatSource: "stale-source",
+      serverChatExternalRef: "stale-ref",
+      historyId: "history-local",
+      temporaryChat: false,
+      createChat,
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-fresh"),
+      invalidateServerChatHistory: vi.fn(),
+      ...setters
+    })
+
+    expect(createChat).toHaveBeenCalledWith(
+      {
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_only",
+        state: "in-progress",
+        topic_label: undefined,
+        cluster_id: undefined,
+        source: undefined,
+        external_ref: undefined
+      },
+      undefined
+    )
+  })
+
   it("reuses an existing matching persona chat without creating a new one", async () => {
     const setters = createSetterBundle()
     const createChat = vi.fn()

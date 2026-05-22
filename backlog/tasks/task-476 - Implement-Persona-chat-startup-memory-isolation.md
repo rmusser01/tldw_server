@@ -34,7 +34,8 @@ Implement the first Persona-backed Chat Startup hardening slice from #1908: prev
 - Updated `apps/packages/ui/src/hooks/chat/personaServerChat.ts` so `read_write` is preserved only when reusing an existing matching Persona-backed server chat.
 - New Persona-backed chats after stale Character or different-Persona reset now start with explicit `read_only` and a fresh `in-progress` metadata payload instead of carrying stale topic/source/cluster/external-ref state.
 - PR #1935 review follow-up: added `serverChatMetaLoaded` to the Persona startup helper and callers so a restored `serverChatId` with assistant metadata still hydrating is reused instead of reset or recreated prematurely.
-- Updated `apps/packages/ui/src/hooks/chat/__tests__/personaServerChat.test.ts` to cover stale Character reset, stale different-Persona reset, and restored-chat metadata-hydration behavior.
+- PR #1935 review follow-up: brand-new Persona chats now also use fresh `in-progress` metadata even when stale conversation metadata remains in the store.
+- Updated `apps/packages/ui/src/hooks/chat/__tests__/personaServerChat.test.ts` to cover stale Character reset, stale different-Persona reset, brand-new chat stale metadata isolation, and restored-chat metadata-hydration behavior.
 - Verified red/green with `bunx vitest run src/hooks/chat/__tests__/personaServerChat.test.ts --reporter=verbose` from `apps/packages/ui`.
 - Verified integration with `bunx vitest run src/hooks/chat/__tests__/personaServerChat.test.ts src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx --reporter=verbose` from `apps/packages/ui`.
 - Verified with `git diff --check`.
@@ -46,7 +47,7 @@ Implement the first Persona-backed Chat Startup hardening slice from #1908: prev
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Closed the PR #1935 review follow-up for Persona chat startup memory isolation. The helper now waits for server chat metadata before treating a restored chat ID as stale, while still defaulting unknown/unhydrated Persona startup memory to read_only and preserving read_write only for loaded matching Persona sessions.
+Closed the PR #1935 review follow-up for Persona chat startup memory isolation. The helper now waits for server chat metadata before treating a restored chat ID as stale, always starts newly created Persona chats with fresh metadata, defaults unknown/unhydrated Persona startup memory to read_only, and preserves read_write only for loaded matching Persona sessions.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
