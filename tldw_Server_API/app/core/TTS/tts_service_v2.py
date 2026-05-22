@@ -116,6 +116,23 @@ _TTS_NONCRITICAL_EXCEPTIONS = (
     TTSValidationError,
     CircuitOpenError,
 )
+_OMNIVOICE_ALIAS_VALUES = {"omnivoice", "omni-voice", "omni_voice"}
+_OMNIVOICE_INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
+_OMNIVOICE_GENERATION_KEYS = {
+    "num_step",
+    "guidance_scale",
+    "denoise",
+    "t_shift",
+    "position_temperature",
+    "class_temperature",
+    "layer_penalty_factor",
+    "duration",
+    "speed",
+    "postprocess_output",
+    "preprocess_prompt",
+    "audio_chunk_duration",
+    "audio_chunk_threshold",
+}
 
 class TTSServiceV2:
     """
@@ -2581,8 +2598,11 @@ class TTSServiceV2:
                     return await factory.registry.create_adapter_with_overrides(provider_enum, overrides)
                 return await factory.registry.get_adapter(provider_enum)
 
-        # Get adapter by model name
-        model_provider = factory.get_provider_for_model(model)
+        # Get adapter by model name. Some tests and integrations inject a
+        # minimal factory that only implements get_adapter_by_model.
+        model_provider = None
+        if hasattr(factory, "get_provider_for_model"):
+            model_provider = factory.get_provider_for_model(model)
         if model_provider == TTSProvider.OMNIVOICE:
             return await factory.registry.create_adapter_with_overrides(
                 model_provider,
@@ -2604,14 +2624,31 @@ class TTSServiceV2:
         provider: Optional[str] = None,
     ) -> bool:
         provider_value = (provider or "").strip().lower()
-        if provider_value in {"omnivoice", "omni-voice", "omni_voice"}:
+        if provider_value in _OMNIVOICE_ALIAS_VALUES:
             return True
         model_value = (getattr(request, "model", None) or "").strip().lower()
-        return (
+        if (
             model_value.startswith("omnivoice")
             or model_value.startswith("omni-voice")
             or model_value.startswith("omni_voice")
-        )
+        ):
+            return True
+        voice = (getattr(request, "voice", None) or "").strip().lower()
+        if voice.startswith("custom:"):
+            return True
+        if getattr(request, "voice_reference", None):
+            return True
+        extras = getattr(request, "extra_params", None)
+        if not isinstance(extras, dict):
+            return False
+        if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
+            return True
+        if any(key in extras for key in _OMNIVOICE_GENERATION_KEYS):
+            return True
+        mode = extras.get("omnivoice_mode", extras.get("mode"))
+        if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
+            return True
+        return False
 
     def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
         if self._closing:

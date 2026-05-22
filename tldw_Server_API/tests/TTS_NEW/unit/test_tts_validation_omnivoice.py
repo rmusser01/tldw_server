@@ -147,3 +147,28 @@ def test_omnivoice_custom_voice_accepts_resolved_reference_audio():
 
     assert is_valid is True
     assert error is None
+
+
+def test_omnivoice_allows_non_english_language_passthrough():
+    validator = TTSInputValidator()
+    request = TTSRequest(text="hola", voice="auto", language="es", format=AudioFormat.WAV)
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is True
+    assert error is None
+
+
+def test_omnivoice_rejects_unknown_generation_param():
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        extra_params={"omnivoice_unknown_knob": 1},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert "generation" in str(error).lower() or "unknown" in str(error).lower()

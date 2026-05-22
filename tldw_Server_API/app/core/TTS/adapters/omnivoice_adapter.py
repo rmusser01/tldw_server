@@ -25,9 +25,36 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
+from ..utils import parse_bool
 from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse
 from .omnivoice_sidecar_protocol import build_sidecar_auth_headers
 from .omnivoice_sidecar_supervisor import create_sidecar_async_client
+
+GENERATION_PARAM_TYPES = {
+    "num_step": int,
+    "guidance_scale": float,
+    "denoise": bool,
+    "t_shift": float,
+    "position_temperature": float,
+    "class_temperature": float,
+    "layer_penalty_factor": float,
+    "duration": float,
+    "speed": float,
+    "postprocess_output": bool,
+    "preprocess_prompt": bool,
+    "audio_chunk_duration": float,
+    "audio_chunk_threshold": float,
+}
+INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
+LANGUAGE_KEYS = ("language_id", "language")
+REFERENCE_TEXT_KEYS = ("reference_text", "ref_text", "voice_reference_text")
+UNSUPPORTED_OMNIVOICE_KEYS = {"omnivoice_temperature", "omnivoice_top_p", "omnivoice_seed"}
+AVAILABILITY_ERROR_CODES = {"MODEL_NOT_AVAILABLE", "RUNTIME_IMPORT_FAILED", "MODEL_LOAD_FAILED"}
+VALIDATION_ERROR_CODES = {
+    "INVALID_REFERENCE_AUDIO",
+    "INVALID_GENERATION_PARAMETER",
+    "REFERENCE_PATH_NOT_ALLOWED",
+}
 
 
 class OmniVoiceAdapter(TTSAdapter):
@@ -48,7 +75,7 @@ class OmniVoiceAdapter(TTSAdapter):
     DEFAULT_SAMPLE_RATE = 24000
     MAX_TEXT_LENGTH = 5000
     DEFAULT_TIMEOUT_SECONDS = 30.0
-    VALID_MODES = frozenset({"auto", "clone"})
+    VALID_MODES = frozenset({"auto", "design", "clone"})
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
@@ -65,6 +92,8 @@ class OmniVoiceAdapter(TTSAdapter):
         self.timeout = float(_cfg_value("timeout", self.DEFAULT_TIMEOUT_SECONDS))
         temp_dir = _cfg_value("temp_dir")
         self.temp_dir = Path(temp_dir).expanduser() if temp_dir else None
+        scratch_dir = _cfg_value("scratch_dir")
+        self.scratch_dir = Path(scratch_dir).expanduser() if scratch_dir else None
         self._supervisor = _cfg_value("_supervisor")
 
     def set_supervisor(self, supervisor: Any) -> None:
@@ -156,13 +185,13 @@ class OmniVoiceAdapter(TTSAdapter):
                 provider=self.PROVIDER_KEY,
             )
 
-        mode = self._resolve_mode(request)
-        sample_rate = self._resolve_sample_rate(request)
         reference_audio_path = await self._materialize_reference_audio(request) if request.voice_reference else None
+        mode = self._resolve_mode(request, reference_audio_path=reference_audio_path)
+        requested_sample_rate = self._resolve_sample_rate(request)
         payload = self._build_sidecar_payload(
             request,
             mode=mode,
-            sample_rate=sample_rate,
+            sample_rate=requested_sample_rate,
             reference_audio_path=reference_audio_path,
         )
 
@@ -189,19 +218,7 @@ class OmniVoiceAdapter(TTSAdapter):
                     )
 
             if response.status_code != 200:
-                logger.warning(
-                    "OmniVoice sidecar returned status {} with body: {}",
-                    response.status_code,
-                    response.text,
-                )
-                raise TTSGenerationError(
-                    "OmniVoice sidecar returned an error",
-                    provider=self.PROVIDER_KEY,
-                    details={
-                        "status_code": response.status_code,
-                        "response_text": self._sanitize_sidecar_error_text(response.text),
-                    },
-                )
+                self._raise_for_sidecar_error(response)
 
             sidecar_audio_format = (
                 response.headers.get("X-OmniVoice-Audio-Format", "wav").strip().lower()
@@ -215,6 +232,9 @@ class OmniVoiceAdapter(TTSAdapter):
 
             audio_bytes = response.content
             channels = int(response.headers.get("X-OmniVoice-Channels", "1") or "1")
+            native_sample_rate = self._parse_sample_rate_header(
+                response.headers.get("X-OmniVoice-Sample-Rate")
+            )
             if not audio_bytes:
                 raise TTSGenerationError(
                     "OmniVoice sidecar returned empty audio",
@@ -225,14 +245,14 @@ class OmniVoiceAdapter(TTSAdapter):
                 audio_bytes,
                 sidecar_audio_format=sidecar_audio_format,
                 requested_format=request.format,
-                sample_rate=sample_rate,
+                sample_rate=native_sample_rate,
                 channels=channels,
             )
 
             return TTSResponse(
                 audio_data=response_audio,
                 format=response_format,
-                sample_rate=sample_rate,
+                sample_rate=native_sample_rate,
                 channels=channels,
                 text_processed=request.text,
                 voice_used=request.voice,
@@ -242,6 +262,8 @@ class OmniVoiceAdapter(TTSAdapter):
                     "transport": "sidecar",
                     "sidecar_mode": mode,
                     "sidecar_audio_format": sidecar_audio_format,
+                    "sidecar_native_sample_rate": native_sample_rate,
+                    "requested_sample_rate": requested_sample_rate,
                     "used_reference_audio": reference_audio_path is not None,
                 },
             )
@@ -250,20 +272,133 @@ class OmniVoiceAdapter(TTSAdapter):
                 with contextlib.suppress(OSError):
                     reference_audio_path.unlink()
 
-    def _resolve_mode(self, request: TTSRequest) -> str:
+    def _resolve_mode(self, request: TTSRequest, *, reference_audio_path: Optional[Path] = None) -> str:
         extras = request.extra_params if isinstance(request.extra_params, dict) else {}
         explicit_mode = extras.get("omnivoice_mode", extras.get("mode"))
+        normalized_mode = None
         if isinstance(explicit_mode, str):
             normalized = explicit_mode.strip().lower()
             if normalized in self.VALID_MODES:
-                return normalized
+                normalized_mode = normalized
+            elif normalized:
+                raise TTSValidationError(
+                    "OmniVoice mode must be one of auto, design, clone",
+                    provider=self.PROVIDER_KEY,
+                )
+        elif explicit_mode is not None:
+            raise TTSValidationError("OmniVoice mode must be a string", provider=self.PROVIDER_KEY)
 
         voice = (request.voice or "").strip().lower()
-        if request.voice_reference is not None:
-            return "clone"
-        if voice == "clone" or voice.startswith("custom:"):
-            return "clone"
-        return "auto"
+        instruct = self._resolve_instruct(extras)
+        clone_requested = bool(reference_audio_path) or request.voice_reference is not None
+        clone_requested = clone_requested or voice == "clone" or voice.startswith("custom:")
+        design_requested = instruct is not None
+        if clone_requested and design_requested:
+            raise TTSValidationError(
+                "OmniVoice design instruct cannot be combined with clone reference audio",
+                provider=self.PROVIDER_KEY,
+            )
+        inferred = "clone" if clone_requested else "design" if design_requested else "auto"
+        if normalized_mode is not None:
+            if normalized_mode == "auto" and inferred != "auto":
+                raise TTSValidationError(
+                    "OmniVoice mode=auto conflicts with design or clone inputs",
+                    provider=self.PROVIDER_KEY,
+                )
+            if normalized_mode == "design" and clone_requested:
+                raise TTSValidationError("OmniVoice mode=design conflicts with clone inputs", provider=self.PROVIDER_KEY)
+            if normalized_mode == "design" and instruct is None:
+                raise TTSValidationError("OmniVoice mode=design requires instruct", provider=self.PROVIDER_KEY)
+            if normalized_mode == "clone" and design_requested:
+                raise TTSValidationError("OmniVoice mode=clone conflicts with instruct", provider=self.PROVIDER_KEY)
+            if normalized_mode == "clone" and not clone_requested:
+                raise TTSValidationError(
+                    "OmniVoice mode=clone requires reference audio",
+                    provider=self.PROVIDER_KEY,
+                )
+            return normalized_mode
+        return inferred
+
+    def _resolve_instruct(self, extras: dict[str, Any]) -> Optional[str]:
+        values: list[tuple[str, str]] = []
+        for key in INSTRUCT_KEYS:
+            value = extras.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise TTSValidationError(f"OmniVoice {key} must be a string", provider=self.PROVIDER_KEY)
+            stripped = value.strip()
+            if stripped:
+                values.append((key, stripped))
+        unique = {value for _, value in values}
+        if len(unique) > 1:
+            raise TTSValidationError(
+                "Conflicting OmniVoice instruct aliases provided",
+                provider=self.PROVIDER_KEY,
+                details={"aliases": [key for key, _ in values]},
+            )
+        return values[0][1] if values else None
+
+    def _resolve_language_id(self, request: TTSRequest, extras: dict[str, Any]) -> Optional[str]:
+        values: list[tuple[str, str]] = []
+        for key in LANGUAGE_KEYS:
+            value = extras.get(key)
+            if value is None:
+                continue
+            stripped = str(value).strip()
+            if stripped:
+                values.append((key, stripped))
+        request_language = getattr(request, "language", None)
+        if request_language is not None:
+            stripped = str(request_language).strip()
+            if stripped and stripped.lower() != "en":
+                values.append(("request.language", stripped))
+        unique = {value.lower() for _, value in values}
+        if len(unique) > 1:
+            raise TTSValidationError(
+                "Conflicting OmniVoice language aliases provided",
+                provider=self.PROVIDER_KEY,
+                details={"aliases": [key for key, _ in values]},
+            )
+        return values[0][1] if values else None
+
+    def _resolve_generation(self, extras: dict[str, Any]) -> dict[str, Any]:
+        generation: dict[str, Any] = {}
+        for key, value in extras.items():
+            if key in GENERATION_PARAM_TYPES:
+                generation[key] = self._coerce_generation_value(key, value, GENERATION_PARAM_TYPES[key])
+                continue
+            if (
+                key.startswith("omnivoice_")
+                and key not in {"omnivoice_mode"}
+            ) or key in UNSUPPORTED_OMNIVOICE_KEYS:
+                raise TTSValidationError(
+                    f"Unknown or unsupported OmniVoice generation parameter: {key}",
+                    provider=self.PROVIDER_KEY,
+                )
+        return generation
+
+    def _coerce_generation_value(self, key: str, value: Any, target_type: type) -> Any:
+        try:
+            if target_type is bool:
+                return parse_bool(value, default=False)
+            if target_type is int:
+                return int(value)
+            if target_type is float:
+                return float(value)
+        except (TypeError, ValueError) as exc:
+            raise TTSValidationError(
+                f"OmniVoice generation parameter {key} has invalid type",
+                provider=self.PROVIDER_KEY,
+            ) from exc
+        return value
+
+    def _resolve_reference_text(self, extras: dict[str, Any]) -> Optional[str]:
+        for key in REFERENCE_TEXT_KEYS:
+            value = extras.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     def _resolve_sample_rate(self, request: TTSRequest) -> int:
         if request.target_sample_rate and int(request.target_sample_rate) > 0:
@@ -289,26 +424,29 @@ class OmniVoiceAdapter(TTSAdapter):
         sample_rate: int,
         reference_audio_path: Optional[Path],
     ) -> dict[str, Any]:
+        extras = request.extra_params if isinstance(request.extra_params, dict) else {}
         payload: dict[str, Any] = {
             "text": self.preprocess_text(request.text),
             "mode": mode,
             "requested_sample_rate": sample_rate,
+            "generation": self._resolve_generation(extras),
         }
+        instruct = self._resolve_instruct(extras)
+        language_id = self._resolve_language_id(request, extras)
+        if mode == "design" and instruct:
+            payload["instruct"] = instruct
+        if language_id:
+            payload["language_id"] = language_id
         if mode != "clone":
             voice = (request.voice or "").strip() or "auto"
             if voice and not voice.startswith("custom:") and voice.lower() != "clone":
                 payload["voice"] = voice
         else:
-            extras = request.extra_params if isinstance(request.extra_params, dict) else {}
-            reference_text = (
-                extras.get("reference_text")
-                or extras.get("ref_text")
-                or extras.get("voice_reference_text")
-            )
+            reference_text = self._resolve_reference_text(extras)
             if reference_audio_path is not None:
                 payload["reference_audio_path"] = str(reference_audio_path)
-            if isinstance(reference_text, str) and reference_text.strip():
-                payload["reference_text"] = reference_text.strip()
+            if reference_text:
+                payload["reference_text"] = reference_text
         return payload
 
     async def _materialize_reference_audio(self, request: TTSRequest) -> Optional[Path]:
@@ -317,11 +455,13 @@ class OmniVoiceAdapter(TTSAdapter):
         return await asyncio.to_thread(self._materialize_reference_audio_sync, request.voice_reference)
 
     def _materialize_reference_audio_sync(self, voice_reference: bytes) -> Path:
-        self._ensure_temp_dir()
+        target_dir = self.scratch_dir or self.temp_dir
+        if target_dir is not None:
+            target_dir.mkdir(parents=True, exist_ok=True)
         temp_file = tempfile.NamedTemporaryFile(
             suffix=".wav",
             prefix="omnivoice_ref_",
-            dir=str(self.temp_dir) if self.temp_dir else None,
+            dir=str(target_dir) if target_dir else None,
             delete=False,
         )
         temp_path = Path(temp_file.name)
@@ -358,6 +498,61 @@ class OmniVoiceAdapter(TTSAdapter):
         if str(response_text or "").strip():
             return "OmniVoice sidecar reported an internal error; see server logs."
         return "OmniVoice sidecar returned an empty error response."
+
+    def _parse_sample_rate_header(self, value: str | None) -> int:
+        try:
+            sample_rate = int(value or self.DEFAULT_SAMPLE_RATE)
+        except (TypeError, ValueError):
+            sample_rate = self.DEFAULT_SAMPLE_RATE
+        return sample_rate if sample_rate > 0 else self.DEFAULT_SAMPLE_RATE
+
+    def _raise_for_sidecar_error(self, response: Any) -> None:
+        content_type = response.headers.get("content-type", "")
+        payload: dict[str, Any] = {}
+        if content_type.lower().startswith("application/json"):
+            with contextlib.suppress(ValueError, TypeError):
+                parsed = response.json()
+                if isinstance(parsed, dict):
+                    payload = parsed
+        error = payload.get("error") if isinstance(payload, dict) else None
+        code = None
+        retryable = False
+        if isinstance(error, dict):
+            raw_code = error.get("code")
+            code = str(raw_code).strip() if raw_code is not None else None
+            retryable = bool(error.get("retryable", False))
+        details = {
+            "status_code": response.status_code,
+            "response_text": self._sanitize_sidecar_error_text(getattr(response, "text", None)),
+        }
+        if code:
+            details["sidecar_error_code"] = code
+            details["retryable"] = retryable
+        logger.warning(
+            "OmniVoice sidecar returned status {} with sanitized error code {}",
+            response.status_code,
+            code or "unknown",
+        )
+        if code in AVAILABILITY_ERROR_CODES:
+            raise TTSProviderNotConfiguredError(
+                "OmniVoice sidecar runtime is not available",
+                provider=self.PROVIDER_KEY,
+                error_code=code,
+                details=details,
+            )
+        if code in VALIDATION_ERROR_CODES:
+            raise TTSValidationError(
+                "OmniVoice sidecar rejected the request",
+                provider=self.PROVIDER_KEY,
+                error_code=code,
+                details=details,
+            )
+        raise TTSGenerationError(
+            "OmniVoice sidecar returned an error",
+            provider=self.PROVIDER_KEY,
+            error_code=code,
+            details=details,
+        )
 
     def _ensure_temp_dir(self) -> None:
         if self.temp_dir is None:
