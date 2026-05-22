@@ -20,6 +20,7 @@ import {
   personaToAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import {
   buildAssistantOverlaySnapshotFromSelection,
   resolveAssistantOverlaySnapshot
@@ -143,10 +144,16 @@ export const AssistantSelect: React.FC<Props> = ({
   )
   const [characters, setCharacters] = React.useState<CharacterSummary[]>([])
   const [personas, setPersonas] = React.useState<PersonaInfo[]>([])
+  const [charactersLoading, setCharactersLoading] = React.useState(true)
+  const [personasLoading, setPersonasLoading] = React.useState(true)
+  const [charactersError, setCharactersError] = React.useState(false)
+  const [personasError, setPersonasError] = React.useState(false)
   const [favoriteCharacters, setFavoriteCharacters] = useStorage<
     FavoriteCharacter[]
   >("favoriteCharacters", [])
   const searchInputRef = React.useRef<InputRef | null>(null)
+  const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const returnFocusSelectorRef = React.useRef<string | null>(null)
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -167,6 +174,21 @@ export const AssistantSelect: React.FC<Props> = ({
     ]
   )
 
+  const restoreReturnFocus = React.useCallback(() => {
+    const selector = returnFocusSelectorRef.current
+    returnFocusSelectorRef.current = null
+    if (!selector) {
+      if (variant === "dropdown" && typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          triggerButtonRef.current?.focus()
+        })
+      }
+      return
+    }
+
+    scheduleFocusFirstVisibleElement(selector)
+  }, [variant])
+
   React.useEffect(() => {
     if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
       setActiveTab(selectedAssistant.kind)
@@ -182,6 +204,11 @@ export const AssistantSelect: React.FC<Props> = ({
       if (requestedTab === "character" || requestedTab === "persona") {
         setActiveTab(requestedTab as AssistantSelectTab)
       }
+      returnFocusSelectorRef.current =
+        typeof detail?.returnFocusSelector === "string" &&
+        detail.returnFocusSelector.trim().length > 0
+          ? detail.returnFocusSelector.trim()
+          : null
       setSelectionMode(
         detail?.applyAs === "overlay" ? "overlay" : selectionModePreference
       )
@@ -223,32 +250,76 @@ export const AssistantSelect: React.FC<Props> = ({
     }
   }, [open])
 
+  const loadCharacters = React.useCallback(
+    async (isCancelled: () => boolean = () => false) => {
+      setCharactersLoading(true)
+      setCharactersError(false)
+      try {
+        await tldwClient.initialize()
+        if (typeof tldwClient.listAllCharacters !== "function") {
+          if (!isCancelled()) {
+            setCharacters([])
+          }
+          return
+        }
+        const result = await tldwClient.listAllCharacters()
+        if (!isCancelled()) {
+          setCharacters(Array.isArray(result) ? (result as CharacterSummary[]) : [])
+        }
+      } catch {
+        if (!isCancelled()) {
+          setCharacters([])
+          setCharactersError(true)
+        }
+      } finally {
+        if (!isCancelled()) {
+          setCharactersLoading(false)
+        }
+      }
+    },
+    []
+  )
+
+  const loadPersonas = React.useCallback(
+    async (isCancelled: () => boolean = () => false) => {
+      setPersonasLoading(true)
+      setPersonasError(false)
+      try {
+        await tldwClient.initialize()
+        if (typeof tldwClient.listPersonaProfiles !== "function") {
+          if (!isCancelled()) {
+            setPersonas([])
+          }
+          return
+        }
+        const result = await tldwClient.listPersonaProfiles()
+        if (!isCancelled()) {
+          setPersonas(Array.isArray(result) ? (result as PersonaInfo[]) : [])
+        }
+      } catch {
+        if (!isCancelled()) {
+          setPersonas([])
+          setPersonasError(true)
+        }
+      } finally {
+        if (!isCancelled()) {
+          setPersonasLoading(false)
+        }
+      }
+    },
+    []
+  )
+
   React.useEffect(() => {
     let cancelled = false
+    const isCancelled = () => cancelled
 
-    const loadOptions = async () => {
-      await tldwClient.initialize().catch(() => null)
-
-      if (typeof tldwClient.listAllCharacters === "function") {
-        const result = await tldwClient.listAllCharacters().catch(() => [])
-        if (!cancelled && Array.isArray(result)) {
-          setCharacters(result as CharacterSummary[])
-        }
-      }
-
-      if (typeof tldwClient.listPersonaProfiles === "function") {
-        const result = await tldwClient.listPersonaProfiles().catch(() => [])
-        if (!cancelled && Array.isArray(result)) {
-          setPersonas(result as PersonaInfo[])
-        }
-      }
-    }
-
-    void loadOptions()
+    void loadCharacters(isCancelled)
+    void loadPersonas(isCancelled)
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadCharacters, loadPersonas])
 
   const characterEntries = React.useMemo(
     () =>
@@ -374,9 +445,14 @@ export const AssistantSelect: React.FC<Props> = ({
         setOpen(false)
         setSearchText("")
         setSelectionMode(selectionModePreference)
+        restoreReturnFocus()
         return
       }
 
+      setOpen(false)
+      setSearchText("")
+      setSelectionMode(selectionModePreference)
+      restoreReturnFocus()
       await setSelectedAssistant(entry)
       if (selectionMode === "overlay") {
         let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(entry)
@@ -400,12 +476,10 @@ export const AssistantSelect: React.FC<Props> = ({
           )
         }
       }
-      setOpen(false)
-      setSearchText("")
-      setSelectionMode(selectionModePreference)
     },
     [
       effectiveAssistantState.mode,
+      restoreReturnFocus,
       selectionMode,
       selectionModePreference,
       setSelectedAssistant,
@@ -421,12 +495,14 @@ export const AssistantSelect: React.FC<Props> = ({
     if (!nextOpen) {
       setSearchText("")
       setSelectionMode(selectionModePreference)
+      restoreReturnFocus()
     }
-  }, [selectionModePreference])
+  }, [restoreReturnFocus, selectionModePreference])
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
     setSearchText("")
+    restoreReturnFocus()
     try {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tldw:open-actor-settings"))
@@ -434,7 +510,7 @@ export const AssistantSelect: React.FC<Props> = ({
     } catch {
       // no-op
     }
-  }, [])
+  }, [restoreReturnFocus])
 
   const buttonLabel =
     labelOverride ||
@@ -476,9 +552,55 @@ export const AssistantSelect: React.FC<Props> = ({
     activeTabDefinition?.emptyLabel ??
     t("option:assistant.noAssistants", "No assistants available.")
   const activeTabShowsFavorites = activeTabDefinition?.showFavorites ?? false
+  const activeTabLoading =
+    activeTab === "character" ? charactersLoading : personasLoading
+  const activeTabError =
+    activeTab === "character" ? charactersError : personasError
+  const retryActiveTabLoad =
+    activeTab === "character" ? loadCharacters : loadPersonas
+  const activeTabErrorLabel =
+    activeTab === "character"
+      ? t(
+          "option:assistant.charactersLoadError",
+          "Could not load characters."
+        )
+      : t("option:assistant.personasLoadError", "Could not load personas.")
+  const activeTabRetryLabel =
+    activeTab === "character"
+      ? t("option:assistant.retryCharacters", "Retry characters")
+      : t("option:assistant.retryPersonas", "Retry personas")
+  const catalogLoadingLabel = t(
+    "option:assistant.catalogLoadingStatus",
+    "Loading character and persona catalogs"
+  )
+  const activeTabLoadingLabel = t(
+    "option:assistant.loadingCatalogs",
+    "Loading characters and personas"
+  )
 
   const activeTabContent =
-    activeTabEntries.length === 0 ? (
+    activeTabLoading ? (
+      <div
+        role="status"
+        aria-label={catalogLoadingLabel}
+        className="px-3 py-4 text-center text-sm text-text-subtle"
+      >
+        {activeTabLoadingLabel}
+      </div>
+    ) : activeTabError ? (
+      <div className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
+        <p>{activeTabErrorLabel}</p>
+        <button
+          type="button"
+          className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
+          onClick={() => {
+            void retryActiveTabLoad()
+          }}
+        >
+          {activeTabRetryLabel}
+        </button>
+      </div>
+    ) : activeTabEntries.length === 0 ? (
       <div className="px-3 py-4 text-center text-sm text-text-subtle">
         {activeTabEmptyLabel}
       </div>
@@ -572,7 +694,10 @@ export const AssistantSelect: React.FC<Props> = ({
     )
 
   const content = (
-    <div className="w-[320px] rounded-lg border border-border bg-background shadow-lg">
+    <div
+      data-testid="assistant-select-panel"
+      className="w-[320px] rounded-lg border border-border bg-background shadow-lg"
+    >
       <div className="border-b border-border p-2">
         <Input
           ref={searchInputRef}
@@ -647,6 +772,7 @@ export const AssistantSelect: React.FC<Props> = ({
     >
       <Tooltip title={buttonLabel}>
         <button
+          ref={triggerButtonRef}
           type="button"
           data-testid="character-select"
           className={`inline-flex items-center gap-2 ${className}`.trim()}

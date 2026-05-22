@@ -105,6 +105,24 @@ describe("chat settings assistant overlay", () => {
     expect(tooLongName?.assistantOverlay).toBeUndefined()
   })
 
+  it("trims assistantOverlay optional string fields during normalization", () => {
+    const settings = normalizeChatSettingsRecord({
+      schemaVersion: 2,
+      updatedAt: "2026-05-22T18:00:00.000Z",
+      assistantOverlay: buildOverlay({
+        avatar_url: "  https://example.com/avatar-trimmed.png  ",
+        system_prompt_snapshot: "  Stay concise.  "
+      })
+    })
+
+    expect(settings?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        avatar_url: "https://example.com/avatar-trimmed.png",
+        system_prompt_snapshot: "Stay concise."
+      })
+    )
+  })
+
   it("persists assistantOverlay locally before a server chat id exists", async () => {
     const scratch = await applyChatSettingsPatch({
       historyId: null,

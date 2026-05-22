@@ -168,6 +168,51 @@ async def test_chat_settings_roundtrip_persists_assistant_overlay(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_settings_normalizes_assistant_overlay_strings(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_assistant_overlay_trim_")
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    reset_settings()
+    try:
+        from tldw_Server_API.app.main import app
+
+        headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chat_id = await _create_chat(client, headers)
+            payload = {
+                "settings": {
+                    "schemaVersion": 2,
+                    "updatedAt": "2026-05-22T20:00:00Z",
+                    "assistantOverlay": {
+                        "kind": " Persona ",
+                        "id": " persona-7 ",
+                        "name": " Research Guide ",
+                        "avatar_url": " https://example.com/persona-7.png ",
+                        "system_prompt_snapshot": " Be concise and evidence-driven. ",
+                        "updatedAt": " 2026-05-22T20:00:00Z ",
+                    },
+                }
+            }
+
+            put_response = await client.put(
+                f"/api/v1/chats/{chat_id}/settings",
+                headers=headers,
+                json=payload,
+            )
+            assert put_response.status_code == 200, put_response.text
+            stored = put_response.json()["settings"]["assistantOverlay"]
+            assert stored["kind"] == "persona"
+            assert stored["id"] == "persona-7"
+            assert stored["name"] == "Research Guide"
+            assert stored["avatar_url"] == "https://example.com/persona-7.png"
+            assert stored["system_prompt_snapshot"] == "Be concise and evidence-driven."
+            assert stored["updatedAt"] == "2026-05-22T20:00:00Z"
+    finally:
+        reset_settings()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
 async def test_chat_settings_rejects_invalid_assistant_overlay_kind(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="chacha_assistant_overlay_kind_")
     monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)

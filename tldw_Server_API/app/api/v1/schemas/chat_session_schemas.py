@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 ALLOWED_ASSISTANT_KINDS = ("character", "persona")
 ALLOWED_PERSONA_MEMORY_MODES = ("read_only", "read_write")
+MAX_ASSISTANT_OVERLAY_TEXT_CHARS = 20_000
 
 
 def _default_offset_pagination_aliases(response):
@@ -38,6 +39,100 @@ def _validate_conversation_state(value: Optional[str]) -> Optional[str]:
     if normalized not in ALLOWED_CONVERSATION_STATES:
         raise ValueError(f"Invalid state '{value}'. Allowed: {', '.join(ALLOWED_CONVERSATION_STATES)}")
     return normalized
+
+
+def _normalize_required_overlay_text(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _normalize_optional_overlay_text(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    return value
+
+
+def _normalize_overlay_timestamp(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _validate_iso_timestamp_text(value: str) -> str:
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("Expected ISO timestamp string") from exc
+    return value
+
+
+class AssistantOverlaySettings(BaseModel):
+    """Normalized assistant personality overlay stored in per-chat settings."""
+
+    kind: Literal["character", "persona"] = Field(
+        ...,
+        description="Source identity kind for the overlay",
+    )
+    id: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Stable character/persona identifier",
+    )
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Display name snapshot captured when the overlay was applied",
+    )
+    avatar_url: str | None = Field(
+        default=None,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Optional avatar URL snapshot",
+    )
+    system_prompt_snapshot: str | None = Field(
+        default=None,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Optional system prompt snapshot captured on apply",
+    )
+    updatedAt: str = Field(
+        ...,
+        min_length=1,
+        description="ISO timestamp for the last overlay update",
+    )
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _normalize_kind(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("id", "name", mode="before")
+    @classmethod
+    def _normalize_required_text(cls, value: Any) -> Any:
+        return _normalize_required_overlay_text(value)
+
+    @field_validator("avatar_url", "system_prompt_snapshot", mode="before")
+    @classmethod
+    def _normalize_optional_text(cls, value: Any) -> Any:
+        return _normalize_optional_overlay_text(value)
+
+    @field_validator("updatedAt", mode="before")
+    @classmethod
+    def _normalize_updated_at(cls, value: Any) -> Any:
+        return _normalize_overlay_timestamp(value)
+
+    @field_validator("updatedAt")
+    @classmethod
+    def _validate_updated_at(cls, value: str) -> str:
+        return _validate_iso_timestamp_text(value)
 
 class ChatSessionCreate(BaseModel):
     """Schema for creating a new chat session."""
