@@ -588,7 +588,7 @@ async def test_omnivoice_structured_sidecar_errors_map_to_typed_exceptions(monke
         json={
             "error": {
                 "code": "MODEL_NOT_AVAILABLE",
-                "message": "local path /secret/model is missing",
+                "message": "Model weights are not installed",
                 "retryable": False,
             }
         },
@@ -612,7 +612,44 @@ async def test_omnivoice_structured_sidecar_errors_map_to_typed_exceptions(monke
         )
 
     assert exc_info.value.error_code == "MODEL_NOT_AVAILABLE"  # nosec B101
-    assert exc_info.value.details["sidecar_error_message"] == (
-        "OmniVoice sidecar reported an internal error; see server logs."
+    assert exc_info.value.details["sidecar_error_message"] == "Model weights are not installed"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_structured_sidecar_error_message_redacts_sensitive_details(monkeypatch):
+    adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter.set_supervisor(_FakeSupervisor())
+
+    response = httpx.Response(
+        400,
+        json={
+            "error": {
+                "code": "INVALID_GENERATION_PARAMETER",
+                "message": "local path /secret/model is missing",
+                "retryable": False,
+            }
+        },
+        headers={"content-type": "application/json"},
     )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.create_sidecar_async_client",
+        lambda *, timeout: _FakeClient({}, response),
+        raising=True,
+    )
+
+    with pytest.raises(TTSValidationError) as exc_info:
+        await adapter.generate(
+            TTSRequest(
+                text="fail please",
+                voice="auto",
+                format=AudioFormat.WAV,
+                stream=False,
+            )
+        )
+
+    assert exc_info.value.error_code == "INVALID_GENERATION_PARAMETER"  # nosec B101
+    assert exc_info.value.details["sidecar_error_message"] == "local path [redacted-path] is missing"  # nosec B101
     assert "secret" not in str(exc_info.value.details)  # nosec B101

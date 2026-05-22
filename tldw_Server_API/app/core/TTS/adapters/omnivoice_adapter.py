@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import tempfile
 import wave
 from io import BytesIO
@@ -499,6 +500,26 @@ class OmniVoiceAdapter(TTSAdapter):
             return "OmniVoice sidecar reported an internal error; see server logs."
         return "OmniVoice sidecar returned an empty error response."
 
+    @staticmethod
+    def _sanitize_structured_sidecar_message(message: str | None) -> str:
+        sanitized = str(message or "").strip()
+        if not sanitized:
+            return "OmniVoice sidecar returned an empty error response."
+        sanitized = re.sub(r"[\x00-\x1f\x7f]+", " ", sanitized)
+        sanitized = re.sub(r"\b(?:https?|file)://[^\s<>'\"]+", "[redacted-url]", sanitized)
+        sanitized = re.sub(r"\b[A-Za-z]:\\[^\s:;,)\]}]+(?:\\[^\s:;,)\]}]+)*", "[redacted-path]", sanitized)
+        sanitized = re.sub(r"(?<!\w)~(?:/[^\s:;,)\]}]+)+", "[redacted-path]", sanitized)
+        sanitized = re.sub(r"(?<!\w)/(?:[^\s/:;,)\]}]+/)+[^\s:;,)\]}]+", "[redacted-path]", sanitized)
+        sanitized = re.sub(
+            r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+",
+            lambda match: f"{match.group(1)}=[redacted-secret]",
+            sanitized,
+        )
+        sanitized = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [redacted-token]", sanitized)
+        sanitized = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "[redacted-token]", sanitized)
+        sanitized = re.sub(r"\s+", " ", sanitized).strip()
+        return sanitized[:500] if sanitized else "OmniVoice sidecar returned an empty error response."
+
     def _parse_sample_rate_header(self, value: str | None) -> int:
         try:
             sample_rate = int(value or self.DEFAULT_SAMPLE_RATE)
@@ -532,7 +553,7 @@ class OmniVoiceAdapter(TTSAdapter):
             details["sidecar_error_code"] = code
             details["retryable"] = retryable
         if message:
-            details["sidecar_error_message"] = self._sanitize_sidecar_error_text(message)
+            details["sidecar_error_message"] = self._sanitize_structured_sidecar_message(message)
         logger.warning(
             "OmniVoice sidecar returned status {} with sanitized error code {}",
             response.status_code,
