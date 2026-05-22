@@ -1,7 +1,8 @@
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react"
 import { Document, pdfjs } from "react-pdf"
 import type { DocumentProps } from "react-pdf"
-import { Spin, Alert } from "antd"
+import { Spin } from "antd"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { PdfPage } from "./PdfPage"
 import { TextSelectionPopover } from "../TextSelectionPopover"
 import { useTextSelection } from "@/hooks/document-workspace/useTextSelection"
@@ -407,12 +408,12 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   if (!url) {
     return (
       <div className="flex h-full items-center justify-center p-4">
-        <Alert
-          type="warning"
+        <DesignSystemAlert
+          variant="warning"
           title="No document URL"
-          description="Please select a document to view"
-          showIcon
-        />
+        >
+          Please select a document to view
+        </DesignSystemAlert>
       </div>
     )
   }
@@ -446,12 +447,12 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
           </div>
         }
         error={
-          <Alert
-            type="error"
+          <DesignSystemAlert
+            variant="error"
             title="Failed to load PDF"
-            description={error || "An error occurred while loading the document"}
-            showIcon
-          />
+          >
+            {error || "An error occurred while loading the document"}
+          </DesignSystemAlert>
         }
       >
         {loading ? null : viewMode === "single" ? (

@@ -33,50 +33,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx:Alert#antd-alert-epubviewer-type-error-line-592-1w9pq4c",
-    "path": "src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx:Alert#antd-alert-epubviewer-type-warning-line-576-x5j1x0",
-    "path": "src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx:Alert#antd-alert-pdfdocument-type-error-failed-to-load-pdf-lin-1vmdcny",
-    "path": "src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx:Alert#antd-alert-pdfdocument-type-warning-no-document-url-plea-1uewu4b",
-    "path": "src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/DocumentWorkspace/DocumentWorkspaceErrorBoundary.tsx:Result",
     "path": "src/components/DocumentWorkspace/DocumentWorkspaceErrorBoundary.tsx",
     "rule": "antd-product-state-import",

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Spin, Alert } from "antd"
+import { Spin } from "antd"
 import type { Book, Rendition, NavItem } from "epubjs"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { TextSelectionPopover } from "../TextSelectionPopover"
 import { EpubSearch } from "./EpubSearch"
@@ -573,15 +574,15 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
   if (!url) {
     return (
       <div className="flex h-full items-center justify-center p-4">
-        <Alert
-          type="warning"
+        <DesignSystemAlert
+          variant="warning"
           title={t("option:documentWorkspace.noUrl", "No document URL")}
-          description={t(
+        >
+          {t(
             "option:documentWorkspace.selectDocument",
             "Please select a document to view"
           )}
-          showIcon
-        />
+        </DesignSystemAlert>
       </div>
     )
   }
@@ -589,12 +590,12 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-4">
-        <Alert
-          type="error"
+        <DesignSystemAlert
+          variant="error"
           title={t("option:documentWorkspace.loadError", "Failed to load EPUB")}
-          description={error}
-          showIcon
-        />
+        >
+          {error}
+        </DesignSystemAlert>
       </div>
     )
   }
