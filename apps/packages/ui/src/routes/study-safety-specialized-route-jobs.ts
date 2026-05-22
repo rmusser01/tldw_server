@@ -290,7 +290,11 @@ export const STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS: SpecializedRouteJob[] = [
   }
 ]
 
+const STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS_BY_ROUTE = new Map(
+  STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS.map((job) => [job.route, job])
+)
+
 export const getStudySafetySpecializedRouteJob = (
   route: SpecializedRouteJob["route"]
 ): SpecializedRouteJob | undefined =>
-  STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS.find((job) => job.route === route)
+  STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS_BY_ROUTE.get(route)

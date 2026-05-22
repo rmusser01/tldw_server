@@ -1,5 +1,4 @@
 import React from "react"
-import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
@@ -88,17 +87,6 @@ import OptionDataTables from "../option-data-tables"
 import OptionChunkingPlayground from "../option-chunking-playground"
 import OptionKanbanPlayground from "../option-kanban-playground"
 
-const resolveSourcePath = (candidates: string[]) => {
-  const path = candidates.find((candidate) => existsSync(candidate))
-  if (!path) {
-    throw new Error(`Unable to locate source file: ${candidates.join(", ")}`)
-  }
-  return path
-}
-
-const readWorkspaceSource = (candidates: string[]) =>
-  readFileSync(resolveSourcePath(candidates), "utf8")
-
 const sharedRouteCases = [
   {
     route: "/evaluations",
@@ -183,35 +171,5 @@ describe("study, safety, and specialized route boundaries", () => {
     )
 
     expect(await screen.findByTestId("moderation-rules-target")).toBeVisible()
-  })
-
-  it("keeps the web-only claims review route as a content-review alias", () => {
-    const source = readWorkspaceSource([
-      "../../tldw-frontend/pages/claims-review.tsx",
-      "apps/tldw-frontend/pages/claims-review.tsx"
-    ])
-
-    expect(source).toContain("RouteRedirect")
-    expect(source).toContain('to="/content-review"')
-  })
-
-  it("keeps VN labs routes as web-only Next pages", () => {
-    const vnAssetsSource = readWorkspaceSource([
-      "../../tldw-frontend/pages/vn-assets.tsx",
-      "apps/tldw-frontend/pages/vn-assets.tsx"
-    ])
-    const vnPlaySource = readWorkspaceSource([
-      "../../tldw-frontend/pages/vn-play.tsx",
-      "apps/tldw-frontend/pages/vn-play.tsx"
-    ])
-
-    expect(vnAssetsSource).toContain(
-      "import('@web/components/vn-assets/VNAssetsWorkbench')"
-    )
-    expect(vnAssetsSource).toContain("ssr: false")
-    expect(vnPlaySource).toContain(
-      "import('@web/components/vn-play/VNPlayWorkspace')"
-    )
-    expect(vnPlaySource).toContain("ssr: false")
   })
 })

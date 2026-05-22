@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  getStudySafetySpecializedRouteJob,
   STUDY_SAFETY_SPECIALIZED_ROUTE_FINDINGS,
   STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS
 } from "../study-safety-specialized-route-jobs"
@@ -29,6 +30,12 @@ describe("study, safety, and specialized route jobs", () => {
   it("keeps labels aligned with route metadata", () => {
     for (const job of STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS) {
       expect(job.label).toBe(getRouteMetadata(job.route)?.label)
+    }
+  })
+
+  it("looks up route jobs by canonical route", () => {
+    for (const job of STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS) {
+      expect(getStudySafetySpecializedRouteJob(job.route)).toBe(job)
     }
   })
 

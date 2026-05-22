@@ -21,6 +21,10 @@ modified_files:
 - apps/packages/ui/src/routes/option-evaluations.tsx
 - apps/packages/ui/src/routes/option-kanban-playground.tsx
 - apps/packages/ui/src/routes/route-metadata.ts
+- apps/tldw-frontend/extension/routes/option-evaluations.tsx
+- apps/tldw-frontend/extension/routes/option-kanban-playground.tsx
+- apps/tldw-frontend/__tests__/extension/study-safety-specialized-route-parity.test.tsx
+- apps/tldw-frontend/__tests__/pages/study-safety-specialized-page-shims.test.tsx
 - backlog/tasks/task-418.9.1 - Implement-WP11B-study-safety-specialized-route-contract.md
 ---
 
@@ -50,6 +54,10 @@ Execute WP11B Task 1 from the WebUI study/safety/specialized implementation plan
 - Verification: `bunx tsc --noEmit --target ES2022 --module ESNext --moduleResolution bundler src/routes/study-safety-specialized-route-jobs.ts` passed.
 - Typecheck note: package-wide `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit -p tsconfig.json` still fails on inherited baseline TypeScript debt outside this slice; no reported errors referenced the new route-job contract or changed route wrappers.
 - Bandit skipped because this slice touched TypeScript/Markdown only and no Python files.
+- Review fix: matched extension `/evaluations` and `/kanban` route boundaries to shared route identities.
+- Review fix: changed `getStudySafetySpecializedRouteJob` to use a route map and added lookup coverage.
+- Review fix: removed cross-package filesystem source reads from the shared UI boundary test and moved Next page ownership checks into frontend tests that import the page modules.
+- Review-fix verification: `bunx vitest run __tests__/extension/study-safety-specialized-route-parity.test.tsx __tests__/pages/study-safety-specialized-page-shims.test.tsx --maxWorkers=1 --no-file-parallelism` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -58,6 +66,7 @@ Execute WP11B Task 1 from the WebUI study/safety/specialized implementation plan
 - Added a pure WP11B route-job contract for evaluations, flashcards, quiz, moderation/content review aliases, data tables, chunking, kanban, and VN routes.
 - Added focused tests for route-job coverage, route boundary ownership, Next-only specialized pages, sidepanel flashcards isolation, and route metadata alias behavior.
 - Fixed narrow ownership mismatches found by the tests: evaluations now has a route error boundary, `/kanban` reports the canonical route id/label, and `/claims-review` metadata now matches its redirect to `/content-review`.
+- Addressed PR review comments by adding extension route parity, route-map lookup, and frontend-owned page shim tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
