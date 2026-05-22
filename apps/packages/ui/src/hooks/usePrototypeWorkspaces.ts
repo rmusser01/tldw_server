@@ -4,6 +4,8 @@ import type {
   PrototypeWorkspaceDetail,
   PrototypePromotionCreateInput,
   PrototypePromotionRequest,
+  PrototypePromotionReviewInput,
+  PrototypePromotionReviewResult,
   PrototypeSessionJob,
   PrototypeWorkspace,
   PrototypeWorkspaceCreateInput,
@@ -14,7 +16,8 @@ import {
   createPrototypeOwnerBranchSessionRequest,
   createPrototypePromotionRequestRequest,
   createPrototypeWorkspaceRequest,
-  getPrototypeWorkspaceRequest
+  getPrototypeWorkspaceRequest,
+  reviewPrototypePromotionRequestRequest
 } from "@/services/tldw/domains/prototype-workspaces"
 
 export const prototypeWorkspaceQueryKeys = {
@@ -113,11 +116,41 @@ export const useCreatePromotionRequest = () => {
   >({
     mutationFn: createPrototypePromotionRequestRequest,
     onSuccess: async (_promotion, variables) => {
-      await queryClient.invalidateQueries({
-        queryKey: prototypeWorkspaceQueryKeys.promotions(
-          variables.prototype_workspace_id
-        )
-      })
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: prototypeWorkspaceQueryKeys.workspace(
+            variables.prototype_workspace_id
+          )
+        }),
+        queryClient.invalidateQueries({
+          queryKey: prototypeWorkspaceQueryKeys.promotions(
+            variables.prototype_workspace_id
+          )
+        })
+      ])
+    }
+  })
+}
+
+export const useReviewPrototypePromotionRequest = () => {
+  const queryClient = useQueryClient()
+  return useMutation<
+    PrototypePromotionReviewResult,
+    Error,
+    PrototypePromotionReviewInput
+  >({
+    mutationFn: reviewPrototypePromotionRequestRequest,
+    onSuccess: async (reviewResult, variables) => {
+      const workspaceId =
+        reviewResult.prototype_workspace_id || variables.prototype_workspace_id
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: prototypeWorkspaceQueryKeys.workspace(workspaceId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: prototypeWorkspaceQueryKeys.promotions(workspaceId)
+        })
+      ])
     }
   })
 }

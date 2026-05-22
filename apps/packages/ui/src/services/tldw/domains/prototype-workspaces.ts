@@ -6,6 +6,8 @@ import type {
   PrototypeWorkspaceDetail,
   PrototypePromotionCreateInput,
   PrototypePromotionRequest,
+  PrototypePromotionReviewInput,
+  PrototypePromotionReviewResult,
   PrototypeSessionJob,
   PrototypeWorkspace,
   PrototypeWorkspaceCreateInput,
@@ -75,6 +77,18 @@ export const createPrototypePromotionRequestRequest = (
   body: PrototypePromotionCreateInput
 ) => jsonPost<PrototypePromotionRequest>("/prototype-promotions", body)
 
+export const reviewPrototypePromotionRequestRequest = (
+  input: PrototypePromotionReviewInput
+) =>
+  jsonPost<PrototypePromotionReviewResult>(
+    `/prototype-promotions/${encodeURIComponent(input.promotion_request_id)}/review`,
+    {
+      decision: input.decision,
+      review_notes: input.review_notes,
+      review_baseline_snapshot_id: input.review_baseline_snapshot_id
+    }
+  )
+
 export const exchangePrototypePrivateLinkRequest = (
   token: string,
   body: PrototypeLinkExchangeRequest
@@ -119,6 +133,13 @@ export const prototypeWorkspaceMethods = {
     body: PrototypePromotionCreateInput
   ): Promise<PrototypePromotionRequest> {
     return createPrototypePromotionRequestRequest(body)
+  },
+
+  async reviewPrototypePromotionRequest(
+    this: TldwApiClientCore,
+    body: PrototypePromotionReviewInput
+  ): Promise<PrototypePromotionReviewResult> {
+    return reviewPrototypePromotionRequestRequest(body)
   },
 
   async exchangePrototypePrivateLink(

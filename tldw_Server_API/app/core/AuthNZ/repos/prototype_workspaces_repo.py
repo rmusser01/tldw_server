@@ -1115,6 +1115,21 @@ class PrototypeWorkspacesRepo:
         )
         return self._normalize_promotion_request_row(self._row_to_dict(row) if row else None)
 
+    async def list_promotion_requests_for_workspace(self, prototype_workspace_id: str) -> list[dict[str, Any]]:
+        """Return owner-review promotion requests for one prototype workspace."""
+        rows = await self.db_pool.fetchall(
+            """
+            SELECT id, prototype_workspace_id, prototype_session_id, candidate_snapshot_id,
+                   requested_by_user_id, requested_by_shared_actor_id, status,
+                   reviewed_by_user_id, review_notes, created_at, updated_at
+            FROM prototype_promotion_requests
+            WHERE prototype_workspace_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            (prototype_workspace_id,),
+        )
+        return [self._normalize_promotion_request_row(self._row_to_dict(r)) or {} for r in rows]
+
     async def update_promotion_request(
         self,
         promotion_request_id: str,

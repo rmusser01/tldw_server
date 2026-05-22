@@ -260,6 +260,67 @@ class TestPrototypeWorkspaceEndpoints:
         assert body["snapshots"][1]["snapshot_id"] == seed_snapshot["snapshot_id"]
         assert body["snapshots"][1]["is_canonical"] is True
 
+    def test_owner_workspace_detail_includes_promotion_request_inventory(
+        self,
+        client: TestClient,
+        test_services: SimpleNamespace,
+    ) -> None:
+        workspace, seed_snapshot = _seed_workspace(test_services, title="Promotion inventory prototype")
+        access_context = _seed_external_access(
+            test_services,
+            prototype_workspace_id=workspace["id"],
+            share_link_id=63,
+        )
+        session_result = _run(
+            test_services.service.create_or_reuse_branch_session(
+                prototype_workspace_id=workspace["id"],
+                actor_type="external_collaborator",
+                actor_shared_actor_id=access_context.shared_actor_id,
+                request_nonce="req_promotion_inventory",
+                share_link_id=63,
+            )
+        )
+        session = session_result["session"]
+        candidate_snapshot = _run(
+            test_services.repo.create_snapshot(
+                prototype_workspace_id=workspace["id"],
+                snapshot_id="psnap_promotion_inventory_candidate",
+                created_by_shared_actor_id=access_context.shared_actor_id,
+                parent_snapshot_id=seed_snapshot["snapshot_id"],
+                created_from_session_id=session["id"],
+                storage_ref="prototype://promotion-inventory-candidate",
+                prompt_summary="Inventory candidate",
+            )
+        )
+        promotion_request = _run(
+            test_services.repo.create_promotion_request(
+                prototype_workspace_id=workspace["id"],
+                prototype_session_id=session["id"],
+                candidate_snapshot_id=candidate_snapshot["snapshot_id"],
+                requested_by_shared_actor_id=access_context.shared_actor_id,
+            )
+        )
+
+        resp = client.get(f"/api/v1/prototype-workspaces/{workspace['id']}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["promotion_requests"] == [
+            {
+                "id": promotion_request["id"],
+                "prototype_workspace_id": workspace["id"],
+                "prototype_session_id": session["id"],
+                "candidate_snapshot_id": candidate_snapshot["snapshot_id"],
+                "requested_by_user_id": None,
+                "requested_by_shared_actor_id": access_context.shared_actor_id,
+                "status": "pending",
+                "reviewed_by_user_id": None,
+                "review_notes": None,
+                "created_at": promotion_request["created_at"],
+                "updated_at": promotion_request["updated_at"],
+            }
+        ]
+
     def test_owner_can_create_workspace_and_request_branch_session(self, client: TestClient) -> None:
         created = client.post(
             "/api/v1/prototype-workspaces",

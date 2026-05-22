@@ -74,6 +74,7 @@ export interface PrototypeWorkspaceDetail extends PrototypeWorkspace {
   viewer_role: PrototypeWorkspaceViewerRole
   sessions: PrototypeWorkspaceSessionSummary[]
   snapshots: PrototypeWorkspaceSnapshotSummary[]
+  promotion_requests: PrototypePromotionRequest[]
 }
 
 export interface PrototypeWorkspaceSessionCreateInput {
@@ -117,4 +118,22 @@ export interface PrototypePromotionRequest {
   review_notes?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface PrototypePromotionReviewInput {
+  promotion_request_id: string
+  prototype_workspace_id: string
+  decision: "approve" | "reject"
+  review_notes?: string | null
+  review_baseline_snapshot_id?: string | null
+}
+
+export interface PrototypePromotionReviewResult {
+  status: string
+  failure_code?: string | null
+  prototype_workspace_id: string
+  candidate_snapshot_id: string
+  canonical_snapshot_id?: string | null
+  preview_handle?: string | null
+  details: Record<string, unknown>
 }

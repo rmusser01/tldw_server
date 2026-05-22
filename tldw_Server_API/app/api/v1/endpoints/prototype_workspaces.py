@@ -276,6 +276,7 @@ async def _build_workspace_detail_response(repo: Any, workspace: dict[str, Any])
     """Build an owner-facing workspace detail response with sessions and snapshots."""
     sessions = await repo.list_sessions_for_workspace(str(workspace["id"]))
     snapshots = await repo.list_snapshots_for_workspace(str(workspace["id"]))
+    promotion_requests = await repo.list_promotion_requests_for_workspace(str(workspace["id"]))
     canonical_snapshot_id = str(workspace.get("canonical_snapshot_id") or "")
     last_known_good_snapshot_id = str(workspace.get("last_known_good_snapshot_id") or "")
 
@@ -294,6 +295,7 @@ async def _build_workspace_detail_response(repo: Any, workspace: dict[str, Any])
             "viewer_role": "owner",
             "sessions": sessions,
             "snapshots": snapshot_records,
+            "promotion_requests": promotion_requests,
         }
     )
 
