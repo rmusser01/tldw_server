@@ -5,6 +5,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   List,
   Modal,
   message,
@@ -49,8 +50,15 @@ import {
 } from "@/services/watchlists-overview"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import {
+  cadenceDraftToLegacyPreset,
+  createDefaultQuickSetupCadenceDraft,
+  formatQuickSetupCadenceLabel,
+  legacyPresetToQuickSetupCadenceDraft,
+  normalizeQuickSetupIntervalCadence,
   parseQuickSetupExtraSourceUrls,
   QUICK_SETUP_DEFAULT_VALUES,
+  type WatchlistCadenceIntervalUnit,
+  type QuickSetupScheduleMode,
   type QuickSetupValues,
   toQuickSetupJobPayload,
   toQuickSetupSourcePayload
@@ -76,6 +84,7 @@ import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
+import { isWatchlistRunSuccessful } from "../shared/runStatus"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 import {
   trackWatchlistsOnboardingTelemetry,
@@ -746,7 +755,7 @@ export const OverviewTab: React.FC = () => {
         size: 50
       })
       const completedRun = (Array.isArray(runResult.items) ? runResult.items : []).find(
-        (run) => String(run.status || "").trim().toLowerCase() === "completed"
+        (run) => isWatchlistRunSuccessful(run.status)
       )
       if (!completedRun) {
         setPipelinePreviewError(
@@ -1052,6 +1061,66 @@ export const OverviewTab: React.FC = () => {
         ...(quickSetupValues || {})
       }) as QuickSetupValues,
     [quickSetupForm, quickSetupValues]
+  )
+  const quickSetupScheduleDraft =
+    quickSetupSnapshot.scheduleCadence ||
+    legacyPresetToQuickSetupCadenceDraft(quickSetupSnapshot.schedulePreset)
+  const quickSetupScheduleOptions = useMemo<Array<{ value: QuickSetupScheduleMode; label: string }>>(
+    () => [
+      {
+        value: "manual",
+        label: t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only")
+      },
+      {
+        value: "interval",
+        label: t(
+          "watchlists:overview.onboarding.quickSetup.schedule.interval",
+          "Every N hours/minutes"
+        )
+      },
+      {
+        value: "daily",
+        label: t("watchlists:overview.onboarding.quickSetup.schedule.dailySimple", "Daily")
+      },
+      {
+        value: "weekdays",
+        label: t("watchlists:overview.onboarding.quickSetup.schedule.weekdaysSimple", "Weekdays")
+      },
+      {
+        value: "weekly",
+        label: t("watchlists:overview.onboarding.quickSetup.schedule.weekly", "Weekly")
+      },
+      {
+        value: "advanced",
+        label: t("watchlists:overview.onboarding.quickSetup.schedule.advanced", "Advanced cron")
+      }
+    ],
+    [t]
+  )
+  const quickSetupIntervalUnitOptions = useMemo(
+    () => [
+      {
+        value: "hours",
+        label: t("watchlists:overview.onboarding.quickSetup.intervalUnits.hours", "Hours")
+      },
+      {
+        value: "minutes",
+        label: t("watchlists:overview.onboarding.quickSetup.intervalUnits.minutes", "Minutes")
+      }
+    ],
+    [t]
+  )
+  const quickSetupWeekdayOptions = useMemo(
+    () => [
+      { value: "SUN", label: t("watchlists:overview.onboarding.quickSetup.weekdays.sun", "Sunday") },
+      { value: "MON", label: t("watchlists:overview.onboarding.quickSetup.weekdays.mon", "Monday") },
+      { value: "TUE", label: t("watchlists:overview.onboarding.quickSetup.weekdays.tue", "Tuesday") },
+      { value: "WED", label: t("watchlists:overview.onboarding.quickSetup.weekdays.wed", "Wednesday") },
+      { value: "THU", label: t("watchlists:overview.onboarding.quickSetup.weekdays.thu", "Thursday") },
+      { value: "FRI", label: t("watchlists:overview.onboarding.quickSetup.weekdays.fri", "Friday") },
+      { value: "SAT", label: t("watchlists:overview.onboarding.quickSetup.weekdays.sat", "Saturday") }
+    ],
+    [t]
   )
 
   useEffect(() => {
@@ -1926,29 +1995,100 @@ export const OverviewTab: React.FC = () => {
 
                 <Form.Item
                   label={t("watchlists:overview.onboarding.quickSetup.fields.schedule", "Schedule")}
-                  name="schedulePreset"
+                  name={["scheduleCadence", "kind"]}
                 >
                   <Select
-                    options={[
-                      {
-                        value: "none",
-                        label: t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only")
-                      },
-                      {
-                        value: "hourly",
-                        label: t("watchlists:overview.onboarding.quickSetup.schedule.hourly", "Hourly")
-                      },
-                      {
-                        value: "daily",
-                        label: t("watchlists:overview.onboarding.quickSetup.schedule.daily", "Daily at 08:00")
-                      },
-                      {
-                        value: "weekdays",
-                        label: t("watchlists:overview.onboarding.quickSetup.schedule.weekdays", "Weekdays at 08:00")
-                      }
-                    ]}
+                    aria-label={t("watchlists:overview.onboarding.quickSetup.fields.schedule", "Schedule")}
+                    options={quickSetupScheduleOptions}
+                    onChange={(value) => {
+                      const cadence = createDefaultQuickSetupCadenceDraft(
+                        value as QuickSetupScheduleMode,
+                        quickSetupScheduleDraft
+                      )
+                      quickSetupForm.setFieldsValue({
+                        scheduleCadence: cadence,
+                        schedulePreset: cadenceDraftToLegacyPreset(cadence)
+                      })
+                    }}
                   />
                 </Form.Item>
+
+                {quickSetupScheduleDraft.kind === "interval" && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Form.Item
+                      label={t("watchlists:overview.onboarding.quickSetup.fields.intervalEvery", "Every")}
+                      name={["scheduleCadence", "every"]}
+                    >
+                      <InputNumber
+                        aria-label={t("watchlists:overview.onboarding.quickSetup.fields.intervalEvery", "Every")}
+                        min={quickSetupScheduleDraft.unit === "minutes" ? 5 : 1}
+                        max={quickSetupScheduleDraft.unit === "minutes" ? 59 : 23}
+                        className="w-full"
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      label={t("watchlists:overview.onboarding.quickSetup.fields.intervalUnit", "Interval unit")}
+                      name={["scheduleCadence", "unit"]}
+                    >
+                      <Select
+                        aria-label={t("watchlists:overview.onboarding.quickSetup.fields.intervalUnit", "Interval unit")}
+                        options={quickSetupIntervalUnitOptions}
+                        onChange={(value) => {
+                          const cadence = normalizeQuickSetupIntervalCadence(
+                            quickSetupForm.getFieldValue(["scheduleCadence", "every"]),
+                            value as WatchlistCadenceIntervalUnit
+                          )
+                          quickSetupForm.setFieldsValue({
+                            scheduleCadence: cadence,
+                            schedulePreset: cadenceDraftToLegacyPreset(cadence)
+                          })
+                        }}
+                      />
+                    </Form.Item>
+                  </div>
+                )}
+
+                {(quickSetupScheduleDraft.kind === "daily" ||
+                  quickSetupScheduleDraft.kind === "weekdays" ||
+                  quickSetupScheduleDraft.kind === "weekly") && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {quickSetupScheduleDraft.kind === "weekly" && (
+                      <Form.Item
+                        label={t("watchlists:overview.onboarding.quickSetup.fields.weekday", "Weekday")}
+                        name={["scheduleCadence", "weekday"]}
+                      >
+                        <Select
+                          aria-label={t("watchlists:overview.onboarding.quickSetup.fields.weekday", "Weekday")}
+                          options={quickSetupWeekdayOptions}
+                        />
+                      </Form.Item>
+                    )}
+                    <Form.Item
+                      label={t("watchlists:overview.onboarding.quickSetup.fields.time", "Time")}
+                      name={["scheduleCadence", "time"]}
+                    >
+                      <Input
+                        aria-label={t("watchlists:overview.onboarding.quickSetup.fields.time", "Time")}
+                        type="time"
+                      />
+                    </Form.Item>
+                  </div>
+                )}
+
+                {quickSetupScheduleDraft.kind === "advanced" && (
+                  <Form.Item
+                    label={t("watchlists:overview.onboarding.quickSetup.fields.cronExpression", "Cron expression")}
+                    name={["scheduleCadence", "cron"]}
+                  >
+                    <Input
+                      aria-label={t("watchlists:overview.onboarding.quickSetup.fields.cronExpression", "Cron expression")}
+                      placeholder={t(
+                        "watchlists:overview.onboarding.quickSetup.placeholders.cronExpression",
+                        "0 8 * * MON-FRI"
+                      )}
+                    />
+                  </Form.Item>
+                )}
 
                 <Form.Item
                   label={t("watchlists:overview.onboarding.quickSetup.fields.setupGoal", "Setup goal")}
@@ -2046,13 +2186,47 @@ export const OverviewTab: React.FC = () => {
                     <span className="font-medium">
                       {t("watchlists:overview.onboarding.quickSetup.review.schedule", "Schedule")}:
                     </span>{" "}
-                    {quickSetupSnapshot.schedulePreset === "hourly"
-                      ? t("watchlists:overview.onboarding.quickSetup.schedule.hourly", "Hourly")
-                      : quickSetupSnapshot.schedulePreset === "daily"
-                        ? t("watchlists:overview.onboarding.quickSetup.schedule.daily", "Daily at 08:00")
-                        : quickSetupSnapshot.schedulePreset === "weekdays"
-                          ? t("watchlists:overview.onboarding.quickSetup.schedule.weekdays", "Weekdays at 08:00")
-                          : t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only")}
+                    {formatQuickSetupCadenceLabel(quickSetupScheduleDraft, {
+                      manual: t("watchlists:overview.onboarding.quickSetup.schedule.none", "Manual only"),
+                      hourly: t("watchlists:overview.onboarding.quickSetup.schedule.hourly", "Hourly"),
+                      daily: (time) =>
+                        t("watchlists:overview.onboarding.quickSetup.schedule.dailyAt", "Daily at {{time}}", {
+                          time
+                        }),
+                      weekdays: (time) =>
+                        t("watchlists:overview.onboarding.quickSetup.schedule.weekdaysAt", "Weekdays at {{time}}", {
+                          time
+                        }),
+                      weekly: (weekday, time) => {
+                        const weekdayLabel =
+                          quickSetupWeekdayOptions.find((option) => option.value === weekday)?.label || weekday
+                        return t(
+                          "watchlists:overview.onboarding.quickSetup.schedule.weeklyAt",
+                          "{{weekday}} at {{time}}",
+                          { weekday: weekdayLabel, time }
+                        )
+                      },
+                      interval: (value, unit) =>
+                        unit === "minutes"
+                          ? t(
+                              "watchlists:overview.onboarding.quickSetup.schedule.everyMinutes",
+                              "Every {{value}} minute{{plural}}",
+                              { value, plural: value === 1 ? "" : "s" }
+                            )
+                          : t(
+                              "watchlists:overview.onboarding.quickSetup.schedule.everyHours",
+                              "Every {{value}} hour{{plural}}",
+                              { value, plural: value === 1 ? "" : "s" }
+                            ),
+                      advanced: (cron) =>
+                        cron
+                          ? t(
+                              "watchlists:overview.onboarding.quickSetup.schedule.customCron",
+                              "Custom cron: {{cron}}",
+                              { cron }
+                            )
+                          : t("watchlists:overview.onboarding.quickSetup.schedule.advanced", "Advanced cron")
+                    })}
                   </p>
                   <p>
                     <span className="font-medium">

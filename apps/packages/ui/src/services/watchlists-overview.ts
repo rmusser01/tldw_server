@@ -120,6 +120,9 @@ const normalizeStatus = (value: string | null | undefined): string =>
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
 
+const normalizeStatusKey = (value: string | null | undefined): string =>
+  normalizeStatus(value).replace(/\s+/g, "_")
+
 const asFiniteNumber = (value: unknown, fallback = 0): number => {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : fallback
@@ -136,6 +139,14 @@ const DELIVERY_ATTENTION_STATUSES = new Set([
   "error",
   "partial",
   "warning"
+])
+
+const AUDIO_ATTENTION_STATUSES = new Set([
+  "enqueue_failed",
+  "failed",
+  "error",
+  "configuration_required",
+  "queue_unavailable"
 ])
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
@@ -188,16 +199,12 @@ const hasAudioOutputIssue = (metadata: unknown): boolean => {
     record.generate_audio === true ||
     audio?.requested === true ||
     audio?.enabled === true
-  const normalized = normalizeStatus(
+  const statusValue =
     (record.audio_briefing_status as string | null | undefined) ||
-      (record.audio_status as string | null | undefined) ||
-      (audio?.status as string | null | undefined)
-  )
-  if (
-    normalized === "enqueue failed" ||
-    normalized === "failed" ||
-    normalized === "error"
-  ) {
+    (record.audio_status as string | null | undefined) ||
+    (audio?.status as string | null | undefined)
+  const normalized = normalizeStatusKey(statusValue)
+  if (AUDIO_ATTENTION_STATUSES.has(normalized)) {
     return true
   }
   return requested && normalized === "skipped"

@@ -267,6 +267,7 @@ export type RunStatus =
   | "queued"
   | "running"
   | "completed"
+  | "succeeded"
   | "failed"
   | "cancelled"
 

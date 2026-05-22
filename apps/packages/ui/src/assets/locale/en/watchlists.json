@@ -252,6 +252,11 @@
           "sourceType": "Feed type",
           "monitorName": "Monitor name",
           "schedule": "Schedule",
+          "intervalEvery": "Every",
+          "intervalUnit": "Interval unit",
+          "weekday": "Weekday",
+          "time": "Time",
+          "cronExpression": "Cron expression",
           "setupGoal": "Setup goal",
           "audioBriefing": "Audio briefing",
           "runNow": "Run test generation immediately"
@@ -267,7 +272,8 @@
         "placeholders": {
           "sourceName": "e.g., Daily Tech Feed",
           "sourceUrl": "https://example.com/feed.xml",
-          "monitorName": "e.g., Morning Brief"
+          "monitorName": "e.g., Morning Brief",
+          "cronExpression": "0 8 * * MON-FRI"
         },
         "validation": {
           "sourceNameRequired": "Enter a feed name",
@@ -280,7 +286,31 @@
           "none": "Manual only",
           "hourly": "Hourly",
           "daily": "Daily at 08:00",
-          "weekdays": "Weekdays at 08:00"
+          "weekdays": "Weekdays at 08:00",
+          "interval": "Every N hours/minutes",
+          "dailySimple": "Daily",
+          "weekdaysSimple": "Weekdays",
+          "weekly": "Weekly",
+          "advanced": "Advanced cron",
+          "dailyAt": "Daily at {{time}}",
+          "weekdaysAt": "Weekdays at {{time}}",
+          "weeklyAt": "{{weekday}} at {{time}}",
+          "everyMinutes": "Every {{value}} minute{{plural}}",
+          "everyHours": "Every {{value}} hour{{plural}}",
+          "customCron": "Custom cron: {{cron}}"
+        },
+        "intervalUnits": {
+          "hours": "Hours",
+          "minutes": "Minutes"
+        },
+        "weekdays": {
+          "sun": "Sunday",
+          "mon": "Monday",
+          "tue": "Tuesday",
+          "wed": "Wednesday",
+          "thu": "Thursday",
+          "fri": "Friday",
+          "sat": "Saturday"
         },
         "review": {
           "feed": "Feed",
@@ -1135,6 +1165,7 @@
       "pending": "Pending",
       "running": "Running",
       "completed": "Completed",
+      "succeeded": "Completed",
       "failed": "Failed",
       "cancelled": "Cancelled",
       "unknown": "Unknown"
@@ -1228,10 +1259,12 @@
       "audioStatusLoading": "Loading...",
       "audioStatusUnavailable": "Unknown",
       "audioTask": "Task {{taskId}}",
+      "audioNoTask": "No audio task created",
       "audioArtifactsLabel": "Audio artifacts",
       "audioStale": "Stale",
       "audioSupersededBy": "Superseded by {{requestId}}",
       "audioFallback": "Fallback: {{reason}}",
+      "audioReason": "Reason: {{reason}}",
       "audioFinalAvailable": "Final audio available",
       "audioDownloadFinal": "Download final audio",
       "openAudioArtifact": "Open",

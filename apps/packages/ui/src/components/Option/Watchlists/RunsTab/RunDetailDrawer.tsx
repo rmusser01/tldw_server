@@ -42,6 +42,7 @@ import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { RunDetailResponse, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
+import { isWatchlistRunTerminal } from "../shared/runStatus"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
 import {
@@ -162,8 +163,10 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }, [data?.stats])
 
   const audioSummary = useMemo(() => {
-    return getAudioStatusSummary(audioStatus, outputMetadataLabels)
-  }, [audioStatus, outputMetadataLabels])
+    const liveSummary = getAudioStatusSummary(audioStatus, outputMetadataLabels)
+    if (liveSummary.requested) return liveSummary
+    return getAudioStatusSummary(data?.stats, outputMetadataLabels)
+  }, [audioStatus, data?.stats, outputMetadataLabels])
 
   const downloadCsv = (content: string, filename: string): void => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" })
@@ -586,9 +589,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
             return
           }
 
-          const status = String(currentStatusRef.current || "").toLowerCase()
-          const terminal = status === "completed" || status === "failed" || status === "cancelled"
-          if (terminal) {
+          if (isWatchlistRunTerminal(currentStatusRef.current)) {
             setStreamState("disconnected")
             return
           }
@@ -1114,7 +1115,8 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   }
 
   const renderAudioStatusPanel = () => {
-    if (!audioTaskId) return null
+    const displayAudioTaskId = audioStatus?.task_id || audioTaskId
+    if (!displayAudioTaskId && !audioSummary.requested) return null
 
     const hasFinalAudio = Boolean(audioSummary.downloadUrl || audioSummary.finalArtifact)
     const hasAudioArtifacts = Boolean(
@@ -1158,9 +1160,11 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               {t("watchlists:runs.detail.audioStatusTitle", "Audio briefing")}
             </div>
             <div className="text-xs text-text-muted">
-              {t("watchlists:runs.detail.audioTask", "Task {{taskId}}", {
-                taskId: audioTaskId
-              })}
+              {displayAudioTaskId
+                ? t("watchlists:runs.detail.audioTask", "Task {{taskId}}", {
+                    taskId: displayAudioTaskId
+                  })
+                : t("watchlists:runs.detail.audioNoTask", "No audio task created")}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1184,11 +1188,19 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         {audioStatusError ? (
           <div className="text-xs text-danger">{audioStatusError}</div>
         ) : audioSummary.fallbackReason ? (
-          <div className="text-xs text-warning">
-            {t("watchlists:runs.detail.audioFallback", "Fallback: {{reason}}", {
-              reason: audioSummary.fallbackReason
-            })}
-          </div>
+          audioSummary.status === "fallback" ? (
+            <div className="text-xs text-warning">
+              {t("watchlists:runs.detail.audioFallback", "Fallback: {{reason}}", {
+                reason: audioSummary.fallbackReason
+              })}
+            </div>
+          ) : (
+            <div className="text-xs text-warning">
+              {t("watchlists:runs.detail.audioReason", "Reason: {{reason}}", {
+                reason: audioSummary.fallbackReason
+              })}
+            </div>
+          )
         ) : null}
 
         {hasFinalAudio && (
@@ -1228,15 +1240,20 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="small"
-            onClick={handleRetryAudio}
-            loading={retryingAudio}
-          >
-            {t("watchlists:runs.detail.retryAudio", "Retry audio")}
-          </Button>
-        </div>
+        {(displayAudioTaskId ||
+          audioSummary.status === "queue_unavailable" ||
+          audioSummary.status === "enqueue_failed" ||
+          audioSummary.status === "failed") && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="small"
+              onClick={handleRetryAudio}
+              loading={retryingAudio}
+            >
+              {t("watchlists:runs.detail.retryAudio", "Retry audio")}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }

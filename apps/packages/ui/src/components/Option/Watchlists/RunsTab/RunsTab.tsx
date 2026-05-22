@@ -25,6 +25,10 @@ import {
 import type { WatchlistJob, WatchlistRun } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
+import {
+  isWatchlistRunSuccessful,
+  normalizeWatchlistRunStatus
+} from "../shared/runStatus"
 import { RunDetailDrawer } from "./RunDetailDrawer"
 import { Download, Square } from "lucide-react"
 import { mapWatchlistsError } from "../shared/watchlists-error"
@@ -43,9 +47,6 @@ const RUNS_CSV_SERVER_PAGE_SIZE = 1000
 const RUNS_ADVANCED_FILTERS_STORAGE_KEY = "watchlists:runs:advanced-filters:v1"
 const RUN_STALLED_THRESHOLD_MS = 45 * 60_000
 type RunsCsvTalliesMode = "none" | "per_run" | "aggregate"
-
-const normalizeRunStatus = (status: unknown): string =>
-  String(status || "").trim().toLowerCase()
 
 const toStatusDefaultLabel = (status: string): string =>
   status
@@ -292,7 +293,7 @@ export const RunsTab: React.FC = () => {
   }, [])
 
   const getRunStatusLabel = useCallback((status: string) => {
-    const normalized = normalizeRunStatus(status)
+    const normalized = normalizeWatchlistRunStatus(status)
     if (!normalized) {
       return t("watchlists:runs.statusLabels.unknown", "Unknown")
     }
@@ -326,7 +327,7 @@ export const RunsTab: React.FC = () => {
     const visibleRuns = Array.isArray(runs) ? runs : []
     const nextStatuses = new Map<number, string>()
     visibleRuns.forEach((run) => {
-      nextStatuses.set(run.id, normalizeRunStatus(run.status))
+      nextStatuses.set(run.id, normalizeWatchlistRunStatus(run.status))
     })
 
     if (!hasRunsAnnouncementBaselineRef.current) {
@@ -337,7 +338,7 @@ export const RunsTab: React.FC = () => {
 
     const changedRuns = visibleRuns.filter((run) => {
       const previousStatus = previousVisibleRunsStatusRef.current.get(run.id)
-      const currentStatus = normalizeRunStatus(run.status)
+      const currentStatus = normalizeWatchlistRunStatus(run.status)
       return Boolean(previousStatus) && previousStatus !== currentStatus
     })
 
@@ -607,10 +608,10 @@ export const RunsTab: React.FC = () => {
       key: "status",
       width: 120,
       render: (status: string, record) => {
-        const statusNormalized = normalizeRunStatus(status)
+        const statusNormalized = normalizeWatchlistRunStatus(status)
         const ingestedCount = Number(record.stats?.items_ingested || 0)
         const hasBriefingOutputSignal =
-          statusNormalized === "completed" &&
+          isWatchlistRunSuccessful(status) &&
           Number.isFinite(ingestedCount) &&
           ingestedCount > 0
         const progressPercent = Math.round(
@@ -621,7 +622,7 @@ export const RunsTab: React.FC = () => {
         return (
           <div className="flex items-center gap-2">
             <StatusTag status={status} />
-            {status === "running" && (
+            {statusNormalized === "running" && (
               <Progress
                 percent={progressPercent}
                 size="small"

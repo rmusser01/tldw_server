@@ -477,6 +477,97 @@ describe("watchlists overview service", () => {
     expect(result.systemHealth).toBe("degraded")
   })
 
+  it("marks actionable audio setup and queue statuses as output attention", async () => {
+    mocks.fetchWatchlistSources.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      has_more: false
+    })
+    mocks.fetchWatchlistJobs.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      has_more: false
+    })
+    mocks.fetchScrapedItems.mockResolvedValueOnce({ items: [], total: 0 })
+    mocks.fetchWatchlistContentAlerts.mockResolvedValueOnce({ items: [], total: 0 })
+    mocks.fetchWatchlistRuns
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+    mocks.fetchWatchlistOutputs.mockResolvedValueOnce({
+      items: [
+        {
+          id: 801,
+          run_id: 101,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "queue_unavailable"
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:05:00Z"
+        },
+        {
+          id: 802,
+          run_id: 102,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio: {
+              requested: true,
+              status: "configuration_required"
+            }
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:06:00Z"
+        },
+        {
+          id: 803,
+          run_id: 103,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "disabled"
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:07:00Z"
+        },
+        {
+          id: 804,
+          run_id: 104,
+          job_id: 10,
+          type: "briefing_markdown",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "skipped_no_items"
+          },
+          version: 1,
+          expired: false,
+          created_at: "2026-02-18T10:08:00Z"
+        }
+      ],
+      total: 4,
+      has_more: false
+    })
+
+    const result = await fetchWatchlistsOverviewData()
+
+    expect(result.outputs.audioIssues).toBe(2)
+    expect(result.outputs.attention).toBe(2)
+    expect(result.health.statuses.outputs).toBe("attention")
+    expect(result.health.attention.outputs).toBe(2)
+  })
+
   it("derives health model and tab badges from aggregate counters", () => {
     const model = buildOverviewHealthModel({
       sources: { total: 3, degraded: 0, inactive: 3 },
