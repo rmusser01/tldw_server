@@ -161,6 +161,12 @@ AUDIO_BRIEFING_WORKFLOW_DEF: dict[str, Any] = {
                 "voice": "{{ inputs.tts_voice }}",
                 "response_format": "mp3",
                 "speed": "{{ inputs.tts_speed }}",
+                "artifact_metadata": {
+                    "final_artifact": True,
+                    "fallback_artifact": True,
+                    "single_voice_fallback": True,
+                    "fallback_reason": "multi_voice_tts_failed",
+                },
             },
             "timeout_seconds": 600,
             "retry": 1,

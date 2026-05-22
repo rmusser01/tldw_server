@@ -66,6 +66,24 @@ class TestAudioBriefingWorkflowDefinition:
         assert audio_cfg["background_audio_uri"] == "{{ inputs.background_audio_uri }}"
         assert audio_cfg["background_volume"] == "{{ inputs.background_volume }}"
 
+    def test_workflow_def_marks_single_voice_fallback_artifact(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            AUDIO_BRIEFING_WORKFLOW_DEF,
+        )
+
+        fallback_cfg = next(
+            step["config"]
+            for step in AUDIO_BRIEFING_WORKFLOW_DEF["steps"]
+            if step["id"] == "tts_single_voice_fallback"
+        )
+
+        assert fallback_cfg["artifact_metadata"] == {
+            "final_artifact": True,
+            "fallback_artifact": True,
+            "single_voice_fallback": True,
+            "fallback_reason": "multi_voice_tts_failed",
+        }
+
 
 class TestBuildWorkflowInputs:
     """Tests for _build_workflow_inputs."""

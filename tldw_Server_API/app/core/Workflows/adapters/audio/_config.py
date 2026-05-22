@@ -47,6 +47,7 @@ class TTSConfig(BaseAdapterConfig):
     extra_params: dict[str, Any] | None = Field(None, description="Provider-specific parameters")
     provider_options: dict[str, Any] | None = Field(None, description="Additional provider options")
     output_filename_template: str | None = Field(None, description="Output filename template (Jinja)")
+    artifact_metadata: dict[str, Any] | None = Field(None, description="Additional audio artifact metadata")
     post_process: PostProcessConfig | None = Field(None, description="Post-processing options")
 
 

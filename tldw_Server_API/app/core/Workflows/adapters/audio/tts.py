@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Workflows.adapters._common import (
     AsyncFileWriter,
     resolve_artifact_filename,
     resolve_artifacts_dir,
+    watchlist_artifact_metadata,
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.audio._config import TTSConfig
@@ -275,12 +276,21 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
 
             mime, _ = mimetypes.guess_type(str(out_path))
             audio_artifact_id = f"tts_{uuid.uuid4()}"
+            artifact_metadata = config.get("artifact_metadata")
+            if not isinstance(artifact_metadata, dict):
+                artifact_metadata = {}
             context["add_artifact"](
                 type="tts_audio",
                 uri=f"file://{normalized_path}",
                 size_bytes=size_bytes,
                 mime_type=mime or "application/octet-stream",
-                metadata={"model": model, "voice": voice, "format": ext},
+                metadata={
+                    "model": model,
+                    "voice": voice,
+                    "format": ext,
+                    **watchlist_artifact_metadata(context),
+                    **artifact_metadata,
+                },
                 artifact_id=audio_artifact_id,
             )
     except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS:

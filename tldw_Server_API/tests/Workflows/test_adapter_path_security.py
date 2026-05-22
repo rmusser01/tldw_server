@@ -9,6 +9,32 @@ import tldw_Server_API.app.core.Workflows.adapters._common as workflow_common
 pytestmark = pytest.mark.unit
 
 
+def test_watchlist_artifact_metadata_filters_to_watchlists_source():
+    metadata = workflow_common.watchlist_artifact_metadata(
+        {
+            "workflow_metadata": {
+                "source": "watchlist_audio_briefing",
+                "watchlist_job_id": 42,
+                "watchlist_run_id": 7,
+                "audio_request_id": "wla_test_request",
+                "ignored": "not copied",
+            }
+        }
+    )
+
+    assert metadata == {
+        "source": "watchlist_audio_briefing",
+        "watchlist_job_id": 42,
+        "watchlist_run_id": 7,
+        "audio_request_id": "wla_test_request",
+    }
+
+
+def test_watchlist_artifact_metadata_ignores_non_watchlists_metadata():
+    assert workflow_common.watchlist_artifact_metadata({"workflow_metadata": {"source": "manual_workflow"}}) == {}
+    assert workflow_common.watchlist_artifact_metadata({"workflow_metadata": "watchlist_audio_briefing"}) == {}
+
+
 @pytest.mark.asyncio
 async def test_prompt_adapter_sanitizes_artifact_dir(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)

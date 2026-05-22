@@ -337,7 +337,7 @@ git commit -m "feat: add watchlists audio request ids"
 - Test: `tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py`
 - Test: `tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py`
 
-- [ ] **Step 1: Write failing artifact metadata tests**
+- [x] **Step 1: Write failing artifact metadata tests**
 
 Add tests that set `context["workflow_metadata"]`:
 
@@ -352,7 +352,7 @@ context["workflow_metadata"] = {
 
 Assert script, speaker, final, and fallback TTS artifact metadata include those fields.
 
-- [ ] **Step 2: Run failing adapter tests**
+- [x] **Step 2: Run failing adapter tests**
 
 Run:
 
@@ -365,7 +365,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: new metadata assertions fail.
 
-- [ ] **Step 3: Add shared correlation metadata helper locally**
+- [x] **Step 3: Add shared correlation metadata helper locally**
 
 Keep implementation small. In each touched adapter, derive only safe Watchlists keys from `context["workflow_metadata"]`:
 
@@ -383,7 +383,7 @@ If duplication becomes distracting, move the helper into `tldw_Server_API/app/co
 
 Before changing adapters, confirm the Task 1 handler test proves payload metadata reaches `definition_snapshot["metadata"]`; otherwise these adapter changes will pass only synthetic unit tests and fail in the real workflow path.
 
-- [ ] **Step 4: Merge correlation metadata into artifacts**
+- [x] **Step 4: Merge correlation metadata into artifacts**
 
 Merge the helper result into:
 
@@ -393,7 +393,7 @@ Merge the helper result into:
 
 For fallback TTS, add optional `artifact_metadata` in config and merge it last after base model/voice/format metadata.
 
-- [ ] **Step 5: Mark Watchlists fallback TTS as final fallback**
+- [x] **Step 5: Mark Watchlists fallback TTS as final fallback**
 
 In `AUDIO_BRIEFING_WORKFLOW_DEF`, add fallback TTS config metadata:
 
@@ -408,7 +408,7 @@ In `AUDIO_BRIEFING_WORKFLOW_DEF`, add fallback TTS config metadata:
 
 Keep this limited to the Watchlists fallback step.
 
-- [ ] **Step 6: Run adapter tests**
+- [x] **Step 6: Run adapter tests**
 
 Run:
 
@@ -421,7 +421,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py \

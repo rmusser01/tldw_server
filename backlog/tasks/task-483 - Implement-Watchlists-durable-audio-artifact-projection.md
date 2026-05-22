@@ -14,8 +14,16 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/Workflows_DB.py
 - tldw_Server_API/app/core/Scheduler/handlers/workflows.py
 - tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py
+- tldw_Server_API/app/core/Workflows/adapters/_common.py
+- tldw_Server_API/app/core/Workflows/adapters/audio/_config.py
+- tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py
+- tldw_Server_API/app/core/Workflows/adapters/audio/tts.py
+- tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py
 - tldw_Server_API/app/api/v1/endpoints/watchlists.py
 - tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+- tldw_Server_API/tests/Workflows/test_adapter_path_security.py
+- tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py
+- tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
 - tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 - tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
 - Docs/superpowers/plans/2026-05-22-watchlists-durable-audio-artifact-projection-implementation-plan.md
@@ -76,6 +84,22 @@ Task 2 verification:
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py -q` passed, `40 passed`.
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `38 passed, 1 skipped`.
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/app/api/v1/endpoints/watchlists.py -f json -o /tmp/bandit_watchlists_audio_projection_task2.json` passed with `results 0`.
+- `git diff --check` passed.
+
+Task 3 completed:
+- Added a shared adapter helper that copies Watchlists correlation metadata only when `workflow_metadata.source == "watchlist_audio_briefing"`.
+- Tagged audio script artifacts with `source`, `watchlist_job_id`, `watchlist_run_id`, and `audio_request_id`.
+- Tagged multi-voice per-speaker and final TTS artifacts with the same correlation fields.
+- Added generic TTS `artifact_metadata` passthrough for fallback/final markers.
+- Marked the Watchlists single-voice fallback TTS step as the final fallback artifact.
+
+Task 3 verification:
+- Red run: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py::TestAudioBriefingWorkflowDefinition::test_workflow_def_marks_single_voice_fallback_artifact tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py::TestAudioBriefingComposeAdapter::test_compose_registers_script_artifact tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py::test_tts_adapter_merges_watchlist_and_config_artifact_metadata tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py::TestMultiVoiceTTSAdapter::test_multi_voice_tts_registers_per_speaker_artifacts -q` failed for missing artifact metadata.
+- Green run: same command passed, `4 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py -q` passed, `193 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py -q` passed, `29 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/test_adapter_path_security.py::test_watchlist_artifact_metadata_filters_to_watchlists_source tldw_Server_API/tests/Workflows/test_adapter_path_security.py::test_watchlist_artifact_metadata_ignores_non_watchlists_metadata -q` passed, `2 passed`.
+- `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Workflows/adapters/_common.py tldw_Server_API/app/core/Workflows/adapters/audio/_config.py tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py tldw_Server_API/app/core/Workflows/adapters/audio/tts.py tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py -f json -o /tmp/bandit_watchlists_audio_projection_task3.json` passed with `results 0`.
 - `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
