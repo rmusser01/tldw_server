@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef } from "react"
-import { Alert, Button, Form, Input, Modal, Select, message } from "antd"
+import { Button, Form, Input, Modal, Select, message } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { testWatchlistSource, testWatchlistSourceDraft } from "@/services/watchlists"
 import type { JobPreviewResult, SourcePreviewDiagnostics } from "@/types/watchlists"
 import type { WatchlistSource, SourceType } from "@/types/watchlists"
@@ -424,10 +425,10 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
           </div>
           {testResult && (
             <Alert
-              type={Number(testResult.total || 0) > 0 ? "success" : "warning"}
-              showIcon
+              variant={Number(testResult.total || 0) > 0 ? "success" : "warning"}
               title={t("watchlists:sources.form.testSourceSummary", "Test Summary")}
-              description={t(
+            >
+              {t(
                 "watchlists:sources.form.testSourceSummaryDescription",
                 "{{total}} preview item{{plural}}, {{ingestable}} ingestable, {{filtered}} filtered.",
                 {
@@ -437,41 +438,35 @@ export const SourceFormModal: React.FC<SourceFormModalProps> = ({
                   plural: Number(testResult.total || 0) === 1 ? "" : "s"
                 }
               )}
-            />
+            </Alert>
           )}
           {diagnosticsLines.length > 0 && (
             <Alert
-              type="info"
-              showIcon
-              message={t(
+              variant="info"
+              title={t(
                 "watchlists:sources.form.validationDiagnostics",
                 "Validation diagnostics"
               )}
-              description={(
-                <div className="space-y-1">
-                  {diagnosticsLines.map((line) => (
-                    <div key={line}>{line}</div>
-                  ))}
-                </div>
-              )}
-            />
+            >
+              <div className="space-y-1">
+                {diagnosticsLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+            </Alert>
           )}
           {testError && (
             <Alert
-              type="error"
-              showIcon
+              variant="error"
               title={testError}
-              description={testErrorHint || testError}
-              action={(
-                <Button
-                  size="small"
-                  onClick={() => void handleTestSource()}
-                  loading={testingSource}
-                >
-                  {t("watchlists:errors.retry", "Retry")}
-                </Button>
-              )}
-            />
+              action={{
+                label: t("watchlists:errors.retry", "Retry"),
+                onClick: () => void handleTestSource(),
+                loading: testingSource
+              }}
+            >
+              {testErrorHint || testError}
+            </Alert>
           )}
         </div>
 
