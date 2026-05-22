@@ -62,7 +62,7 @@ Implement the approved Watchlists durable audio artifact projection plan. Work i
 - [x] #5 `/watchlists` run audio endpoint can repair and return durable script/speaker/final audio projections from canonical Workflows artifacts.
 - [x] #6 Retry paths do not present stale audio artifacts as the active request.
 - [x] #7 Frontend renders durable mirrored audio graph, stale state, and live overrides without raw file paths.
-- [ ] #8 Focused backend/frontend tests and Bandit/diff hygiene are recorded.
+- [x] #8 Focused backend/frontend tests and Bandit/diff hygiene are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -178,6 +178,16 @@ Task 7 verification:
 - `git diff --check` passed.
 - `node -e "for (const file of ['apps/packages/ui/src/assets/locale/en/watchlists.json','apps/packages/ui/src/public/_locales/en/watchlists.json']) { JSON.parse(require('fs').readFileSync(file, 'utf8')); console.log(file + ' ok') }"` passed.
 - Bandit not applicable to Task 7 because the touched implementation scope is TypeScript/locale/docs only.
+
+Task 8 deferred:
+- Verified `watchlist_run` is registered on the Scheduler `watchlists` queue and recurring Watchlist-backed schedules route there.
+- Found no startup or enqueue path that guarantees a `watchlists` queue worker; the generic Scheduler starts `default` workers, while audio generation explicitly scales the `workflows` queue.
+- Did not add a proactive projection task in this PR because an unserved `watchlists` task would be unreliable, and placing the projection task on `workflows` would depend on retry-as-poll behavior after async Workflow submission.
+- Lazy read-repair plus mirrored fallback remains the durable MVP reliability path.
+
+Task 8 verification:
+- `rg -n "watchlist.*@task|queue=.*watch|watchlist_run|scale_workers|@task" tldw_Server_API/app/core tldw_Server_API/app/services`
+- `rg -n "scale_workers\([^\n]*(watchlists|workflows)|watchlists_queue|queue_name=\"watchlists\"|\"watchlists\"\)" tldw_Server_API/app tldw_Server_API/tests`
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

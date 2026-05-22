@@ -852,7 +852,7 @@ git commit -m "feat: show durable watchlists audio graph"
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py`
 
-- [ ] **Step 1: Verify the existing Watchlists background execution pattern**
+- [x] **Step 1: Verify the existing Watchlists background execution pattern**
 
 Inspect Scheduler handlers and Watchlists services. Use an existing Watchlists queue/handler if one exists. Do not create a new unserved queue.
 
@@ -862,9 +862,19 @@ Run:
 rg -n "watchlist.*@task|queue=.*watch|watchlist_run|scale_workers" tldw_Server_API/app/core tldw_Server_API/app/services
 ```
 
-- [ ] **Step 2: Decide whether proactive projection is safe for this PR**
+Observed:
+
+- `watchlist_run` is registered on the `watchlists` Scheduler queue in `tldw_Server_API/app/core/Scheduler/handlers/watchlists.py`.
+- Recurring Watchlist-backed schedules route to handler `watchlist_run` and queue `watchlists` in `tldw_Server_API/app/services/workflows_scheduler.py`.
+- The generic Scheduler worker pool only starts `default` workers by default.
+- Audio briefing submission explicitly ensures a `workflows` queue worker via `_ensure_workflows_queue_has_worker(...)`.
+- No matching `scale_workers(..., "watchlists")` or startup worker bootstrap for the `watchlists` queue was found.
+
+- [x] **Step 2: Decide whether proactive projection is safe for this PR**
 
 If there is no ensured worker path, do not implement this task in the first PR. Record it as deferred in the implementation task. Lazy read-repair is already sufficient for durability on read.
+
+Decision: defer proactive projection in this PR. Adding a Watchlists projection task to the unserved `watchlists` queue would not reliably run, and adding it to the `workflows` queue would make projection depend on retry-as-poll behavior after an async Workflow submit. The durable MVP remains complete through lazy read-repair plus mirrored fallback.
 
 - [ ] **Step 3: Write failing proactive projection tests if safe**
 
@@ -895,7 +905,7 @@ source .venv/bin/activate && python -m pytest \
   -q
 ```
 
-- [ ] **Step 6: Commit or record deferral**
+- [x] **Step 6: Commit or record deferral**
 
 If implemented:
 
