@@ -562,6 +562,156 @@ async def test_find_active_session_filters_candidate_in_sql() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_promotion_requests_for_workspace_filters_and_orders_requests(
+    repo,
+    prototype_db,
+) -> None:
+    """Promotion inventory is scoped to one workspace and ordered newest first."""
+    workspace = await repo.create_workspace(
+        owner_user_id=1,
+        title="review queue",
+        creation_source="prompt",
+    )
+    other_workspace = await repo.create_workspace(owner_user_id=1, title="other queue", creation_source="prompt")
+    base_snapshot = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_base",
+        created_by_user_id=1,
+    )
+    other_snapshot = await repo.create_snapshot(
+        prototype_workspace_id=other_workspace["id"],
+        snapshot_id="snap_review_queue_other_base",
+        created_by_user_id=1,
+    )
+    actor = await repo.create_shared_actor(
+        prototype_workspace_id=workspace["id"],
+        share_link_id=91,
+        display_name="Review queue stakeholder",
+        runtime_policy_profile="locked_collab",
+    )
+    other_actor = await repo.create_shared_actor(
+        prototype_workspace_id=other_workspace["id"],
+        share_link_id=92,
+        display_name="Other stakeholder",
+        runtime_policy_profile="locked_collab",
+    )
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=base_snapshot["snapshot_id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=actor["id"],
+        share_link_id=91,
+    )
+    other_session = await repo.create_session(
+        prototype_workspace_id=other_workspace["id"],
+        base_snapshot_id=other_snapshot["snapshot_id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=other_actor["id"],
+        share_link_id=92,
+    )
+    older_candidate = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_candidate_old",
+        created_by_shared_actor_id=actor["id"],
+        parent_snapshot_id=base_snapshot["snapshot_id"],
+        created_from_session_id=session["id"],
+    )
+    newer_candidate = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_candidate_new",
+        created_by_shared_actor_id=actor["id"],
+        parent_snapshot_id=base_snapshot["snapshot_id"],
+        created_from_session_id=session["id"],
+    )
+    other_candidate = await repo.create_snapshot(
+        prototype_workspace_id=other_workspace["id"],
+        snapshot_id="snap_review_queue_other_candidate",
+        created_by_shared_actor_id=other_actor["id"],
+        parent_snapshot_id=other_snapshot["snapshot_id"],
+        created_from_session_id=other_session["id"],
+    )
+
+    older_request = await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=older_candidate["snapshot_id"],
+        requested_by_shared_actor_id=actor["id"],
+    )
+    newer_request = await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=newer_candidate["snapshot_id"],
+        requested_by_shared_actor_id=actor["id"],
+    )
+    await repo.create_promotion_request(
+        prototype_workspace_id=other_workspace["id"],
+        prototype_session_id=other_session["id"],
+        candidate_snapshot_id=other_candidate["snapshot_id"],
+        requested_by_shared_actor_id=other_actor["id"],
+    )
+    prototype_db.execute(
+        "UPDATE prototype_promotion_requests SET updated_at = ? WHERE id = ?",
+        ("2026-01-01T00:00:00+00:00", older_request["id"]),
+    )
+    prototype_db.execute(
+        "UPDATE prototype_promotion_requests SET updated_at = ? WHERE id = ?",
+        ("2026-01-02T00:00:00+00:00", newer_request["id"]),
+    )
+    prototype_db.commit()
+
+    requests = await repo.list_promotion_requests_for_workspace(workspace["id"])
+
+    assert [request["id"] for request in requests] == [newer_request["id"], older_request["id"]]
+    assert {request["prototype_workspace_id"] for request in requests} == {workspace["id"]}
+    assert requests[0]["candidate_snapshot_id"] == newer_candidate["snapshot_id"]
+
+
+@pytest.mark.asyncio
+async def test_list_promotion_requests_for_workspace_filters_unparseable_rows(
+    repo,
+    monkeypatch,
+) -> None:
+    """Unparseable promotion request rows are omitted from the owner inventory."""
+    workspace = await repo.create_workspace(owner_user_id=1, title="review queue", creation_source="prompt")
+    base_snapshot = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_filter_base",
+        created_by_user_id=1,
+    )
+    actor = await repo.create_shared_actor(
+        prototype_workspace_id=workspace["id"],
+        share_link_id=93,
+        display_name="Review queue stakeholder",
+        runtime_policy_profile="locked_collab",
+    )
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=base_snapshot["snapshot_id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=actor["id"],
+        share_link_id=93,
+    )
+    candidate = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_filter_candidate",
+        created_by_shared_actor_id=actor["id"],
+        parent_snapshot_id=base_snapshot["snapshot_id"],
+        created_from_session_id=session["id"],
+    )
+    await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=candidate["snapshot_id"],
+        requested_by_shared_actor_id=actor["id"],
+    )
+    monkeypatch.setattr(repo, "_normalize_promotion_request_row", lambda _row: None)
+
+    requests = await repo.list_promotion_requests_for_workspace(workspace["id"])
+
+    assert requests == []
+
+
+@pytest.mark.asyncio
 async def test_cleanup_retained_state_revokes_expired_records_and_stales_pending_promotions(
     repo,
     prototype_db,

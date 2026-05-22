@@ -20,7 +20,8 @@ import {
   useCreateCollaboratorBranchSession,
   useCreateOwnerBranchSession,
   useCreatePromotionRequest,
-  useCreatePrototypeWorkspace
+  useCreatePrototypeWorkspace,
+  useReviewPrototypePromotionRequest
 } from "@/hooks/usePrototypeWorkspaces"
 import { getPrototypeContractState } from "@/test-utils/prototype-contract-fixtures"
 
@@ -310,9 +311,9 @@ describe("usePrototypeWorkspaces", () => {
       )
     )
 
-    const { result } = renderHook(() => useCreatePromotionRequest(), {
-      wrapper: buildWrapper()
-    })
+    const { queryClient, wrapper } = buildWrapperWithClient()
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    const { result } = renderHook(() => useCreatePromotionRequest(), { wrapper })
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -341,6 +342,99 @@ describe("usePrototypeWorkspaces", () => {
           })
         })
       )
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: prototypeWorkspaceQueryKeys.workspace("pw_1")
+      })
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: prototypeWorkspaceQueryKeys.promotions("pw_1")
+      })
+    })
+  })
+
+  it("reviews a prototype promotion request through the authenticated tldw fetch helper", async () => {
+    fetchWithTldwAuthMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "promoted",
+          prototype_workspace_id: "pw_1",
+          candidate_snapshot_id: "psnap_1",
+          canonical_snapshot_id: "psnap_1",
+          preview_handle: "pph_1",
+          details: {}
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    )
+
+    const { queryClient, wrapper } = buildWrapperWithClient()
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    const { result } = renderHook(() => useReviewPrototypePromotionRequest(), {
+      wrapper
+    })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        promotion_request_id: "ppr_1",
+        prototype_workspace_id: "pw_1",
+        decision: "approve",
+        review_notes: "Ship it",
+        review_baseline_snapshot_id: "psnap_base"
+      })
+    })
+
+    await waitFor(() => {
+      expect(fetchWithTldwAuthMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:8000/api/v1/prototype-promotions/ppr_1/review",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Content-Type": "application/json"
+          }),
+          body: JSON.stringify({
+            decision: "approve",
+            review_notes: "Ship it",
+            review_baseline_snapshot_id: "psnap_base"
+          })
+        })
+      )
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: prototypeWorkspaceQueryKeys.workspace("pw_1")
+      })
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: prototypeWorkspaceQueryKeys.promotions("pw_1")
+      })
+    })
+  })
+
+  it("preserves structured prototype promotion review errors for owner-state mapping", async () => {
+    const promotionConflict = getPrototypeContractState("promotion_conflict")
+    fetchWithTldwAuthMock.mockResolvedValue(
+      new Response(
+        JSON.stringify(promotionConflict.mockResponse),
+        {
+          status: promotionConflict.httpStatus,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    )
+
+    const { result } = renderHook(() => useReviewPrototypePromotionRequest(), {
+      wrapper: buildWrapper()
+    })
+
+    await expect(
+      result.current.mutateAsync({
+        promotion_request_id: "ppr_1",
+        prototype_workspace_id: "pw_1",
+        decision: "approve"
+      })
+    ).rejects.toMatchObject({
+      status: promotionConflict.httpStatus,
+      detail: promotionConflict.mockResponse.detail,
+      message: promotionConflict.mockResponse.detail.message
     })
   })
 })

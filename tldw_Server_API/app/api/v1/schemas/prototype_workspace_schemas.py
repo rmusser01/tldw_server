@@ -142,10 +142,27 @@ class PrototypeWorkspaceSnapshotSummaryResponse(BaseModel):
     is_last_known_good: bool = False
 
 
+class PrototypePromotionRequestSummaryResponse(BaseModel):
+    """Owner-facing summary of a collaborator promotion request."""
+
+    id: str
+    prototype_workspace_id: str
+    prototype_session_id: str
+    candidate_snapshot_id: str
+    requested_by_user_id: int | None = None
+    requested_by_shared_actor_id: str | None = None
+    status: str
+    reviewed_by_user_id: int | None = None
+    review_notes: str | None = None
+    created_at: str
+    updated_at: str
+
+
 class PrototypeWorkspaceDetailResponse(PrototypeWorkspaceResponse):
     viewer_role: Literal["owner", "internal_collaborator"] = "owner"
     sessions: list[PrototypeWorkspaceSessionSummaryResponse] = Field(default_factory=list)
     snapshots: list[PrototypeWorkspaceSnapshotSummaryResponse] = Field(default_factory=list)
+    promotion_requests: list[PrototypePromotionRequestSummaryResponse] = Field(default_factory=list)
 
 
 class PrototypeWorkspaceSessionCreateRequest(BaseModel):
