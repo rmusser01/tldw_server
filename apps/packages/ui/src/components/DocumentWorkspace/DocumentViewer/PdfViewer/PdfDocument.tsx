@@ -66,6 +66,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   onPageChange,
   pdfDocumentRef
 }) => {
+  const { t } = useTranslation(["option"])
   const [numPages, setNumPages] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from "react
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useStorage } from "@plasmohq/storage/hook"
-import { Alert, Drawer, Dropdown, Modal, notification, Tabs, Tooltip } from "antd"
+import { Drawer, Dropdown, Modal, notification, Tabs, Tooltip } from "antd"
 import {
   FileText,
   MessageSquare,
@@ -23,6 +23,7 @@ import {
   ChevronDown,
   CircleHelp
 } from "lucide-react"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useMobile, useTablet } from "@/hooks/useMediaQuery"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -946,18 +947,18 @@ export const DocumentWorkspacePage: React.FC = () => {
   const loadingAlert =
     loadingDocumentId !== null ? (
       <div className="px-4 pt-2">
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           title={t(
             "option:documentWorkspace.loadingDocument",
             "Loading document..."
           )}
-          description={t(
+        >
+          {t(
             "option:documentWorkspace.loadingDocumentHint",
             "Fetching the document file. This can take a moment for large files."
           )}
-        />
+        </DesignSystemAlert>
       </div>
     ) : null
 
@@ -982,29 +983,27 @@ export const DocumentWorkspacePage: React.FC = () => {
   const healthAlert =
     healthIssues.length > 0 ? (
       <div className="px-4 pt-2">
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t(
             "option:documentWorkspace.healthWarningTitle",
             "Document workspace storage unavailable"
           )}
-          description={
-            <div className="space-y-1">
-              <ul className="list-disc pl-5">
-                {healthIssues.map((issue, index) => (
-                  <li key={`${index}-${issue}`}>{issue}</li>
-                ))}
-              </ul>
-              <div className="text-xs text-text-muted">
-                {t(
-                  "option:documentWorkspace.healthWarningHint",
-                  "Some workspace features are temporarily unavailable. This usually resolves after restarting the server. If this persists, contact your administrator."
-                )}
-              </div>
+        >
+          <div className="space-y-1">
+            <ul className="list-disc pl-5">
+            {healthIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+            </ul>
+            <div className="text-xs text-text-muted">
+              {t(
+                "option:documentWorkspace.healthWarningHint",
+                "Some workspace features are temporarily unavailable. This usually resolves after restarting the server. If this persists, contact your administrator."
+              )}
             </div>
-          }
-        />
+          </div>
+        </DesignSystemAlert>
       </div>
     ) : null
 
