@@ -567,6 +567,49 @@ async def test_omnivoice_pcm_sidecar_response_uses_native_sample_rate_header(mon
         assert wav_file.getframerate() == 16000  # nosec B101
 
 
+@pytest.mark.parametrize("sample_rate_header", [None, "not-a-rate"])
+@pytest.mark.asyncio
+async def test_omnivoice_pcm_sidecar_response_falls_back_to_requested_sample_rate(
+    monkeypatch,
+    sample_rate_header,
+):
+    adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter.set_supervisor(_FakeSupervisor())
+
+    pcm = b"\x00\x01" * 64
+    headers = {
+        "X-OmniVoice-Audio-Format": "pcm",
+        "X-OmniVoice-Channels": "1",
+    }
+    if sample_rate_header is not None:
+        headers["X-OmniVoice-Sample-Rate"] = sample_rate_header
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.create_sidecar_async_client",
+        lambda *, timeout: _FakeClient(
+            {},
+            httpx.Response(200, content=pcm, headers=headers),
+        ),
+        raising=True,
+    )
+
+    response = await adapter.generate(
+        TTSRequest(
+            text="fallback rate",
+            voice="auto",
+            format=AudioFormat.WAV,
+            target_sample_rate=22050,
+            stream=False,
+        )
+    )
+
+    assert response.sample_rate == 22050  # nosec B101
+    with wave.open(BytesIO(response.audio_data), "rb") as wav_file:
+        assert wav_file.getframerate() == 22050  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_omnivoice_generate_transcodes_wav_to_requested_mp3(monkeypatch, tmp_path):
     adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5, "temp_dir": str(tmp_path)})
