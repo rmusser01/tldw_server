@@ -1,7 +1,7 @@
 ---
 id: TASK-448
 title: Implement overlay send path and snapshot-on-apply behavior
-status: To Do
+status: Done
 labels:
 - implementation
 - chat
@@ -33,7 +33,7 @@ Implement snapshot-on-apply overlay resolution from full character/persona detai
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Task 3 now separates overlay application from ordinary assistant selection, persists overlay snapshots in chat settings using resolved source detail, preserves tracked character/persona send paths, and prevents overlay changes from clearing the active conversation. Verification: `node node_modules/vitest/vitest.mjs --config vitest.config.ts run src/utils/__tests__/assistant-overlay.test.ts src/components/Common/__tests__/AssistantSelect.behavior.test.tsx src/components/Common/__tests__/AssistantSelect.tabs.test.tsx src/hooks/chat-modes/__tests__/normalChatMode.overlay.test.ts src/hooks/__tests__/useMessage.routing-mode.test.ts src/hooks/__tests__/useMessage.assistant-overlay.guard.test.ts src/hooks/__tests__/useMessageOption.assistant-overlay.test.tsx` -> 7 files passed, 29 tests passed. Bandit not applicable because the touched scope in this task is TypeScript/TSX only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

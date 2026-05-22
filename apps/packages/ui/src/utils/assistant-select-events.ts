@@ -4,6 +4,7 @@ export type AssistantSelectTab = "character" | "persona"
 
 export type AssistantSelectOpenDetail = {
   tab?: AssistantSelectTab
+  applyAs?: "tracked" | "overlay"
   source?: string
   returnFocusSelector?: string
 }
