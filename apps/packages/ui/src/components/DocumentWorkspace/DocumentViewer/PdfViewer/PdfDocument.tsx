@@ -451,7 +451,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
             variant="error"
             title="Failed to load PDF"
           >
-            {error || "An error occurred while loading the document"}
+            {error || t("option:documentWorkspace.genericLoadError", "An error occurred while loading the document")}
           </DesignSystemAlert>
         }
       >
