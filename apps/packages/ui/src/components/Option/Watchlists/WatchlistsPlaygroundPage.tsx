@@ -83,6 +83,7 @@ import {
 } from "@/utils/watchlists-ia-experiment-telemetry"
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import { resolveWatchlistsIaExperimentRollout } from "@/utils/watchlists-ia-rollout"
+import { resolvePreferredWatchlistId } from "./watchlist-selection"
 
 const RUN_NOTIFICATIONS_POLL_MS = 15_000
 const RUN_NOTIFICATIONS_PAGE_SIZE = 25
@@ -516,10 +517,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
       const response = await fetchWatchlists({ page: 1, size: 100 })
       const items = Array.isArray(response.items) ? response.items : []
       setWatchlists(items)
-      const hasValidSelection =
-        selectedWatchlistId != null && items.some((watchlist) => watchlist.id === selectedWatchlistId)
-      const nextSelectedWatchlistId =
-        items.length === 0 ? null : hasValidSelection ? selectedWatchlistId : items[0]?.id ?? null
+      const nextSelectedWatchlistId = resolvePreferredWatchlistId(items, selectedWatchlistId)
       if (nextSelectedWatchlistId !== selectedWatchlistId) {
         setSelectedWatchlistId(nextSelectedWatchlistId)
       }
