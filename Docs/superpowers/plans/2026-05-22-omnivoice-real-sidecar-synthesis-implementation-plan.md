@@ -66,7 +66,7 @@ This plan intentionally does not change the default TTS provider, does not enabl
 - Modify: `tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_protocol.py`
 - Modify: `tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_server.py`
 
-- [ ] **Step 1: Write failing protocol tests**
+- [x] **Step 1: Write failing protocol tests**
 
 Add tests that instantiate `OmniVoiceSynthesizeRequest` directly and assert:
 
@@ -121,7 +121,7 @@ def test_synthesize_request_clone_requires_reference_text_and_path():
         )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -132,7 +132,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_serve
 
 Expected: FAIL because the current protocol has no `generation`, `instruct`, `language_id`, `requested_sample_rate`, or conflict validation.
 
-- [ ] **Step 3: Implement protocol models**
+- [x] **Step 3: Implement protocol models**
 
 Update `omnivoice_sidecar_protocol.py` with focused models:
 
@@ -213,7 +213,7 @@ class OmniVoiceSynthesizeRequest(BaseModel):
 
 Keep `build_sidecar_auth_headers(...)` unchanged. Keep `OmniVoiceHealthResponse` or replace it with `OmniVoiceRuntimeStatus` only if endpoint tests are updated at the same time.
 
-- [ ] **Step 4: Run focused protocol tests**
+- [x] **Step 4: Run focused protocol tests**
 
 Run:
 
@@ -224,7 +224,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_serve
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_protocol.py \
@@ -244,7 +244,7 @@ git commit -m "test: define omnivoice sidecar protocol contract"
 - Modify: `tldw_Server_API/tests/TTS_NEW/unit/test_tts_validation_omnivoice.py`
 - Modify or create: `tldw_Server_API/tests/TTS_NEW/unit/service/test_tts_omnivoice_fallback_policy.py`
 
-- [ ] **Step 1: Write failing adapter payload tests**
+- [x] **Step 1: Write failing adapter payload tests**
 
 Add tests that verify canonical payload shape:
 
@@ -331,7 +331,7 @@ async def test_omnivoice_reference_audio_materializes_under_configured_scratch_d
     assert reference_path.parent == scratch_dir
 ```
 
-- [ ] **Step 2: Write failing validation tests**
+- [x] **Step 2: Write failing validation tests**
 
 Add tests in `test_tts_validation_omnivoice.py`:
 
@@ -357,7 +357,7 @@ def test_omnivoice_rejects_unknown_generation_param():
     assert "generation" in str(error).lower() or "unknown" in str(error).lower()
 ```
 
-- [ ] **Step 3: Write failing service fallback-policy tests**
+- [x] **Step 3: Write failing service fallback-policy tests**
 
 Add `tldw_Server_API/tests/TTS_NEW/unit/service/test_tts_omnivoice_fallback_policy.py` or extend an existing service-policy test file. Use a fake factory/adapter setup that makes the OmniVoice adapter fail and a second provider succeed if fallback is allowed.
 
@@ -399,7 +399,7 @@ async def test_omnivoice_direct_voice_reference_does_not_fallback():
 
 Also cover `custom:<voice_id>` and an OmniVoice-only generation parameter such as `num_step`.
 
-- [ ] **Step 4: Run focused tests to verify failure**
+- [x] **Step 4: Run focused tests to verify failure**
 
 Run:
 
@@ -414,7 +414,7 @@ python -m pytest \
 
 Expected: FAIL because the current adapter sends `sample_rate` top-level, has no `design` mode, does not build `generation`, and validation is English-only.
 
-- [ ] **Step 5: Implement adapter normalization helpers**
+- [x] **Step 5: Implement adapter normalization helpers**
 
 Add focused helpers to `OmniVoiceAdapter`:
 
@@ -448,7 +448,7 @@ Implementation rules:
 - `_build_sidecar_payload(...)` emits only canonical keys: `text`, `mode`, optional `voice`, optional `instruct`, optional `language_id`, optional `reference_audio_path`, optional `reference_text`, `requested_sample_rate`, and `generation`.
 - `_materialize_reference_audio_sync(...)` writes direct clone reference files under `extra_params.scratch_dir` from provider config, falling back to `temp_dir` only for test-only configurations where no sidecar containment is required.
 
-- [ ] **Step 6: Use sidecar native sample-rate headers on response**
+- [x] **Step 6: Use sidecar native sample-rate headers on response**
 
 In `generate(...)`, read sidecar native rate:
 
@@ -459,7 +459,7 @@ target_rate = request.target_sample_rate or native_sample_rate
 
 Use `native_sample_rate` for WAV/PCM normalization and response metadata unless conversion explicitly changes it. Do not pass requested target sample rate as sidecar native output rate.
 
-- [ ] **Step 7: Implement structured sidecar error mapping**
+- [x] **Step 7: Implement structured sidecar error mapping**
 
 When `response.status_code != 200`, parse JSON if present:
 
@@ -477,7 +477,7 @@ Map:
 
 Keep `_sanitize_sidecar_error_text(...)`; never surface raw response text.
 
-- [ ] **Step 8: Relax validation language allowlist and add generation checks**
+- [x] **Step 8: Relax validation language allowlist and add generation checks**
 
 In `tts_validation.py`:
 
@@ -485,7 +485,7 @@ In `tts_validation.py`:
 - Add OmniVoice-specific parameter validation for `instruct`, `voice_design`, `voice_description`, `language_id`, `omnivoice_mode`/`mode`, and generation allowlist/ranges.
 - Keep clone `reference_text` and duration checks unchanged.
 
-- [ ] **Step 9: Implement service-level no-fallback policy**
+- [x] **Step 9: Implement service-level no-fallback policy**
 
 In `tts_service_v2.py`, harden `_is_explicit_omnivoice_request(...)` or the fallback decision near `generate_speech(...)` so fallback is disabled when any of these are true:
 
@@ -499,7 +499,7 @@ In `tts_service_v2.py`, harden `_is_explicit_omnivoice_request(...)` or the fall
 
 Keep generic fallback behavior when OmniVoice is only an implicit priority candidate and no OmniVoice-specific semantic is present.
 
-- [ ] **Step 10: Run focused tests**
+- [x] **Step 10: Run focused tests**
 
 Run:
 
@@ -514,7 +514,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/TTS/adapters/omnivoice_adapter.py \
@@ -534,7 +534,7 @@ git commit -m "feat: normalize omnivoice sidecar requests"
 - Create: `tldw_Server_API/app/core/TTS/adapters/omnivoice_runtime.py`
 - Create: `tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_runtime.py`
 
-- [ ] **Step 1: Write failing runtime unit tests**
+- [x] **Step 1: Write failing runtime unit tests**
 
 Use fake import hooks instead of importing real OmniVoice. Cover:
 
@@ -574,7 +574,7 @@ Assert:
 - empty arrays raise `EMPTY_AUDIO_OUTPUT`.
 - clone reference paths outside configured `scratch_dir` raise `REFERENCE_PATH_NOT_ALLOWED`.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -585,7 +585,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_runtime.py -q
 
 Expected: FAIL because `omnivoice_runtime.py` does not exist.
 
-- [ ] **Step 3: Implement runtime module**
+- [x] **Step 3: Implement runtime module**
 
 Create `omnivoice_runtime.py` with:
 
@@ -624,7 +624,7 @@ Key implementation details:
 - Convert generated output into mono float/PCM WAV bytes. Prefer `soundfile.write(BytesIO(), array, 24000, format="WAV")` when available; fallback to `wave` with clipped int16 conversion.
 - Return a small dataclass `OmniVoiceSynthesizeResult(audio_bytes, audio_format, sample_rate, channels, cold_start, model)`.
 
-- [ ] **Step 4: Run runtime tests**
+- [x] **Step 4: Run runtime tests**
 
 Run:
 
@@ -635,7 +635,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_runtime.py -q
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/TTS/adapters/omnivoice_runtime.py \
@@ -651,7 +651,7 @@ git commit -m "feat: add omnivoice sidecar runtime"
 - Modify: `tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_server.py`
 - Modify: `tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_server.py`
 
-- [ ] **Step 1: Write failing server tests with injected fake runner**
+- [x] **Step 1: Write failing server tests with injected fake runner**
 
 Extend `create_app(...)` tests:
 
@@ -683,7 +683,7 @@ Assert:
 - clone requests with a reference path outside `scratch_dir` return structured `REFERENCE_PATH_NOT_ALLOWED`.
 - Existing auth tests still pass.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -694,7 +694,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_serve
 
 Expected: FAIL because current server has no runner injection or `/status`.
 
-- [ ] **Step 3: Implement sidecar app factory injection**
+- [x] **Step 3: Implement sidecar app factory injection**
 
 Change signature:
 
@@ -724,7 +724,7 @@ def load_runtime_config_from_env() -> dict[str, Any]:
 
 Add `/status`, make `/health` cheap and status-backed, and route `warmup/reload/shutdown` through runtime methods where available.
 
-- [ ] **Step 4: Implement structured error responses**
+- [x] **Step 4: Implement structured error responses**
 
 Add helper:
 
@@ -739,7 +739,7 @@ def _runtime_error_response(exc: OmniVoiceRuntimeError) -> JSONResponse:
 
 Keep raw exception details out of responses.
 
-- [ ] **Step 5: Run sidecar server tests**
+- [x] **Step 5: Run sidecar server tests**
 
 Run:
 
@@ -750,7 +750,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_serve
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_server.py \
@@ -767,7 +767,7 @@ git commit -m "feat: run omnivoice runtime from sidecar API"
 - Modify: `tldw_Server_API/app/core/TTS/tts_service_v2.py` only if adapter overrides need scratch-dir defaults from service config
 - Modify: `tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_supervisor.py`
 
-- [ ] **Step 1: Write failing supervisor env tests**
+- [x] **Step 1: Write failing supervisor env tests**
 
 Add assertions to existing spawn env tests:
 
@@ -802,7 +802,7 @@ async def test_supervisor_spawn_sets_omnivoice_runtime_env(tmp_path, monkeypatch
 
 The body should reuse the existing fake process and ready-client patterns in `test_omnivoice_sidecar_supervisor.py`.
 
-- [ ] **Step 2: Run supervisor tests to verify failure**
+- [x] **Step 2: Run supervisor tests to verify failure**
 
 Run:
 
@@ -813,7 +813,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_super
 
 Expected: FAIL on missing env vars.
 
-- [ ] **Step 3: Implement config env propagation**
+- [x] **Step 3: Implement config env propagation**
 
 In `OmniVoiceSidecarSupervisor.__init__`, resolve:
 
@@ -826,7 +826,7 @@ In `OmniVoiceSidecarSupervisor.__init__`, resolve:
 
 In `_build_subprocess_env(...)`, add only non-empty values. Create `scratch_dir` and `runtime_path` directories before spawn if configured.
 
-- [ ] **Step 4: Ensure readiness remains cheap**
+- [x] **Step 4: Ensure readiness remains cheap**
 
 Keep `_wait_for_ready()` polling `/health`. Since `/health` becomes status-backed, it must not trigger real synthesis or model download. If `/health` reports `ready=False` because model is missing, supervisor should treat startup as successful only if the sidecar process is alive. Do not spin forever waiting for a model that setup has not provisioned.
 
@@ -842,7 +842,7 @@ if response.status_code == 200:
 
 Do not hide synth-time provider errors; this only means the sidecar process is reachable.
 
-- [ ] **Step 5: Run supervisor tests**
+- [x] **Step 5: Run supervisor tests**
 
 Run:
 
@@ -853,7 +853,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_super
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_supervisor.py \
@@ -870,7 +870,7 @@ git commit -m "feat: pass omnivoice runtime config to sidecar"
 - Modify: `tldw_Server_API/Config_Files/tts_providers_config.yaml`
 - Modify: `tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_installer.py`
 
-- [ ] **Step 1: Write failing installer tests**
+- [x] **Step 1: Write failing installer tests**
 
 Add tests for config patch output:
 
@@ -893,7 +893,7 @@ def test_validate_local_model_path_rejects_missing_path(tmp_path):
         validate_local_model_path(tmp_path / "missing")
 ```
 
-- [ ] **Step 2: Run installer tests to verify failure**
+- [x] **Step 2: Run installer tests to verify failure**
 
 Run:
 
@@ -904,7 +904,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_installer.py 
 
 Expected: FAIL because installer does not record `model_path`.
 
-- [ ] **Step 3: Implement model path installer options**
+- [x] **Step 3: Implement model path installer options**
 
 Add CLI args:
 
@@ -934,7 +934,7 @@ extra_params:
 
 If the installer is going to patch `providers.omnivoice.enabled: true`, `--model-path` is required unless `--skip-model-check` is paired with a config mode that leaves the provider disabled. For this implementation slice, choose the simpler behavior: fail fast when `--model-path` is absent. Do not silently enable OmniVoice without a local model directory.
 
-- [ ] **Step 4: Update default config**
+- [x] **Step 4: Update default config**
 
 In `tts_providers_config.yaml`, keep `enabled: false` and add comments/keys:
 
@@ -949,7 +949,7 @@ extra_params:
 
 Do not add OmniVoice to provider priority.
 
-- [ ] **Step 5: Run installer tests**
+- [x] **Step 5: Run installer tests**
 
 Run:
 
@@ -960,7 +960,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_installer.py 
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
@@ -976,7 +976,7 @@ git commit -m "feat: require local omnivoice model path"
 **Files:**
 - Create: `tldw_Server_API/tests/TTS_NEW/integration/test_omnivoice_real_runtime.py`
 
-- [ ] **Step 1: Write skipped-by-default integration tests**
+- [x] **Step 1: Write skipped-by-default integration tests**
 
 Create tests guarded by `TLDW_TEST_OMNIVOICE_REAL=1`:
 
@@ -1011,7 +1011,7 @@ Each should:
 
 Use a tiny generated WAV fixture for clone reference and a short `reference_text`.
 
-- [ ] **Step 2: Run integration test in default environment**
+- [x] **Step 2: Run integration test in default environment**
 
 Run:
 
@@ -1022,7 +1022,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/integration/test_omnivoice_real_r
 
 Expected: SKIPPED unless `TLDW_TEST_OMNIVOICE_REAL=1` and `TLDW_OMNIVOICE_MODEL_PATH` are set.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tldw_Server_API/tests/TTS_NEW/integration/test_omnivoice_real_runtime.py
@@ -1037,7 +1037,7 @@ git commit -m "test: add opt-in omnivoice real runtime smoke tests"
 - Modify: `Docs/STT-TTS/TTS-SETUP-GUIDE.md`
 - Modify: `tldw_Server_API/app/core/TTS/TTS-README.md`
 
-- [ ] **Step 1: Update TTS setup guide**
+- [x] **Step 1: Update TTS setup guide**
 
 Document:
 
@@ -1065,7 +1065,7 @@ Example API body:
 }
 ```
 
-- [ ] **Step 2: Update TTS README**
+- [x] **Step 2: Update TTS README**
 
 Add a concise OmniVoice provider section pointing to setup guide and noting:
 
@@ -1074,7 +1074,7 @@ Add a concise OmniVoice provider section pointing to setup guide and noting:
 - no incremental streaming v1
 - structured sidecar errors are mapped by the adapter
 
-- [ ] **Step 3: Run docs link/check smoke**
+- [x] **Step 3: Run docs link/check smoke**
 
 Run:
 
@@ -1085,7 +1085,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_stt_tts_link_hygiene.py tldw_Se
 
 Expected: PASS, or document existing unrelated failures before proceeding.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Docs/STT-TTS/TTS-SETUP-GUIDE.md tldw_Server_API/app/core/TTS/TTS-README.md
@@ -1100,7 +1100,7 @@ git commit -m "docs: document omnivoice real sidecar setup"
 - No planned source edits unless verification finds issues.
 - Update Backlog task(s) with final verification notes.
 
-- [ ] **Step 1: Run focused OmniVoice test suite**
+- [x] **Step 1: Run focused OmniVoice test suite**
 
 Run:
 
@@ -1119,7 +1119,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run broader TTS regression slice**
+- [x] **Step 2: Run broader TTS regression slice**
 
 Run:
 
@@ -1130,7 +1130,7 @@ python -m pytest tldw_Server_API/tests/TTS_NEW/unit tldw_Server_API/tests/TTS/ad
 
 Expected: PASS, or document unrelated baseline failures.
 
-- [ ] **Step 3: Run Bandit on touched code scope**
+- [x] **Step 3: Run Bandit on touched code scope**
 
 Run:
 
@@ -1149,7 +1149,7 @@ python -m bandit -r \
 
 Expected: no new high/medium findings in touched code. Fix new findings before finalizing.
 
-- [ ] **Step 4: Run diff hygiene**
+- [x] **Step 4: Run diff hygiene**
 
 Run:
 
@@ -1160,7 +1160,7 @@ git status --short
 
 Expected: no whitespace errors; only intended files changed.
 
-- [ ] **Step 5: Update Backlog implementation task**
+- [x] **Step 5: Update Backlog implementation task**
 
 Use Backlog.md MCP to record:
 
@@ -1170,7 +1170,7 @@ Use Backlog.md MCP to record:
 - known skipped real-runtime integration test if no local model path was available
 - final summary
 
-- [ ] **Step 6: Commit final tracking update**
+- [x] **Step 6: Commit final tracking update**
 
 ```bash
 git add "backlog/tasks/<implementation-task>.md"
