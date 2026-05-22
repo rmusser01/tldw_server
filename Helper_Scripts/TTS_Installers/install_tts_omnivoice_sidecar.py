@@ -147,18 +147,23 @@ def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
 
 
 def _path_for_config(path: Path, repo_root: Optional[Path]) -> str:
+    path_posix = path.as_posix()
     if not path.is_absolute():
-        return path.as_posix()
+        return path_posix
     if repo_root is not None:
         try:
-            return os.path.relpath(path, repo_root).replace(os.sep, "/")
-        except ValueError:
+            rel_path = os.path.relpath(path, repo_root)
+            rel_path_posix = rel_path.replace("\\", "/").replace(os.sep, "/")
+            if ":" in rel_path_posix and getattr(path, "drive", ""):
+                return path_posix
+            return rel_path_posix
+        except (TypeError, ValueError):
             pass
-    return str(path)
+    return path_posix
 
 
 def _validate_config_path_scalar(value: str) -> str:
-    if any(character in value for character in ('"', "\\", "\n", "\r")):
+    if any(character in value for character in ('"', "\n", "\r")):
         raise SystemExit(f"Unsafe path value for YAML config: {value!r}")
     return value
 
@@ -190,10 +195,12 @@ def _find_provider_block(lines: list[str], provider_name: str) -> tuple[Optional
             while block_end < len(lines):
                 next_line = lines[block_end]
                 next_stripped = next_line.strip()
+                next_indent = len(next_line) - len(next_line.lstrip(" "))
                 if not next_stripped or next_stripped.startswith("#"):
+                    if next_indent <= block_indent:
+                        break
                     block_end += 1
                     continue
-                next_indent = len(next_line) - len(next_line.lstrip(" "))
                 if next_indent <= block_indent:
                     break
                 block_end += 1

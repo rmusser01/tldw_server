@@ -392,6 +392,27 @@ def test_omnivoice_install_fails_when_config_patch_does_not_update_provider(
     assert [entry[0] for entry in calls][-1] == "patch_tts_config"
 
 
+def test_omnivoice_install_normalizes_config_patch_system_exit(monkeypatch, tmp_path):
+    calls = _patch_omnivoice_sidecar_installer(
+        monkeypatch,
+        tmp_path,
+        config_patched=True,
+    )
+
+    def _raise_patch_error(**kwargs):  # noqa: ARG001
+        calls.append(("patch_tts_config", kwargs["config_path"], kwargs["model_path"]))
+        raise SystemExit("unsafe config path")
+
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    monkeypatch.setattr(installer, "patch_tts_config", _raise_patch_error, raising=True)
+
+    with pytest.raises(RuntimeError, match="unsafe config path"):
+        install_manager._install_omnivoice()
+
+    assert [entry[0] for entry in calls][-1] == "patch_tts_config"
+
+
 def test_omnivoice_install_requires_explicit_model_path(monkeypatch):
     monkeypatch.setattr(install_manager, "_ensure_downloads_allowed", lambda _label: None, raising=True)
     monkeypatch.delenv("TLDW_OMNIVOICE_MODEL_PATH", raising=False)
