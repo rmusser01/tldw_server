@@ -88,7 +88,7 @@ class OmniVoiceRuntime:
                 self._record_error("MODEL_LOAD_FAILED")
                 raise OmniVoiceRuntimeError(
                     "MODEL_LOAD_FAILED",
-                    "OmniVoice model failed to load from the configured local model directory",
+                    f"OmniVoice model failed to load from {model_path}",
                     retryable=False,
                 ) from exc
 
@@ -124,8 +124,6 @@ class OmniVoiceRuntime:
                 ) from exc
 
         audio_bytes = self._to_wav_bytes(generated)
-        self.status = "ready"
-        self.last_error_code = None
         return OmniVoiceSynthesizeResult(
             audio_bytes=audio_bytes,
             audio_format="wav",
@@ -185,13 +183,6 @@ class OmniVoiceRuntime:
         reference_path = Path(reference_audio_path).expanduser().resolve(strict=False)
         allowed_dirs = self._managed_reference_dirs()
         if any(self._is_relative_to(reference_path, allowed_dir) for allowed_dir in allowed_dirs):
-            if not reference_path.exists() or not reference_path.is_file():
-                self._record_error("INVALID_REFERENCE_AUDIO")
-                raise OmniVoiceRuntimeError(
-                    "INVALID_REFERENCE_AUDIO",
-                    "OmniVoice clone reference audio must be an existing regular file",
-                    retryable=False,
-                )
             return reference_path
 
         self._record_error("REFERENCE_PATH_NOT_ALLOWED")
@@ -226,18 +217,7 @@ class OmniVoiceRuntime:
         return True
 
     def _to_wav_bytes(self, generated: object) -> bytes:
-        try:
-            audio = self._coerce_audio_array(generated)
-        except OmniVoiceRuntimeError:
-            raise
-        except Exception as exc:
-            self._record_error("AUDIO_ENCODING_FAILED")
-            raise OmniVoiceRuntimeError(
-                "AUDIO_ENCODING_FAILED",
-                "OmniVoice audio output could not be encoded as WAV",
-                retryable=False,
-            ) from exc
-
+        audio = self._coerce_audio_array(generated)
         try:
             soundfile = importlib.import_module("soundfile")
             buffer = io.BytesIO()
