@@ -226,7 +226,18 @@ class OmniVoiceRuntime:
         return True
 
     def _to_wav_bytes(self, generated: object) -> bytes:
-        audio = self._coerce_audio_array(generated)
+        try:
+            audio = self._coerce_audio_array(generated)
+        except OmniVoiceRuntimeError:
+            raise
+        except Exception as exc:
+            self._record_error("AUDIO_ENCODING_FAILED")
+            raise OmniVoiceRuntimeError(
+                "AUDIO_ENCODING_FAILED",
+                "OmniVoice audio output could not be encoded as WAV",
+                retryable=False,
+            ) from exc
+
         try:
             soundfile = importlib.import_module("soundfile")
             buffer = io.BytesIO()
