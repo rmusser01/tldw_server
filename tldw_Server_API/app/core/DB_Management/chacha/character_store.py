@@ -228,6 +228,67 @@ class CharacterStore:
             logger.error(f"Database error fetching character card ID {character_id}: {e}")
             raise
 
+    def get_character_cards_by_ids(
+        self,
+        character_ids: list[int],
+        include_deleted: bool = False,
+    ) -> dict[int, dict[str, Any]]:
+        """
+        Retrieve multiple character cards by ID in one query.
+
+        Args:
+            character_ids: Candidate character card IDs. Duplicates and invalid
+                non-positive IDs are ignored.
+            include_deleted: Whether soft-deleted character cards should be
+                included in the result.
+
+        Returns:
+            Mapping of character card ID to deserialized character card data.
+
+        Raises:
+            CharactersRAGDBError: For database errors during fetching.
+        """
+        normalized_ids: list[int] = []
+        seen: set[int] = set()
+        for character_id in character_ids:
+            try:
+                normalized_id = int(character_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_id <= 0 or normalized_id in seen:
+                continue
+            normalized_ids.append(normalized_id)
+            seen.add(normalized_id)
+
+        if not normalized_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        query = f"SELECT * FROM character_cards WHERE id IN ({placeholders})"  # nosec B608
+        params: list[Any] = list(normalized_ids)
+        if not include_deleted:
+            query += f" AND deleted = {self._deleted_literal(False)}"
+
+        try:
+            cursor = self._db.execute_query(query, tuple(params))
+            characters: dict[int, dict[str, Any]] = {}
+            for row in cursor.fetchall():
+                character = self._db._deserialize_row_fields(
+                    row,
+                    self._db._CHARACTER_CARD_JSON_FIELDS,
+                )
+                if not character:
+                    continue
+                try:
+                    result_id = int(character.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                characters[result_id] = character
+            return characters
+        except CharactersRAGDBError as e:
+            logger.error(f"Database error fetching character card IDs {normalized_ids}: {e}")
+            raise
+
     def get_character_card_by_name(self, name: str) -> dict[str, Any] | None:
         """
         Retrieve a specific character card by its unique name.

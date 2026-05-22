@@ -14,6 +14,70 @@ import uuid as _uuid
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
 
+def test_chat_session_list_assistant_names_are_preloaded_in_bulk():
+    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import (
+        _attach_conversation_assistant_names_from_lookups,
+        _conversation_assistant_name_lookups,
+    )
+
+    class FakeDb:
+        def __init__(self):
+            self.character_bulk_calls = 0
+            self.persona_bulk_calls = 0
+
+        def get_character_cards_by_ids(self, character_ids):
+            self.character_bulk_calls += 1
+            assert character_ids == [1, 2]
+            return {
+                1: {"id": 1, "name": "Ada"},
+                2: {"id": 2, "name": "Babbage"},
+            }
+
+        def get_persona_profiles_by_ids(self, *, user_id, persona_ids, include_deleted=False):
+            self.persona_bulk_calls += 1
+            assert user_id == "user-1"
+            assert persona_ids == ["persona-1"]
+            assert include_deleted is False
+            return {"persona-1": {"id": "persona-1", "name": "Researcher"}}
+
+        def get_character_card_by_id(self, character_id):
+            raise AssertionError("list assistant-name resolution must not call per-row character lookup")
+
+        def get_persona_profile(self, persona_id, *, user_id, include_deleted=False):
+            raise AssertionError("list assistant-name resolution must not call per-row persona lookup")
+
+    conversations = [
+        {"id": "chat-1", "character_id": 1, "assistant_kind": "character"},
+        {"id": "chat-2", "character_id": None, "assistant_kind": "character", "assistant_id": "2"},
+        {"id": "chat-3", "character_id": None, "assistant_kind": "persona", "assistant_id": "persona-1"},
+    ]
+
+    db = FakeDb()
+    character_names, persona_names = _conversation_assistant_name_lookups(
+        db,
+        conversations,
+        "user-1",
+    )
+
+    labeled = [
+        _attach_conversation_assistant_names_from_lookups(
+            dict(conversation),
+            character_names=character_names,
+            persona_names=persona_names,
+        )
+        for conversation in conversations
+    ]
+
+    assert db.character_bulk_calls == 1
+    assert db.persona_bulk_calls == 1
+    assert labeled[0]["character_name"] == "Ada"
+    assert labeled[0]["assistant_name"] == "Ada"
+    assert labeled[1]["character_name"] == "Babbage"
+    assert labeled[1]["assistant_name"] == "Babbage"
+    assert labeled[2]["assistant_name"] == "Researcher"
+    assert "character_name" not in labeled[2]
+
+
 @pytest.mark.asyncio
 async def test_character_chat_flow_sessions_messages_worldbooks():
     # Use an isolated per-test DB base directory

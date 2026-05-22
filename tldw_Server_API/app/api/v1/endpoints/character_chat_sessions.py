@@ -1014,41 +1014,140 @@ def _convert_db_conversation_to_response(
     )
 
 
+def _assistant_display_name(record: Mapping[str, Any] | None) -> str | None:
+    """Return a normalized display name from an assistant identity row."""
+    if not isinstance(record, Mapping):
+        return None
+    name = record.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
+def _conversation_character_lookup_id(conv_data: Mapping[str, Any]) -> int | None:
+    """Return the character card ID used to label a character-backed conversation."""
+    character_id = conv_data.get("character_id")
+    assistant_kind = conv_data.get("assistant_kind") or (
+        "character" if character_id is not None else None
+    )
+    if assistant_kind != "character" and character_id is None:
+        return None
+
+    raw_character_id = character_id if character_id is not None else conv_data.get("assistant_id")
+    try:
+        return int(raw_character_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _conversation_persona_lookup_id(conv_data: Mapping[str, Any]) -> str | None:
+    """Return the persona profile ID used to label a persona-backed conversation."""
+    if conv_data.get("assistant_kind") != "persona":
+        return None
+    assistant_id = conv_data.get("assistant_id")
+    if isinstance(assistant_id, str) and assistant_id.strip():
+        return assistant_id.strip()
+    return None
+
+
 def _conversation_assistant_names(
     db: CharactersRAGDB,
     conv_data: Mapping[str, Any],
     user_id: str,
 ) -> tuple[str | None, str | None]:
     """Resolve display names for a conversation's assistant identity."""
-    character_id = conv_data.get("character_id")
-    assistant_kind = conv_data.get("assistant_kind") or (
-        "character" if character_id is not None else None
-    )
-    assistant_id = conv_data.get("assistant_id")
-
-    if assistant_kind == "character" or character_id is not None:
-        raw_character_id = character_id if character_id is not None else assistant_id
-        try:
-            resolved_character_id = int(raw_character_id)
-        except (TypeError, ValueError):
-            return None, None
-
+    resolved_character_id = _conversation_character_lookup_id(conv_data)
+    if resolved_character_id is not None:
         character = db.get_character_card_by_id(resolved_character_id)
-        if isinstance(character, dict):
-            name = character.get("name")
-            if isinstance(name, str) and name.strip():
-                display_name = name.strip()
-                return display_name, display_name
+        display_name = _assistant_display_name(character)
+        if display_name is not None:
+            return display_name, display_name
         return None, None
 
-    if assistant_kind == "persona" and isinstance(assistant_id, str) and assistant_id.strip():
-        persona_profile = db.get_persona_profile(assistant_id.strip(), user_id=user_id)
-        if isinstance(persona_profile, dict):
-            name = persona_profile.get("name")
-            if isinstance(name, str) and name.strip():
-                return None, name.strip()
+    persona_id = _conversation_persona_lookup_id(conv_data)
+    if persona_id is not None:
+        persona_profile = db.get_persona_profile(persona_id, user_id=user_id)
+        display_name = _assistant_display_name(persona_profile)
+        if display_name is not None:
+            return None, display_name
 
     return None, None
+
+
+def _conversation_assistant_name_lookups(
+    db: CharactersRAGDB,
+    conversations: list[Mapping[str, Any]],
+    user_id: str,
+) -> tuple[dict[int, str], dict[str, str]]:
+    """Resolve assistant display names for a list of conversations in bulk."""
+    character_ids: list[int] = []
+    persona_ids: list[str] = []
+    seen_character_ids: set[int] = set()
+    seen_persona_ids: set[str] = set()
+
+    for conv_data in conversations:
+        character_id = _conversation_character_lookup_id(conv_data)
+        if character_id is not None and character_id not in seen_character_ids:
+            character_ids.append(character_id)
+            seen_character_ids.add(character_id)
+            continue
+
+        persona_id = _conversation_persona_lookup_id(conv_data)
+        if persona_id is not None and persona_id not in seen_persona_ids:
+            persona_ids.append(persona_id)
+            seen_persona_ids.add(persona_id)
+
+    character_names: dict[int, str] = {}
+    if character_ids:
+        try:
+            characters = db.get_character_cards_by_ids(character_ids)
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Failed to bulk resolve character display names: {}", exc)
+            characters = {}
+        for character_id, character in characters.items():
+            display_name = _assistant_display_name(character)
+            if display_name is not None:
+                character_names[int(character_id)] = display_name
+
+    persona_names: dict[str, str] = {}
+    if persona_ids:
+        try:
+            persona_profiles = db.get_persona_profiles_by_ids(
+                user_id=user_id,
+                persona_ids=persona_ids,
+            )
+        except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Failed to bulk resolve persona display names: {}", exc)
+            persona_profiles = {}
+        for persona_id, persona_profile in persona_profiles.items():
+            display_name = _assistant_display_name(persona_profile)
+            if display_name is not None:
+                persona_names[str(persona_id)] = display_name
+
+    return character_names, persona_names
+
+
+def _attach_conversation_assistant_names_from_lookups(
+    conv_data: dict[str, Any],
+    *,
+    character_names: Mapping[int, str],
+    persona_names: Mapping[str, str],
+) -> dict[str, Any]:
+    """Add pre-resolved assistant display names to a conversation response row."""
+    character_id = _conversation_character_lookup_id(conv_data)
+    if character_id is not None:
+        character_name = character_names.get(character_id)
+        if character_name is not None:
+            conv_data["character_name"] = character_name
+            conv_data["assistant_name"] = character_name
+        return conv_data
+
+    persona_id = _conversation_persona_lookup_id(conv_data)
+    if persona_id is not None:
+        assistant_name = persona_names.get(persona_id)
+        if assistant_name is not None:
+            conv_data["assistant_name"] = assistant_name
+    return conv_data
 
 
 def _attach_conversation_assistant_names(
@@ -5862,6 +5961,12 @@ async def list_chat_sessions(
             for conv in user_conversations:
                 conv["message_count"] = None
 
+        character_names, persona_names = _conversation_assistant_name_lookups(
+            db,
+            user_conversations,
+            user_id_str,
+        )
+
         chats: list[ChatSessionResponse] = []
         for conv in user_conversations:
             settings_payload: Optional[dict[str, Any]] = None
@@ -5870,10 +5975,10 @@ async def list_chat_sessions(
                 settings_payload = (settings_row or {}).get("settings") or {}
             chats.append(
                 _convert_db_conversation_to_response(
-                    _attach_conversation_assistant_names(
-                        db,
+                    _attach_conversation_assistant_names_from_lookups(
                         conv,
-                        user_id_str,
+                        character_names=character_names,
+                        persona_names=persona_names,
                     ),
                     settings=settings_payload,
                 )

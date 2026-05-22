@@ -701,7 +701,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
           t("playground:characterChat.sessionFallbackTitle", "{{name}} role-play", {
             name: characterName,
           }),
-        ).replace("{{name}}", characterName);
+        );
         const title = buildCharacterChatSessionTitle({
           characterName,
           firstUserMessage: message,

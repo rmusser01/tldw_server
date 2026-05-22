@@ -242,7 +242,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
                   "{{name}} role-play",
                   { name: selectedCharacterName }
                 )
-              ).replace("{{name}}", selectedCharacterName)
+              )
             })
           : (() => {
               const fallbackTitle =

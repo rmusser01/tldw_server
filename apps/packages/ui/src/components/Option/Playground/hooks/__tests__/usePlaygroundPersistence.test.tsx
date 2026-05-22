@@ -13,6 +13,16 @@ const mocks = vi.hoisted(() => ({
   usePersistenceMode: vi.fn()
 }))
 
+const translate = (
+  key: string,
+  defaultValue?: string,
+  options?: Record<string, unknown>
+) => {
+  const value = defaultValue || key
+  const name = options?.name
+  return typeof name === "string" ? value.replace("{{name}}", name) : value
+}
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mocks.initialize,
@@ -54,7 +64,7 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
     info: vi.fn(),
     success: vi.fn()
   },
-  t: (key: string, defaultValue?: string) => defaultValue || key,
+  t: translate,
   ...overrides
 })
 

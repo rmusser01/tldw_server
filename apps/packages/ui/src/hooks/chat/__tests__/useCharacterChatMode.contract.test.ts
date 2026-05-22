@@ -75,9 +75,19 @@ const createSetterBundle = () => ({
   setStreaming: vi.fn()
 })
 
-const translate = (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
-  if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-  return fallbackOrOptions?.defaultValue || key
+const translate = (
+  key: string,
+  fallbackOrOptions?: string | { defaultValue?: string; name?: string },
+  options?: { name?: string }
+) => {
+  const value =
+    typeof fallbackOrOptions === "string"
+      ? fallbackOrOptions
+      : fallbackOrOptions?.defaultValue || key
+  const name =
+    options?.name ||
+    (typeof fallbackOrOptions === "object" ? fallbackOrOptions.name : undefined)
+  return typeof name === "string" ? value.replace("{{name}}", name) : value
 }
 
 describe("createCharacterChatMode contract", () => {
