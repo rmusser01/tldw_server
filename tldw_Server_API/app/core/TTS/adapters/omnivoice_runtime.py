@@ -88,7 +88,7 @@ class OmniVoiceRuntime:
                 self._record_error("MODEL_LOAD_FAILED")
                 raise OmniVoiceRuntimeError(
                     "MODEL_LOAD_FAILED",
-                    f"OmniVoice model failed to load from {model_path}",
+                    "OmniVoice model failed to load from the configured local model directory",
                     retryable=False,
                 ) from exc
 
@@ -124,6 +124,8 @@ class OmniVoiceRuntime:
                 ) from exc
 
         audio_bytes = self._to_wav_bytes(generated)
+        self.status = "ready"
+        self.last_error_code = None
         return OmniVoiceSynthesizeResult(
             audio_bytes=audio_bytes,
             audio_format="wav",
@@ -183,6 +185,13 @@ class OmniVoiceRuntime:
         reference_path = Path(reference_audio_path).expanduser().resolve(strict=False)
         allowed_dirs = self._managed_reference_dirs()
         if any(self._is_relative_to(reference_path, allowed_dir) for allowed_dir in allowed_dirs):
+            if not reference_path.exists() or not reference_path.is_file():
+                self._record_error("INVALID_REFERENCE_AUDIO")
+                raise OmniVoiceRuntimeError(
+                    "INVALID_REFERENCE_AUDIO",
+                    "OmniVoice clone reference audio must be an existing regular file",
+                    retryable=False,
+                )
             return reference_path
 
         self._record_error("REFERENCE_PATH_NOT_ALLOWED")
