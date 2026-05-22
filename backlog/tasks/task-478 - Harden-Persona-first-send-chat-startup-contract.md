@@ -35,6 +35,8 @@ Implement the first-send Persona chat startup slice from the Persona-backed Chat
 - Extended `apps/packages/ui/src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx`.
 - Tightened the existing first-send Persona assertion so it verifies the exact `createChat` payload: `assistant_kind: "persona"`, selected Persona `assistant_id`, explicit `read_only`, fresh `in-progress` state, and no inherited topic/cluster/source/external-ref metadata.
 - Added a stale Character-state regression proving Persona first send resets stale Character chat metadata before creating the Persona-backed chat and does not forward the stale Character ID into the Persona path.
+- Addressed PR #1940 review feedback by asserting the normal Persona creation path updates `serverChatId`, assistant kind/id, Persona memory mode, character ID, and metadata-loaded state.
+- Addressed PR #1940 review feedback by asserting stale Character reset also clears title, state, version, topic, cluster, source, and external ref.
 - No production implementation changes were needed; current code satisfies the new first-send contract after the prior helper hardening.
 - Verified with `bunx vitest run src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx --reporter=verbose` from `apps/packages/ui`.
 - Verified adjacent helper coverage with `bunx vitest run src/hooks/chat/__tests__/useChatActions.persona.integration.test.tsx src/hooks/chat/__tests__/personaServerChat.test.ts --reporter=verbose` from `apps/packages/ui`.

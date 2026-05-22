@@ -249,7 +249,14 @@ describe("useChatActions persona integration", () => {
       source: undefined,
       external_ref: undefined
     })
+    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
     expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
+    expect(options.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")
+    expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
+      "read_only"
+    )
+    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(true)
     expect(normalChatModeMock).toHaveBeenCalledWith(
       "Hello persona",
       "",
@@ -299,16 +306,23 @@ describe("useChatActions persona integration", () => {
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith(null)
     expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
     expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    expect(options.setServerChatTitle).toHaveBeenCalledWith(null)
+    expect(options.setServerChatState).toHaveBeenCalledWith("in-progress")
+    expect(options.setServerChatVersion).toHaveBeenCalledWith(null)
+    expect(options.setServerChatTopic).toHaveBeenCalledWith(null)
+    expect(options.setServerChatClusterId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatSource).toHaveBeenCalledWith(null)
+    expect(options.setServerChatExternalRef).toHaveBeenCalledWith(null)
     expect(createChatMock).toHaveBeenCalledWith({
-        assistant_kind: "persona",
-        assistant_id: "garden-helper",
-        persona_memory_mode: "read_only",
-        state: "in-progress",
-        topic_label: undefined,
-        cluster_id: undefined,
-        source: undefined,
-        external_ref: undefined
-      })
+      assistant_kind: "persona",
+      assistant_id: "garden-helper",
+      persona_memory_mode: "read_only",
+      state: "in-progress",
+      topic_label: undefined,
+      cluster_id: undefined,
+      source: undefined,
+      external_ref: undefined
+    })
     expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
       "garden-helper"
