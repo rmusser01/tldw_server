@@ -15,6 +15,8 @@ Risk Gate 1 security model: ../Security/Prototype_Workspaces_Threat_Model.md
 - Current gate: Risk Gate 4 contract freeze
 - Frozen by: Risk Gate 4
 - Fixture: `apps/tldw-frontend/e2e/fixtures/prototype-workspaces/contract-states.json` version 2
+- Operational docs: `Docs/Operations/Prototype_Workspaces_Runbook.md`
+- User guide: `Docs/User_Guides/Prototype_Workspaces.md`
 
 ## Structured Error Detail
 
@@ -61,6 +63,26 @@ Prototype-specific HTTP errors use FastAPI's normal outer envelope with a stable
 | `preview_boot` | `status = "ok"`, `job_type`, `retryable = false`, `preview_handle`, `preview_url` | `failure_code = "invalid_job_payload"` or `runtime_terminal` | `failure_code = "runtime_retryable"`, `retryable = true` | preview scope, snapshot, runtime profile version, target fingerprint | Same target retries renew the active handle; changed targets replace the handle for the scope. |
 | `snapshot_save` | `status = "ok"`, `job_type`, `retryable = false`, `snapshot_id` | `failure_code = "invalid_job_payload"` or `runtime_terminal` | `failure_code = "runtime_retryable"`, `retryable = true` | session and save request id; explicit snapshot id is reused on handler retry | UI can keep showing one saved revision for duplicate completion/retry paths. |
 | `publish_validate_and_promote` | `status = "promoted"`, `job_type`, `retryable = false`, canonical/candidate ids, optional `preview_handle` | `status = "failed"` or `"stale"`, `failure_code`, `retryable = false`, canonical/candidate ids | Reserved for future validators that explicitly return `retryable = true`; default validation failures are terminal | workspace, candidate snapshot, review baseline/canonical snapshot | Failed validation never advances canonical or last-known-good pointers. |
+
+## Operational Support Fields
+
+Risk Gate 7 does not change the frozen error/state contract. It records the fields operators and Frontend/Product reviewers should use when diagnosing support cases and preparing Gate 8 release evidence.
+
+| Surface | Fields | Support use |
+| --- | --- | --- |
+| Workspace detail | `canonical_preview_status`, `publish_validation_status` | Check whether the shared preview and last publish validation are healthy before inspecting branch state. |
+| Prototype session | `runtime_status`, `preview_status`, `last_saved_snapshot_id`, `expires_at`, `revoked_at` | Determine whether a branch is booting, active, failed, expired, revoked, or missing a saved candidate. |
+| Prototype snapshot | `preview_health` | Separate saved candidate existence from preview boot health. |
+| Promotion request | `status`, `reviewed_by_user_id`, `review_notes` | Explain pending, rejected, approved, promoted, failed, stale, and conflict outcomes to owners and collaborators. |
+| Job response/result | `job_id`, `job_type`, `status`, `idempotency_key`, `retryable` | Correlate UI actions with Jobs worker outcomes and decide whether retry is safe. |
+| Structured error detail | `category`, `frontend_state`, `retryable` | Map user-visible states to backend conditions without parsing messages. |
+| Audit/support breadcrumb | workspace id, session id, shared actor id, share-link id, promotion request id, `job_id` | Correlate logs and audit records without recording raw tokens, passwords, grants, or cookies. |
+
+Gate 8 handoff:
+
+- Backend/Core must preserve these field names or open a contract follow-up before changing them.
+- Frontend/Product must provide release evidence for password-protected entry, single-use and exhausted links, resume cookie continuation, revoked links, archived workspaces, promotion conflicts, and validation failures.
+- Operators should use the runbook for signing secret, quota, preview health, and promotion triage until a dedicated admin dashboard exists.
 
 ## Token And Session Security Dispositions
 

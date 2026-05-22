@@ -217,6 +217,8 @@ The short version:
 
 Frontend/backend state names, HTTP status expectations, retryability, and frozen Risk Gate 4 decisions live in `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`.
 
+Operational setup, status-field diagnosis, and support escalation guidance live in `Docs/Operations/Prototype_Workspaces_Runbook.md`. Owner and collaborator workflow examples live in `Docs/User_Guides/Prototype_Workspaces.md`.
+
 ## Risk Gate 4 Error Contract
 
 Prototype-specific endpoint failures use the normal FastAPI `detail` envelope with a stable structured payload:
@@ -243,6 +245,34 @@ Contract rules:
 - Preview renewal returns `preview_unavailable` with 404 for missing/revoked handles and 409 for renewal conflicts.
 
 The generated OpenAPI contract references `PrototypeErrorResponse` for prototype route 403, 404, and 409 responses where those statuses are expected. Prototype 422 entries allow either `PrototypeErrorResponse` or FastAPI's `HTTPValidationError` because malformed request bodies are rejected before endpoint code can wrap them in the domain error envelope.
+
+## Risk Gate 7 Operational Visibility
+
+Gate 7 keeps the API contract frozen and documents how operators and product reviewers diagnose the collaboration surface before release review.
+
+Primary artifacts:
+
+- Operator runbook: `Docs/Operations/Prototype_Workspaces_Runbook.md`
+- User lifecycle guide: `Docs/User_Guides/Prototype_Workspaces.md`
+- Status/error matrix: `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`
+- Threat model: `Docs/Security/Prototype_Workspaces_Threat_Model.md`
+
+Support fields available without parsing messages:
+
+- workspace: `canonical_preview_status`, `publish_validation_status`
+- session: `runtime_status`, `preview_status`, `last_saved_snapshot_id`, `expires_at`, `revoked_at`
+- snapshot: `preview_health`
+- promotion request: `status`, `reviewed_by_user_id`, `review_notes`
+- job response/result: `job_id`, `job_type`, `status`, `idempotency_key`, `retryable`
+- structured error detail: `category`, `frontend_state`, `retryable`
+
+Operational rules:
+
+- Diagnose public-link entry, session, preview, bootstrap, and promotion failures with `category`, `frontend_state`, and `retryable`; do not branch on message text.
+- Retry only when `retryable = true` appears in the structured error or worker result.
+- Treat signing secret instability as a deployment incident because collaborator session tokens, resume cookies, and preview grants depend on stable signing.
+- Do not capture raw share tokens, session tokens, preview grants, passwords, or resume cookie values in support reports.
+- Gate 8 must provide release evidence for password-protected links, single-use and exhausted links, resume cookies, revoked links, archived workspaces, promotion conflicts, and promotion validation failures.
 
 ## Lifecycle Examples
 
