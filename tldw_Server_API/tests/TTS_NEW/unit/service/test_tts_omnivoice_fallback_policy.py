@@ -86,6 +86,16 @@ class _SuccessfulOpenAIAdapter(TTSAdapter):
         )
 
 
+class _FailingOpenAIAdapter(_SuccessfulOpenAIAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.provider_id = "openai"
+
+    async def generate(self, request: TTSRequest) -> TTSResponse:
+        self.calls += 1
+        raise TTSProviderError("simulated retryable openai failure", provider="openai")
+
+
 class _Registry:
     def __init__(self, omnivoice: _FailingOmniVoiceAdapter, openai: _SuccessfulOpenAIAdapter) -> None:
         self._omnivoice = omnivoice
@@ -130,6 +140,44 @@ def _service_with_failing_omnivoice_and_successful_openai() -> TTSServiceV2:
     service._build_omnivoice_adapter_overrides = lambda overrides=None: {}
     service.fake_omnivoice = factory.fake_omnivoice
     service.fake_openai = factory.fake_openai
+    return service
+
+
+def _service_with_failing_openai_and_successful_fallback() -> TTSServiceV2:
+    failing_openai = _FailingOpenAIAdapter()
+    fallback_adapter = _SuccessfulOpenAIAdapter()
+    fallback_adapter.provider_id = "elevenlabs"
+
+    class _ExplicitOpenAIRegistry:
+        def __init__(self) -> None:
+            self._adapter_specs = {
+                TTSProvider.OPENAI: object(),
+                TTSProvider.ELEVENLABS: object(),
+            }
+
+        async def get_adapter(self, provider_enum: TTSProvider):
+            if provider_enum == TTSProvider.OPENAI:
+                return failing_openai
+            if provider_enum == TTSProvider.ELEVENLABS:
+                return fallback_adapter
+            raise TTSProviderError("provider not configured", provider=provider_enum.value)
+
+    class _ExplicitOpenAIFactory:
+        def __init__(self) -> None:
+            self.registry = _ExplicitOpenAIRegistry()
+
+        def get_provider_for_model(self, model: str) -> TTSProvider:
+            return TTSProvider.OPENAI
+
+        async def get_adapter_by_model(self, model: str):
+            return failing_openai
+
+        async def get_best_adapter(self, *_, **__):
+            return fallback_adapter
+
+    service = TTSServiceV2(_ExplicitOpenAIFactory())
+    service.fake_openai = failing_openai
+    service.fake_fallback = fallback_adapter
     return service
 
 
@@ -227,3 +275,32 @@ async def test_implicit_omnivoice_priority_without_semantics_can_fallback():
 
     assert audio == b"fallback-audio"
     assert service.fake_openai.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_non_omnivoice_custom_voice_keeps_fallback_enabled():
+    service = _service_with_failing_openai_and_successful_fallback()
+    request = OpenAISpeechRequest(
+        model="tts-1",
+        input="hello",
+        voice="custom:voice-1",
+        voice_reference=base64.b64encode(_make_reference_wav(3.5)).decode("ascii"),
+        response_format="wav",
+        stream=False,
+        extra_params={"reference_text": "reference transcript"},
+    )
+
+    audio = b"".join(
+        [
+            chunk
+            async for chunk in service.generate_speech(
+                request,
+                provider="openai",
+                fallback=True,
+            )
+        ]
+    )
+
+    assert audio == b"fallback-audio"
+    assert service.fake_openai.calls == 1
+    assert service.fake_fallback.calls == 1

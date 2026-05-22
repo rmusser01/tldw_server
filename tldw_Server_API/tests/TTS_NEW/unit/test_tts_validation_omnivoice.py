@@ -172,3 +172,82 @@ def test_omnivoice_rejects_unknown_generation_param():
 
     assert is_valid is False
     assert "generation" in str(error).lower() or "unknown" in str(error).lower()
+
+
+@pytest.mark.parametrize(
+    ("extra_params", "voice", "voice_reference", "expected_error"),
+    [
+        ({"mode": "auto", "instruct": "calm"}, "auto", None, "auto"),
+        ({"mode": "auto", "reference_text": "reference transcript"}, "clone", _make_reference_wav(3.5), "auto"),
+        ({"mode": "design"}, "auto", None, "instruct"),
+        (
+            {"mode": "design", "instruct": "calm", "reference_text": "reference transcript"},
+            "clone",
+            _make_reference_wav(3.5),
+            "design",
+        ),
+        ({"mode": "clone", "instruct": "calm", "reference_text": "reference transcript"}, "clone", _make_reference_wav(3.5), "clone"),
+        ({"mode": "clone"}, "auto", None, "reference"),
+    ],
+)
+def test_omnivoice_rejects_mode_conflicts(extra_params, voice, voice_reference, expected_error):
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice=voice,
+        format=AudioFormat.WAV,
+        voice_reference=voice_reference,
+        extra_params=extra_params,
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert expected_error in str(error).lower()
+
+
+def test_omnivoice_language_alias_conflict_rejected():
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hola",
+        voice="auto",
+        language="es",
+        format=AudioFormat.WAV,
+        extra_params={"language_id": "fr"},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert "language" in str(error).lower()
+
+
+def test_omnivoice_matching_language_aliases_pass():
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hola",
+        voice="auto",
+        language="es",
+        format=AudioFormat.WAV,
+        extra_params={"language_id": "es", "language": "es"},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is True
+    assert error is None
+
+
+def test_omnivoice_rejects_invalid_bool_generation_param():
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        extra_params={"denoise": "maybe"},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert "denoise" in str(error)
