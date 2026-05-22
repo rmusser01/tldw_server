@@ -292,7 +292,7 @@ class OmniVoiceAdapter(TTSAdapter):
         payload: dict[str, Any] = {
             "text": self.preprocess_text(request.text),
             "mode": mode,
-            "sample_rate": sample_rate,
+            "requested_sample_rate": sample_rate,
         }
         if mode != "clone":
             voice = (request.voice or "").strip() or "auto"

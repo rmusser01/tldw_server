@@ -74,13 +74,15 @@ class OmniVoiceSynthesizeRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode_inputs(self) -> "OmniVoiceSynthesizeRequest":
-        if self.mode == "auto" and (self.instruct or self.reference_audio_path):
-            raise ValueError("mode=auto cannot include instruct or reference_audio_path")
+        if self.mode == "auto" and (self.instruct or self.reference_audio_path or self.reference_text):
+            raise ValueError("mode=auto cannot include instruct, reference_audio_path, or reference_text")
         if self.mode == "design":
             if not (self.instruct and self.instruct.strip()):
                 raise ValueError("instruct is required for mode=design")
             if self.reference_audio_path:
                 raise ValueError("mode=design cannot include reference_audio_path")
+            if self.reference_text:
+                raise ValueError("mode=design cannot include reference_text")
         if self.mode == "clone":
             if self.instruct:
                 raise ValueError("mode=clone cannot include instruct")
