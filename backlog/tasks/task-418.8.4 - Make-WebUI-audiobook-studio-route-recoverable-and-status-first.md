@@ -28,6 +28,10 @@ Implement WP11A Task 5 for `/audiobook-studio`: add route-owned error boundary c
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 `/audiobook-studio` is wrapped in a route-owned error boundary with the Audiobook Studio route identity.
+- [x] #2 Audiobook Studio exposes project, autosave, chapter, generation, output, and recovery states without backend API changes.
+- [x] #3 Focused component and Playwright verification are recorded.
+- [x] #4 PR review feedback for stale save status and output row typing is addressed.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,10 +54,10 @@ Addressed all actionable PR #1887 review comments visible after the second sweep
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
