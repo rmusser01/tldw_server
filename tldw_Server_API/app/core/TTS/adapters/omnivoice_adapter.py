@@ -236,7 +236,8 @@ class OmniVoiceAdapter(TTSAdapter):
             audio_bytes = response.content
             channels = int(response.headers.get("X-OmniVoice-Channels", "1") or "1")
             native_sample_rate = self._parse_sample_rate_header(
-                response.headers.get("X-OmniVoice-Sample-Rate")
+                response.headers.get("X-OmniVoice-Sample-Rate"),
+                fallback_sample_rate=requested_sample_rate,
             )
             if not audio_bytes:
                 raise TTSGenerationError(
@@ -573,12 +574,15 @@ class OmniVoiceAdapter(TTSAdapter):
         sanitized = re.sub(r"\s+", " ", sanitized).strip()
         return sanitized[:500] if sanitized else "OmniVoice sidecar returned an empty error response."
 
-    def _parse_sample_rate_header(self, value: str | None) -> int:
+    def _parse_sample_rate_header(self, value: str | None, *, fallback_sample_rate: int | None = None) -> int:
+        fallback = fallback_sample_rate if fallback_sample_rate and fallback_sample_rate > 0 else self.sample_rate
+        if fallback <= 0:
+            fallback = self.DEFAULT_SAMPLE_RATE
         try:
-            sample_rate = int(value or self.DEFAULT_SAMPLE_RATE)
+            sample_rate = int(value or fallback)
         except (TypeError, ValueError):
-            sample_rate = self.DEFAULT_SAMPLE_RATE
-        return sample_rate if sample_rate > 0 else self.DEFAULT_SAMPLE_RATE
+            sample_rate = fallback
+        return sample_rate if sample_rate > 0 else fallback
 
     def _raise_for_sidecar_error(self, response: Any) -> None:
         content_type = response.headers.get("content-type", "")
