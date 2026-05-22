@@ -20,7 +20,7 @@ import contextlib
 import os
 import re
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from functools import lru_cache
 from threading import Lock
@@ -1560,6 +1560,7 @@ async def fetch_site_items_with_rules(
     *,
     tenant_id: str = "default",
     timeout: float = 10.0,
+    fetch_diagnostics: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch a list page and extract items using scrape rules."""
     list_url = str(rules.get("list_url") or base_url or "").strip()
@@ -1604,6 +1605,12 @@ async def fetch_site_items_with_rules(
     seen_items: set[str] = set()
     collected: list[dict[str, Any]] = []
 
+    def emit_fetch_diagnostic(event: dict[str, Any]) -> None:
+        if fetch_diagnostics is None:
+            return
+        with contextlib.suppress(*_WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS):
+            fetch_diagnostics(event)
+
     try:
         from tldw_Server_API.app.core.http_client import afetch
         while queue and len(visited) < max_pages:
@@ -1619,17 +1626,24 @@ async def fetch_site_items_with_rules(
                 allowed = is_url_allowed(page_url)
             if not allowed:
                 logger.debug(f"Scrape rules blocked by URL policy: {page_url}")
+                emit_fetch_diagnostic({"url": page_url, "error": "blocked_by_url_policy"})
                 continue
 
             resp = None
             try:
                 resp = await afetch(method="GET", url=page_url, headers=headers, timeout=timeout)
-                if resp.status_code // 100 != 2:
-                    logger.debug(f"fetch_site_items_with_rules HTTP {resp.status_code} for {page_url}")
+                status_code = int(resp.status_code)
+                diagnostic_event: dict[str, Any] = {"url": page_url, "status": status_code}
+                if status_code // 100 != 2 and status_code != 304:
+                    diagnostic_event["error"] = f"HTTP {status_code}"
+                emit_fetch_diagnostic(diagnostic_event)
+                if status_code // 100 != 2:
+                    logger.debug(f"fetch_site_items_with_rules HTTP {status_code} for {page_url}")
                     continue
                 parsed = parse_scraped_items(resp.text or "", page_url, rules)
             except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"fetch_site_items_with_rules request failed ({page_url}): {exc}")
+                emit_fetch_diagnostic({"url": page_url, "error": str(exc) or exc.__class__.__name__})
                 continue
             finally:
                 await _close_response(resp)

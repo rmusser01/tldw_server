@@ -1026,6 +1026,8 @@ export interface JobPreviewResult {
 
 export interface SourcePreviewDiagnostics {
   fetch_mode?: string | null
+  fetch_status?: number | null
+  fetch_error?: string | null
   selector_errors?: string[]
   selector_warnings?: string[]
   no_match_warnings?: string[]

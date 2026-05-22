@@ -111,6 +111,26 @@ const buildDiagnosticsLines = (
       )
     )
   }
+  if (typeof diagnostics.fetch_status === "number") {
+    lines.push(
+      toText(
+        t("watchlists:sources.form.fetchStatusLine", "Fetch status: HTTP {{value}}", {
+          value: diagnostics.fetch_status
+        }),
+        `Fetch status: HTTP ${diagnostics.fetch_status}`
+      )
+    )
+  }
+  if (diagnostics.fetch_error) {
+    lines.push(
+      toText(
+        t("watchlists:sources.form.fetchErrorLine", "Fetch issue: {{value}}", {
+          value: diagnostics.fetch_error
+        }),
+        `Fetch issue: ${diagnostics.fetch_error}`
+      )
+    )
+  }
   lines.push(...toDiagnosticList(diagnostics.selector_errors))
   lines.push(...toDiagnosticList(diagnostics.selector_warnings))
   lines.push(...toDiagnosticList(diagnostics.no_match_warnings))

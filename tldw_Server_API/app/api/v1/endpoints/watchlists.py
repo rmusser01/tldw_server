@@ -2384,6 +2384,42 @@ def _format_selector_diagnostic(issue: Any) -> str:
     return summary
 
 
+def _format_fetch_diagnostic_error(error: Any) -> str | None:
+    """Format a fetch failure for user-visible source-test diagnostics."""
+    if error is None:
+        return None
+    raw = str(error).strip() or error.__class__.__name__
+    normalized = re.sub(r"\s+", " ", raw).strip()
+    if not normalized:
+        return None
+    return normalized[:240]
+
+
+def _apply_fetch_diagnostic_events(
+    diagnostics: SourcePreviewDiagnostics,
+    events: list[dict[str, Any]],
+) -> None:
+    """Copy the first meaningful fetch status/error observation onto diagnostics."""
+    selected_status: int | None = None
+    selected_error: str | None = None
+    for event in events:
+        status = event.get("status")
+        if isinstance(status, int):
+            if selected_status is None:
+                selected_status = status
+            status_is_failure = status // 100 != 2 and status != 304
+        else:
+            status_is_failure = False
+        formatted_error = _format_fetch_diagnostic_error(event.get("error"))
+        if selected_error is None and (formatted_error or status_is_failure):
+            if isinstance(status, int):
+                selected_status = status
+            selected_error = formatted_error or f"HTTP {status}"
+            break
+    diagnostics.fetch_status = selected_status
+    diagnostics.fetch_error = selected_error
+
+
 def _first_present_rule_key(rules: dict[str, Any], keys: tuple[str, ...]) -> str | None:
     """Return the first configured scrape-rule key from a preferred key list."""
     for key in keys:
@@ -2434,9 +2470,13 @@ def _build_source_preview_diagnostics(
     *,
     fetch_mode: str,
     scrape_rules: dict[str, Any] | None = None,
+    fetch_status: int | None = None,
+    fetch_error: Any = None,
 ) -> SourcePreviewDiagnostics:
     """Build optional source-test diagnostics without changing preview item behavior."""
     diagnostics = SourcePreviewDiagnostics(fetch_mode=fetch_mode)
+    diagnostics.fetch_status = fetch_status
+    diagnostics.fetch_error = _format_fetch_diagnostic_error(fetch_error)
     if not scrape_rules:
         return diagnostics
 
@@ -2484,9 +2524,16 @@ async def _build_source_preview_response(
                 last_modified=last_modified,
                 tenant_id="default",
             )
+            if isinstance(res, dict):
+                status = res.get("status")
+                if isinstance(status, int):
+                    diagnostics.fetch_status = status
+                    if status // 100 != 2 and status != 304:
+                        diagnostics.fetch_error = f"HTTP {status}"
             items = res.get("items", []) if isinstance(res, dict) else []
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"watchlists.test_source: rss fetch failed: {exc}")
+            diagnostics.fetch_error = _format_fetch_diagnostic_error(exc)
             items = []
     elif source_type.lower() in {"site", "forum"}:
         scrape_rules = (
@@ -2497,15 +2544,21 @@ async def _build_source_preview_response(
                 fetch_mode="scrape_rules",
                 scrape_rules=scrape_rules,
             )
+            fetch_events: list[dict[str, Any]] = []
             try:
                 items = await fetch_site_items_with_rules(
                     base_url=str(scrape_rules.get("list_url") or normalized_url),
                     rules=scrape_rules,
                     tenant_id="default",
+                    fetch_diagnostics=fetch_events.append,
                 )
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"watchlists.test_source: scrape rules fetch failed: {exc}")
+                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
+                diagnostics.fetch_error = diagnostics.fetch_error or _format_fetch_diagnostic_error(exc)
                 items = []
+            else:
+                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
         elif test_mode:
             diagnostics = _build_source_preview_diagnostics(fetch_mode="test_mode")
             items = [

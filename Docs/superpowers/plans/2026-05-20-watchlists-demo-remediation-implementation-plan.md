@@ -1328,7 +1328,7 @@ git commit -m "feat: clarify watchlists digest output contract"
 - Test: `tldw_Server_API/tests/Watchlists/test_fetchers_scrape_rules.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_preview_endpoint.py`
 
-- [ ] **Step 1: Write source settings helper tests**
+- [x] **Step 1: Write source settings helper tests**
 
 Create tests proving unknown keys survive:
 
@@ -1341,7 +1341,7 @@ expect(merged.vendor_specific).toBe(true)
 expect(merged.scrape.selector).toBe(".article")
 ```
 
-- [ ] **Step 2: Write source test UI assertions**
+- [x] **Step 2: Write source test UI assertions**
 
 In `SourceFormModal.test-source.test.tsx`, assert a failed source test shows:
 
@@ -1350,7 +1350,7 @@ In `SourceFormModal.test-source.test.tsx`, assert a failed source test shows:
 - sample item count
 - dedupe identity preview
 
-- [ ] **Step 3: Run frontend tests and confirm failure**
+- [x] **Step 3: Run frontend tests and confirm failure**
 
 Run:
 
@@ -1364,7 +1364,7 @@ bunx vitest run \
 
 Expected: FAIL until helpers/UI are added.
 
-- [ ] **Step 4: Implement source settings helpers**
+- [x] **Step 4: Implement source settings helpers**
 
 Create `source-settings.ts` with pure helpers:
 
@@ -1383,11 +1383,11 @@ export const mergeSourceSettings = (
 
 Add typed parse/serialize helpers for scrape selectors, extraction mode, dedupe key, and advanced JSON. Invalid advanced JSON should block save with an inline error.
 
-- [ ] **Step 5: Pass draft settings to source test**
+- [x] **Step 5: Pass draft settings to source test**
 
 In `SourceFormModal.tsx`, include normalized draft `settings` in source-test calls so test results reflect what the user is saving.
 
-- [ ] **Step 6: Surface diagnostics**
+- [x] **Step 6: Surface diagnostics**
 
 Render:
 
@@ -1397,11 +1397,11 @@ Render:
 - dedupe identity preview such as "URL + canonical URL" or the configured custom identity
 - warning when no items are found
 
-- [ ] **Step 7: Extend backend diagnostics only where missing**
+- [x] **Step 7: Extend backend diagnostics only where missing**
 
 In `fetchers.py`/`watchlists.py`, expose `validate_selector_rules` diagnostics from source test responses. Do not change the stored source contract unless the UI needs a new persisted setting.
 
-- [ ] **Step 8: Run backend source tests**
+- [x] **Step 8: Run backend source tests**
 
 Run:
 
@@ -1415,7 +1415,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 9: Run frontend source tests**
+- [x] **Step 9: Run frontend source tests**
 
 Run:
 
@@ -1429,7 +1429,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 Run:
 

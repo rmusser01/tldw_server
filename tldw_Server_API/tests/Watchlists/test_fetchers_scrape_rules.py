@@ -168,7 +168,10 @@ async def test_fetch_site_items_with_rules_pagination(monkeypatch):
         raising=True,
     )
     monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.fetchers.is_url_allowed_for_tenant", lambda url, tenant_id: True)
-    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.fetchers.is_url_allowed", lambda url: True)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.fetchers.is_url_allowed",
+        lambda url: True,
+    )
 
     rules = {
         "list_url": "https://example.com/blog",
@@ -186,3 +189,46 @@ async def test_fetch_site_items_with_rules_pagination(monkeypatch):
     assert len(items) == 3
     assert items[0]["title"] == "First"
     assert items[-1]["url"] == "https://example.com/post-3"
+
+
+@pytest.mark.asyncio
+async def test_fetch_site_items_with_rules_reports_fetch_status(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "0")
+
+    class FakeResponse:
+        status_code = 503
+        headers = {}
+        text = "Service unavailable"
+
+    async def fake_afetch(*, method: str, url: str, client=None, headers=None, timeout=None, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.http_client.afetch",
+        fake_afetch,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.fetchers.is_url_allowed_for_tenant",
+        lambda url, tenant_id: True,
+    )
+    monkeypatch.setattr("tldw_Server_API.app.core.Watchlists.fetchers.is_url_allowed", lambda url: True)
+
+    events: list[dict[str, object]] = []
+    items = await fetch_site_items_with_rules(
+        "https://example.com/blog",
+        {
+            "entry_xpath": "//article",
+            "link_xpath": ".//a/@href",
+        },
+        fetch_diagnostics=events.append,
+    )
+
+    assert items == []
+    assert events == [
+        {
+            "url": "https://example.com/blog",
+            "status": 503,
+            "error": "HTTP 503",
+        }
+    ]
