@@ -121,7 +121,8 @@ The sidecar should load one configured runtime per process.
 
 Provider config should support at least:
 
-- `providers.omnivoice.model`: local model path or pre-cached model id
+- `providers.omnivoice.model`: display/model id or local model path
+- `providers.omnivoice.extra_params.model_path`: resolved local model directory used by the sidecar when different from `model`
 - `providers.omnivoice.sample_rate`: default `24000`
 - `providers.omnivoice.max_concurrent_generations`: default `1`
 - `providers.omnivoice.extra_params.python_path`
@@ -137,6 +138,8 @@ The sidecar should not support per-request model, device, dtype, or attention ba
 Runtime synthesis must not silently download model assets.
 
 The installer/setup path should provision and verify before `providers.omnivoice.enabled` is useful. At runtime, missing assets should produce a structured readiness or synthesis failure such as `MODEL_NOT_AVAILABLE`.
+
+The sidecar must not call `OmniVoice.from_pretrained(...)` with an unresolved Hugging Face repo id in no-download mode. Upstream OmniVoice resolves non-directory identifiers through Hugging Face, so the installer or verification path must resolve the configured model into a concrete local directory and record that directory in config, preferably `providers.omnivoice.extra_params.model_path`. The sidecar should treat a non-directory model value as `MODEL_NOT_AVAILABLE` unless a future explicit runtime-download mode is designed and approved.
 
 The implementation should support reproducible provisioning through PyPI or a pinned git source, while preserving explicit local-source development through paths such as `../OmniVoice`.
 
@@ -213,7 +216,7 @@ The sidecar should return only WAV or PCM. The main app keeps converting to `mp3
 For auto voice:
 
 ```python
-audio = model.generate(text=text, language_id=language_id, **generation_kwargs)
+audio = model.generate(text=text, language=language_id, **generation_kwargs)
 ```
 
 If `language_id` is omitted, do not synthesize a default language id inside tldw. Let OmniVoice use its own behavior.
@@ -226,7 +229,7 @@ For voice design:
 audio = model.generate(
     text=text,
     instruct=instruct,
-    language_id=language_id,
+    language=language_id,
     **generation_kwargs,
 )
 ```
@@ -250,7 +253,7 @@ audio = model.generate(
     text=text,
     ref_audio=reference_audio_path,
     ref_text=reference_text,
-    language_id=language_id,
+    language=language_id,
     **generation_kwargs,
 )
 ```
@@ -270,7 +273,7 @@ Resolution order:
 
 The current hard-coded English-only validation for `omnivoice` should be relaxed so supported languages are not artificially blocked by tldw.
 
-The sidecar payload should use only `language_id`. The adapter owns alias resolution and should fail validation if `extra_params.language_id`, `extra_params.language`, and the normalized public request language conflict.
+The sidecar payload should use only `language_id` as its internal field name. The adapter owns alias resolution and should fail validation if `extra_params.language_id`, `extra_params.language`, and the normalized public request language conflict. The sidecar runner must map that internal `language_id` field to OmniVoice's Python API argument named `language`.
 
 ## Generation Parameter Validation
 
@@ -393,9 +396,10 @@ The installer should:
 - create the dedicated sidecar venv
 - install PyTorch according to operator-selected backend instructions or document the required pre-step
 - install OmniVoice from PyPI, pinned git, or explicit local checkout
+- resolve or verify the configured model into a local model directory
 - install sidecar dependencies
 - patch only `providers.omnivoice`
-- record `python_path`, `runtime_path`, and optional logs path
+- record `python_path`, `runtime_path`, local `model_path`, and optional logs path
 - optionally run a load-only verification
 - optionally run a tiny smoke synth when the model is available
 
