@@ -115,8 +115,18 @@ def create_runtime_layout(layout: OmniVoiceRuntimeLayout) -> OmniVoiceRuntimeLay
 
     layout.runtime_base.mkdir(parents=True, exist_ok=True)
     layout.runtime_dir.mkdir(parents=True, exist_ok=True)
+    (layout.runtime_dir / "scratch").mkdir(parents=True, exist_ok=True)
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
     return layout
+
+
+def validate_local_model_path(model_path: Path) -> Path:
+    """Resolve and validate an existing local OmniVoice model directory."""
+
+    resolved = model_path.expanduser().resolve()
+    if not resolved.is_dir():
+        raise SystemExit(f"OmniVoice model path is not a directory: {resolved}")
+    return resolved
 
 
 def validate_runtime_layout(layout: OmniVoiceRuntimeLayout) -> list[str]:
@@ -268,6 +278,7 @@ def patch_tts_config(
     config_path: Path,
     layout: OmniVoiceRuntimeLayout,
     source_checkout: Path,
+    model_path: Path,
     repo_root: Optional[Path] = None,
 ) -> bool:
     """Patch only the OmniVoice provider block."""
@@ -291,6 +302,7 @@ def patch_tts_config(
     provider_indent = " " * effective_block_indent
     key_indent = provider_indent + "  "
     nested_indent = key_indent + "  "
+    scratch_dir = layout.runtime_dir / "scratch"
     block_lines = [
         f"{provider_indent}{PROVIDER_NAME}:",
         f"{key_indent}enabled: true",
@@ -300,8 +312,10 @@ def patch_tts_config(
         f"{key_indent}max_concurrent_generations: 1",
         f"{key_indent}extra_params:",
         f'{nested_indent}repo_path: "{_path_for_config(source_checkout, repo_root)}"',
+        f'{nested_indent}model_path: "{_path_for_config(model_path, repo_root)}"',
         f'{nested_indent}python_path: "{_path_for_config(layout.interpreter_path, repo_root)}"',
         f'{nested_indent}runtime_path: "{_path_for_config(layout.runtime_dir, repo_root)}"',
+        f'{nested_indent}scratch_dir: "{_path_for_config(scratch_dir, repo_root)}"',
         f'{nested_indent}logs_path: "{_path_for_config(layout.logs_dir, repo_root)}"',
         f'{nested_indent}host: "127.0.0.1"',
         f"{nested_indent}port: 8039",
@@ -410,9 +424,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--repo-url", default=DEFAULT_REPO_URL)
     parser.add_argument("--runtime-base", default=str(DEFAULT_RUNTIME_BASE))
     parser.add_argument("--source-dir")
+    parser.add_argument("--model-path", help="Resolved local OmniVoice model directory")
     parser.add_argument("--config-path", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--skip-clone", action="store_true")
     parser.add_argument("--skip-install", action="store_true")
+    parser.add_argument("--skip-model-check", action="store_true")
     parser.add_argument("--recreate-venv", action="store_true")
     parser.add_argument(
         "--install-inference-deps",
@@ -428,6 +444,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _ensure_prerequisites()
 
     repo_root = resolve_repo_root()
+    if not args.model_path:
+        raise SystemExit("OmniVoice model path is required; pass --model-path")
+
+    model_path = Path(args.model_path).expanduser().resolve()
+    if not args.skip_model_check:
+        model_path = validate_local_model_path(Path(args.model_path))
+
     runtime_base = Path(args.runtime_base)
     config_path = Path(args.config_path)
     source_checkout = resolve_source_checkout(
@@ -456,6 +479,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         config_path=config_path,
         layout=layout,
         source_checkout=source_checkout,
+        model_path=model_path,
         repo_root=repo_root,
     )
     logger.info("OmniVoice sidecar runtime ready at {}", layout.runtime_base)
