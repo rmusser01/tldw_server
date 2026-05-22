@@ -106,6 +106,36 @@ def test_existing_sqlite_workflow_runs_schema_migrates_metadata_json(tmp_path):
     assert json.loads(run.metadata_json or "{}")["audio_request_id"] == "wla_after_migration"
 
 
+def test_sqlite_metadata_migration_reraises_non_duplicate_errors():
+    db = WorkflowsDatabase.__new__(WorkflowsDatabase)
+
+    class FailingCursor:
+        @staticmethod
+        def execute(sql: str) -> None:
+            raise sqlite3.OperationalError("disk I/O error")
+
+    class FailingConnection:
+        rollback_called = False
+
+        @staticmethod
+        def cursor() -> FailingCursor:
+            return FailingCursor()
+
+        @staticmethod
+        def commit() -> None:
+            raise AssertionError("commit should not run after failed migration")
+
+        def rollback(self) -> None:
+            self.rollback_called = True
+
+    connection = FailingConnection()
+    db._conn = connection
+
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+        db._sqlite_migrate_to_v9()
+    assert connection.rollback_called is True
+
+
 @pytest.mark.asyncio
 async def test_workflow_run_handler_persists_payload_metadata_without_mutating_definition(monkeypatch):
     created_runs: list[dict[str, Any]] = []
@@ -170,3 +200,23 @@ async def test_workflow_run_handler_persists_payload_metadata_without_mutating_d
     assert definition_snapshot["metadata"] == {"existing": "kept"}
     assert submitted == [(created_runs[0]["run_id"], workflow_handler_mod.RunMode.ASYNC)]
     assert ledger_records == [("42", created_runs[0]["run_id"])]
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_handler_rejects_non_dict_metadata(monkeypatch):
+    class FakeWorkflowsDB:
+        def create_run(self, **kwargs: Any) -> None:
+            raise AssertionError("invalid metadata should fail before create_run")
+
+    monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
+
+    with pytest.raises(ValueError, match="metadata must be a dict"):
+        await workflow_handler_mod.workflow_run(
+            {
+                "user_id": "42",
+                "definition_snapshot": {"name": "audio_briefing", "steps": []},
+                "inputs": {"items": []},
+                "metadata": "not-a-dict",
+                "mode": "async",
+            }
+        )

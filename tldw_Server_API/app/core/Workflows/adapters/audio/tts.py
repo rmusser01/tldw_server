@@ -279,17 +279,23 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
             artifact_metadata = config.get("artifact_metadata")
             if not isinstance(artifact_metadata, dict):
                 artifact_metadata = {}
+            watchlist_metadata = watchlist_artifact_metadata(context)
+            artifact_metadata = {
+                key: value
+                for key, value in artifact_metadata.items()
+                if key not in watchlist_metadata
+            }
             context["add_artifact"](
                 type="tts_audio",
                 uri=f"file://{normalized_path}",
                 size_bytes=size_bytes,
                 mime_type=mime or "application/octet-stream",
                 metadata={
+                    **artifact_metadata,
                     "model": model,
                     "voice": voice,
                     "format": ext,
-                    **watchlist_artifact_metadata(context),
-                    **artifact_metadata,
+                    **watchlist_metadata,
                 },
                 artifact_id=audio_artifact_id,
             )

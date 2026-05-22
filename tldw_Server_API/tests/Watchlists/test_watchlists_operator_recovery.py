@@ -229,7 +229,7 @@ async def test_retry_run_audio_marks_output_audio_stale(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_retry_run_audio_persists_non_submitted_status_before_409(monkeypatch):
+async def test_retry_run_audio_does_not_mutate_state_when_queue_submit_fails(monkeypatch):
     from fastapi import HTTPException
 
     from tldw_Server_API.app.api.v1.endpoints import watchlists
@@ -263,12 +263,7 @@ async def test_retry_run_audio_persists_non_submitted_status_before_409(monkeypa
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == "audio_retry_not_queued"
     trigger.assert_awaited_once()
-    db.update_run.assert_called_once()
-    persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
-    assert persisted_stats["audio_briefing_status"] == "queue_unavailable"
-    assert persisted_stats["audio_briefing_reason"] == "workflows_queue_has_no_workers"
-    assert "audio_briefing_task_id" not in persisted_stats
-    assert "audio_briefing_retry_task_id" not in persisted_stats
+    db.update_run.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -997,6 +997,7 @@ class WatchlistRunAudioResponse(BaseModel):
     schema_version: int | None = None
     synced_at: str | None = None
     stale: bool | None = None
+    superseded_by: str | int | None = None
     error: str | None = None
 
 

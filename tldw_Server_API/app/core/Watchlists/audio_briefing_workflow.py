@@ -385,7 +385,7 @@ async def trigger_audio_briefing(
         )
     if audio_request_id is not None:
         audio_request_id = str(audio_request_id).strip()
-        if not audio_request_id.startswith("wla_"):
+        if not audio_request_id.startswith("wla_") or len(audio_request_id) <= len("wla_"):
             raise ValueError("audio_request_id must start with 'wla_'")
     active_audio_request_id = audio_request_id or _new_audio_request_id()
     workflow_inputs = {

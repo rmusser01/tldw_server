@@ -16,6 +16,22 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def test_output_row_metadata_uses_parser_for_object_rows():
+    from tldw_Server_API.app.api.v1.endpoints.watchlists import _output_row_metadata
+
+    class OutputRow:
+        metadata_json = json.dumps({"origin": "json_only"})
+
+        @staticmethod
+        def metadata():
+            return {"origin": "watchlists", "delivery_status": "sent"}
+
+    assert _output_row_metadata(OutputRow()) == {
+        "origin": "watchlists",
+        "delivery_status": "sent",
+    }
+
+
 class TestGetRunAudioEndpoint:
     """Tests for the /runs/{run_id}/audio endpoint."""
 
@@ -266,7 +282,8 @@ class TestGetRunAudioEndpoint:
         assert result["workflow_run_id"] == "wf_run_91"
         assert result["audio_request_id"] == "wla_current"
         assert result["artifact_id"] == "art_final"
-        assert result["audio_uri"] == "file:///tmp/final.mp3"
+        assert result["audio_uri"] is None
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_final/download"
         persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
         persisted_output = json.loads(collections_db.update_output_artifact_metadata.call_args.kwargs["metadata_json"])
         assert persisted_stats["audio"]["final_artifact"]["artifact_id"] == "art_final"
@@ -286,6 +303,7 @@ class TestGetRunAudioEndpoint:
             "status": "completed",
             "workflow_run_id": "wf_run_91",
             "audio_request_id": "wla_current",
+            "superseded_by": "wla_next",
             "artifact_id": "art_final",
             "download_url": "/api/v1/workflows/artifacts/art_final/download",
             "script_artifact": None,
@@ -330,6 +348,7 @@ class TestGetRunAudioEndpoint:
         assert result["artifact_id"] == "art_final"
         assert result["download_url"] == "/api/v1/workflows/artifacts/art_final/download"
         assert result["audio_uri"] is None
+        assert result["superseded_by"] == "wla_next"
 
     @pytest.mark.asyncio
     async def test_scheduler_status_lookup_logs_failures_without_leaking_error_text(self):
@@ -871,7 +890,7 @@ class TestGetRunAudioEndpoint:
             result = await get_run_audio(run_id=7, target_user_id=None, current_user=user, db=db)
 
         assert result["status"] == "completed"
-        assert result["audio_uri"] == "file:///tmp/briefing.mp3"
+        assert result["audio_uri"] is None
         assert result["artifact_id"] == "art_audio_1"
         assert result["download_url"] == "/api/v1/workflows/artifacts/art_audio_1/download"
         assert result["size_bytes"] == 1024000
@@ -1052,7 +1071,8 @@ class TestGetRunAudioEndpoint:
         assert result["status"] == "completed"
         assert result["task_id"] == "task_paged_hit"
         assert result["artifact_id"] == "art_audio_paged"
-        assert result["audio_uri"] == "file:///tmp/paged-briefing.mp3"
+        assert result["audio_uri"] is None
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_audio_paged/download"
         assert mock_wf_db.list_runs.call_count == 2
         first_call = mock_wf_db.list_runs.call_args_list[0].kwargs
         second_call = mock_wf_db.list_runs.call_args_list[1].kwargs
@@ -1273,7 +1293,8 @@ class TestGetRunAudioEndpoint:
 
         assert result["status"] == "completed"
         assert result["artifact_id"] == "art_final"
-        assert result["audio_uri"] == "file:///tmp/briefing_mixed.mp3"
+        assert result["audio_uri"] is None
+        assert result["download_url"] == "/api/v1/workflows/artifacts/art_final/download"
 
     @pytest.mark.asyncio
     async def test_returns_structured_audio_artifact_graph(self):
@@ -1375,7 +1396,7 @@ class TestGetRunAudioEndpoint:
 
         assert result["status"] == "completed"
         assert result["artifact_id"] == "art_final_graph"
-        assert result["audio_uri"] == "file:///tmp/final.mp3"
+        assert result["audio_uri"] is None
         assert result["download_url"] == "/api/v1/workflows/artifacts/art_final_graph/download"
         assert result["script_artifact"]["artifact_id"] == "art_script"
         assert result["script_artifact"]["title"] == "Briefing script"

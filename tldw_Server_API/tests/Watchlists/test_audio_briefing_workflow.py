@@ -500,6 +500,24 @@ class TestTriggerAudioBriefing:
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
 
     @pytest.mark.asyncio
+    async def test_trigger_rejects_empty_audio_request_suffix(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import trigger_audio_briefing
+
+        db = MagicMock()
+        db.list_items.return_value = ([{"title": "Story", "summary": "Summary", "url": "https://example.com/1"}], 1)
+
+        with pytest.raises(ValueError, match="audio_request_id"):
+            await trigger_audio_briefing(
+                user_id=1,
+                job_id=42,
+                run_id=7,
+                output_prefs={"generate_audio": True, "target_audio_minutes": 5},
+                db=db,
+                scheduler=self.SubmitOnlyScheduler("task_abc123"),
+                audio_request_id="wla_",
+            )
+
+    @pytest.mark.asyncio
     async def test_trigger_does_not_downscale_existing_workflow_workers(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             trigger_audio_briefing,

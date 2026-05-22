@@ -292,6 +292,10 @@ async def test_tts_adapter_merges_watchlist_and_config_artifact_metadata(monkeyp
         "voice": "af_heart",
         "model": "kokoro",
         "artifact_metadata": {
+            "source": "malicious_override",
+            "watchlist_job_id": 999,
+            "watchlist_run_id": 888,
+            "audio_request_id": "wla_wrong_request",
             "final_artifact": True,
             "fallback_artifact": True,
             "single_voice_fallback": True,

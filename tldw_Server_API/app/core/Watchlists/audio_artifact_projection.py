@@ -25,12 +25,14 @@ _CORRELATION_KEYS = ("source", "watchlist_job_id", "watchlist_run_id", "audio_re
 
 
 def _get_value(obj: Any, key: str, default: Any = None) -> Any:
+    """Read a field from dict-like and object-like rows without raising."""
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
 
 def _json_object(value: Any) -> dict[str, Any]:
+    """Coerce a JSON object payload to a dict, returning empty dict on bad input."""
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
@@ -46,14 +48,17 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 
 def _json_dumps(value: dict[str, Any]) -> str:
+    """Serialize metadata deterministically for idempotent update comparisons."""
     return json.dumps(value, sort_keys=True)
 
 
 def _same_json_object(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Compare JSON-compatible dicts using the same ordering used for persistence."""
     return _json_dumps(left) == _json_dumps(right)
 
 
 def _first_non_empty_string(*values: Any) -> str | None:
+    """Return the first scalar value that can be represented as non-empty text."""
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -93,6 +98,7 @@ def artifact_download_url(artifact_id: Any, *, target_user_id: int | None = None
 
 
 def _artifact_metadata(artifact: Any) -> dict[str, Any]:
+    """Read artifact metadata from current and compatibility artifact row fields."""
     metadata = _json_object(_get_value(artifact, "metadata_json"))
     if not metadata:
         metadata = _json_object(_get_value(artifact, "metadata"))
@@ -100,10 +106,12 @@ def _artifact_metadata(artifact: Any) -> dict[str, Any]:
 
 
 def _artifact_id(artifact: Any) -> Any:
+    """Return the artifact identifier across Workflow artifact row shapes."""
     return _get_value(artifact, "artifact_id") or _get_value(artifact, "id")
 
 
 def _scrub_artifact_metadata(value: Any) -> Any:
+    """Remove raw artifact URI fields from metadata before mirroring to Watchlists."""
     if isinstance(value, dict):
         return {key: _scrub_artifact_metadata(item) for key, item in value.items() if key != "uri"}
     if isinstance(value, list):
@@ -192,7 +200,7 @@ def _artifact_matches_run(metadata: dict[str, Any], *, run_id: int, audio_reques
         return False
     if audio_request_id:
         metadata_request_id = _first_non_empty_string(metadata.get("audio_request_id"))
-        if metadata_request_id and metadata_request_id != audio_request_id:
+        if metadata_request_id != audio_request_id:
             return False
     return True
 
@@ -208,14 +216,15 @@ def extract_workflow_run_metadata(workflow_run: Any) -> dict[str, Any]:
 
     candidates.append(_json_object(_get_value(workflow_run, "inputs_json")))
 
+    merged: dict[str, Any] = {}
     for candidate in candidates:
         extracted = {key: candidate[key] for key in _CORRELATION_KEYS if candidate.get(key) is not None}
+        for key, value in extracted.items():
+            merged.setdefault(key, value)
         for optional_key in ("fallback_reason", "audio_fallback_reason", "fallback_error"):
             if candidate.get(optional_key) is not None:
-                extracted[optional_key] = candidate[optional_key]
-        if extracted:
-            return extracted
-    return {}
+                merged.setdefault(optional_key, candidate[optional_key])
+    return merged
 
 
 def _workflow_run_id(workflow_run: Any) -> Any:
@@ -405,9 +414,7 @@ def find_matching_workflow_run(
             candidate_request_id = _first_non_empty_string(metadata.get("audio_request_id"))
             if stored_key == idempotency_key:
                 return lookup_run
-            if str(metadata.get("watchlist_run_id")) == str(run_id) and (
-                not candidate_request_id or candidate_request_id == audio_request_id
-            ):
+            if str(metadata.get("watchlist_run_id")) == str(run_id) and candidate_request_id == audio_request_id:
                 return lookup_run
 
     fallback_run = None
@@ -427,7 +434,7 @@ def find_matching_workflow_run(
             candidate_request_id = _first_non_empty_string(metadata.get("audio_request_id"))
             if audio_request_id and candidate_request_id == audio_request_id:
                 return workflow_run
-            if audio_request_id and candidate_request_id and candidate_request_id != audio_request_id:
+            if audio_request_id:
                 continue
             if fallback_run is None:
                 fallback_run = workflow_run
@@ -444,6 +451,7 @@ def _watchlist_audio_idempotency_key(
     run_id: int,
     audio_request_id: str | None,
 ) -> str | None:
+    """Build the Watchlists audio Workflow idempotency key when all parts are known."""
     request_id = _first_non_empty_string(audio_request_id)
     job_id_text = _first_non_empty_string(job_id)
     run_id_text = _first_non_empty_string(run_id)

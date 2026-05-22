@@ -1344,9 +1344,22 @@ class WorkflowsDatabase:
 
     def _sqlite_migrate_to_v9(self) -> None:
         cur = self._conn.cursor()
-        with contextlib.suppress(_WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS):
+        try:
             cur.execute("ALTER TABLE workflow_runs ADD COLUMN metadata_json TEXT")
             self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if "duplicate column name" in message or "already exists" in message:
+                with contextlib.suppress(sqlite3.Error):
+                    self._conn.rollback()
+                return
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.rollback()
+            raise
+        except sqlite3.Error:
+            with contextlib.suppress(sqlite3.Error):
+                self._conn.rollback()
+            raise
 
     def _create_schema(self) -> None:
         current_version = self._get_sqlite_schema_version()

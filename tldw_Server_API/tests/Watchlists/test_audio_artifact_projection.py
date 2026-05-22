@@ -211,6 +211,20 @@ def test_extract_workflow_run_metadata_uses_compatible_sources_in_order():
     assert extract_workflow_run_metadata(
         _workflow_run(metadata=None, definition_metadata=None, inputs={"audio_request_id": "wla_inputs"})
     )["audio_request_id"] == "wla_inputs"
+    merged = extract_workflow_run_metadata(
+        _workflow_run(
+            metadata={"source": "watchlist_audio_briefing", "watchlist_run_id": 91},
+            definition_metadata={"audio_request_id": "wla_definition", "watchlist_job_id": 42},
+            inputs={"fallback_reason": "single_voice_fallback"},
+        )
+    )
+    assert merged == {
+        "source": "watchlist_audio_briefing",
+        "watchlist_run_id": 91,
+        "audio_request_id": "wla_definition",
+        "watchlist_job_id": 42,
+        "fallback_reason": "single_voice_fallback",
+    }
 
 
 def test_status_and_download_url_normalization():
@@ -256,6 +270,49 @@ def test_find_matching_workflow_run_prefers_idempotency_lookup():
         is matching_run
     )
     assert db.lookup_key == "watchlist-audio-briefing:1:42:91:wla_current"
+
+
+def test_find_matching_workflow_run_rejects_legacy_run_when_request_id_is_active():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import find_matching_workflow_run
+
+    legacy_run = _workflow_run(metadata={"source": "watchlist_audio_briefing", "watchlist_run_id": 91})
+
+    class FakeWorkflowDB:
+        def get_run_by_idempotency(self, tenant_id: str, user_id: str, idempotency_key: str):
+            return None
+
+        def list_runs(self, **kwargs: Any):
+            return [legacy_run]
+
+    assert (
+        find_matching_workflow_run(
+            FakeWorkflowDB(),
+            tenant_id="tenant_1",
+            user_id="1",
+            job_id=42,
+            run_id=91,
+            audio_request_id="wla_current",
+        )
+        is None
+    )
+
+
+def test_build_audio_projection_rejects_legacy_artifacts_when_request_id_is_active():
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import build_audio_projection
+
+    legacy_final_metadata = _watchlist_meta(final_artifact=True, title="Old final")
+    legacy_final_metadata.pop("audio_request_id")
+
+    projection = build_audio_projection(
+        run_id=91,
+        task_id="task_retry",
+        audio_request_id="wla_current",
+        workflow_run=_workflow_run(status="completed", metadata=_watchlist_meta()),
+        artifacts=[_artifact("art_legacy_final", metadata=legacy_final_metadata)],
+    )
+
+    assert projection["final_artifact"] is None
+    assert projection.get("artifact_id") is None
 
 
 def test_merge_and_stale_helpers_preserve_unrelated_metadata():

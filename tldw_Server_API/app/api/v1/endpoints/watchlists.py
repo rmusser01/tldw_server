@@ -4963,18 +4963,21 @@ async def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit
 
 
 def _output_row_id(row: Any) -> Any:
+    """Return a stable output artifact identifier across dict and row-like shapes."""
     if isinstance(row, dict):
         return row.get("id")
     return getattr(row, "id", None)
 
 
 def _output_row_metadata(row: Any) -> dict[str, Any]:
+    """Parse output metadata without dropping row-provided compatibility fields."""
     if isinstance(row, dict):
         return _parse_json_object(row.get("metadata_json") or row.get("metadata"))
-    return _parse_json_object(getattr(row, "metadata_json", None))
+    return _parse_output_metadata(row)
 
 
 def _retry_audio_projection(run_id: int, audio_result: Any, status: str) -> dict[str, Any]:
+    """Build the active empty audio graph used immediately after a queued retry."""
     return {
         "run_id": run_id,
         "task_id": str(audio_result.task_id) if audio_result.task_id else None,
@@ -4998,6 +5001,7 @@ def _mirror_audio_retry_state_to_output(
     active_projection: dict[str, Any],
     superseded_by: str | None,
 ) -> bool:
+    """Mirror retry stale/active audio state into the canonical Watchlists output artifact."""
     from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
         find_canonical_watchlist_output,
         mark_audio_projection_stale,
@@ -5041,8 +5045,8 @@ async def retry_run_audio(
         description="Admin-only: retry audio for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db=Depends(get_watchlists_db_for_user),
-    collections_db=Depends(get_collections_db_for_user),
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
 ) -> RunStageRetryResponse:
     """Retry the audio briefing stage for a completed or failed watchlist run."""
     _enforce_runs_admin_if_configured(current_user)
@@ -5093,6 +5097,9 @@ async def retry_run_audio(
         output_prefs=output_prefs,
         db=target_db,
     )
+    if not audio_result.submitted:
+        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
+
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
     run_stats = mark_audio_projection_stale(run_stats, superseded_by=audio_result.audio_request_id)
     active_audio_projection = _retry_audio_projection(
@@ -5115,9 +5122,6 @@ async def retry_run_audio(
             active_projection=active_audio_projection,
             superseded_by=audio_result.audio_request_id,
         )
-
-    if not audio_result.submitted:
-        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
 
     return RunStageRetryResponse(
         run_id=run_id,
@@ -5461,12 +5465,14 @@ def _get_watchlists_workflow_db() -> Any:
 
 
 def _workflow_run_identifier(workflow_run: Any) -> Any:
+    """Return a Workflow run id across dict, SQLite, and backend row shapes."""
     if isinstance(workflow_run, dict):
         return workflow_run.get("run_id") or workflow_run.get("id")
     return getattr(workflow_run, "run_id", None) or getattr(workflow_run, "id", None)
 
 
 def _list_workflow_audio_artifacts(workflow_db: Any, workflow_run_id: Any) -> list[Any]:
+    """List Workflow artifacts using whichever artifact API the backing DB exposes."""
     if workflow_run_id is None:
         return []
     try:
@@ -5483,37 +5489,20 @@ def _list_workflow_audio_artifacts(workflow_db: Any, workflow_run_id: Any) -> li
         return []
 
 
-def _artifact_uri_by_id(artifacts: list[Any], artifact_id: Any) -> str | None:
-    if artifact_id is None:
-        return None
-    artifact_id_text = str(artifact_id)
-    for artifact in artifacts or []:
-        current_id = None
-        if isinstance(artifact, dict):
-            current_id = artifact.get("artifact_id") or artifact.get("id")
-            uri = artifact.get("uri")
-        else:
-            current_id = getattr(artifact, "artifact_id", None) or getattr(artifact, "id", None)
-            uri = getattr(artifact, "uri", None)
-        if str(current_id) == artifact_id_text and isinstance(uri, str):
-            return uri
-    return None
-
-
 def _audio_projection_response(
     projection: dict[str, Any],
     *,
     run_id: int,
     task_id: Any,
-    audio_uri: str | None = None,
     queue_name: str | None = None,
 ) -> dict[str, Any]:
+    """Shape the public audio response without exposing raw filesystem artifact URIs."""
     response = {
         "run_id": run_id,
         "task_id": projection.get("task_id") or (str(task_id) if task_id is not None else None),
         "queue_name": queue_name,
         "status": projection.get("status") or "unknown",
-        "audio_uri": audio_uri,
+        "audio_uri": None,
         "download_url": projection.get("download_url"),
         "artifact_id": projection.get("artifact_id"),
         "size_bytes": projection.get("size_bytes"),
@@ -5527,11 +5516,13 @@ def _audio_projection_response(
         "schema_version": projection.get("schema_version", 1),
         "synced_at": projection.get("synced_at"),
         "stale": projection.get("stale"),
+        "superseded_by": projection.get("superseded_by"),
     }
     return response
 
 
 def _looks_like_collections_db(collections_db: Any) -> bool:
+    """Return whether an injected dependency behaves like the Collections DB facade."""
     return callable(getattr(collections_db, "list_output_artifacts", None))
 
 
@@ -5548,9 +5539,9 @@ async def get_run_audio(
         description="Admin-only: fetch run audio info for another user ID.",
     ),
     current_user: User = Depends(get_request_user),
-    db=Depends(get_watchlists_db_for_user),
-    collections_db=Depends(get_collections_db_for_user),
-):
+    db: Any = Depends(get_watchlists_db_for_user),
+    collections_db: Any = Depends(get_collections_db_for_user),
+) -> dict[str, Any]:
     """Return audio briefing artifact metadata for a watchlist run.
 
     Looks up the workflow run that was triggered by this watchlist run
@@ -5619,7 +5610,6 @@ async def get_run_audio(
                     mirrored_projection,
                     run_id=run_id,
                     task_id=task_id,
-                    audio_uri=None,
                 )
             return await _audio_scheduler_status_or_pending(run_id, task_id)
 
@@ -5630,7 +5620,6 @@ async def get_run_audio(
                     mirrored_projection,
                     run_id=run_id,
                     task_id=task_id,
-                    audio_uri=None,
                 )
             return await _audio_scheduler_status_or_pending(run_id, task_id)
 
@@ -5666,12 +5655,10 @@ async def get_run_audio(
             if not mirror_ok:
                 logger.warning("Watchlists audio projection mirror failed for run={}", run_id)
 
-        audio_uri = _artifact_uri_by_id(artifacts, projection.get("artifact_id"))
         return _audio_projection_response(
             projection,
             run_id=run_id,
             task_id=task_id,
-            audio_uri=audio_uri,
             queue_name=queue_name,
         )
 
@@ -5688,7 +5675,6 @@ async def get_run_audio(
                 mirrored_projection,
                 run_id=run_id,
                 task_id=task_id,
-                audio_uri=None,
             )
         logger.opt(exception=exc).warning(f"Failed to look up audio artifact for run {run_id}")
         return {

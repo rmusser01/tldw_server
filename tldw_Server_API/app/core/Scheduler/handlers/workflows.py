@@ -69,7 +69,10 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
     definition_snapshot = payload.get("definition_snapshot")
     if workflow_id is None and not definition_snapshot:
         raise ValueError("workflow_run: must provide workflow_id or definition_snapshot")
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    raw_metadata = payload.get("metadata")
+    if raw_metadata is not None and not isinstance(raw_metadata, dict):
+        raise ValueError("workflow_run: metadata must be a dict when provided")
+    metadata = raw_metadata or {}
     if isinstance(definition_snapshot, dict):
         definition_snapshot = dict(definition_snapshot)
         existing_definition_metadata = definition_snapshot.get("metadata")
