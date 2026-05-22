@@ -27,6 +27,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
+from ..utils import parse_bool
 from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse
 from .omnivoice_sidecar_protocol import build_sidecar_auth_headers
 from .omnivoice_sidecar_supervisor import create_sidecar_async_client
@@ -56,8 +57,6 @@ VALIDATION_ERROR_CODES = {
     "INVALID_GENERATION_PARAMETER",
     "REFERENCE_PATH_NOT_ALLOWED",
 }
-STRICT_TRUE_VALUES = {"1", "true", "t", "yes", "y", "on"}
-STRICT_FALSE_VALUES = {"0", "false", "f", "no", "n", "off"}
 
 
 class OmniVoiceAdapter(TTSAdapter):
@@ -236,8 +235,7 @@ class OmniVoiceAdapter(TTSAdapter):
             audio_bytes = response.content
             channels = int(response.headers.get("X-OmniVoice-Channels", "1") or "1")
             native_sample_rate = self._parse_sample_rate_header(
-                response.headers.get("X-OmniVoice-Sample-Rate"),
-                fallback_sample_rate=requested_sample_rate,
+                response.headers.get("X-OmniVoice-Sample-Rate")
             )
             if not audio_bytes:
                 raise TTSGenerationError(
@@ -366,12 +364,7 @@ class OmniVoiceAdapter(TTSAdapter):
             )
         return values[0][1] if values else None
 
-    def _resolve_generation(
-        self,
-        extras: dict[str, Any],
-        *,
-        request_speed: Optional[float] = None,
-    ) -> dict[str, Any]:
+    def _resolve_generation(self, extras: dict[str, Any]) -> dict[str, Any]:
         generation: dict[str, Any] = {}
         for key, value in extras.items():
             if key in GENERATION_PARAM_TYPES:
@@ -385,77 +378,22 @@ class OmniVoiceAdapter(TTSAdapter):
                     f"Unknown or unsupported OmniVoice generation parameter: {key}",
                     provider=self.PROVIDER_KEY,
                 )
-        if "speed" not in generation and request_speed is not None:
-            speed = self._coerce_generation_value("speed", request_speed, float)
-            if not math.isclose(speed, 1.0, rel_tol=0.0, abs_tol=1e-12):
-                generation["speed"] = speed
         return generation
 
     def _coerce_generation_value(self, key: str, value: Any, target_type: type) -> Any:
         try:
             if target_type is bool:
-                return self._coerce_bool_generation_value(key, value)
+                return parse_bool(value, default=False)
             if target_type is int:
-                return self._coerce_int_generation_value(key, value)
+                return int(value)
             if target_type is float:
-                return self._coerce_float_generation_value(key, value)
+                return float(value)
         except (TypeError, ValueError) as exc:
             raise TTSValidationError(
                 f"OmniVoice generation parameter {key} has invalid type",
                 provider=self.PROVIDER_KEY,
             ) from exc
         return value
-
-    def _coerce_bool_generation_value(self, key: str, value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in STRICT_TRUE_VALUES:
-                return True
-            if normalized in STRICT_FALSE_VALUES:
-                return False
-        raise TTSValidationError(
-            f"OmniVoice generation parameter {key} must be a boolean",
-            provider=self.PROVIDER_KEY,
-        )
-
-    def _coerce_int_generation_value(self, key: str, value: Any) -> int:
-        if isinstance(value, bool):
-            raise TTSValidationError(
-                f"OmniVoice generation parameter {key} must be an integer",
-                provider=self.PROVIDER_KEY,
-            )
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str):
-            stripped = value.strip()
-            if re.fullmatch(r"[+-]?\d+", stripped):
-                return int(stripped)
-        raise TTSValidationError(
-            f"OmniVoice generation parameter {key} must be an integer",
-            provider=self.PROVIDER_KEY,
-        )
-
-    def _coerce_float_generation_value(self, key: str, value: Any) -> float:
-        if isinstance(value, bool):
-            raise TTSValidationError(
-                f"OmniVoice generation parameter {key} must be a finite number",
-                provider=self.PROVIDER_KEY,
-            )
-        try:
-            parsed = float(value)
-        except (TypeError, ValueError) as exc:
-            raise TTSValidationError(
-                f"OmniVoice generation parameter {key} must be a finite number",
-                provider=self.PROVIDER_KEY,
-            ) from exc
-        if not math.isfinite(parsed):
-            raise TTSValidationError(
-                f"OmniVoice generation parameter {key} must be a finite number",
-                provider=self.PROVIDER_KEY,
-            )
-        return parsed
 
     def _resolve_reference_text(self, extras: dict[str, Any]) -> Optional[str]:
         for key in REFERENCE_TEXT_KEYS:
@@ -493,6 +431,7 @@ class OmniVoiceAdapter(TTSAdapter):
             "text": self.preprocess_text(request.text),
             "mode": mode,
             "requested_sample_rate": sample_rate,
+            "generation": self._resolve_generation(extras),
         }
         instruct = self._resolve_instruct(extras)
         language_id = self._resolve_language_id(request, extras)
@@ -562,35 +501,12 @@ class OmniVoiceAdapter(TTSAdapter):
             return "OmniVoice sidecar reported an internal error; see server logs."
         return "OmniVoice sidecar returned an empty error response."
 
-    @staticmethod
-    def _sanitize_structured_sidecar_message(message: str | None) -> str:
-        sanitized = str(message or "").strip()
-        if not sanitized:
-            return "OmniVoice sidecar returned an empty error response."
-        sanitized = re.sub(r"[\x00-\x1f\x7f]+", " ", sanitized)
-        sanitized = re.sub(r"\b(?:https?|file)://[^\s<>'\"]+", "[redacted-url]", sanitized)
-        sanitized = re.sub(r"\b[A-Za-z]:\\[^\s:;,)\]}]+(?:\\[^\s:;,)\]}]+)*", "[redacted-path]", sanitized)
-        sanitized = re.sub(r"(?<!\w)~(?:/[^\s:;,)\]}]+)+", "[redacted-path]", sanitized)
-        sanitized = re.sub(r"(?<!\w)/(?:[^\s/:;,)\]}]+/)+[^\s:;,)\]}]+", "[redacted-path]", sanitized)
-        sanitized = re.sub(
-            r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+",
-            lambda match: f"{match.group(1)}=[redacted-secret]",
-            sanitized,
-        )
-        sanitized = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [redacted-token]", sanitized)
-        sanitized = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "[redacted-token]", sanitized)
-        sanitized = re.sub(r"\s+", " ", sanitized).strip()
-        return sanitized[:500] if sanitized else "OmniVoice sidecar returned an empty error response."
-
-    def _parse_sample_rate_header(self, value: str | None, *, fallback_sample_rate: int | None = None) -> int:
-        fallback = fallback_sample_rate if fallback_sample_rate and fallback_sample_rate > 0 else self.sample_rate
-        if fallback <= 0:
-            fallback = self.DEFAULT_SAMPLE_RATE
+    def _parse_sample_rate_header(self, value: str | None) -> int:
         try:
-            sample_rate = int(value or fallback)
+            sample_rate = int(value or self.DEFAULT_SAMPLE_RATE)
         except (TypeError, ValueError):
-            sample_rate = fallback
-        return sample_rate if sample_rate > 0 else fallback
+            sample_rate = self.DEFAULT_SAMPLE_RATE
+        return sample_rate if sample_rate > 0 else self.DEFAULT_SAMPLE_RATE
 
     def _raise_for_sidecar_error(self, response: Any) -> None:
         content_type = response.headers.get("content-type", "")
@@ -602,13 +518,10 @@ class OmniVoiceAdapter(TTSAdapter):
                     payload = parsed
         error = payload.get("error") if isinstance(payload, dict) else None
         code = None
-        message = None
         retryable = False
         if isinstance(error, dict):
             raw_code = error.get("code")
             code = str(raw_code).strip() if raw_code is not None else None
-            raw_message = error.get("message")
-            message = str(raw_message).strip() if raw_message is not None else None
             retryable = bool(error.get("retryable", False))
         details = {
             "status_code": response.status_code,
@@ -617,8 +530,6 @@ class OmniVoiceAdapter(TTSAdapter):
         if code:
             details["sidecar_error_code"] = code
             details["retryable"] = retryable
-        if message:
-            details["sidecar_error_message"] = self._sanitize_structured_sidecar_message(message)
         logger.warning(
             "OmniVoice sidecar returned status {} with sanitized error code {}",
             response.status_code,

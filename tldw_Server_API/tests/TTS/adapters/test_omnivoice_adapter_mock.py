@@ -12,7 +12,11 @@ from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStat
 from tldw_Server_API.app.core.TTS.adapters import omnivoice_adapter as omnivoice_adapter_module
 from tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter import OmniVoiceAdapter
 from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError
+from tldw_Server_API.app.core.TTS.tts_exceptions import (
+    TTSGenerationError,
+    TTSProviderNotConfiguredError,
+    TTSValidationError,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -145,8 +149,126 @@ async def test_omnivoice_generate_posts_narrow_internal_payload_and_returns_wav(
         "mode": "auto",
         "voice": "auto",
         "requested_sample_rate": 24000,
+        "generation": {},
     }
     assert parsed_payload.requested_sample_rate == 24000  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_adapter_sends_generation_object_and_design_mode(monkeypatch):
+    adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter.set_supervisor(_FakeSupervisor())
+
+    recorded: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.create_sidecar_async_client",
+        lambda *, timeout: _FakeClient(
+            recorded,
+            httpx.Response(
+                200,
+                content=_make_reference_wav(3.5),
+                headers={
+                    "X-OmniVoice-Audio-Format": "wav",
+                    "X-OmniVoice-Sample-Rate": "24000",
+                    "X-OmniVoice-Channels": "1",
+                },
+            ),
+        ),
+        raising=True,
+    )
+
+    await adapter.generate(
+        TTSRequest(
+            text="hello",
+            voice="auto",
+            format=AudioFormat.WAV,
+            stream=False,
+            language="es",
+            extra_params={"instruct": "calm teacher", "num_step": 8, "guidance_scale": 4.0},
+        )
+    )
+
+    parsed_payload = OmniVoiceSynthesizeRequest(**recorded["json"])
+    assert recorded["json"] == {
+        "text": "hello",
+        "mode": "design",
+        "voice": "auto",
+        "instruct": "calm teacher",
+        "language_id": "es",
+        "requested_sample_rate": 24000,
+        "generation": {"num_step": 8, "guidance_scale": 4.0},
+    }
+    assert parsed_payload.mode == "design"  # nosec B101
+    assert "sample_rate" not in recorded["json"]  # nosec B101
+
+
+def test_omnivoice_adapter_rejects_conflicting_instruct_aliases():
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        stream=False,
+        extra_params={"instruct": "warm", "voice_design": "cold"},
+    )
+
+    with pytest.raises(TTSValidationError, match="instruct"):
+        OmniVoiceAdapter({})._build_sidecar_payload(
+            request,
+            mode="auto",
+            sample_rate=24000,
+            reference_audio_path=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_reference_audio_materializes_under_configured_scratch_dir(tmp_path, monkeypatch):
+    scratch_dir = tmp_path / "runtime" / "scratch"
+    adapter = OmniVoiceAdapter(
+        {
+            "sample_rate": 24000,
+            "timeout": 5,
+            "extra_params": {"scratch_dir": str(scratch_dir)},
+        }
+    )
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter.set_supervisor(_FakeSupervisor())
+
+    recorded: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.create_sidecar_async_client",
+        lambda *, timeout: _FakeClient(
+            recorded,
+            httpx.Response(
+                200,
+                content=_make_reference_wav(3.5),
+                headers={
+                    "X-OmniVoice-Audio-Format": "wav",
+                    "X-OmniVoice-Sample-Rate": "24000",
+                    "X-OmniVoice-Channels": "1",
+                },
+            ),
+        ),
+        raising=True,
+    )
+
+    await adapter.generate(
+        TTSRequest(
+            text="clone me",
+            voice="clone",
+            format=AudioFormat.WAV,
+            stream=False,
+            voice_reference=_make_reference_wav(3.5),
+            extra_params={"reference_text": "reference transcript"},
+        )
+    )
+
+    reference_path = Path(recorded["json"]["reference_audio_path"])
+    assert reference_path.parent == scratch_dir  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -204,6 +326,7 @@ async def test_omnivoice_clone_request_materializes_reference_audio_but_sends_na
         "reference_audio_path": str(transient_path),
         "reference_text": "reference transcript",
         "requested_sample_rate": 24000,
+        "generation": {},
     }
     assert parsed_payload.reference_audio_path == str(transient_path)  # nosec B101
     assert parsed_payload.requested_sample_rate == 24000  # nosec B101
@@ -349,49 +472,6 @@ async def test_omnivoice_pcm_sidecar_response_uses_native_sample_rate_header(mon
         assert wav_file.getframerate() == 16000  # nosec B101
 
 
-@pytest.mark.parametrize("sample_rate_header", [None, "not-a-rate"])
-@pytest.mark.asyncio
-async def test_omnivoice_pcm_sidecar_response_falls_back_to_requested_sample_rate(
-    monkeypatch,
-    sample_rate_header,
-):
-    adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
-    adapter._initialized = True
-    adapter._status = ProviderStatus.AVAILABLE
-    adapter.set_supervisor(_FakeSupervisor())
-
-    pcm = b"\x00\x01" * 64
-    headers = {
-        "X-OmniVoice-Audio-Format": "pcm",
-        "X-OmniVoice-Channels": "1",
-    }
-    if sample_rate_header is not None:
-        headers["X-OmniVoice-Sample-Rate"] = sample_rate_header
-
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.create_sidecar_async_client",
-        lambda *, timeout: _FakeClient(
-            {},
-            httpx.Response(200, content=pcm, headers=headers),
-        ),
-        raising=True,
-    )
-
-    response = await adapter.generate(
-        TTSRequest(
-            text="fallback rate",
-            voice="auto",
-            format=AudioFormat.WAV,
-            target_sample_rate=22050,
-            stream=False,
-        )
-    )
-
-    assert response.sample_rate == 22050  # nosec B101
-    with wave.open(BytesIO(response.audio_data), "rb") as wav_file:
-        assert wav_file.getframerate() == 22050  # nosec B101
-
-
 @pytest.mark.asyncio
 async def test_omnivoice_generate_transcodes_wav_to_requested_mp3(monkeypatch, tmp_path):
     adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5, "temp_dir": str(tmp_path)})
@@ -508,7 +588,7 @@ async def test_omnivoice_structured_sidecar_errors_map_to_typed_exceptions(monke
         json={
             "error": {
                 "code": "MODEL_NOT_AVAILABLE",
-                "message": "Model weights are not installed",
+                "message": "local path /secret/model is missing",
                 "retryable": False,
             }
         },
@@ -532,44 +612,4 @@ async def test_omnivoice_structured_sidecar_errors_map_to_typed_exceptions(monke
         )
 
     assert exc_info.value.error_code == "MODEL_NOT_AVAILABLE"  # nosec B101
-    assert exc_info.value.details["sidecar_error_message"] == "Model weights are not installed"  # nosec B101
-
-
-@pytest.mark.asyncio
-async def test_omnivoice_structured_sidecar_error_message_redacts_sensitive_details(monkeypatch):
-    adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
-    adapter._initialized = True
-    adapter._status = ProviderStatus.AVAILABLE
-    adapter.set_supervisor(_FakeSupervisor())
-
-    response = httpx.Response(
-        400,
-        json={
-            "error": {
-                "code": "INVALID_GENERATION_PARAMETER",
-                "message": "local path /secret/model is missing",
-                "retryable": False,
-            }
-        },
-        headers={"content-type": "application/json"},
-    )
-
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.create_sidecar_async_client",
-        lambda *, timeout: _FakeClient({}, response),
-        raising=True,
-    )
-
-    with pytest.raises(TTSValidationError) as exc_info:
-        await adapter.generate(
-            TTSRequest(
-                text="fail please",
-                voice="auto",
-                format=AudioFormat.WAV,
-                stream=False,
-            )
-        )
-
-    assert exc_info.value.error_code == "INVALID_GENERATION_PARAMETER"  # nosec B101
-    assert exc_info.value.details["sidecar_error_message"] == "local path [redacted-path] is missing"  # nosec B101
     assert "secret" not in str(exc_info.value.details)  # nosec B101

@@ -1,40 +1,22 @@
 ---
 id: TASK-455
 title: Implement OmniVoice managed sidecar real synthesis
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-05-22 20:21
+updated_date: '2026-05-22 20:21'
 labels:
-- tts
-- omnivoice
-- implementation
+  - tts
+  - omnivoice
+  - implementation
 dependencies: []
 references:
-- TASK-453
-- TASK-454
-- Docs/superpowers/specs/2026-05-22-omnivoice-real-sidecar-synthesis-design.md
+  - TASK-453
+  - TASK-454
+  - Docs/superpowers/specs/2026-05-22-omnivoice-real-sidecar-synthesis-design.md
 documentation:
-- Docs/superpowers/plans/2026-05-22-omnivoice-real-sidecar-synthesis-implementation-plan.md
-modified_files:
-- tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_protocol.py
-- tldw_Server_API/app/core/TTS/adapters/omnivoice_adapter.py
-- tldw_Server_API/app/core/TTS/tts_validation.py
-- tldw_Server_API/app/core/TTS/adapters/omnivoice_runtime.py
-- tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_server.py
-- tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_supervisor.py
-- Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py
-- tldw_Server_API/app/core/Setup/install_manager.py
-- tldw_Server_API/Config_Files/tts_providers_config.yaml
-- tldw_Server_API/tests/TTS/adapters/test_omnivoice_adapter_mock.py
-- tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_runtime.py
-- tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_server.py
-- tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_sidecar_supervisor.py
-- tldw_Server_API/tests/TTS_NEW/unit/test_omnivoice_installer.py
-- tldw_Server_API/tests/TTS_NEW/unit/test_tts_validation_omnivoice.py
-- tldw_Server_API/tests/TTS_NEW/integration/test_omnivoice_real_runtime.py
-- Docs/STT-TTS/TTS-SETUP-GUIDE.md
-- tldw_Server_API/app/core/TTS/TTS-README.md
+  - >-
+    Docs/superpowers/plans/2026-05-22-omnivoice-real-sidecar-synthesis-implementation-plan.md
 ---
 
 ## Description
@@ -62,15 +44,19 @@ Verification recorded for Task 2: red run failed 9 expected tests; focused suite
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the OmniVoice managed sidecar path so provider requests now reach a real lazy-loaded OmniVoice runtime instead of the old silent-WAV stub. The implementation adds strict sidecar protocol validation, adapter request normalization and structured sidecar error mapping, a sidecar-local runtime wrapper with local model path validation and managed clone-reference handling, runtime-backed FastAPI sidecar endpoints, supervisor config propagation/readiness handling, installer/setup-manager local model path requirements, disabled-by-default config hints, opt-in real runtime smoke tests, and setup documentation. Final review also identified and fixed public OpenAI-compatible `speed` forwarding so non-default `TTSRequest.speed` is now passed to OmniVoice generation params unless explicitly overridden in `extra_params`. Verification on 2026-05-22: focused OmniVoice suite `170 passed`; broad TTS unit slice `448 passed, 1 xfailed, 1 xpassed`; docs link/check smoke `4 passed`; opt-in real runtime test default run `3 skipped`; Bandit on touched code reported zero findings in `/tmp/bandit_omnivoice_real_sidecar.json` and `/tmp/bandit_omnivoice_speed_fix.json`. Final focused re-review approved the speed fix. Full `git diff --check` remains blocked by unrelated pre-existing trailing whitespace at `Docs/Design/Agents.md:127`.
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

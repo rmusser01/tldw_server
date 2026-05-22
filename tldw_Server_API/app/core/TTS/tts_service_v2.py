@@ -118,7 +118,7 @@ _TTS_NONCRITICAL_EXCEPTIONS = (
 )
 _OMNIVOICE_ALIAS_VALUES = {"omnivoice", "omni-voice", "omni_voice"}
 _OMNIVOICE_INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
-_OMNIVOICE_SEMANTIC_GENERATION_KEYS = {
+_OMNIVOICE_GENERATION_KEYS = {
     "num_step",
     "guidance_scale",
     "denoise",
@@ -126,6 +126,8 @@ _OMNIVOICE_SEMANTIC_GENERATION_KEYS = {
     "position_temperature",
     "class_temperature",
     "layer_penalty_factor",
+    "duration",
+    "speed",
     "postprocess_output",
     "preprocess_prompt",
     "audio_chunk_duration",
@@ -2638,26 +2640,22 @@ class TTSServiceV2:
             or model_value.startswith("omni_voice")
         ):
             return True
-        provider_hint_value = (provider_hint or "").strip().lower()
-        if provider_hint_value and provider_hint_value not in _OMNIVOICE_ALIAS_VALUES:
-            return False
         voice = (getattr(request, "voice", None) or "").strip().lower()
-        has_omnivoice_semantics = False
         if voice.startswith("custom:"):
-            has_omnivoice_semantics = True
+            return True
         if getattr(request, "voice_reference", None):
-            has_omnivoice_semantics = True
+            return True
         extras = getattr(request, "extra_params", None)
         if not isinstance(extras, dict):
-            return has_omnivoice_semantics
+            return False
         if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
-            has_omnivoice_semantics = True
-        if any(key in extras for key in _OMNIVOICE_SEMANTIC_GENERATION_KEYS):
-            has_omnivoice_semantics = True
+            return True
+        if any(key in extras for key in _OMNIVOICE_GENERATION_KEYS):
+            return True
         mode = extras.get("omnivoice_mode", extras.get("mode"))
         if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
-            has_omnivoice_semantics = True
-        return has_omnivoice_semantics
+            return True
+        return False
 
     def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
         if self._closing:
