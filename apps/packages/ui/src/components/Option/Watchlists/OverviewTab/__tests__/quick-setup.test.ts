@@ -47,6 +47,58 @@ describe("watchlists overview quick setup helpers", () => {
     timezoneSpy.mockRestore()
   })
 
+  it("resolves variable cadence drafts into existing schedule fields", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "America/Los_Angeles" })
+      }) as Intl.DateTimeFormat)
+
+    expect(resolveQuickSetupSchedule({ kind: "manual" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "interval", every: 5, unit: "hour" })).toEqual({
+      schedule_expr: "0 */5 * * *",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "interval", every: 30, unit: "minute" })).toEqual({
+      schedule_expr: "*/30 * * * *",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "daily", time: "07:45" })).toEqual({
+      schedule_expr: "45 7 * * *",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "weekdays", time: "08:15" })).toEqual({
+      schedule_expr: "15 8 * * MON-FRI",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "weekly", weekday: "mon", time: "08:00" })).toEqual({
+      schedule_expr: "0 8 * * MON",
+      timezone: "America/Los_Angeles"
+    })
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 * * WED" })).toEqual({
+      schedule_expr: "15 6 * * WED",
+      timezone: "America/Los_Angeles"
+    })
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("does not serialize invalid advanced cron drafts", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(() => ({
+        resolvedOptions: () => ({ timeZone: "America/Los_Angeles" })
+      }) as Intl.DateTimeFormat)
+
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 *" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 * * WED;rm" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "61 6 * * WED" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "? 6 * * WED" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "*/1 * * * *" })).toEqual({})
+
+    timezoneSpy.mockRestore()
+  })
+
   it("falls back to UTC when timezone is unavailable", () => {
     const timezoneSpy = vi
       .spyOn(Intl, "DateTimeFormat")

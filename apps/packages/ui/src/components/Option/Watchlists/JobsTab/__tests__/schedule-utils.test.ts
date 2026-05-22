@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
   buildCronFromPreset,
   createDefaultPresetState,
-  parsePresetFromCron
+  formatScheduleTimeValue,
+  parseScheduleTime,
+  parsePresetFromCron,
+  validateCronFormat,
+  validateCronSchedule
 } from "../schedule-utils"
 
 describe("schedule-utils", () => {
@@ -119,5 +123,34 @@ describe("schedule-utils", () => {
       minute: 0,
       weekday: "MON"
     })
+  })
+
+  it("normalizes shared cadence time values", () => {
+    expect(parseScheduleTime("7:05")).toEqual({ hour: 7, minute: 5 })
+    expect(parseScheduleTime("24:00")).toEqual({ hour: 8, minute: 0 })
+    expect(formatScheduleTimeValue("7:05")).toBe("07:05")
+    expect(formatScheduleTimeValue("bad")).toBe("08:00")
+  })
+
+  it("validates cron format and minimum frequency consistently", () => {
+    expect(validateCronFormat("15 6 * * WED")).toBeNull()
+    expect(validateCronFormat("15 6 *")).toBe("field_count")
+    expect(validateCronFormat("15 6 * * WED;rm")).toBe("invalid_token")
+    expect(validateCronFormat("99 6 * * WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 99 * * WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 6 0 * WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 6 * 13 WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 6 * * FUNDAY")).toBe("invalid_value")
+    expect(validateCronFormat("? 6 * * WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 ? * * WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 6 * ? WED")).toBe("invalid_value")
+    expect(validateCronFormat("15 6 * * MON-FRI")).toBeNull()
+    expect(validateCronFormat("15 6 * JAN-MAR WED")).toBeNull()
+    expect(validateCronFormat("15 6 ? * WED")).toBeNull()
+    expect(validateCronFormat("15 6 * * ?")).toBeNull()
+    expect(validateCronFormat("*/60 * * * *")).toBe("invalid_value")
+    expect(validateCronFormat("0 */6 * * *")).toBeNull()
+    expect(validateCronSchedule("*/1 * * * *")).toBe("too_frequent")
+    expect(validateCronSchedule("*/5 * * * *")).toBeNull()
   })
 })

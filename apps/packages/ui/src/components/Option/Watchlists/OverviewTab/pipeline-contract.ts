@@ -5,14 +5,22 @@ import type {
 } from "@/types/watchlists"
 import {
   resolveQuickSetupSchedule,
+  type WatchlistCadenceDraft,
   type QuickSetupSchedulePreset
 } from "./quick-setup"
+import {
+  formatScheduleTimeValue,
+  normalizeWeekdayToken,
+  type ScheduleIntervalUnit,
+  type WeekdayToken
+} from "../JobsTab/schedule-utils"
 import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 
 export interface BriefingPipelineDraft {
   monitorName: string
   sourceIds: number[]
   schedulePreset: QuickSetupSchedulePreset
+  scheduleCadence?: WatchlistCadenceDraft
   scheduleExpr?: string | null
   timezone?: string
   templateName: string
@@ -39,6 +47,28 @@ export interface PipelineReviewSummary {
   deliveries: string[]
 }
 
+export interface PipelineScheduleLabelCopy {
+  manual?: string
+  hourly?: string
+  dailyPreset?: string
+  weekdaysPreset?: string
+  advanced?: (cron: string) => string
+  interval?: (value: number, unit: ScheduleIntervalUnit) => string
+  daily?: (time: string) => string
+  weekdays?: (time: string) => string
+  weekly?: (weekday: string, time: string) => string
+  weekdayLabels?: Partial<Record<WeekdayToken, string>>
+}
+
+export interface PipelineReviewSummaryCopy {
+  schedule?: PipelineScheduleLabelCopy
+  textBriefing?: string
+  audioBriefing?: string
+  email?: string
+  chatbook?: string
+  inAppReports?: string
+}
+
 const SCHEDULE_LABELS: Record<QuickSetupSchedulePreset, string> = {
   none: "Manual only",
   hourly: "Hourly",
@@ -46,11 +76,69 @@ const SCHEDULE_LABELS: Record<QuickSetupSchedulePreset, string> = {
   weekdays: "Weekdays at 08:00"
 }
 
+const WEEKDAY_LABELS: Record<WeekdayToken, string> = {
+  SUN: "Sunday",
+  MON: "Monday",
+  TUE: "Tuesday",
+  WED: "Wednesday",
+  THU: "Thursday",
+  FRI: "Friday",
+  SAT: "Saturday"
+}
+
 const normalizeRecipients = (value: string[] | undefined): string[] => {
   if (!Array.isArray(value)) return []
   return value
     .map((entry) => String(entry || "").trim())
     .filter((entry) => entry.length > 0)
+}
+
+const formatPresetScheduleLabel = (
+  preset: QuickSetupSchedulePreset,
+  copy: PipelineScheduleLabelCopy = {}
+): string => {
+  if (preset === "none") return copy.manual || SCHEDULE_LABELS.none
+  if (preset === "hourly") return copy.hourly || SCHEDULE_LABELS.hourly
+  if (preset === "weekdays") return copy.weekdaysPreset || SCHEDULE_LABELS.weekdays
+  return copy.dailyPreset || SCHEDULE_LABELS.daily
+}
+
+const formatCustomCronLabel = (
+  cron: string,
+  copy: PipelineScheduleLabelCopy = {}
+): string => {
+  if (copy.advanced) return copy.advanced(cron)
+  return cron ? `Custom cron: ${cron}` : "Custom cron"
+}
+
+const formatScheduleCadenceLabel = (
+  cadence: WatchlistCadenceDraft | undefined,
+  fallback: QuickSetupSchedulePreset,
+  copy: PipelineScheduleLabelCopy = {}
+): string => {
+  if (!cadence) return formatPresetScheduleLabel(fallback, copy)
+  if (cadence.kind === "manual") return copy.manual || SCHEDULE_LABELS.none
+  if (cadence.kind === "advanced") {
+    const cron = String(cadence.cron || "").trim()
+    return formatCustomCronLabel(cron, copy)
+  }
+  if (cadence.kind === "interval") {
+    const value = Math.max(1, Math.floor(Number(cadence.every) || 1))
+    const unit: ScheduleIntervalUnit =
+      cadence.unit === "minute" || cadence.unit === "minutes" ? "minutes" : "hours"
+    if (copy.interval) return copy.interval(value, unit)
+    const unitLabel = unit === "minutes" ? "minute" : "hour"
+    return `Every ${value} ${unitLabel}${value === 1 ? "" : "s"}`
+  }
+  const time = formatScheduleTimeValue("time" in cadence ? cadence.time : undefined)
+  if (cadence.kind === "daily") return copy.daily ? copy.daily(time) : `Daily at ${time}`
+  if (cadence.kind === "weekdays") {
+    return copy.weekdays ? copy.weekdays(time) : `Weekdays at ${time}`
+  }
+  const weekday =
+    copy.weekdayLabels?.[normalizeWeekdayToken(cadence.weekday)] ||
+    WEEKDAY_LABELS[normalizeWeekdayToken(cadence.weekday)]
+  return copy.weekly ? copy.weekly(weekday, time) : `Weekly on ${weekday} at ${time}`
 }
 
 export const validateBriefingPipelineDraft = (
@@ -84,12 +172,15 @@ export const validateBriefingPipelineDraft = (
 export const toPipelineJobCreatePayload = (
   draft: BriefingPipelineDraft
 ): WatchlistJobCreate => {
-  const schedule = draft.scheduleExpr
-    ? {
-        schedule_expr: draft.scheduleExpr,
-        timezone: draft.timezone
-      }
-    : resolveQuickSetupSchedule(draft.schedulePreset)
+  const rawScheduleExpr = String(draft.scheduleExpr ?? "").trim()
+  const schedule = draft.scheduleCadence
+    ? resolveQuickSetupSchedule(draft.scheduleCadence)
+    : rawScheduleExpr
+      ? {
+          schedule_expr: rawScheduleExpr,
+          timezone: draft.timezone
+        }
+      : resolveQuickSetupSchedule(draft.schedulePreset)
   const recipients = normalizeRecipients(draft.emailRecipients)
   const templateVersionNum = Number(draft.templateVersion)
   const normalizedTemplateVersion =
@@ -217,18 +308,24 @@ export const toPipelineOutputCreatePayload = (
 }
 
 export const buildPipelineReviewSummary = (
-  draft: BriefingPipelineDraft
+  draft: BriefingPipelineDraft,
+  copy: PipelineReviewSummaryCopy = {}
 ): PipelineReviewSummary => {
-  const artifacts = ["Text briefing"]
-  if (draft.includeAudio) artifacts.push("Audio briefing")
+  const rawScheduleExpr = String(draft.scheduleExpr ?? "").trim()
+  const artifacts = [copy.textBriefing || "Text briefing"]
+  if (draft.includeAudio) artifacts.push(copy.audioBriefing || "Audio briefing")
 
   const deliveries: string[] = []
-  if (normalizeRecipients(draft.emailRecipients).length > 0) deliveries.push("Email")
-  if (draft.createChatbook) deliveries.push("Chatbook")
-  if (deliveries.length === 0) deliveries.push("In-app reports")
+  if (normalizeRecipients(draft.emailRecipients).length > 0) deliveries.push(copy.email || "Email")
+  if (draft.createChatbook) deliveries.push(copy.chatbook || "Chatbook")
+  if (deliveries.length === 0) deliveries.push(copy.inAppReports || "In-app reports")
 
   return {
-    scheduleLabel: SCHEDULE_LABELS[draft.schedulePreset],
+    scheduleLabel: draft.scheduleCadence
+      ? formatScheduleCadenceLabel(draft.scheduleCadence, draft.schedulePreset, copy.schedule)
+      : rawScheduleExpr
+        ? formatCustomCronLabel(rawScheduleExpr, copy.schedule)
+        : formatPresetScheduleLabel(draft.schedulePreset, copy.schedule),
     artifacts,
     deliveries
   }

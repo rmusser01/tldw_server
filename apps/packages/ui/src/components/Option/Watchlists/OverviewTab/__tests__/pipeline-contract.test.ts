@@ -134,6 +134,77 @@ describe("watchlists pipeline contract", () => {
     ).not.toHaveProperty("auto_output")
   })
 
+  it("serializes variable cadence drafts through the existing schedule contract", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "interval", every: 30, unit: "minute" }
+      })
+    ).toMatchObject({
+      schedule_expr: "*/30 * * * *",
+      timezone: "UTC"
+    })
+
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "weekly", weekday: "fri", time: "09:15" }
+      })
+    ).toMatchObject({
+      schedule_expr: "15 9 * * FRI",
+      timezone: "UTC"
+    })
+
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "advanced", cron: "20 6 * * TUE" }
+      })
+    ).toMatchObject({
+      schedule_expr: "20 6 * * TUE",
+      timezone: "UTC"
+    })
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("uses the same schedule precedence for payload and review summary", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+    const draft: BriefingPipelineDraft = {
+      ...baseDraft,
+      schedulePreset: "none",
+      scheduleExpr: "0 8 * * *",
+      scheduleCadence: { kind: "interval", every: 30, unit: "minute" }
+    }
+
+    expect(toPipelineJobCreatePayload(draft)).toMatchObject({
+      schedule_expr: "*/30 * * * *",
+      timezone: "UTC"
+    })
+    expect(buildPipelineReviewSummary(draft).scheduleLabel).toBe("Every 30 minutes")
+
+    timezoneSpy.mockRestore()
+  })
+
   it("propagates html template format into job and output payloads", () => {
     const htmlDraft: BriefingPipelineDraft = {
       ...baseDraft,
@@ -178,5 +249,48 @@ describe("watchlists pipeline contract", () => {
       artifacts: ["Text briefing"],
       deliveries: ["In-app reports"]
     })
+  })
+
+  it("labels variable cadence drafts in the review summary", () => {
+    expect(
+      buildPipelineReviewSummary({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "interval", every: 30, unit: "minute" }
+      }).scheduleLabel
+    ).toBe("Every 30 minutes")
+
+    expect(
+      buildPipelineReviewSummary({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "weekly", weekday: "fri", time: "09:15" }
+      }).scheduleLabel
+    ).toBe("Weekly on Friday at 09:15")
+
+    expect(
+      buildPipelineReviewSummary({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "advanced", cron: "20 6 * * TUE" }
+      }).scheduleLabel
+    ).toBe("Custom cron: 20 6 * * TUE")
+  })
+
+  it("supports localized cadence label copy in the review summary", () => {
+    expect(
+      buildPipelineReviewSummary(
+        {
+          ...baseDraft,
+          schedulePreset: "none",
+          scheduleCadence: { kind: "interval", every: 1, unit: "hour" }
+        },
+        {
+          schedule: {
+            interval: (value, unit) => `localized ${value} ${unit}`
+          }
+        }
+      ).scheduleLabel
+    ).toBe("localized 1 hours")
   })
 })

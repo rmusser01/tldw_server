@@ -4,6 +4,7 @@ import {
   createDefaultPipelineWizardDraft,
   toBriefingPipelineDraft,
   toPipelineWizardSourcePayload,
+  validatePipelineWizardCron,
   validatePipelineWizardDraft
 } from "../pipeline-wizard-state"
 
@@ -198,5 +199,148 @@ describe("watchlists pipeline wizard state", () => {
       delivery: "Email",
       audio: "1 speaker audio briefing"
     })
+  })
+
+  it("serializes weekdays and advanced cadence without changing backend schedule fields", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+    const base = {
+      ...createDefaultPipelineWizardDraft(),
+      sourceMode: "existing" as const,
+      sourceIds: [10],
+      monitorName: "Cadence Brief",
+      templateName: "briefing_md",
+      audioEnabled: false,
+      audioSpeakers: []
+    }
+
+    expect(
+      toBriefingPipelineDraft({
+        ...base,
+        scheduleMode: "weekdays",
+        scheduleHour: 8,
+        scheduleMinute: 15
+      })
+    ).toEqual(
+      expect.objectContaining({
+        scheduleExpr: "15 8 * * MON-FRI",
+        timezone: "UTC"
+      })
+    )
+
+    expect(
+      toBriefingPipelineDraft({
+        ...base,
+        scheduleMode: "advanced",
+        scheduleAdvancedCron: "20 6 * * TUE"
+      })
+    ).toEqual(
+      expect.objectContaining({
+        scheduleExpr: "20 6 * * TUE",
+        timezone: "UTC"
+      })
+    )
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("rejects malformed and too-frequent advanced cron cadence", () => {
+    const base = {
+      ...createDefaultPipelineWizardDraft(),
+      sourceMode: "existing" as const,
+      sourceIds: [10],
+      monitorName: "Cadence Brief",
+      templateName: "briefing_md",
+      scheduleMode: "advanced" as const,
+      audioEnabled: false,
+      audioSpeakers: []
+    }
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
+        scheduleAdvancedCron: "15 6 *"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["scheduleAdvancedCron"]
+    })
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
+        scheduleAdvancedCron: "15 6 * * WED;rm"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["scheduleAdvancedCron"]
+    })
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
+        scheduleAdvancedCron: "61 6 * * WED"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["scheduleAdvancedCron"]
+    })
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
+        scheduleAdvancedCron: "? 6 * * WED"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["scheduleAdvancedCron"]
+    })
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
+        scheduleAdvancedCron: "*/1 * * * *"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["scheduleAdvancedCronTooFrequent"]
+    })
+    expect(validatePipelineWizardCron("*/1 * * * *")).toBe("too_frequent")
+    expect(
+      toBriefingPipelineDraft({
+        ...base,
+        scheduleAdvancedCron: "*/1 * * * *"
+      })
+    ).toEqual(expect.not.objectContaining({ scheduleExpr: expect.any(String) }))
+  })
+
+  it("summarizes one-source and audio-off review states without podcast assumptions", () => {
+    const summary = buildPipelineWizardReviewSummary(
+      {
+        ...createDefaultPipelineWizardDraft(),
+        sourceMode: "existing",
+        sourceIds: [7],
+        monitorName: "Manual Brief",
+        scheduleMode: "manual",
+        templateName: "briefing_md",
+        audioEnabled: false,
+        audioSpeakers: []
+      },
+      [{ id: 7, name: "AI Feed" }]
+    )
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        sources: "AI Feed",
+        cadence: "Manual only",
+        audio: "Audio disabled"
+      })
+    )
   })
 })

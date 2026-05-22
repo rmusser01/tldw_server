@@ -12,6 +12,7 @@ import {
   INTERVAL_MINUTES_MAX,
   INTERVAL_MINUTES_MIN,
   parsePresetFromCron,
+  validateCronFormat,
   type PresetScheduleState,
   type ScheduleIntervalUnit,
   type SchedulePresetKey,
@@ -56,8 +57,6 @@ const INTERVAL_UNIT_OPTIONS: Array<{ value: ScheduleIntervalUnit; label: string 
   { value: "minutes", label: "Minutes" }
 ]
 
-const CRON_FIELDS = 5
-const CRON_TOKEN_PATTERN = /^[A-Z0-9*,/?-]+$/i
 const CRON_EXAMPLES = [
   {
     id: "daily0900",
@@ -78,15 +77,6 @@ const CRON_EXAMPLES = [
     expression: "0 */6 * * *"
   }
 ]
-
-type CronFormatValidationResult = "field_count" | "invalid_token" | null
-
-const validateCronFormat = (expression: string): CronFormatValidationResult => {
-  const tokens = expression.trim().split(/\s+/)
-  if (tokens.length !== CRON_FIELDS) return "field_count"
-  if (tokens.some((token) => !CRON_TOKEN_PATTERN.test(token))) return "invalid_token"
-  return null
-}
 
 export const SchedulePicker: React.FC<SchedulePickerProps> = ({
   value,
@@ -112,6 +102,12 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
       return t(
         "watchlists:schedule.cronInvalidTokenError",
         "Cron tokens can only include letters, numbers, *, /, -, ?, and comma."
+      )
+    }
+    if (validationResult === "invalid_value") {
+      return t(
+        "watchlists:schedule.cronInvalidValueError",
+        "Cron field values are outside supported ranges."
       )
     }
     return null
