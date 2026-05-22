@@ -89,3 +89,24 @@ Do not describe audio as playable, produced, or complete when only the Scheduler
 - Some remote sources may block scraping or return no usable items. Replace the source or show the diagnostic rather than retrying silently.
 - Extension verification depends on a current extension build and seeded server configuration.
 - Current verification on 2026-05-21: the Chrome MV3 extension build completed and `tests/e2e/watchlists.spec.ts` passed 14 Watchlists smoke tests. Existing WXT/Rollup font, chunk-size, duplicate-import, and circular chunk warnings remain noisy but did not block the route smoke.
+
+## Verification Snapshot - 2026-05-21
+
+Branch: `codex/watchlists-final-verification`
+Base: `origin/dev` at `668ee4929dd2b27a786a1ca519cd22ed936486e4`
+
+Passed gates:
+
+- `bun run test:watchlists:typecheck` from `apps/packages/ui`: 1 file, 3 tests passed.
+- `bun run test:watchlists:scale` from `apps/packages/ui`: 7 files, 53 tests passed.
+- `bun run test:watchlists:a11y` from `apps/packages/ui`: 12 files, 91 tests passed. Expected mocked error-state stderr appeared in load-error/remediation tests.
+- `python -m pytest tldw_Server_API/tests/Watchlists -q`: 498 passed, 9 skipped, 1 xpassed, 147 warnings. The skipped tests are environment-gated integration/E2E cases in the Watchlists suite.
+- `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py tldw_Server_API/app/core/Watchlists -f json -o /tmp/bandit_watchlists_remediation_final.json`: `results: []`, `errors: []`.
+- WebUI Playwright smoke: `playwright test e2e/workflows/watchlists-demo-readiness.spec.ts --reporter=line` from `apps/tldw-frontend`: 3 passed. The first sandboxed attempt failed to bind `0.0.0.0:8080`; the escalated rerun passed.
+- Extension Playwright smoke: `PLAYWRIGHT_JSON_OUTPUT_NAME=.watchlists-e2e-report.json TLDW_E2E_EXTENSION_HEADLESS=0 playwright test tests/e2e/watchlists.spec.ts --reporter=json` from `apps/extension`: 14 passed. `node scripts/assert-playwright-no-skips.mjs .watchlists-e2e-report.json` reported `passed=14 skipped=0 unexpected=0 flaky=0`. A headless CI-mode attempt skipped all 14 tests because Chromium could not keep the MV3 extension context alive in this environment; the escalated headed rerun is the valid result.
+
+Manual live demo dry run:
+
+- Not completed in this verification pass. It still requires the actual demo API environment, reachable real source URLs, configured LLM/TTS providers, and chosen voices.
+- The automated WebUI and extension gates verify the route, guided setup, monitor payloads, output error recovery, truthful audio status display, and Reports/Activity surfaces with controlled API responses.
+- Before a public demo claims final playable audio, rerun the Provider And Voice Preflight and Final playback gate above against the actual demo environment.
