@@ -21,18 +21,22 @@ class _FakeOmniVoice:
     load_kwargs = None
     generate_calls = []
     generated_audio = np.zeros(2400, dtype=np.float32)
+    load_error = None
 
     @classmethod
-    def reset(cls, generated_audio=None):
+    def reset(cls, generated_audio=None, load_error=None):
         cls.model_path = None
         cls.load_kwargs = None
         cls.generate_calls = []
         cls.generated_audio = (
             np.zeros(2400, dtype=np.float32) if generated_audio is None else generated_audio
         )
+        cls.load_error = load_error
 
     @classmethod
     def from_pretrained(cls, model_path, **kwargs):
+        if cls.load_error is not None:
+            raise cls.load_error
         cls.model_path = model_path
         cls.load_kwargs = kwargs
         return cls()
@@ -159,6 +163,33 @@ async def test_runtime_clone_mode_includes_reference_audio_and_text(tmp_path, fa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reference_kind", ["missing", "directory"])
+async def test_runtime_rejects_invalid_reference_inside_managed_directory(
+    tmp_path,
+    fake_omnivoice,
+    reference_kind,
+):
+    config = _runtime_config(tmp_path)
+    reference_path = Path(config["scratch_dir"]) / "ref.wav"
+    if reference_kind == "directory":
+        reference_path.mkdir()
+    runtime = OmniVoiceRuntime(config)
+    await runtime.load()
+    request = OmniVoiceSynthesizeRequest(
+        text="hello",
+        mode="clone",
+        reference_audio_path=str(reference_path),
+        reference_text="reference transcript",
+    )
+
+    with pytest.raises(OmniVoiceRuntimeError) as exc:
+        await runtime.synthesize(request)
+
+    assert exc.value.code == "INVALID_REFERENCE_AUDIO"
+    assert fake_omnivoice.generate_calls == []
+
+
+@pytest.mark.asyncio
 async def test_runtime_empty_audio_output_raises(tmp_path, fake_omnivoice):
     fake_omnivoice.reset(generated_audio=np.array([], dtype=np.float32))
     runtime = OmniVoiceRuntime(_runtime_config(tmp_path))
@@ -168,6 +199,26 @@ async def test_runtime_empty_audio_output_raises(tmp_path, fake_omnivoice):
         await runtime.synthesize(request)
 
     assert exc.value.code == "EMPTY_AUDIO_OUTPUT"
+
+
+@pytest.mark.asyncio
+async def test_runtime_success_after_failure_restores_ready_status(tmp_path, fake_omnivoice):
+    fake_omnivoice.reset(generated_audio=np.array([], dtype=np.float32))
+    runtime = OmniVoiceRuntime(_runtime_config(tmp_path))
+
+    with pytest.raises(OmniVoiceRuntimeError) as exc:
+        await runtime.synthesize(OmniVoiceSynthesizeRequest(text="hello", mode="auto"))
+
+    assert exc.value.code == "EMPTY_AUDIO_OUTPUT"
+    assert runtime.status == "error"
+    assert runtime.last_error_code == "EMPTY_AUDIO_OUTPUT"
+
+    fake_omnivoice.generated_audio = np.zeros(2400, dtype=np.float32)
+    result = await runtime.synthesize(OmniVoiceSynthesizeRequest(text="hello again", mode="auto"))
+
+    assert result.audio_bytes
+    assert runtime.status == "ready"
+    assert runtime.last_error_code is None
 
 
 @pytest.mark.asyncio
@@ -188,3 +239,16 @@ async def test_runtime_rejects_clone_reference_outside_managed_directories(tmp_p
 
     assert exc.value.code == "REFERENCE_PATH_NOT_ALLOWED"
     assert fake_omnivoice.generate_calls == []
+
+
+@pytest.mark.asyncio
+async def test_model_load_failure_message_does_not_include_local_model_path(tmp_path, fake_omnivoice):
+    config = _runtime_config(tmp_path)
+    fake_omnivoice.reset(load_error=RuntimeError("boom"))
+    runtime = OmniVoiceRuntime(config)
+
+    with pytest.raises(OmniVoiceRuntimeError) as exc:
+        await runtime.load()
+
+    assert exc.value.code == "MODEL_LOAD_FAILED"
+    assert config["model_path"] not in str(exc.value)
