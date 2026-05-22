@@ -50,6 +50,7 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
       - mode: 'async'|'sync' (default 'async')
       - validation_mode: 'block'|'non-block' (default 'block')
       - definition_snapshot: dict (optional; ad-hoc run definition)
+      - metadata: dict (optional; persisted on the run and exposed to adapters)
       - secrets: dict[str,str] (optional; injected ephemerally into engine context)
 
     Returns:
@@ -68,6 +69,16 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
     definition_snapshot = payload.get("definition_snapshot")
     if workflow_id is None and not definition_snapshot:
         raise ValueError("workflow_run: must provide workflow_id or definition_snapshot")
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if isinstance(definition_snapshot, dict):
+        definition_snapshot = dict(definition_snapshot)
+        existing_definition_metadata = definition_snapshot.get("metadata")
+        merged_definition_metadata = {
+            **(existing_definition_metadata if isinstance(existing_definition_metadata, dict) else {}),
+            **metadata,
+        }
+        if merged_definition_metadata:
+            definition_snapshot["metadata"] = merged_definition_metadata
 
     run_mode = str(payload.get("mode") or "async").lower()
     mode = RunMode.SYNC if run_mode == "sync" else RunMode.ASYNC
@@ -87,6 +98,7 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
             idempotency_key=None,
             session_id=None,
             validation_mode=validation_mode,
+            metadata=metadata,
         )
     except Exception as e:
         logger.error(f"workflow_run: failed to create run: {e}")
