@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
+import watchlistsLocale from "../../../../../assets/locale/en/watchlists.json"
+import extensionWatchlistsLocale from "../../../../../public/_locales/en/watchlists.json"
 import {
   buildDeliveryDisclosureSummary,
   buildRegenerateOutputRequest,
@@ -28,6 +30,17 @@ import {
   getWeakEvidenceWarningCount,
   isAudioOutput
 } from "../outputMetadata"
+
+const structuredAudioStatusLabels = {
+  skipped: "Skipped",
+  disabled: "Disabled",
+  skippedNoItems: "Skipped: no items",
+  configurationRequired: "Configuration required",
+  queueUnavailable: "Queue unavailable",
+  dead: "Dead",
+  cancelled: "Cancelled",
+  enqueueFailed: "Enqueue failed"
+}
 
 describe("outputMetadata helpers", () => {
   it("builds regenerate request with template version when template name is set", () => {
@@ -232,6 +245,17 @@ describe("outputMetadata helpers", () => {
     expect(summary.statusLabel).toBe("Queue unavailable")
     expect(summary.statusColor).toBe("gold")
     expect(summary.fallbackReason).toBe("workflows_queue_has_no_workers")
+  })
+
+  it("keeps locale resources aligned for structured audio status labels", () => {
+    const audioStatus = (watchlistsLocale as { outputs?: { audioStatus?: Record<string, string> } })
+      .outputs?.audioStatus
+    const extensionMessages = extensionWatchlistsLocale as Record<string, { message?: string }>
+
+    for (const [key, label] of Object.entries(structuredAudioStatusLabels)) {
+      expect(audioStatus?.[key]).toBe(label)
+      expect(extensionMessages[`outputs_audioStatus_${key}`]?.message).toBe(label)
+    }
   })
 
   it("labels structured audio non-submission statuses", () => {

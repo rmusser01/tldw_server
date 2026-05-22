@@ -1787,6 +1787,63 @@
   "outputs_deliveryOverflowCount": {
     "message": "+{{count}} more"
   },
+  "outputs_audioStatus_completed": {
+    "message": "Completed"
+  },
+  "outputs_audioStatus_ready": {
+    "message": "Ready"
+  },
+  "outputs_audioStatus_fallback": {
+    "message": "Fallback"
+  },
+  "outputs_audioStatus_partial": {
+    "message": "Partial"
+  },
+  "outputs_audioStatus_queued": {
+    "message": "Queued"
+  },
+  "outputs_audioStatus_pending": {
+    "message": "Pending"
+  },
+  "outputs_audioStatus_running": {
+    "message": "Running"
+  },
+  "outputs_audioStatus_inProgress": {
+    "message": "In progress"
+  },
+  "outputs_audioStatus_failed": {
+    "message": "Failed"
+  },
+  "outputs_audioStatus_skipped": {
+    "message": "Skipped"
+  },
+  "outputs_audioStatus_disabled": {
+    "message": "Disabled"
+  },
+  "outputs_audioStatus_skippedNoItems": {
+    "message": "Skipped: no items"
+  },
+  "outputs_audioStatus_configurationRequired": {
+    "message": "Configuration required"
+  },
+  "outputs_audioStatus_queueUnavailable": {
+    "message": "Queue unavailable"
+  },
+  "outputs_audioStatus_dead": {
+    "message": "Dead"
+  },
+  "outputs_audioStatus_cancelled": {
+    "message": "Cancelled"
+  },
+  "outputs_audioStatus_enqueueFailed": {
+    "message": "Enqueue failed"
+  },
+  "outputs_audioStatus_error": {
+    "message": "Error"
+  },
+  "outputs_audioStatus_unknown": {
+    "message": "Unknown"
+  },
   "outputs_noContent": {
     "message": "No content available"
   },
