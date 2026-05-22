@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
+from tldw_Server_API.app.core.Scheduler import get_existing_global_scheduler, SchedulerError
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
@@ -4945,6 +4946,7 @@ def _output_row_summary(row: Any) -> dict[str, Any]:
         "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
         "audio_briefing_status": metadata.get("audio_briefing_status"),
         "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
+        "audio_briefing_reason": metadata.get("audio_briefing_reason"),
     }
 
 
@@ -4999,36 +5001,35 @@ async def retry_run_audio(
     output_prefs["generate_audio"] = True
 
     from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+        apply_audio_briefing_result_metadata,
         trigger_audio_briefing,
     )
 
     if str(getattr(run, "status", "")).lower() in {"running", "queued"}:
         raise HTTPException(status_code=409, detail="audio_retry_run_in_progress")
-    task_id = await trigger_audio_briefing(
+    audio_result = await trigger_audio_briefing(
         user_id=int(resolved_user_id),
         job_id=int(run.job_id),
         run_id=run_id,
         output_prefs=output_prefs,
         db=target_db,
     )
-    if not task_id:
-        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
-
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
-    run_stats["audio_briefing_task_id"] = task_id
-    run_stats["audio_briefing_retry_task_id"] = task_id
-    run_stats["audio_briefing_status"] = "pending"
+    apply_audio_briefing_result_metadata(run_stats, audio_result, retry=True)
     try:
         await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("watchlists.retry_audio failed to persist retry state for run={}: {}", run_id, exc)
         raise HTTPException(status_code=500, detail="audio_retry_state_update_failed") from exc
 
+    if not audio_result.submitted:
+        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
+
     return RunStageRetryResponse(
         run_id=run_id,
         stage="audio",
         retried=True,
-        task_id=str(task_id),
+        task_id=str(audio_result.task_id),
     )
 
 
@@ -5248,10 +5249,16 @@ async def get_run_diagnostics(
     output_rows = await _list_run_watchlist_outputs(target_collections_db, run_id, limit=25)
     outputs = [_output_row_summary(row) for row in output_rows]
     audio_task_id = stats.get("audio_briefing_task_id")
-    audio_payload = {
-        "task_id": audio_task_id,
-        "status": stats.get("audio_briefing_status"),
-    } if audio_task_id else None
+    audio_status = stats.get("audio_briefing_status")
+    audio_reason = stats.get("audio_briefing_reason")
+    audio_payload = None
+    if audio_status or audio_task_id or audio_reason:
+        audio_payload = {
+            "task_id": audio_task_id,
+            "status": audio_status,
+        }
+        if audio_reason:
+            audio_payload["reason"] = audio_reason
 
     return RunDiagnosticsResponse(
         run_id=run_id,
@@ -5271,6 +5278,82 @@ async def get_run_diagnostics(
 # --------------------
 # Audio Briefing
 # --------------------
+
+_SCHEDULER_AUDIO_STATUS_MAP = {
+    "queued": "queued",
+    "pending": "pending",
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "dead": "dead",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+}
+
+
+async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | None:
+    """Return a safe Scheduler status snapshot for a Watchlists audio task."""
+    try:
+        scheduler = await get_existing_global_scheduler()
+        if scheduler is None:
+            return None
+        task = await scheduler.get_task(task_id)
+    except asyncio.CancelledError:
+        raise
+    except SchedulerError as exc:
+        logger.warning(
+            "Watchlists audio: scheduler status lookup failed for task {} (error_type={})",
+            task_id,
+            type(exc).__name__,
+        )
+        return None
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Watchlists audio: scheduler status lookup failed for task {} (error_type={})",
+            task_id,
+            type(exc).__name__,
+        )
+        return None
+    if task is None:
+        return None
+
+    raw_status = getattr(getattr(task, "status", None), "value", None) or str(getattr(task, "status", "unknown"))
+    raw_status = raw_status.rsplit(".", 1)[-1].lower()
+    status_value = _SCHEDULER_AUDIO_STATUS_MAP.get(raw_status, "unknown")
+    result: dict[str, Any] = {
+        "task_id": task_id,
+        "status": status_value,
+        "queue_name": getattr(task, "queue_name", None),
+    }
+    if getattr(task, "error", None):
+        result["fallback_reason"] = "scheduler_task_error"
+    return result
+
+
+def _pending_audio_scheduler_fallback(run_id: int, task_id: Any) -> dict[str, Any]:
+    """Build the safe pending response used before workflow artifacts exist."""
+    return {
+        "run_id": run_id,
+        "task_id": task_id,
+        "status": "pending",
+        "queue_name": "workflows",
+        "audio_uri": None,
+        "download_url": None,
+        "fallback_reason": "workflow_run_not_started",
+    }
+
+
+async def _audio_scheduler_status_or_pending(run_id: int, task_id: Any) -> dict[str, Any]:
+    """Return Scheduler status for an audio task, or a safe pending fallback."""
+    scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+    if scheduler_status:
+        return {
+            "run_id": run_id,
+            **scheduler_status,
+            "audio_uri": None,
+            "download_url": None,
+        }
+    return _pending_audio_scheduler_fallback(run_id, task_id)
 
 
 @router.get(
@@ -5322,7 +5405,7 @@ async def get_run_audio(
         user_dir = DatabasePaths.get_user_base_directory(int(resolved_user_id))
         wf_db_path = os.path.join(str(user_dir), "workflows", "workflows.db")
         if not os.path.exists(wf_db_path):
-            raise HTTPException(status_code=404, detail="no_workflow_db")
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
         wf_db = WorkflowsDatabase(db_path=wf_db_path)
         tenant_id = await _resolve_watchlist_workflow_tenant_id(
@@ -5383,13 +5466,7 @@ async def get_run_audio(
             page_idx += 1
 
         if not matching_run:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": "pending",
-                "audio_uri": None,
-                "download_url": None,
-            }
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
         # Check for artifacts
         matching_run_id = None
@@ -5398,13 +5475,7 @@ async def get_run_audio(
         else:
             matching_run_id = getattr(matching_run, "run_id", None) or getattr(matching_run, "id", None)
         if not matching_run_id:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": "pending",
-                "audio_uri": None,
-                "download_url": None,
-            }
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
         artifacts: list[Any] = []
         used_legacy_artifacts_api = False
@@ -5624,10 +5695,19 @@ async def get_run_audio(
                 "fallback_reason": fallback_reason,
             }
 
+        scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+        response_status = matching_run_status
+        queue_name = None
+        if scheduler_status:
+            response_status = scheduler_status.get("status") or response_status
+            queue_name = scheduler_status.get("queue_name")
+            fallback_reason = scheduler_status.get("fallback_reason") or fallback_reason
+
         return {
             "run_id": run_id,
             "task_id": task_id,
-            "status": matching_run_status,
+            "status": response_status,
+            "queue_name": queue_name,
             "audio_uri": None,
             "download_url": None,
             "script_artifact": script_artifact,
@@ -5637,6 +5717,8 @@ async def get_run_audio(
         }
 
     except HTTPException:
+        raise
+    except asyncio.CancelledError:
         raise
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.opt(exception=exc).warning(f"Failed to look up audio artifact for run {run_id}")
@@ -6797,13 +6879,13 @@ async def create_output(
     metadata_update_needed = False
 
     if effective_generate_audio:
-        metadata["audio_briefing_requested"] = True
         try:
             from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+                apply_audio_briefing_result_metadata,
                 trigger_audio_briefing,
             )
 
-            audio_task_id = await trigger_audio_briefing(
+            audio_result = await trigger_audio_briefing(
                 user_id=user_id,
                 job_id=job_id,
                 run_id=payload.run_id,
@@ -6829,25 +6911,33 @@ async def create_output(
                 },
                 db=db,
             )
-            if audio_task_id:
-                metadata["audio_briefing_task_id"] = audio_task_id
-                metadata["audio_briefing_status"] = "pending"
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
-                    if not isinstance(run_stats, dict):
-                        run_stats = {}
-                    run_stats["audio_briefing_task_id"] = audio_task_id
-                    db.update_run(run.id, stats_json=json.dumps(run_stats))
-            else:
-                metadata["audio_briefing_status"] = "skipped"
+            apply_audio_briefing_result_metadata(metadata, audio_result, requested=True)
+            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+                run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
+                if not isinstance(run_stats, dict):
+                    run_stats = {}
+                apply_audio_briefing_result_metadata(run_stats, audio_result)
+                await run_in_threadpool(db.update_run, run.id, stats_json=json.dumps(run_stats))
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
                 "Watchlists output audio briefing enqueue failed for run {} (error_type={})",
                 payload.run_id,
                 type(exc).__name__,
             )
+            metadata["audio_briefing_requested"] = True
             metadata["audio_briefing_status"] = "enqueue_failed"
+            metadata.pop("audio_briefing_task_id", None)
+            metadata.pop("audio_briefing_reason", None)
             metadata["audio_briefing_error"] = type(exc).__name__
+            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+                run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
+                if not isinstance(run_stats, dict):
+                    run_stats = {}
+                run_stats["audio_briefing_status"] = "enqueue_failed"
+                run_stats.pop("audio_briefing_task_id", None)
+                run_stats.pop("audio_briefing_reason", None)
+                run_stats["audio_briefing_error"] = type(exc).__name__
+                await run_in_threadpool(db.update_run, run.id, stats_json=json.dumps(run_stats))
         metadata_update_needed = True
 
     if isinstance(delivery_plan, dict):

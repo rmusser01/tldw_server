@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
 
 
 pytestmark = pytest.mark.unit
@@ -1412,7 +1413,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
 
     with patch(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-        new=AsyncMock(return_value="task_output_audio"),
+        new=AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task_output_audio")),
     ) as mock_trigger:
         r = c.post(
             "/api/v1/watchlists/outputs",
@@ -1444,7 +1445,7 @@ def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(
     metadata = output.get("metadata", {})
     assert metadata.get("audio_briefing_requested") is True
     assert metadata.get("audio_briefing_task_id") == "task_output_audio"
-    assert metadata.get("audio_briefing_status") == "pending"
+    assert metadata.get("audio_briefing_status") == "queued"
 
     assert mock_trigger.await_count == 1
     kwargs = mock_trigger.await_args.kwargs
@@ -1556,10 +1557,25 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     r = c.post(f"/api/v1/watchlists/jobs/{job_id}/run")
     assert r.status_code == 200, r.text
     run_id = r.json()["id"]
+    WatchlistsDatabase.for_user(555).update_run(
+        run_id,
+        stats_json=json.dumps(
+            {
+                "audio_briefing_status": "queued",
+                "audio_briefing_task_id": "stale-task",
+                "audio_briefing_reason": "old_reason",
+            }
+        ),
+    )
 
     with patch(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-        new=AsyncMock(return_value=None),
+        new=AsyncMock(
+            return_value=AudioBriefingTriggerResult(
+                status="skipped_no_items",
+                reason="no_ingested_items",
+            )
+        ),
     ) as mock_trigger:
         r = c.post(
             "/api/v1/watchlists/outputs",
@@ -1574,7 +1590,8 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     output = r.json()
     metadata = output.get("metadata", {})
     assert metadata.get("audio_briefing_requested") is True
-    assert metadata.get("audio_briefing_status") == "skipped"
+    assert metadata.get("audio_briefing_status") == "skipped_no_items"
+    assert metadata.get("audio_briefing_reason") == "no_ingested_items"
     assert "audio_briefing_task_id" not in metadata
     assert mock_trigger.await_count == 1
 
@@ -1582,6 +1599,7 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     assert r.status_code == 200, r.text
     run_payload = r.json()
     assert run_payload.get("stats", {}).get("audio_briefing_task_id") is None
+    assert run_payload.get("stats", {}).get("audio_briefing_reason") == "no_ingested_items"
 
 
 def test_outputs_generate_audio_trigger_failure_marks_enqueue_failed_metadata(

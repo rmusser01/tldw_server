@@ -48,10 +48,23 @@ def client_with_user():
 @pytest.mark.asyncio
 async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingestion(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import watchlists
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
 
     retry_run_audio = watchlists.retry_run_audio
 
-    run = SimpleNamespace(id=10, job_id=7, stats_json=json.dumps({"items_ingested": 2}), error_msg=None)
+    run = SimpleNamespace(
+        id=10,
+        job_id=7,
+        stats_json=json.dumps(
+            {
+                "items_ingested": 2,
+                "audio_briefing_task_id": "stale-task",
+                "audio_briefing_retry_task_id": "stale-retry-task",
+                "audio_briefing_reason": "old_reason",
+            }
+        ),
+        error_msg=None,
+    )
     job = SimpleNamespace(
         id=7,
         output_prefs_json=json.dumps(
@@ -72,7 +85,7 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     db.get_run.return_value = run
     db.get_job.return_value = job
     db.update_run.return_value = run
-    trigger = AsyncMock(return_value="task-retry-10")
+    trigger = AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task-retry-10"))
     rerun_job = AsyncMock()
     monkeypatch.setattr(watchlists, "run_watchlist_job", rerun_job)
     monkeypatch.setattr(
@@ -98,6 +111,53 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     trigger.assert_awaited_once()
     rerun_job.assert_not_called()
     db.update_run.assert_called_once()
+    persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
+    assert persisted_stats["audio_briefing_status"] == "queued"
+    assert persisted_stats["audio_briefing_task_id"] == "task-retry-10"
+    assert persisted_stats["audio_briefing_retry_task_id"] == "task-retry-10"
+
+
+@pytest.mark.asyncio
+async def test_retry_run_audio_persists_non_submitted_status_before_409(monkeypatch):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import watchlists
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
+
+    run = SimpleNamespace(id=10, job_id=7, stats_json=json.dumps({"items_ingested": 2}), error_msg=None)
+    job = SimpleNamespace(id=7, output_prefs_json=json.dumps({"generate_audio": True}))
+    db = MagicMock()
+    db.get_run.return_value = run
+    db.get_job.return_value = job
+    db.update_run.return_value = run
+    trigger = AsyncMock(
+        return_value=AudioBriefingTriggerResult(
+            status="queue_unavailable",
+            reason="workflows_queue_has_no_workers",
+        )
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
+        trigger,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_target_watchlists_context",
+        AsyncMock(return_value=(945, db)),
+    )
+
+    user = SimpleNamespace(id=945, role="admin")
+    with pytest.raises(HTTPException) as exc_info:
+        await watchlists.retry_run_audio(run_id=10, target_user_id=None, current_user=user, db=db)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "audio_retry_not_queued"
+    trigger.assert_awaited_once()
+    db.update_run.assert_called_once()
+    persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
+    assert persisted_stats["audio_briefing_status"] == "queue_unavailable"
+    assert persisted_stats["audio_briefing_reason"] == "workflows_queue_has_no_workers"
+    assert "audio_briefing_task_id" not in persisted_stats
+    assert "audio_briefing_retry_task_id" not in persisted_stats
 
 
 @pytest.mark.asyncio
@@ -348,7 +408,13 @@ async def test_run_diagnostics_bundle_includes_run_and_latest_output_metadata(mo
         status="failed",
         started_at="2026-05-19T04:00:00Z",
         finished_at="2026-05-19T04:03:00Z",
-        stats_json=json.dumps({"items_found": 5, "audio_briefing_task_id": "task-10"}),
+        stats_json=json.dumps(
+            {
+                "items_found": 5,
+                "audio_briefing_status": "queue_unavailable",
+                "audio_briefing_reason": "workflows_queue_has_no_workers",
+            }
+        ),
         error_msg="delivery_failed",
         log_path="/private/tmp/watchlists.log",
     )
@@ -374,6 +440,7 @@ async def test_run_diagnostics_bundle_includes_run_and_latest_output_metadata(mo
                     }
                 ],
                 "audio_briefing_status": "enqueue_failed",
+                "audio_briefing_reason": "scheduler_submit_failed",
             }
         ),
     )
@@ -399,8 +466,15 @@ async def test_run_diagnostics_bundle_includes_run_and_latest_output_metadata(mo
     assert result.outputs[0]["id"] == 55
     assert result.outputs[0]["deliveries"][0]["status"] == "failed"
     assert result.outputs[0]["deliveries"][0]["delivery_count"] == 1
+    assert result.outputs[0]["audio_briefing_status"] == "enqueue_failed"
+    assert result.outputs[0]["audio_briefing_reason"] == "scheduler_submit_failed"
     assert "provider" not in result.outputs[0]["deliveries"][0]
     assert "subject" not in result.outputs[0]["deliveries"][0]
+    assert result.audio == {
+        "task_id": None,
+        "status": "queue_unavailable",
+        "reason": "workflows_queue_has_no_workers",
+    }
     assert "log_path" not in json.dumps(result.model_dump())
 
 

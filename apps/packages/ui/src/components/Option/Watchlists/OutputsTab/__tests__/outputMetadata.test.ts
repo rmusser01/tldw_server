@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
+import watchlistsLocale from "../../../../../assets/locale/en/watchlists.json"
+import extensionWatchlistsLocale from "../../../../../public/_locales/en/watchlists.json"
 import {
   buildDeliveryDisclosureSummary,
   buildRegenerateOutputRequest,
   createOutputMetadataLabels,
+  getAudioStatusColor,
   getAudioStatusLabel,
   getDeliveryStatusColor,
   getDeliveryStatusLabel,
@@ -15,6 +18,7 @@ import {
   getOutputDeliveryStatuses,
   getOutputFileExtension,
   getOutputMimeType,
+  getOutputAudioStatusSummary,
   getOutputReportPreset,
   getOutputReportReadiness,
   getOutputReportSnapshotAvailable,
@@ -26,6 +30,17 @@ import {
   getWeakEvidenceWarningCount,
   isAudioOutput
 } from "../outputMetadata"
+
+const structuredAudioStatusLabels = {
+  skipped: "Skipped",
+  disabled: "Disabled",
+  skippedNoItems: "Skipped: no items",
+  configurationRequired: "Configuration required",
+  queueUnavailable: "Queue unavailable",
+  dead: "Dead",
+  cancelled: "Cancelled",
+  enqueueFailed: "Enqueue failed"
+}
 
 describe("outputMetadata helpers", () => {
   it("builds regenerate request with template version when template name is set", () => {
@@ -216,6 +231,42 @@ describe("outputMetadata helpers", () => {
         audio_briefing_task_id: "task-123"
       }).status
     ).toBe("queued")
+  })
+
+  it("normalizes flat audio briefing reasons from output metadata", () => {
+    const summary = getOutputAudioStatusSummary({
+      audio_briefing_requested: true,
+      audio_briefing_status: "queue_unavailable",
+      audio_briefing_reason: "workflows_queue_has_no_workers"
+    })
+
+    expect(summary.requested).toBe(true)
+    expect(summary.status).toBe("queue_unavailable")
+    expect(summary.statusLabel).toBe("Queue unavailable")
+    expect(summary.statusColor).toBe("gold")
+    expect(summary.fallbackReason).toBe("workflows_queue_has_no_workers")
+  })
+
+  it("keeps locale resources aligned for structured audio status labels", () => {
+    const audioStatus = (watchlistsLocale as { outputs?: { audioStatus?: Record<string, string> } })
+      .outputs?.audioStatus
+    const extensionMessages = extensionWatchlistsLocale as Record<string, { message?: string }>
+
+    for (const [key, label] of Object.entries(structuredAudioStatusLabels)) {
+      expect(audioStatus?.[key]).toBe(label)
+      expect(extensionMessages[`outputs_audioStatus_${key}`]?.message).toBe(label)
+    }
+  })
+
+  it("labels structured audio non-submission statuses", () => {
+    expect(getAudioStatusLabel("disabled")).toBe("Disabled")
+    expect(getAudioStatusColor("disabled")).toBe("default")
+    expect(getAudioStatusLabel("skipped_no_items")).toBe("Skipped: no items")
+    expect(getAudioStatusColor("skipped_no_items")).toBe("default")
+    expect(getAudioStatusLabel("configuration_required")).toBe("Configuration required")
+    expect(getAudioStatusColor("configuration_required")).toBe("gold")
+    expect(getAudioStatusLabel("queue_unavailable")).toBe("Queue unavailable")
+    expect(getAudioStatusColor("queue_unavailable")).toBe("gold")
   })
 
   it("returns artifact labels and tag colors by output kind", () => {

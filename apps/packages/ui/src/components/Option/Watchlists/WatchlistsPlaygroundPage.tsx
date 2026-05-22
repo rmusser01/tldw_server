@@ -83,6 +83,7 @@ import {
 } from "@/utils/watchlists-ia-experiment-telemetry"
 import { trackWatchlistsOnboardingTelemetry } from "@/utils/watchlists-onboarding-telemetry"
 import { resolveWatchlistsIaExperimentRollout } from "@/utils/watchlists-ia-rollout"
+import { resolvePreferredWatchlistId } from "./watchlist-selection"
 
 const RUN_NOTIFICATIONS_POLL_MS = 15_000
 const RUN_NOTIFICATIONS_PAGE_SIZE = 25
@@ -501,6 +502,9 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const [watchlistFormSaving, setWatchlistFormSaving] = React.useState(false)
   const [watchlistForm, setWatchlistForm] = React.useState<WatchlistFormState>(WATCHLIST_FORM_DEFAULTS)
   const { isConstrained } = useWatchlistsViewport()
+  const selectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
+  const loadWatchlistsRequestRef = useRef(0)
+  selectedWatchlistIdRef.current = selectedWatchlistId
   const selectedWatchlist = React.useMemo(
     () =>
       Array.isArray(watchlists)
@@ -510,28 +514,28 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   )
 
   const loadWatchlists = useCallback(async () => {
+    const requestId = loadWatchlistsRequestRef.current + 1
+    loadWatchlistsRequestRef.current = requestId
+    const isLatestRequest = () => loadWatchlistsRequestRef.current === requestId
+
     setWatchlistsLoading(true)
     setWatchlistsError(null)
     try {
       const response = await fetchWatchlists({ page: 1, size: 100 })
+      if (!isLatestRequest()) return
       const items = Array.isArray(response.items) ? response.items : []
-      setWatchlists(items)
-      const hasValidSelection =
-        selectedWatchlistId != null && items.some((watchlist) => watchlist.id === selectedWatchlistId)
-      const nextSelectedWatchlistId =
-        items.length === 0 ? null : hasValidSelection ? selectedWatchlistId : items[0]?.id ?? null
-      if (nextSelectedWatchlistId !== selectedWatchlistId) {
-        setSelectedWatchlistId(nextSelectedWatchlistId)
-      }
+      const nextSelectedWatchlistId = resolvePreferredWatchlistId(items, selectedWatchlistIdRef.current)
+      setWatchlists(items, nextSelectedWatchlistId)
     } catch (err) {
+      if (!isLatestRequest()) return
       console.error("Failed to load Watchlists:", err)
       setWatchlistsError(t("watchlists:containers.fetchError", "Failed to load Watchlists"))
     } finally {
-      setWatchlistsLoading(false)
+      if (isLatestRequest()) {
+        setWatchlistsLoading(false)
+      }
     }
   }, [
-    selectedWatchlistId,
-    setSelectedWatchlistId,
     setWatchlists,
     setWatchlistsError,
     setWatchlistsLoading,

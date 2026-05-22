@@ -6,6 +6,7 @@ audio artifact lookup behavior.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -58,6 +59,180 @@ class TestGetRunAudioEndpoint:
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
+    async def test_missing_workflows_db_returns_queued_scheduler_task(self):
+        """Missing Workflows DB should still report queued scheduler task status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_queued"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        scheduler_task = SimpleNamespace(
+            id="task_queued",
+            status="queued",
+            queue_name="workflows",
+            error=None,
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=False),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result["run_id"] == 1
+        assert result["task_id"] == "task_queued"
+        assert result["status"] == "queued"
+        assert result["queue_name"] == "workflows"
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+
+    @pytest.mark.asyncio
+    async def test_missing_workflows_db_returns_pending_when_scheduler_unavailable(self):
+        """Missing Workflows DB should return safe pending fallback when scheduler lookup fails."""
+        from tldw_Server_API.app.core.Scheduler import SchedulerError
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_pending"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        sensitive_error = "scheduler failed at /tmp/secret/path with bearer token abc123"
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=SchedulerError(sensitive_error))
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=False),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result["run_id"] == 1
+        assert result["task_id"] == "task_pending"
+        assert result["status"] == "pending"
+        assert result["queue_name"] == "workflows"
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+        assert result["fallback_reason"] == "workflow_run_not_started"
+        assert sensitive_error not in json.dumps(result)
+
+    @pytest.mark.asyncio
+    async def test_scheduler_status_lookup_logs_failures_without_leaking_error_text(self):
+        """Scheduler lookup fallback should be observable without exposing raw exception text."""
+        from tldw_Server_API.app.core.Scheduler import SchedulerError
+        from tldw_Server_API.app.api.v1.endpoints import watchlists
+
+        sensitive_error = "scheduler failed at /tmp/secret/path with bearer token abc123"
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=SchedulerError(sensitive_error))
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+            patch.object(watchlists.logger, "warning") as warning,
+        ):
+            result = await watchlists._get_audio_scheduler_task_status("task_pending")
+
+        assert result is None
+        warning.assert_called_once()
+        logged = " ".join(str(part) for part in warning.call_args.args)
+        assert "task_pending" in logged
+        assert "SchedulerError" in logged
+        assert sensitive_error not in logged
+
+    @pytest.mark.asyncio
+    async def test_missing_workflows_db_does_not_start_global_scheduler_for_status_lookup(self):
+        """Read-only audio status should not initialize the process-global Scheduler."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+        from tldw_Server_API.app.core.Scheduler import scheduler as scheduler_module
+        from tldw_Server_API.app.core.Scheduler.scheduler import stop_global_scheduler
+
+        await stop_global_scheduler()
+        assert scheduler_module._GLOBAL_SCHEDULER is None
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_pending"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        try:
+            with (
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                    return_value=1,
+                ),
+                patch(
+                    "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                    return_value="/tmp/test_user",  # nosec B108
+                ),
+                patch("os.path.exists", return_value=False),
+            ):
+                result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+            assert result["status"] == "pending"
+            assert result["queue_name"] == "workflows"
+            assert scheduler_module._GLOBAL_SCHEDULER is None
+        finally:
+            await stop_global_scheduler()
+
+    @pytest.mark.asyncio
     async def test_returns_pending_when_workflow_not_found(self):
         """Test returns pending status when workflow run not found yet."""
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
@@ -101,6 +276,263 @@ class TestGetRunAudioEndpoint:
         assert result["status"] == "pending"
         assert result["task_id"] == "task_abc"
         assert result["audio_uri"] is None
+
+    @pytest.mark.asyncio
+    async def test_existing_workflows_db_uses_scheduler_status_when_workflow_run_not_found(self):
+        """Existing Workflows DB without a matching run should still expose Scheduler status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_failed"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = []
+
+        scheduler_task = SimpleNamespace(
+            id="task_failed",
+            status="failed",
+            queue_name="workflows",
+            error="provider_unavailable",
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result["run_id"] == 1
+        assert result["task_id"] == "task_failed"
+        assert result["status"] == "failed"
+        assert result["queue_name"] == "workflows"
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+        assert result["fallback_reason"] == "scheduler_task_error"
+
+    @pytest.mark.asyncio
+    async def test_matching_workflow_run_without_id_uses_scheduler_status(self):
+        """A matched workflow run without a run id should still expose live Scheduler status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_running"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        wf_run_without_id = SimpleNamespace(
+            status="running",
+            metadata_json=json.dumps({"watchlist_run_id": 1}),
+        )
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [wf_run_without_id]
+
+        scheduler_task = SimpleNamespace(
+            id="task_running",
+            status="running",
+            queue_name="workflows",
+            error=None,
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result["run_id"] == 1
+        assert result["task_id"] == "task_running"
+        assert result["status"] == "running"
+        assert result["queue_name"] == "workflows"
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+
+    @pytest.mark.asyncio
+    async def test_matching_workflow_run_without_audio_artifact_uses_scheduler_status(self):
+        """A matched workflow run without final audio should still expose live Scheduler status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_failed_after_script"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        wf_run = SimpleNamespace(
+            id="wf_run_1",
+            status="running",
+            metadata_json=json.dumps({"watchlist_run_id": 1}),
+        )
+        script_artifact = SimpleNamespace(
+            id="art_script_1",
+            type="audio_script",
+            uri="file:///tmp/briefing-script.md",
+            size_bytes=1200,
+            mime_type="text/markdown",
+            metadata_json=json.dumps({"title": "Briefing script"}),
+        )
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [wf_run]
+        mock_wf_db.list_artifacts.return_value = [script_artifact]
+
+        scheduler_task = SimpleNamespace(
+            id="task_failed_after_script",
+            status="failed",
+            queue_name="workflows",
+            error="tts_provider_failed",
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result["run_id"] == 1
+        assert result["task_id"] == "task_failed_after_script"
+        assert result["status"] == "failed"
+        assert result["queue_name"] == "workflows"
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+        assert result["script_artifact"]["artifact_id"] == "art_script_1"
+        assert result["fallback_reason"] == "scheduler_task_error"
+
+    @pytest.mark.asyncio
+    async def test_scheduler_status_lookup_propagates_cancellation(self):
+        """Cancelled status lookups should not be converted into a pending response."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import _get_audio_scheduler_task_status
+
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with patch(
+            "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+            new=AsyncMock(return_value=scheduler),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await _get_audio_scheduler_task_status("task_cancelled")
+
+    @pytest.mark.asyncio
+    async def test_get_run_audio_propagates_scheduler_status_cancellation(self):
+        """Endpoint cancellation during Scheduler status lookup should propagate."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_cancelled"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=False),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
 
     @pytest.mark.asyncio
     async def test_returns_audio_when_artifact_found(self):

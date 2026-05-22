@@ -314,8 +314,8 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     const view = render(<WatchlistsPlaygroundPage />)
 
     await waitFor(() => expect(mocks.fetchWatchlistsMock).toHaveBeenCalledWith({ page: 1, size: 100 }))
-    await waitFor(() => expect(mocks.state.setWatchlists).toHaveBeenCalledWith([container]))
-    await waitFor(() => expect(mocks.state.setSelectedWatchlistId).toHaveBeenCalledWith(container.id))
+    await waitFor(() => expect(mocks.state.setWatchlists).toHaveBeenCalledWith([container], container.id))
+    expect(mocks.state.setSelectedWatchlistId).not.toHaveBeenCalledWith(container.id)
     view.rerender(<WatchlistsPlaygroundPage />)
 
     expect(await screen.findByRole("heading", { name: "Healthcare ransomware" })).toBeInTheDocument()
@@ -323,6 +323,43 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     expect(screen.getByText("CTI / OSINT")).toBeInTheDocument()
     expect(screen.getByText("High")).toBeInTheDocument()
     expect(screen.getByTestId("watchlists-tab-alerts")).toBeInTheDocument()
+  })
+
+  it("loads Watchlists with the preferred active selection in one store update", async () => {
+    const importedPlaceholder = {
+      ...container,
+      id: 7,
+      name: "Imported Watchlist",
+      domain: "general",
+      status: "paused",
+      priority: "medium",
+      tags: [],
+      created_at: "2026-05-10T00:00:00Z",
+      updated_at: "2026-05-10T00:00:00Z"
+    }
+    const activeNewsWatchlist = {
+      ...container,
+      id: 8,
+      name: "Morning News",
+      domain: "news",
+      status: "active",
+      priority: "high",
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    }
+    const items = [importedPlaceholder, activeNewsWatchlist]
+    mocks.fetchWatchlistsMock.mockResolvedValueOnce({
+      items,
+      total: 2,
+      has_more: false
+    })
+
+    render(<WatchlistsPlaygroundPage />)
+
+    await waitFor(() => {
+      expect(mocks.state.setWatchlists).toHaveBeenCalledWith(items, activeNewsWatchlist.id)
+    })
+    expect(mocks.state.setSelectedWatchlistId).not.toHaveBeenCalledWith(activeNewsWatchlist.id)
   })
 
   it("uses the canonical alert for container loading and error states", () => {

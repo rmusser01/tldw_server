@@ -916,6 +916,16 @@ async def get_global_scheduler(config: Optional[SchedulerConfig] = None,
         return _GLOBAL_SCHEDULER
 
 
+async def get_existing_global_scheduler() -> Optional[Scheduler]:
+    """Return the started global Scheduler without creating or starting one."""
+    async with _GLOBAL_SCHEDULER_LOCK:
+        if _GLOBAL_SCHEDULER is None:
+            return None
+        if not getattr(_GLOBAL_SCHEDULER, "_started", False):
+            return None
+        return _GLOBAL_SCHEDULER
+
+
 async def stop_global_scheduler() -> None:
     """Stop and clear the process-global Scheduler instance (primarily for tests)."""
     global _GLOBAL_SCHEDULER

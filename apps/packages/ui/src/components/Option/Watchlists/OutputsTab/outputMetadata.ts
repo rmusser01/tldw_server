@@ -25,7 +25,13 @@ export type AudioStatusLabelKey =
   | "running"
   | "in_progress"
   | "failed"
+  | "disabled"
   | "skipped"
+  | "skipped_no_items"
+  | "configuration_required"
+  | "queue_unavailable"
+  | "dead"
+  | "cancelled"
   | "enqueue_failed"
   | "error"
   | "unknown"
@@ -58,6 +64,7 @@ export interface AudioStatusSummary {
   fallbackReason?: string
   error?: string
   taskId?: string
+  queueName?: string
   downloadUrl?: string
   scriptArtifact?: AudioArtifactSummary
   speakerArtifacts: AudioArtifactSummary[]
@@ -114,7 +121,13 @@ const DEFAULT_AUDIO_STATUS_LABELS: Record<AudioStatusLabelKey, string> = {
   running: "Running",
   in_progress: "In progress",
   failed: "Failed",
+  disabled: "Disabled",
   skipped: "Skipped",
+  skipped_no_items: "Skipped: no items",
+  configuration_required: "Configuration required",
+  queue_unavailable: "Queue unavailable",
+  dead: "Dead",
+  cancelled: "Cancelled",
   enqueue_failed: "Enqueue failed",
   error: "Error",
   unknown: "Unknown"
@@ -145,7 +158,22 @@ export const createOutputMetadataLabels = (
       DEFAULT_AUDIO_STATUS_LABELS.in_progress
     ),
     failed: t("watchlists:outputs.audioStatus.failed", DEFAULT_AUDIO_STATUS_LABELS.failed),
+    disabled: t("watchlists:outputs.audioStatus.disabled", DEFAULT_AUDIO_STATUS_LABELS.disabled),
     skipped: t("watchlists:outputs.audioStatus.skipped", DEFAULT_AUDIO_STATUS_LABELS.skipped),
+    skipped_no_items: t(
+      "watchlists:outputs.audioStatus.skippedNoItems",
+      DEFAULT_AUDIO_STATUS_LABELS.skipped_no_items
+    ),
+    configuration_required: t(
+      "watchlists:outputs.audioStatus.configurationRequired",
+      DEFAULT_AUDIO_STATUS_LABELS.configuration_required
+    ),
+    queue_unavailable: t(
+      "watchlists:outputs.audioStatus.queueUnavailable",
+      DEFAULT_AUDIO_STATUS_LABELS.queue_unavailable
+    ),
+    dead: t("watchlists:outputs.audioStatus.dead", DEFAULT_AUDIO_STATUS_LABELS.dead),
+    cancelled: t("watchlists:outputs.audioStatus.cancelled", DEFAULT_AUDIO_STATUS_LABELS.cancelled),
     enqueue_failed: t(
       "watchlists:outputs.audioStatus.enqueueFailed",
       DEFAULT_AUDIO_STATUS_LABELS.enqueue_failed
@@ -497,9 +525,17 @@ export const getAudioStatusColor = (status: string): string => {
   ) {
     return "blue"
   }
-  if (normalized === "skipped") return "default"
+  if (
+    normalized === "skipped" ||
+    normalized === "disabled" ||
+    normalized === "skipped_no_items" ||
+    normalized === "cancelled"
+  ) {
+    return "default"
+  }
+  if (normalized === "configuration_required" || normalized === "queue_unavailable") return "gold"
   if (normalized === "enqueue_failed") return "red"
-  if (normalized === "failed" || normalized === "error") return "red"
+  if (normalized === "failed" || normalized === "error" || normalized === "dead") return "red"
   return "default"
 }
 
@@ -577,12 +613,14 @@ const getAudioMetadataRecord = (metadata: unknown): Record<string, unknown> | nu
   const flatStatus = asNonEmptyString(record.audio_briefing_status)
   const flatTaskId = asNonEmptyString(record.audio_briefing_task_id)
   const flatError = asNonEmptyString(record.audio_briefing_error)
-  if (record.audio_briefing_requested === true || flatStatus || flatTaskId || flatError) {
+  const flatReason = asNonEmptyString(record.audio_briefing_reason)
+  if (record.audio_briefing_requested === true || flatStatus || flatTaskId || flatError || flatReason) {
     return {
       status: flatStatus,
       requested: record.audio_briefing_requested === true,
       task_id: flatTaskId,
-      error: flatError
+      error: flatError,
+      fallback_reason: flatReason
     }
   }
   return record
@@ -622,8 +660,13 @@ export const getAudioStatusSummary = (
     asSafeDownloadUrl(record?.audio_uri)
   const fallbackReason =
     asNonEmptyString(record?.fallback_reason) ||
-    asNonEmptyString(record?.fallbackReason)
+    asNonEmptyString(record?.fallbackReason) ||
+    asNonEmptyString(record?.reason) ||
+    asNonEmptyString(record?.audio_briefing_reason)
   const error = asNonEmptyString(record?.error)
+  const queueName =
+    asNonEmptyString(record?.queue_name) ||
+    asNonEmptyString(record?.queueName)
   const explicitlyRequested = record?.requested === true || record?.audio_briefing_requested === true
   const requested =
     record !== null &&
@@ -647,6 +690,7 @@ export const getAudioStatusSummary = (
     fallbackReason,
     error,
     taskId,
+    queueName,
     downloadUrl,
     scriptArtifact,
     speakerArtifacts,
@@ -659,6 +703,35 @@ export const getOutputAudioStatusSummary = (
   labels?: OutputMetadataLabels
 ): AudioStatusSummary => {
   return getAudioStatusSummary(getAudioMetadataRecord(metadata), labels)
+}
+
+export const getMergedOutputAudioStatusSummary = (
+  metadata: unknown,
+  liveStatus: WatchlistRunAudioStatus | null | undefined,
+  labels?: OutputMetadataLabels
+): AudioStatusSummary => {
+  const metadataSummary = getOutputAudioStatusSummary(metadata, labels)
+  const liveSummary = liveStatus ? getAudioStatusSummary(liveStatus, labels) : null
+  if (!liveSummary?.requested) return metadataSummary
+
+  const status = liveSummary.status !== "unknown" ? liveSummary.status : metadataSummary.status
+  return {
+    requested: true,
+    status,
+    statusLabel: getAudioStatusLabel(status, labels),
+    statusColor: getAudioStatusColor(status),
+    fallbackReason: liveSummary.fallbackReason ?? metadataSummary.fallbackReason,
+    error: liveSummary.error ?? metadataSummary.error,
+    taskId: liveSummary.taskId ?? metadataSummary.taskId,
+    queueName: liveSummary.queueName ?? metadataSummary.queueName,
+    downloadUrl: liveSummary.downloadUrl ?? metadataSummary.downloadUrl,
+    scriptArtifact: liveSummary.scriptArtifact ?? metadataSummary.scriptArtifact,
+    speakerArtifacts:
+      liveSummary.speakerArtifacts.length > 0
+        ? liveSummary.speakerArtifacts
+        : metadataSummary.speakerArtifacts,
+    finalArtifact: liveSummary.finalArtifact ?? metadataSummary.finalArtifact
+  }
 }
 
 interface BuildRegenerateOptions {

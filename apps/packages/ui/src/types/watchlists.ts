@@ -328,6 +328,7 @@ export interface WatchlistAudioCast {
 export interface WatchlistRunAudioStatus {
   run_id: number
   task_id?: string | null
+  queue_name?: string | null
   status: "pending" | "running" | "completed" | "failed" | "unknown" | string
   audio_uri?: string | null
   download_url?: string | null

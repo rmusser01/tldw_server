@@ -981,6 +981,7 @@ class WatchlistRunAudioResponse(BaseModel):
 
     run_id: int
     task_id: str | None = None
+    queue_name: str | None = None
     status: str
     audio_uri: str | None = None
     download_url: str | None = None

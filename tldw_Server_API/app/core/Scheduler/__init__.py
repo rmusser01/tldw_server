@@ -52,7 +52,7 @@ from .base.exceptions import (
 )
 from .base.registry import get_registry, task
 from .config import SchedulerConfig, get_config, reset_config, set_config
-from .scheduler import Scheduler, create_scheduler, get_global_scheduler, stop_global_scheduler
+from .scheduler import Scheduler, create_scheduler, get_existing_global_scheduler, get_global_scheduler, stop_global_scheduler
 
 __version__ = "1.0.0"
 
@@ -60,6 +60,7 @@ __all__ = [
     # Main interfaces
     'Scheduler',
     'create_scheduler',
+    'get_existing_global_scheduler',
     'get_global_scheduler',
     'stop_global_scheduler',
     'task',
