@@ -488,6 +488,13 @@ describe("AssistantSelect behavior", () => {
       targetTab: "Personas",
       targetName: "Guide Persona",
       expected: { kind: "persona", id: "persona-1", name: "Guide Persona" }
+    },
+    {
+      label: "none to character",
+      source: null,
+      targetTab: "Characters",
+      targetName: "Alpha",
+      expected: { kind: "character", id: "char-1", name: "Alpha" }
     }
   ])("supports $label from the assistant selector", async ({ source, targetTab, targetName, expected }) => {
     const user = userEvent.setup()
