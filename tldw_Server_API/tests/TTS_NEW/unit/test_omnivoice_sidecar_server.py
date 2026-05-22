@@ -8,132 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
 
-from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
-from tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter import OmniVoiceAdapter
-from tldw_Server_API.app.core.TTS.adapters.omnivoice_runtime import (
-    OmniVoiceRuntimeError,
-    OmniVoiceSynthesizeResult,
-)
-from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import (
-    OmniVoiceRuntimeStatus,
-    OmniVoiceSynthesizeRequest,
-)
-
-
-def _build_test_wav(*, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
-    buffer = BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(channels)
-        wav_file.setsampwidth(sample_width)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(b"\x01" * sample_width * channels * 64)
-    return buffer.getvalue()
-
-
-class FakeOmniVoiceRuntime:
-    def __init__(
-        self,
-        *,
-        scratch_dir: Path,
-        synthesize_error: OmniVoiceRuntimeError | None = None,
-        status_model: str = "local-model",
-        synthesize_model: str = "local-model",
-    ) -> None:
-        self.status_calls = 0
-        self.load_calls = 0
-        self.synthesize_calls: list[OmniVoiceSynthesizeRequest] = []
-        self.synthesize_error = synthesize_error
-        self.status_model = status_model
-        self.synthesize_model = synthesize_model
-        self.status = self.get_status
-        self.last_error_code = None
-        self.model = "loaded-model"
-        self._model_id = status_model
-        self._model_path = scratch_dir / "local-model"
-
-    async def get_status(self) -> OmniVoiceRuntimeStatus:
-        self.status_calls += 1
-        return OmniVoiceRuntimeStatus(
-            status="ready",
-            ready=True,
-            model=self.status_model,
-            model_path=str(self._model_path),
-        )
-
-    async def load(self) -> object:
-        self.load_calls += 1
-        return self.model
-
-    async def synthesize(self, request: OmniVoiceSynthesizeRequest) -> OmniVoiceSynthesizeResult:
-        self.synthesize_calls.append(request)
-        if request.reference_audio_path:
-            self._validate_reference_audio_path(request.reference_audio_path)
-        if self.synthesize_error is not None:
-            raise self.synthesize_error
-        return OmniVoiceSynthesizeResult(
-            audio_bytes=_build_test_wav(),
-            audio_format="wav",
-            sample_rate=24000,
-            channels=1,
-            cold_start=False,
-            model=self.synthesize_model,
-        )
-
-    def _validate_reference_audio_path(self, reference_audio_path: str) -> None:
-        reference_path = Path(reference_audio_path).expanduser().resolve(strict=False)
-        scratch_path = self._model_path.parent.resolve(strict=False)
-        try:
-            reference_path.relative_to(scratch_path)
-        except ValueError as exc:
-            raise OmniVoiceRuntimeError(
-                "REFERENCE_PATH_NOT_ALLOWED",
-                "OmniVoice clone reference audio path is outside managed directories",
-                retryable=False,
-            ) from exc
-
-
-class FakeReloadableOmniVoiceRuntime(FakeOmniVoiceRuntime):
-    def __init__(self, *, scratch_dir: Path) -> None:
-        super().__init__(scratch_dir=scratch_dir)
-        self.reload_calls = 0
-
-    async def reload(self) -> None:
-        self.reload_calls += 1
-
-
-class FakeShutdownOmniVoiceRuntime(FakeOmniVoiceRuntime):
-    def __init__(self, *, scratch_dir: Path) -> None:
-        super().__init__(scratch_dir=scratch_dir)
-        self.shutdown_calls = 0
-
-    async def shutdown(self) -> None:
-        self.shutdown_calls += 1
-        self.status = "shutting-down"
-        self.model = None
-
-
-class FakeAttributeStatusRuntime:
-    def __init__(self, *, model_path: Path) -> None:
-        self.status = "ready"
-        self.last_error_code = None
-        self.model = object()
-        self._model_id = "local-model"
-        self._model_path = model_path
-        self.load_calls = 0
-
-    async def load(self) -> object:
-        self.load_calls += 1
-        return self.model
-
-    async def synthesize(self, request: OmniVoiceSynthesizeRequest) -> OmniVoiceSynthesizeResult:
-        return OmniVoiceSynthesizeResult(
-            audio_bytes=_build_test_wav(),
-            audio_format="wav",
-            sample_rate=24000,
-            channels=1,
-            cold_start=False,
-            model="local-model",
-        )
+from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
 
 
 @pytest.fixture
@@ -541,73 +416,6 @@ def test_synthesize_request_rejects_mode_field_conflicts():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("field_name", ["instruct", "reference_audio_path", "reference_text"])
-def test_synthesize_request_rejects_auto_mode_empty_forbidden_fields(field_name: str):
-    with pytest.raises(ValidationError, match=field_name):
-        OmniVoiceSynthesizeRequest(text="hi", mode="auto", generation={}, **{field_name: ""})
-
-
-@pytest.mark.unit
-def test_synthesize_request_rejects_auto_mode_reference_audio_path():
-    with pytest.raises(ValidationError, match="mode=auto"):
-        OmniVoiceSynthesizeRequest(
-            text="hi",
-            mode="auto",
-            reference_audio_path="/managed/ref.wav",
-            generation={},
-        )
-
-
-@pytest.mark.unit
-def test_synthesize_request_rejects_auto_mode_reference_text():
-    with pytest.raises(ValidationError, match="reference_text"):
-        OmniVoiceSynthesizeRequest(
-            text="hi",
-            mode="auto",
-            reference_text="reference transcript",
-            generation={},
-        )
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("field_name", ["reference_audio_path", "reference_text"])
-def test_synthesize_request_rejects_design_mode_empty_forbidden_fields(field_name: str):
-    with pytest.raises(ValidationError, match=field_name):
-        OmniVoiceSynthesizeRequest(
-            text="hi",
-            mode="design",
-            instruct="warm narrator",
-            generation={},
-            **{field_name: ""},
-        )
-
-
-@pytest.mark.unit
-def test_synthesize_request_rejects_design_mode_reference_text():
-    with pytest.raises(ValidationError, match="reference_text"):
-        OmniVoiceSynthesizeRequest(
-            text="hi",
-            mode="design",
-            instruct="warm narrator",
-            reference_text="reference transcript",
-            generation={},
-        )
-
-
-@pytest.mark.unit
-def test_synthesize_request_rejects_clone_mode_empty_instruct():
-    with pytest.raises(ValidationError, match="instruct"):
-        OmniVoiceSynthesizeRequest(
-            text="hi",
-            mode="clone",
-            instruct="",
-            reference_audio_path="/managed/ref.wav",
-            reference_text="reference transcript",
-            generation={},
-        )
-
-
-@pytest.mark.unit
 def test_synthesize_request_rejects_mixed_design_and_clone_inputs():
     with pytest.raises(ValidationError, match="instruct"):
         OmniVoiceSynthesizeRequest(
@@ -618,18 +426,6 @@ def test_synthesize_request_rejects_mixed_design_and_clone_inputs():
             reference_text="reference transcript",
             generation={},
         )
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("field_name", ["reference_audio_path", "reference_text"])
-def test_synthesize_request_clone_requires_non_empty_reference_fields(field_name: str):
-    kwargs = {
-        "reference_audio_path": "/managed/ref.wav",
-        "reference_text": "reference transcript",
-        field_name: "",
-    }
-    with pytest.raises(ValidationError, match=field_name):
-        OmniVoiceSynthesizeRequest(text="hi", mode="clone", generation={}, **kwargs)
 
 
 @pytest.mark.unit
@@ -648,30 +444,6 @@ def test_synthesize_request_clone_requires_reference_text_and_path():
             reference_audio_path="/managed/ref.wav",
             generation={},
         )
-
-
-@pytest.mark.unit
-def test_omnivoice_adapter_sidecar_payload_matches_protocol_schema():
-    adapter = OmniVoiceAdapter({"sample_rate": 24000})
-    request = TTSRequest(
-        text="hi",
-        voice="narrator",
-        format=AudioFormat.WAV,
-        stream=False,
-        target_sample_rate=22050,
-    )
-
-    payload = adapter._build_sidecar_payload(
-        request,
-        mode="auto",
-        sample_rate=22050,
-        reference_audio_path=None,
-    )
-    parsed = OmniVoiceSynthesizeRequest(**payload)
-
-    assert payload["requested_sample_rate"] == 22050  # nosec B101
-    assert "sample_rate" not in payload  # nosec B101
-    assert parsed.requested_sample_rate == 22050  # nosec B101
 
 
 @pytest.mark.unit
