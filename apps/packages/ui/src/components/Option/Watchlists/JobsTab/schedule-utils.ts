@@ -158,9 +158,11 @@ const isCronFieldBaseValid = (
   value: string,
   min: number,
   max: number,
-  namedValues: Record<string, number> = {}
+  namedValues: Record<string, number> = {},
+  allowQuestion = false
 ): boolean => {
-  if (value === "*" || value === "?") return true
+  if (value === "*") return true
+  if (value === "?") return allowQuestion
   const rangeParts = value.split("-")
   if (rangeParts.length === 2) {
     const [rangeStart, rangeEnd] = rangeParts
@@ -176,7 +178,8 @@ const isCronFieldPartValid = (
   value: string,
   min: number,
   max: number,
-  namedValues: Record<string, number> = {}
+  namedValues: Record<string, number> = {},
+  allowQuestion = false
 ): boolean => {
   if (!value) return false
   const stepParts = value.split("/")
@@ -184,26 +187,27 @@ const isCronFieldPartValid = (
     const [base, step] = stepParts
     return (
       parseCronStepValue(step, max) !== null &&
-      isCronFieldBaseValid(base, min, max, namedValues)
+      isCronFieldBaseValid(base, min, max, namedValues, allowQuestion)
     )
   }
   if (stepParts.length > 2) return false
-  return isCronFieldBaseValid(value, min, max, namedValues)
+  return isCronFieldBaseValid(value, min, max, namedValues, allowQuestion)
 }
 
 const isCronFieldValueValid = (value: string, fieldIndex: number): boolean => {
   const fieldRules = [
     { min: 0, max: 59 },
     { min: 0, max: 23 },
-    { min: 1, max: 31 },
+    { min: 1, max: 31, allowQuestion: true },
     { min: 1, max: 12, names: MONTH_NAME_MAP },
-    { min: 0, max: 7, names: WEEKDAY_VALUE_MAP }
+    { min: 0, max: 7, names: WEEKDAY_VALUE_MAP, allowQuestion: true }
   ] as const
   const rules = fieldRules[fieldIndex]
   const namedValues = "names" in rules ? rules.names : undefined
+  const allowQuestion = "allowQuestion" in rules ? rules.allowQuestion : false
   return value
     .split(",")
-    .every((part) => isCronFieldPartValid(part, rules.min, rules.max, namedValues))
+    .every((part) => isCronFieldPartValid(part, rules.min, rules.max, namedValues, allowQuestion))
 }
 
 export const validateCronSchedule = (

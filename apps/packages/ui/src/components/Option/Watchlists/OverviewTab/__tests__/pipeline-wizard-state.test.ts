@@ -295,6 +295,16 @@ describe("watchlists pipeline wizard state", () => {
     expect(
       validatePipelineWizardDraft({
         ...base,
+        scheduleAdvancedCron: "? 6 * * WED"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["scheduleAdvancedCron"]
+    })
+
+    expect(
+      validatePipelineWizardDraft({
+        ...base,
         scheduleAdvancedCron: "*/1 * * * *"
       })
     ).toEqual({
