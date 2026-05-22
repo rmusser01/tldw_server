@@ -26,6 +26,14 @@ type DemoPreviewMode = "catalog" | "taking" | "results"
 
 const QUIZ_BETA_TOOLTIP_ID = "quiz-beta-tooltip"
 
+const QUIZ_STUDY_MODES = [
+  "Take Quiz",
+  "Generate",
+  "Create",
+  "Manage",
+  "Results"
+] as const
+
 const normalizeDemoAnswer = (value: string | undefined): string => value?.trim().toLowerCase() ?? ""
 
 const isDemoQuestionCorrect = (question: DemoQuizQuestion, answer: string | undefined): boolean => {
@@ -92,6 +100,55 @@ const QuizBetaBadge: React.FC<{ label: string; description: string }> = ({
     </div>
   )
 }
+
+const QuizStudyFrame = ({
+  children,
+  stateLabel,
+  constrainContent = false
+}: {
+  children: React.ReactNode
+  stateLabel?: React.ReactNode
+  constrainContent?: boolean
+}) => (
+  <div className="space-y-4" data-testid="quiz-study-workspace">
+    <header
+      className="mx-auto max-w-6xl px-4 pt-4"
+      data-testid="quiz-study-header"
+    >
+      <div className="rounded-lg border border-border bg-surface px-4 py-3 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-xs font-semibold text-text-muted">Study workspace</div>
+            <h1 className="mt-1 text-2xl font-semibold text-text">Quiz</h1>
+          </div>
+          {stateLabel ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {stateLabel}
+            </div>
+          ) : null}
+        </div>
+        <nav
+          aria-label="Quiz modes"
+          className="mt-3 flex flex-wrap gap-2"
+        >
+          {QUIZ_STUDY_MODES.map((mode) => (
+            <span
+              key={mode}
+              className="rounded-full border border-border bg-bg px-2.5 py-1 text-xs font-medium text-text-muted"
+            >
+              {mode}
+            </span>
+          ))}
+        </nav>
+      </div>
+    </header>
+    <div
+      className={constrainContent ? "mx-auto max-w-6xl px-4 pb-4" : undefined}
+    >
+      {children}
+    </div>
+  </div>
+)
 
 const DemoQuizPreview: React.FC<{ quizzes: DemoQuiz[] }> = ({ quizzes }) => {
   const [selectedQuizId, setSelectedQuizId] = React.useState<string | null>(
@@ -639,66 +696,76 @@ export const QuizWorkspace: React.FC = () => {
   // Offline state - show demo or connection banner
   if (!isOnline) {
     return demoEnabled ? (
-      <div className="space-y-4">
-        <div className="flex justify-end">
-          <QuizBetaBadge
-            label={t("common:beta", { defaultValue: "Beta" })}
-            description={betaDescription}
-          />
-        </div>
-        {demoConnectionWarning ? (
-          <InlineConnectionWarning
-            testId="quiz-demo-connection-warning"
-            message={demoConnectionWarning.message}
-            retryActionLabel={demoConnectionWarning.retryActionLabel}
-            onRetry={demoConnectionWarning.onRetry}
-            retryDisabled={demoConnectionWarning.retryDisabled}
-          />
-        ) : null}
-        <FeatureEmptyState
-          title={
-            <span className="inline-flex items-center gap-2">
-              <StatusBadge variant="demo">Demo</StatusBadge>
-              <span>
-                {t("option:quiz.demoTitle", {
-                  defaultValue: "Explore Quiz Playground in demo mode"
-                })}
-              </span>
-            </span>
-          }
-          description={t("option:quiz.demoDescription", {
-            defaultValue:
-              "This demo shows how Quiz Playground can help you create and take quizzes from your content. Connect your own server later to generate quizzes from your media."
-          })}
-          examples={[
-            t("option:quiz.demoExample1", {
-              defaultValue:
-                "Generate quizzes automatically from videos, articles, or documents."
-            }),
-            t("option:quiz.demoExample2", {
-              defaultValue:
-                "Create custom quizzes with multiple choice, true/false, and fill-in-the-blank questions."
-            }),
-            t("option:quiz.demoExample3", {
-              defaultValue:
-                "Track your quiz results and review incorrect answers to improve retention."
-            })
-          ]}
-          primaryActionLabel={t("option:connectionCard.buttonGoToServerCard", {
-            defaultValue: "Go to server card"
-          })}
-          onPrimaryAction={scrollToServerCard}
-        />
-        <DemoQuizPreview quizzes={demoQuizzes} />
-      </div>
-    ) : (
-        <div className="space-y-4">
-          <div className="flex justify-end">
+      <QuizStudyFrame
+        stateLabel={
+          <>
+            <StatusBadge variant="demo">Local demo</StatusBadge>
             <QuizBetaBadge
               label={t("common:beta", { defaultValue: "Beta" })}
               description={betaDescription}
             />
-          </div>
+          </>
+        }
+        constrainContent
+      >
+        <div className="space-y-4">
+          {demoConnectionWarning ? (
+            <InlineConnectionWarning
+              testId="quiz-demo-connection-warning"
+              message={demoConnectionWarning.message}
+              retryActionLabel={demoConnectionWarning.retryActionLabel}
+              onRetry={demoConnectionWarning.onRetry}
+              retryDisabled={demoConnectionWarning.retryDisabled}
+            />
+          ) : null}
+          <FeatureEmptyState
+            title={
+              <span className="inline-flex items-center gap-2">
+                <StatusBadge variant="demo">Demo</StatusBadge>
+                <span>
+                  {t("option:quiz.demoTitle", {
+                    defaultValue: "Explore Quiz Playground in demo mode"
+                  })}
+                </span>
+              </span>
+            }
+            description={t("option:quiz.demoDescription", {
+              defaultValue:
+                "This demo shows how Quiz Playground can help you create and take quizzes from your content. Connect your own server later to generate quizzes from your media."
+            })}
+            examples={[
+              t("option:quiz.demoExample1", {
+                defaultValue:
+                  "Generate quizzes automatically from videos, articles, or documents."
+              }),
+              t("option:quiz.demoExample2", {
+                defaultValue:
+                  "Create custom quizzes with multiple choice, true/false, and fill-in-the-blank questions."
+              }),
+              t("option:quiz.demoExample3", {
+                defaultValue:
+                  "Track your quiz results and review incorrect answers to improve retention."
+              })
+            ]}
+            primaryActionLabel={t("option:connectionCard.buttonGoToServerCard", {
+              defaultValue: "Go to server card"
+            })}
+            onPrimaryAction={scrollToServerCard}
+          />
+          <DemoQuizPreview quizzes={demoQuizzes} />
+        </div>
+      </QuizStudyFrame>
+    ) : (
+      <QuizStudyFrame
+        stateLabel={
+          <QuizBetaBadge
+            label={t("common:beta", { defaultValue: "Beta" })}
+            description={betaDescription}
+          />
+        }
+        constrainContent
+      >
+        <div className="space-y-4">
           <ConnectionProblemBanner
             badgeLabel={offlineBannerProps.badgeLabel}
             title={offlineBannerProps.title}
@@ -711,7 +778,8 @@ export const QuizWorkspace: React.FC = () => {
             retryDisabled={offlineBannerProps.retryDisabled}
           />
         </div>
-      )
+      </QuizStudyFrame>
+    )
   }
 
   // Feature not supported on this server
@@ -719,94 +787,104 @@ export const QuizWorkspace: React.FC = () => {
     const specVersion = capabilities?.specVersion ?? "unknown"
 
     return (
-      <div className="space-y-4">
-        <div className="flex justify-end">
-          <QuizBetaBadge
-            label={t("common:beta", { defaultValue: "Beta" })}
-            description={betaDescription}
+      <QuizStudyFrame
+        stateLabel={
+          <>
+            <StatusBadge variant="error">Feature unavailable</StatusBadge>
+            <QuizBetaBadge
+              label={t("common:beta", { defaultValue: "Beta" })}
+              description={betaDescription}
+            />
+          </>
+        }
+        constrainContent
+      >
+        <div className="space-y-4">
+          <FeatureEmptyState
+            title={
+              <span className="inline-flex items-center gap-2">
+                <StatusBadge variant="error">Feature unavailable</StatusBadge>
+                <span>
+                  {t("option:quiz.offlineTitle", {
+                    defaultValue: "Quiz API not available on this server"
+                  })}
+                </span>
+              </span>
+            }
+            description={t("option:quiz.offlineDescription", {
+              defaultValue:
+                "This server does not advertise Quiz endpoints in its capability spec (reported: {{specVersion}}). Quizzes require tldw_server v0.1.0+ with /api/v1/quizzes enabled.",
+              specVersion
+            })}
+            examples={[
+              t("option:quiz.offlineExample1", {
+                defaultValue:
+                  "Open Health & diagnostics to verify server version and advertised API routes."
+              }),
+              t("option:quiz.offlineExample2", {
+                defaultValue:
+                  "Update the server, then refresh this page so capabilities are re-detected."
+              }),
+              t("option:quiz.offlineExample3", {
+                defaultValue:
+                  "If you self-host, confirm /api/v1/quizzes appears in /openapi.json."
+              })
+            ]}
+            primaryActionLabel={t("settings:healthSummary.diagnostics", {
+              defaultValue: "Health & diagnostics"
+            })}
+            onPrimaryAction={() => navigate("/settings/health")}
+            secondaryActionLabel={t("option:quiz.offlineSecondaryAction", {
+              defaultValue: "Open setup guide"
+            })}
+            onSecondaryAction={() => navigate("/documentation")}
           />
         </div>
-        <FeatureEmptyState
-          title={
-            <span className="inline-flex items-center gap-2">
-              <StatusBadge variant="error">Feature unavailable</StatusBadge>
-              <span>
-                {t("option:quiz.offlineTitle", {
-                  defaultValue: "Quiz API not available on this server"
-                })}
-              </span>
-            </span>
-          }
-          description={t("option:quiz.offlineDescription", {
-            defaultValue:
-              "This server does not advertise Quiz endpoints in its capability spec (reported: {{specVersion}}). Quizzes require tldw_server v0.1.0+ with /api/v1/quizzes enabled.",
-            specVersion
-          })}
-          examples={[
-            t("option:quiz.offlineExample1", {
-              defaultValue:
-                "Open Health & diagnostics to verify server version and advertised API routes."
-            }),
-            t("option:quiz.offlineExample2", {
-              defaultValue:
-                "Update the server, then refresh this page so capabilities are re-detected."
-            }),
-            t("option:quiz.offlineExample3", {
-              defaultValue:
-                "If you self-host, confirm /api/v1/quizzes appears in /openapi.json."
-            })
-          ]}
-          primaryActionLabel={t("settings:healthSummary.diagnostics", {
-            defaultValue: "Health & diagnostics"
-          })}
-          onPrimaryAction={() => navigate("/settings/health")}
-          secondaryActionLabel={t("option:quiz.offlineSecondaryAction", {
-            defaultValue: "Open setup guide"
-          })}
-          onSecondaryAction={() => navigate("/documentation")}
-        />
-      </div>
+      </QuizStudyFrame>
     )
   }
 
   // Online and feature supported - render main playground
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
+    <QuizStudyFrame
+      stateLabel={
         <QuizBetaBadge
           label={t("common:beta", { defaultValue: "Beta" })}
           description={betaDescription}
         />
-      </div>
-      <QuizPlayground />
-      {!isQuizCountLoading && totalQuizzes === 0 && (
-        <div className="mt-4 text-center" data-testid="quiz-connected-demo-toggle">
-          {showDemo ? (
-            <>
+      }
+    >
+      <div className="space-y-3">
+        <QuizPlayground />
+        {!isQuizCountLoading && totalQuizzes === 0 && (
+          <div className="mt-4 text-center" data-testid="quiz-connected-demo-toggle">
+            {showDemo ? (
+              <>
+                <button
+                  type="button"
+                  className="mb-3 text-sm text-primary hover:text-primary/80"
+                  onClick={() => setShowDemo(false)}
+                >
+                  {t("option:quiz.hideDemoQuiz", { defaultValue: "Hide demo" })}
+                </button>
+                <DemoQuizPreview quizzes={demoQuizzes} />
+              </>
+            ) : (
               <button
                 type="button"
-                className="mb-3 text-sm text-primary hover:text-primary/80"
-                onClick={() => setShowDemo(false)}
+                className="text-sm text-primary hover:text-primary/80"
+                data-testid="quiz-try-demo-button"
+                onClick={() => setShowDemo(true)}
               >
-                {t("option:quiz.hideDemoQuiz", { defaultValue: "Hide demo" })}
+                {t("option:quiz.tryDemoQuiz", {
+                  defaultValue: "Try a demo quiz to see how it works"
+                })}
               </button>
-              <DemoQuizPreview quizzes={demoQuizzes} />
-            </>
-          ) : (
-            <button
-              type="button"
-              className="text-sm text-primary hover:text-primary/80"
-              data-testid="quiz-try-demo-button"
-              onClick={() => setShowDemo(true)}
-            >
-              {t("option:quiz.tryDemoQuiz", {
-                defaultValue: "Try a demo quiz to see how it works"
-              })}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+            )}
+          </div>
+        )}
+      </div>
+    </QuizStudyFrame>
   )
 }
 

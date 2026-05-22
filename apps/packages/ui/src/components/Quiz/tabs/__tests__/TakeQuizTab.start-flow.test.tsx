@@ -13,9 +13,13 @@ import { useQuizAutoSave } from "../../hooks/useQuizAutoSave"
 import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { buildShuffledOptionEntries } from "../../utils/optionShuffle"
 
-vi.mock("react-router-dom", () => ({
-  Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
-}))
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+  return {
+    ...actual,
+    Link: ({ to, children, ...props }: Record<string, unknown>) => <a href={to as string} {...props}>{children as React.ReactNode}</a>
+  }
+})
 
 const interpolate = (template: string, values: Record<string, unknown> | undefined) => {
   return template.replace(/\{\{\s*([^\s}]+)\s*\}\}/g, (_, key: string) => {

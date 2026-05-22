@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { getDesignSystemState } from "@/design-system"
@@ -141,6 +141,22 @@ describe("FlashcardsWorkspace connection states", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Go to server card" }))
     expect(mocks.scrollToServerCard).toHaveBeenCalled()
+  })
+
+  it("preserves study workspace identity and modes while setup is required", () => {
+    mocks.isOnline = false
+    mocks.demoEnabled = false
+    mocks.uxState = "unconfigured"
+
+    render(<FlashcardsWorkspace />)
+
+    expect(screen.getByRole("heading", { level: 1, name: "Flashcards" })).toBeInTheDocument()
+    expect(screen.getByText("Study workspace")).toBeInTheDocument()
+
+    const modes = within(screen.getByRole("navigation", { name: "Flashcards modes" }))
+    for (const mode of ["Study", "Manage", "Import / Export", "Templates", "Scheduler"]) {
+      expect(modes.getByText(mode)).toBeInTheDocument()
+    }
   })
 
   it("keeps demo preview visible while surfacing unreachable guidance", () => {
