@@ -81,6 +81,10 @@ This section is organized by product surface so you can quickly find the right d
 - [Google Keep Notes Import and Export](WebUI_Extension/Google_Keep_Notes_Import_Export_Guide.md)
 - [Workflows Examples](WebUI_Extension/Workflows_Examples.md)
 
+### Prototype Workspaces
+
+- [Prototype Workspaces User Guide](Prototype_Workspaces.md)
+
 ## Integrations and Experiments
 
 - [Getting Started with ACP](Integrations_Experiments/Getting_Started_with_ACP.md)
