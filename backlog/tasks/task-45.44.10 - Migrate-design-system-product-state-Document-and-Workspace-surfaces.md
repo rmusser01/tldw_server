@@ -36,6 +36,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created and completed TASK-45.44.10.1 for the first narrow Document/Workspace slice: DocumentPickerModal Alert migration. PR: https://github.com/rmusser01/tldw_server/pull/1950. Before/after product-state verifier evidence in that child task reduced total baseline exceptions from 303 to 300 and Document/Workspace exceptions from 12 to 9.
+- Created and completed TASK-45.44.10.2 for the next narrow Document/Workspace slice: DocumentViewer PDF/EPUB Alert migration. PR: https://github.com/rmusser01/tldw_server/pull/1952. Verifier evidence after the slice reduces total baseline exceptions from 300 to 296 and Document/Workspace exceptions from 9 to 5.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
