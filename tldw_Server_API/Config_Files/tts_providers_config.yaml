@@ -300,10 +300,14 @@ providers:
     enabled: false
     runtime: "sidecar"
     model: "omnivoice"
+    # Native OmniVoice output; public resampling happens in the main adapter.
     sample_rate: 24000
     max_concurrent_generations: 1
     extra_params:
       repo_path: "../OmniVoice"
+      model_path: "models/omnivoice_sidecar/models/OmniVoice"
+      runtime_path: "models/omnivoice_sidecar/runtime"
+      scratch_dir: "models/omnivoice_sidecar/runtime/scratch"
       host: "127.0.0.1"
       port: 8039
       autoselect_port: true

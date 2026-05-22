@@ -281,6 +281,9 @@ def _patch_omnivoice_sidecar_installer(
 
     calls: list[tuple[str, object]] = []
     source_checkout = tmp_path / "OmniVoice"
+    model_path = tmp_path / "models" / "OmniVoice"
+    model_path.mkdir(parents=True)
+    monkeypatch.setenv("TLDW_OMNIVOICE_MODEL_PATH", str(model_path))
 
     monkeypatch.setattr(
         installer,
@@ -334,8 +337,14 @@ def _patch_omnivoice_sidecar_installer(
     )
     monkeypatch.setattr(
         installer,
+        "validate_local_model_path",
+        lambda path: calls.append(("validate_local_model_path", path)) or path,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        installer,
         "patch_tts_config",
-        lambda **kwargs: calls.append(("patch_tts_config", kwargs["config_path"])) or config_patched,
+        lambda **kwargs: calls.append(("patch_tts_config", kwargs["config_path"], kwargs["model_path"])) or config_patched,
         raising=True,
     )
 
@@ -352,6 +361,7 @@ def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
     install_manager._install_omnivoice()
 
     assert [entry[0] for entry in calls] == [
+        "validate_local_model_path",
         "resolve_source_checkout",
         "build_runtime_layout",
         "create_runtime_layout",
@@ -361,6 +371,9 @@ def test_omnivoice_install_routes_to_sidecar_installer(monkeypatch, tmp_path):
         "validate_runtime_layout",
         "patch_tts_config",
     ]
+    patch_call = calls[-1]
+    assert patch_call[0] == "patch_tts_config"
+    assert patch_call[2] == tmp_path / "models" / "OmniVoice"
 
 
 def test_omnivoice_install_fails_when_config_patch_does_not_update_provider(
@@ -377,6 +390,53 @@ def test_omnivoice_install_fails_when_config_patch_does_not_update_provider(
         install_manager._install_omnivoice()
 
     assert [entry[0] for entry in calls][-1] == "patch_tts_config"
+
+
+def test_omnivoice_install_normalizes_config_patch_system_exit(monkeypatch, tmp_path):
+    calls = _patch_omnivoice_sidecar_installer(
+        monkeypatch,
+        tmp_path,
+        config_patched=True,
+    )
+
+    def _raise_patch_error(**kwargs):  # noqa: ARG001
+        calls.append(("patch_tts_config", kwargs["config_path"], kwargs["model_path"]))
+        raise SystemExit("unsafe config path")
+
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    monkeypatch.setattr(installer, "patch_tts_config", _raise_patch_error, raising=True)
+
+    with pytest.raises(RuntimeError, match="unsafe config path"):
+        install_manager._install_omnivoice()
+
+    assert [entry[0] for entry in calls][-1] == "patch_tts_config"
+
+
+def test_omnivoice_install_requires_explicit_model_path(monkeypatch):
+    monkeypatch.setattr(install_manager, "_ensure_downloads_allowed", lambda _label: None, raising=True)
+    monkeypatch.delenv("TLDW_OMNIVOICE_MODEL_PATH", raising=False)
+
+    with pytest.raises(RuntimeError, match="TLDW_OMNIVOICE_MODEL_PATH"):
+        install_manager._install_omnivoice()
+
+
+def test_omnivoice_install_rejects_invalid_model_path(monkeypatch, tmp_path):
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    missing_model_path = tmp_path / "missing"
+
+    monkeypatch.setattr(install_manager, "_ensure_downloads_allowed", lambda _label: None, raising=True)
+    monkeypatch.setenv("TLDW_OMNIVOICE_MODEL_PATH", str(missing_model_path))
+    monkeypatch.setattr(
+        installer,
+        "resolve_source_checkout",
+        lambda repo_root=None: pytest.fail("source checkout should not resolve for invalid model path"),
+        raising=True,
+    )
+
+    with pytest.raises(RuntimeError, match="OmniVoice model path"):
+        install_manager._install_omnivoice()
 
 
 def test_omnivoice_install_checks_download_policy_before_running_installer(monkeypatch):
