@@ -2552,11 +2552,13 @@ async def _build_source_preview_response(
                     tenant_id="default",
                     fetch_diagnostics=fetch_events.append,
                 )
-                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"watchlists.test_source: scrape rules fetch failed: {exc}")
-                diagnostics.fetch_error = _format_fetch_diagnostic_error(exc)
+                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
+                diagnostics.fetch_error = diagnostics.fetch_error or _format_fetch_diagnostic_error(exc)
                 items = []
+            else:
+                _apply_fetch_diagnostic_events(diagnostics, fetch_events)
         elif test_mode:
             diagnostics = _build_source_preview_diagnostics(fetch_mode="test_mode")
             items = [
