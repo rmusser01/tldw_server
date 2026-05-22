@@ -992,9 +992,9 @@ export const DocumentWorkspacePage: React.FC = () => {
         >
           <div className="space-y-1">
             <ul className="list-disc pl-5">
-              {healthIssues.map((issue, index) => (
-                <li key={`${index}-${issue}`}>{issue}</li>
-              ))}
+            {healthIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
             </ul>
             <div className="text-xs text-text-muted">
               {t(
