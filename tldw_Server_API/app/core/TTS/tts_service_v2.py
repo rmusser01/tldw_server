@@ -2640,22 +2640,26 @@ class TTSServiceV2:
             or model_value.startswith("omni_voice")
         ):
             return True
+        provider_hint_value = (provider_hint or "").strip().lower()
+        if provider_hint_value and provider_hint_value not in _OMNIVOICE_ALIAS_VALUES:
+            return False
         voice = (getattr(request, "voice", None) or "").strip().lower()
+        has_omnivoice_semantics = False
         if voice.startswith("custom:"):
-            return True
+            has_omnivoice_semantics = True
         if getattr(request, "voice_reference", None):
-            return True
+            has_omnivoice_semantics = True
         extras = getattr(request, "extra_params", None)
         if not isinstance(extras, dict):
-            return False
+            return has_omnivoice_semantics
         if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
-            return True
+            has_omnivoice_semantics = True
         if any(key in extras for key in _OMNIVOICE_GENERATION_KEYS):
-            return True
+            has_omnivoice_semantics = True
         mode = extras.get("omnivoice_mode", extras.get("mode"))
         if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
-            return True
-        return False
+            has_omnivoice_semantics = True
+        return has_omnivoice_semantics
 
     def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
         if self._closing:
