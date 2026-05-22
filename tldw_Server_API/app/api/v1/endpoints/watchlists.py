@@ -5303,6 +5303,8 @@ async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | Non
         if scheduler is None:
             return None
         task = await scheduler.get_task(task_id)
+    except asyncio.CancelledError:
+        raise
     except SchedulerError:
         return None
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
@@ -5334,6 +5336,19 @@ def _pending_audio_scheduler_fallback(run_id: int, task_id: Any) -> dict[str, An
         "download_url": None,
         "fallback_reason": "workflow_run_not_started",
     }
+
+
+async def _audio_scheduler_status_or_pending(run_id: int, task_id: Any) -> dict[str, Any]:
+    """Return Scheduler status for an audio task, or a safe pending fallback."""
+    scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+    if scheduler_status:
+        return {
+            "run_id": run_id,
+            **scheduler_status,
+            "audio_uri": None,
+            "download_url": None,
+        }
+    return _pending_audio_scheduler_fallback(run_id, task_id)
 
 
 @router.get(
@@ -5385,15 +5400,7 @@ async def get_run_audio(
         user_dir = DatabasePaths.get_user_base_directory(int(resolved_user_id))
         wf_db_path = os.path.join(str(user_dir), "workflows", "workflows.db")
         if not os.path.exists(wf_db_path):
-            scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
-            if scheduler_status:
-                return {
-                    "run_id": run_id,
-                    **scheduler_status,
-                    "audio_uri": None,
-                    "download_url": None,
-                }
-            return _pending_audio_scheduler_fallback(run_id, task_id)
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
         wf_db = WorkflowsDatabase(db_path=wf_db_path)
         tenant_id = await _resolve_watchlist_workflow_tenant_id(
@@ -5454,7 +5461,7 @@ async def get_run_audio(
             page_idx += 1
 
         if not matching_run:
-            return _pending_audio_scheduler_fallback(run_id, task_id)
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
         # Check for artifacts
         matching_run_id = None
@@ -5463,7 +5470,7 @@ async def get_run_audio(
         else:
             matching_run_id = getattr(matching_run, "run_id", None) or getattr(matching_run, "id", None)
         if not matching_run_id:
-            return _pending_audio_scheduler_fallback(run_id, task_id)
+            return await _audio_scheduler_status_or_pending(run_id, task_id)
 
         artifacts: list[Any] = []
         used_legacy_artifacts_api = False
