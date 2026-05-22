@@ -142,6 +142,7 @@ type NormalChatModeParams = {
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
   systemPromptAppendix?: string
+  overlaySystemPrompt?: string
   webSearch?: boolean
   setIsSearchingInternet?: (value: boolean) => void
   clusterId?: string
@@ -485,17 +486,15 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       ctx.historyForModel ?? ctx.history,
       ctx.selectedModel
     )
+    const baseSystemPrompts: string[] = []
+    const overlayPrompt = ctx.overlaySystemPrompt?.trim() || ""
     const resolvePromptWithAppendix = (content?: string | null) =>
       appendSystemPromptSuffix(content || "", ctx.systemPromptAppendix)
 
     if (!selectedPrompt) {
       const resolvedDefaultPrompt = resolvePromptWithAppendix(prompt)
       if (resolvedDefaultPrompt) {
-        applicationChatHistory.unshift(
-          await systemPromptFormatter({
-            content: resolvedDefaultPrompt
-          })
-        )
+        baseSystemPrompts.push(resolvedDefaultPrompt)
       }
     }
 
@@ -508,11 +507,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
         selectedPrompt.system_prompt ?? selectedPrompt.content
       const resolvedSelectedPrompt =
         resolvePromptWithAppendix(selectedPromptContent)
-      applicationChatHistory.unshift(
-        await systemPromptFormatter({
-          content: resolvedSelectedPrompt
-        })
-      )
+      if (resolvedSelectedPrompt) {
+        baseSystemPrompts.push(resolvedSelectedPrompt)
+      }
       promptContent = resolvedSelectedPrompt
     }
 
@@ -520,12 +517,25 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       const resolvedTemporaryPrompt = resolvePromptWithAppendix(
         ctx.currentChatModelSettings.systemPrompt
       )
-      applicationChatHistory.unshift(
-        await systemPromptFormatter({
-          content: resolvedTemporaryPrompt
-        })
-      )
+      if (resolvedTemporaryPrompt) {
+        baseSystemPrompts.push(resolvedTemporaryPrompt)
+      }
       promptContent = resolvedTemporaryPrompt
+    }
+
+    if (overlayPrompt) {
+      baseSystemPrompts.push(overlayPrompt)
+    }
+
+    if (baseSystemPrompts.length > 0) {
+      const promptMessages = await Promise.all(
+        baseSystemPrompts.map((content) =>
+          systemPromptFormatter({
+            content
+          })
+        )
+      )
+      applicationChatHistory = [...promptMessages, ...applicationChatHistory]
     }
 
     const templatesActive = !!ctx.selectedSystemPrompt

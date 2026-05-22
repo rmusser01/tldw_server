@@ -7,6 +7,9 @@ import { useTranslation } from "react-i18next"
 import type { PersonaInfo } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import { useStoreMessageOption } from "@/store/option"
 import {
   OPEN_ASSISTANT_SELECT_EVENT,
   type AssistantSelectOpenDetail,
@@ -18,12 +21,18 @@ import {
   type AssistantSelection
 } from "@/types/assistant-selection"
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import {
+  buildAssistantOverlaySnapshotFromSelection,
+  resolveAssistantOverlaySnapshot
+} from "@/utils/assistant-overlay"
 
 type Props = {
   className?: string
   iconClassName?: string
   showLabel?: boolean
   variant?: "inline" | "dropdown"
+  labelOverride?: string
+  selectionModePreference?: "tracked" | "overlay"
 }
 
 type CharacterSummary = Record<string, unknown> & {
@@ -103,13 +112,33 @@ export const AssistantSelect: React.FC<Props> = ({
   className = "text-text-muted",
   iconClassName = "size-5",
   showLabel = true,
-  variant = "inline"
+  variant = "inline",
+  labelOverride,
+  selectionModePreference = "tracked"
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [selectedAssistant, setSelectedAssistant] =
     useSelectedAssistant(null)
+  const historyId = useStoreMessageOption((state) => state.historyId)
+  const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  const serverChatAssistantKind = useStoreMessageOption(
+    (state) => state.serverChatAssistantKind
+  )
+  const serverChatAssistantId = useStoreMessageOption(
+    (state) => state.serverChatAssistantId
+  )
+  const serverChatCharacterId = useStoreMessageOption(
+    (state) => state.serverChatCharacterId
+  )
+  const { settings, updateSettings } = useChatSettingsRecord({
+    historyId,
+    serverChatId
+  })
   const [open, setOpen] = React.useState(false)
   const [searchText, setSearchText] = React.useState("")
+  const [selectionMode, setSelectionMode] = React.useState<"tracked" | "overlay">(
+    selectionModePreference
+  )
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
     selectedAssistant?.kind ?? "character"
   )
@@ -125,6 +154,25 @@ export const AssistantSelect: React.FC<Props> = ({
   const searchInputRef = React.useRef<InputRef | null>(null)
   const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const returnFocusSelectorRef = React.useRef<string | null>(null)
+  const effectiveAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: serverChatAssistantKind,
+          assistantId: serverChatAssistantId,
+          characterId: serverChatCharacterId
+        },
+        settings: settings ?? null,
+        draftSelection: selectedAssistant
+      }),
+    [
+      selectedAssistant,
+      serverChatAssistantId,
+      serverChatAssistantKind,
+      serverChatCharacterId,
+      settings
+    ]
+  )
 
   const restoreReturnFocus = React.useCallback(() => {
     const selector = returnFocusSelectorRef.current
@@ -161,6 +209,9 @@ export const AssistantSelect: React.FC<Props> = ({
         detail.returnFocusSelector.trim().length > 0
           ? detail.returnFocusSelector.trim()
           : null
+      setSelectionMode(
+        detail?.applyAs === "overlay" ? "overlay" : selectionModePreference
+      )
       setSearchText("")
       setOpen(true)
     }
@@ -169,7 +220,7 @@ export const AssistantSelect: React.FC<Props> = ({
     return () => {
       window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
     }
-  }, [])
+  }, [selectionModePreference])
 
   React.useEffect(() => {
     if (!open || typeof window === "undefined") return
@@ -386,22 +437,67 @@ export const AssistantSelect: React.FC<Props> = ({
   )
 
   const handleSelect = React.useCallback(
-    (entry: AssistantSelection) => {
+    async (entry: AssistantSelection) => {
+      const isTrackedMode =
+        effectiveAssistantState.mode === "tracked_character" ||
+        effectiveAssistantState.mode === "tracked_persona"
+      if (selectionMode === "overlay" && isTrackedMode) {
+        setOpen(false)
+        setSearchText("")
+        setSelectionMode(selectionModePreference)
+        restoreReturnFocus()
+        return
+      }
+
       setOpen(false)
       setSearchText("")
+      setSelectionMode(selectionModePreference)
       restoreReturnFocus()
-      void setSelectedAssistant(entry)
+      await setSelectedAssistant(entry)
+      if (selectionMode === "overlay") {
+        let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(entry)
+        try {
+          overlaySnapshot = await resolveAssistantOverlaySnapshot(entry)
+        } catch (error) {
+          console.warn(
+            "[AssistantSelect] Failed to resolve overlay snapshot; using summary fallback",
+            error
+          )
+        }
+
+        try {
+          await updateSettings({
+            assistantOverlay: overlaySnapshot
+          })
+        } catch (error) {
+          console.warn(
+            "[AssistantSelect] Failed to persist assistant overlay; keeping local selection",
+            error
+          )
+        }
+      }
     },
-    [restoreReturnFocus, setSelectedAssistant]
+    [
+      effectiveAssistantState.mode,
+      restoreReturnFocus,
+      selectionMode,
+      selectionModePreference,
+      setSelectedAssistant,
+      updateSettings
+    ]
   )
 
   const handleOpenChange = React.useCallback((nextOpen: boolean) => {
     setOpen(nextOpen)
+    if (nextOpen) {
+      setSelectionMode(selectionModePreference)
+    }
     if (!nextOpen) {
       setSearchText("")
+      setSelectionMode(selectionModePreference)
       restoreReturnFocus()
     }
-  }, [restoreReturnFocus])
+  }, [restoreReturnFocus, selectionModePreference])
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
@@ -417,6 +513,7 @@ export const AssistantSelect: React.FC<Props> = ({
   }, [restoreReturnFocus])
 
   const buttonLabel =
+    labelOverride ||
     selectedAssistant?.name ||
     t("option:assistant.selectAssistant", "Select character or persona")
 
@@ -540,7 +637,7 @@ export const AssistantSelect: React.FC<Props> = ({
                   className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
                     isActive
                       ? "border-primary bg-primary/10 text-text"
-                      : "border-border bg-surface text-text hover:bg-surface2"
+                      : "border-border bg-background text-text hover:bg-surface2"
                   }`}
                   onClick={() => {
                     void handleSelect(entry)
@@ -599,7 +696,7 @@ export const AssistantSelect: React.FC<Props> = ({
   const content = (
     <div
       data-testid="assistant-select-panel"
-      className="w-[320px] rounded-lg border border-border bg-elevated shadow-lg"
+      className="w-[320px] rounded-lg border border-border bg-background shadow-lg"
     >
       <div className="border-b border-border p-2">
         <Input
@@ -673,20 +770,21 @@ export const AssistantSelect: React.FC<Props> = ({
       placement="topLeft"
       trigger={["click"]}
     >
-      <button
-        ref={triggerButtonRef}
-        type="button"
-        data-testid="character-select"
-        className={`inline-flex items-center gap-2 ${className}`.trim()}
-        aria-label={buttonLabel}
-        aria-expanded={open}
-        title={buttonLabel}
-      >
-        <UserCircle2 className={iconClassName} />
-        {showLabel ? (
-          <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
-        ) : null}
-      </button>
+      <Tooltip title={buttonLabel}>
+        <button
+          ref={triggerButtonRef}
+          type="button"
+          data-testid="character-select"
+          className={`inline-flex items-center gap-2 ${className}`.trim()}
+          aria-label={buttonLabel}
+          aria-expanded={open}
+        >
+          <UserCircle2 className={iconClassName} />
+          {showLabel ? (
+            <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
+          ) : null}
+        </button>
+      </Tooltip>
     </Dropdown>
   )
 }

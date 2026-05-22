@@ -47,6 +47,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
 )
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     AuthorNoteInfoResponse,
+    AssistantOverlaySettings,
     CharacterChatCompletionPrepRequest,
     CharacterChatCompletionPrepResponse,
     CharacterChatCompletionV2Request,
@@ -213,6 +214,7 @@ _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS = (
 THROTTLE_WINDOW_SIZE = 100
 MAX_CHAT_SETTINGS_BYTES = 200_000
 MAX_AUTHOR_NOTE_CHARS = 20_000
+MAX_ASSISTANT_OVERLAY_TEXT_CHARS = MAX_AUTHOR_NOTE_CHARS
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
 DEFAULT_AUTO_SUMMARY_WINDOW_MESSAGES = 12
 MAX_AUTO_SUMMARY_LINES = 24
@@ -1262,6 +1264,88 @@ def _validate_chat_settings_payload(
         owner_user_id=owner_user_id,
         strip_invalid_reference=strip_invalid_deep_research,
     )
+
+    assistant_overlay = settings.get("assistantOverlay")
+    if assistant_overlay is not None:
+        try:
+            validated_overlay = AssistantOverlaySettings.model_validate(
+                assistant_overlay
+            )
+        except ValidationError as exc:
+            errors = exc.errors()
+            if any(error.get("type") == "model_type" for error in errors):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid assistantOverlay. Expected object or null",
+                ) from exc
+
+            unknown_keys = sorted(
+                str(error["loc"][0])
+                for error in errors
+                if error.get("type") == "extra_forbidden" and error.get("loc")
+            )
+            if unknown_keys:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        "Invalid assistantOverlay. Unknown keys: "
+                        + ", ".join(unknown_keys)
+                    ),
+                ) from exc
+
+            first_error = errors[0] if errors else {}
+            error_loc = first_error.get("loc") or ()
+            field_name = str(error_loc[0]) if error_loc else ""
+            error_type = str(first_error.get("type") or "")
+
+            if field_name == "kind":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid assistantOverlay.kind. Allowed values: character, persona",
+                ) from exc
+
+            if field_name in {"id", "name"}:
+                if error_type == "string_too_long":
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=(
+                            f"assistantOverlay.{field_name} exceeds "
+                            f"{MAX_ASSISTANT_OVERLAY_TEXT_CHARS} characters"
+                        ),
+                    ) from exc
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid assistantOverlay.{field_name}. Expected non-empty string",
+                ) from exc
+
+            if field_name in {"avatar_url", "system_prompt_snapshot"}:
+                if error_type == "string_too_long":
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=(
+                            f"assistantOverlay.{field_name} exceeds "
+                            f"{MAX_ASSISTANT_OVERLAY_TEXT_CHARS} characters"
+                        ),
+                    ) from exc
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid assistantOverlay.{field_name}. Expected string or null",
+                ) from exc
+
+            if field_name == "updatedAt":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid assistantOverlay.updatedAt. Expected ISO timestamp string",
+                ) from exc
+
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid assistantOverlay",
+            ) from exc
+
+        settings["assistantOverlay"] = validated_overlay.model_dump(
+            exclude_unset=True
+        )
 
     memory_by_id = settings.get("characterMemoryById")
     if memory_by_id is not None:

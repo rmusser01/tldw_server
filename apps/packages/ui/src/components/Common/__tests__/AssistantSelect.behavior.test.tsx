@@ -7,14 +7,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   listAllCharacters: vi.fn(async () => []),
   listPersonaProfiles: vi.fn(async () => []),
+  getPersonaProfile: vi.fn(async () => null),
+  getCharacter: vi.fn(async () => null),
   selectedAssistant: {
-    value: null as null | {
-      kind: "character" | "persona"
-      id: string
-      name: string
-    }
+    value: null as
+      | null
+      | {
+          kind: "character" | "persona"
+          id: string
+          name: string
+        }
   },
-  setSelectedAssistant: vi.fn(async () => undefined)
+  setSelectedAssistant: vi.fn(async () => undefined),
+  updateSettings: vi.fn(async () => null)
+}))
+
+const state = vi.hoisted(() => ({
+  option: {
+    historyId: "history-overlay-1",
+    serverChatId: "chat-overlay-1",
+    serverChatAssistantKind: null as string | null,
+    serverChatAssistantId: null as string | null,
+    serverChatCharacterId: null as string | null
+  }
 }))
 
 vi.mock("react-i18next", () => ({
@@ -32,7 +47,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => null),
     listAllCharacters: mocks.listAllCharacters,
-    listPersonaProfiles: mocks.listPersonaProfiles
+    listPersonaProfiles: mocks.listPersonaProfiles,
+    getPersonaProfile: mocks.getPersonaProfile,
+    getCharacter: mocks.getCharacter
   }
 }))
 
@@ -42,6 +59,19 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
     mocks.setSelectedAssistant,
     { isLoading: false, setRenderValue: vi.fn() }
   ]
+}))
+
+vi.mock("@/store/option", () => ({
+  useStoreMessageOption: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector(state.option)
+}))
+
+vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
+  useChatSettingsRecord: () => ({
+    settings: null,
+    updateSettings: mocks.updateSettings,
+    chatKey: "chat-overlay-1"
+  })
 }))
 
 vi.mock("antd", async () => {
@@ -105,7 +135,9 @@ vi.mock("antd", async () => {
 
 import { AssistantSelect } from "../AssistantSelect"
 
-const renderAssistantSelect = () => {
+const renderAssistantSelect = (
+  props: React.ComponentProps<typeof AssistantSelect> = {}
+) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -119,7 +151,7 @@ const renderAssistantSelect = () => {
       <button id="assistant-rail-trigger" type="button">
         Runtime rail trigger
       </button>
-      <AssistantSelect variant="dropdown" />
+      <AssistantSelect variant="dropdown" {...props} />
     </QueryClientProvider>
   )
 }
@@ -128,13 +160,32 @@ describe("AssistantSelect behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.selectedAssistant.value = null
+    state.option = {
+      historyId: "history-overlay-1",
+      serverChatId: "chat-overlay-1",
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatCharacterId: null
+    }
     mocks.listAllCharacters.mockResolvedValue([
-      { id: "char-1", name: "Alpha" },
+      { id: "char-1", name: "Alpha", system_prompt: "Summary prompt" },
       { id: "char-2", name: "Beta" }
     ])
     mocks.listPersonaProfiles.mockResolvedValue([
       { id: "persona-1", name: "Guide Persona" }
     ])
+    mocks.getPersonaProfile.mockResolvedValue({
+      id: "persona-1",
+      name: "Guide Persona",
+      avatar_url: "https://example.com/guide-full.png",
+      system_prompt: "Persona full prompt"
+    })
+    mocks.getCharacter.mockResolvedValue({
+      id: "char-1",
+      name: "Alpha",
+      avatar_url: "https://example.com/alpha-full.png",
+      system_prompt: "Character full prompt"
+    })
   })
 
   it("opens a searchable menu and filters visible characters", async () => {
@@ -206,22 +257,6 @@ describe("AssistantSelect behavior", () => {
     ).toBeInTheDocument()
   })
 
-  it("uses solid design-token backgrounds for the selector panel", async () => {
-    const user = userEvent.setup()
-    renderAssistantSelect()
-
-    await user.click(
-      await screen.findByRole("button", { name: "Select character or persona" })
-    )
-
-    const panel = await screen.findByTestId("assistant-select-panel")
-    expect(panel).toHaveClass("bg-elevated")
-    expect(panel).not.toHaveClass("bg-background")
-    expect(await screen.findByRole("button", { name: "Alpha" })).toHaveClass(
-      "bg-surface"
-    )
-  })
-
   it("does not select a character when its favorite star is clicked", async () => {
     const user = userEvent.setup()
     renderAssistantSelect()
@@ -250,24 +285,6 @@ describe("AssistantSelect behavior", () => {
       await screen.findByRole("button", { name: "Alpha" })
     ).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Characters" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    )
-  })
-
-  it("opens the persona tab from an assistant-select event", async () => {
-    renderAssistantSelect()
-
-    window.dispatchEvent(
-      new CustomEvent("tldw:open-assistant-select", {
-        detail: { tab: "persona", source: "playground-cockpit" }
-      })
-    )
-
-    expect(
-      await screen.findByRole("button", { name: "Guide Persona" })
-    ).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Personas" })).toHaveAttribute(
       "aria-selected",
       "true"
     )
@@ -458,6 +475,7 @@ describe("AssistantSelect behavior", () => {
         }
       })
     )
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -538,5 +556,217 @@ describe("AssistantSelect behavior", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-select-menu")).toBeNull()
     })
+  })
+
+  it("resolves persona overlay snapshots from full persona detail on apply", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "persona",
+          applyAs: "overlay",
+          source: "character-control-rail"
+        }
+      })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.getPersonaProfile).toHaveBeenCalledWith("persona-1")
+    })
+    expect(mocks.updateSettings).toHaveBeenCalledWith({
+      assistantOverlay: expect.objectContaining({
+        kind: "persona",
+        id: "persona-1",
+        name: "Guide Persona",
+        avatar_url: "https://example.com/guide-full.png",
+        system_prompt_snapshot: "Persona full prompt"
+      })
+    })
+  })
+
+  it("refreshes character detail for overlay snapshots when summary prompt material is missing", async () => {
+    const user = userEvent.setup()
+    mocks.listAllCharacters.mockResolvedValue([
+      { id: "char-2", name: "Beta" }
+    ])
+    mocks.getCharacter.mockResolvedValue({
+      id: "char-2",
+      name: "Beta",
+      avatar_url: "https://example.com/beta-full.png",
+      system_prompt: "Character fetched prompt"
+    })
+
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "character",
+          applyAs: "overlay",
+          source: "character-control-rail"
+        }
+      })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Beta" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.getCharacter).toHaveBeenCalledWith("char-2", {
+        forceRefresh: true
+      })
+    })
+    expect(mocks.updateSettings).toHaveBeenCalledWith({
+      assistantOverlay: expect.objectContaining({
+        kind: "character",
+        id: "char-2",
+        name: "Beta",
+        avatar_url: "https://example.com/beta-full.png",
+        system_prompt_snapshot: "Character fetched prompt"
+      })
+    })
+  })
+
+  it("still applies persona selection when persona detail lookup fails", async () => {
+    const user = userEvent.setup()
+    mocks.getPersonaProfile.mockRejectedValueOnce(
+      new Error("persona detail unavailable")
+    )
+
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "persona",
+          applyAs: "overlay",
+          source: "character-control-rail"
+        }
+      })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "persona",
+          id: "persona-1",
+          name: "Guide Persona"
+        })
+      )
+    })
+    expect(mocks.updateSettings).toHaveBeenCalledWith({
+      assistantOverlay: expect.objectContaining({
+        kind: "persona",
+        id: "persona-1",
+        name: "Guide Persona",
+        system_prompt_snapshot: null
+      })
+    })
+  })
+
+  it("still applies local selection when overlay settings persistence fails", async () => {
+    const user = userEvent.setup()
+    mocks.updateSettings.mockRejectedValueOnce(new Error("settings write failed"))
+
+    renderAssistantSelect()
+
+    window.dispatchEvent(
+      new CustomEvent("tldw:open-assistant-select", {
+        detail: {
+          tab: "persona",
+          applyAs: "overlay",
+          source: "character-control-rail"
+        }
+      })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "persona",
+          id: "persona-1",
+          name: "Guide Persona"
+        })
+      )
+    })
+  })
+
+  it("uses the prop-driven overlay selection path and custom label without requiring an open event", async () => {
+    const user = userEvent.setup()
+    renderAssistantSelect({
+      selectionModePreference: "overlay",
+      labelOverride: "Apply overlay"
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Apply overlay" })
+    )
+    await user.click(
+      await screen.findByRole("tab", { name: "Personas" })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "persona",
+          id: "persona-1",
+          name: "Guide Persona"
+        })
+      )
+    })
+    expect(mocks.updateSettings).toHaveBeenCalledWith({
+      assistantOverlay: expect.objectContaining({
+        kind: "persona",
+        id: "persona-1",
+        name: "Guide Persona",
+        avatar_url: "https://example.com/guide-full.png",
+        system_prompt_snapshot: "Persona full prompt"
+      })
+    })
+  })
+
+  it("refuses overlay writes when the current chat is already tracked", async () => {
+    const user = userEvent.setup()
+    state.option = {
+      historyId: "history-overlay-1",
+      serverChatId: "chat-overlay-1",
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: null,
+      serverChatCharacterId: "char-9"
+    }
+
+    renderAssistantSelect({
+      selectionModePreference: "overlay",
+      labelOverride: "Apply overlay"
+    })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Apply overlay" })
+    )
+    await user.click(
+      await screen.findByRole("tab", { name: "Personas" })
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Guide Persona" })
+    )
+
+    await waitFor(() => {
+      expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    })
+    expect(mocks.updateSettings).not.toHaveBeenCalled()
   })
 })

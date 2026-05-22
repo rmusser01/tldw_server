@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 
 import { Playground } from "../Playground"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
@@ -55,6 +55,10 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
   PlaygroundChat: () => <div data-testid="playground-chat" />
+}))
+
+vi.mock("@/components/Option/Playground/CharacterControlRail", () => ({
+  CharacterControlRail: () => <div data-testid="character-control-rail" />
 }))
 
 vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
@@ -198,13 +202,15 @@ describe("Playground coordinator integration", () => {
         "server-history": false,
         "mcp-tools": false,
         "audio-health": false,
-        "model-catalog": false
+        "model-catalog": false,
+        "character-control": false
       },
       engagedPanels: {
         "server-history": false,
         "mcp-tools": false,
         "audio-health": false,
-        "model-catalog": false
+        "model-catalog": false,
+        "character-control": false
       }
     })
   })
@@ -236,6 +242,19 @@ describe("Playground coordinator integration", () => {
     await waitFor(() => {
       expect(restoreSession).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("renders the character control rail when the coordinator marks it visible", () => {
+    useChatSurfaceCoordinatorStore.setState((state) => ({
+      visiblePanels: {
+        ...state.visiblePanels,
+        "character-control": true
+      }
+    }))
+
+    render(<Playground />)
+
+    expect(screen.getByTestId("character-control-rail")).toBeInTheDocument()
   })
 
   it("applies explicit character chat route ids before persisted session restore", async () => {

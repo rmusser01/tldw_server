@@ -33,6 +33,15 @@ export type DeepResearchAttachment = ChatResearchContext & {
   updatedAt: string
 }
 
+export type ChatAssistantOverlay = {
+  kind: "character" | "persona"
+  id: string
+  name: string
+  avatar_url?: string | null
+  system_prompt_snapshot?: string | null
+  updatedAt: string
+}
+
 export type AuthorNotePosition =
   | "before_system"
   | `depth:${number}`
@@ -70,6 +79,7 @@ export type ChatSettingsRecord = {
   chat_dictionary_ids?: number[]
   summary?: ChatSummary | null
   imageEventSyncMode?: "off" | "on"
+  assistantOverlay?: ChatAssistantOverlay | null
   deepResearchAttachment?: DeepResearchAttachment | null
   deepResearchPinnedAttachment?: DeepResearchAttachment | null
   deepResearchAttachmentHistory?: DeepResearchAttachment[]

@@ -17,6 +17,22 @@ if (!chatFormPath) {
 
 const chatFormSource = readFileSync(chatFormPath, "utf8")
 
+const characterControlsSheetPathCandidates = [
+  "src/components/Sidepanel/Chat/CharacterControlsSheet.tsx",
+  "../packages/ui/src/components/Sidepanel/Chat/CharacterControlsSheet.tsx",
+  "apps/packages/ui/src/components/Sidepanel/Chat/CharacterControlsSheet.tsx"
+]
+
+const characterControlsSheetPath = characterControlsSheetPathCandidates.find((candidate) =>
+  existsSync(candidate)
+)
+
+if (!characterControlsSheetPath) {
+  throw new Error("Unable to locate Sidepanel character controls sheet source for compact toolbar contract test")
+}
+
+const characterControlsSheetSource = readFileSync(characterControlsSheetPath, "utf8")
+
 const controlRowPathCandidates = [
   "src/components/Sidepanel/Chat/ControlRow.tsx",
   "../packages/ui/src/components/Sidepanel/Chat/ControlRow.tsx",
@@ -36,6 +52,17 @@ const controlRowSource = readFileSync(controlRowPath, "utf8")
 describe("sidepanel chat compact toolbar contract", () => {
   it("keeps compact icon controls at a minimum 44px touch target", () => {
     expect(chatFormSource).toMatch(/h-11 w-11 min-h-\[44px\] min-w-\[44px\]/)
+  })
+
+  it("reuses the effective assistant overlay contract for compact character controls", () => {
+    expect(chatFormSource).toContain("resolveEffectiveAssistantState")
+    expect(chatFormSource).toContain("chat-character-controls-trigger")
+    expect(chatFormSource).toContain("CharacterControlsSheet")
+    expect(characterControlsSheetSource).toContain("chat-character-controls-sheet")
+    expect(characterControlsSheetSource).toContain("playground:characterRail.applyOverlay")
+    expect(characterControlsSheetSource).toContain("playground:characterRail.clearOverlay")
+    expect(characterControlsSheetSource).toContain("playground:characterRail.startTrackedCharacter")
+    expect(characterControlsSheetSource).toContain("playground:characterRail.startTrackedPersona")
   })
 
   it("includes visible compact labels for key icon actions", () => {

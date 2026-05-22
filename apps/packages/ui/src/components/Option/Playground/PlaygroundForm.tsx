@@ -1388,6 +1388,22 @@ export const PlaygroundForm = ({
     };
   }, [markOptionalPanelEngaged, setOptionalPanelVisible, voiceChatEnabled]);
 
+  React.useEffect(() => {
+    const showCharacterControl = !isMobileViewport;
+    setOptionalPanelVisible("character-control", showCharacterControl);
+    if (showCharacterControl) {
+      markOptionalPanelEngaged("character-control");
+    }
+
+    return () => {
+      setOptionalPanelVisible("character-control", false);
+    };
+  }, [
+    isMobileViewport,
+    markOptionalPanelEngaged,
+    setOptionalPanelVisible,
+  ]);
+
   // Auto-select model on initial load when no model is selected
   // Priority: 1) First favorite model, 2) First available model
   React.useEffect(() => {
