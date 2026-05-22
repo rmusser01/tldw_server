@@ -31,6 +31,12 @@ type MediaSearchResult = {
   url?: string
 }
 
+type EmbeddingDatasetSample = DatasetSample & {
+  query_id: string
+  input: string
+  expected_ids: string[]
+}
+
 const DEFAULT_RUN_CONFIG = {
   comparison_mode: "embedding_only",
   candidates: [],
@@ -141,7 +147,7 @@ const normalizeRunConfig = (
   }
 }
 
-const normalizeDataset = (dataset: DatasetSample[]): DatasetSample[] => {
+const normalizeDataset = (dataset: DatasetSample[]): EmbeddingDatasetSample[] => {
   const baseDataset = Array.isArray(dataset) ? dataset : []
   return baseDataset.map((sample, index) => {
     const record = sample && typeof sample === "object" ? (sample as Record<string, any>) : {}
@@ -151,7 +157,7 @@ const normalizeDataset = (dataset: DatasetSample[]): DatasetSample[] => {
         `q-${index + 1}`,
       input: String(record.input ?? record.query ?? ""),
       expected_ids: normalizeMediaIdArray(record.expected_ids)
-    } as DatasetSample
+    }
   })
 }
 
@@ -167,18 +173,20 @@ const normalizeMediaSearchResults = (payload: unknown): MediaSearchResult[] =>
     .map((item) => {
       const id = String(item?.id ?? item?.media_id ?? "").trim()
       if (!isIntegerId(id)) return null
-      return {
+      const url =
+        typeof item?.url === "string"
+          ? item.url
+          : typeof item?.source_url === "string"
+            ? item.source_url
+            : undefined
+      const result: MediaSearchResult = {
         id,
         title:
           String(item?.title ?? item?.name ?? item?.filename ?? `Media ${id}`).trim() ||
-          `Media ${id}`,
-        url:
-          typeof item?.url === "string"
-            ? item.url
-            : typeof item?.source_url === "string"
-              ? item.source_url
-              : undefined
+          `Media ${id}`
       }
+      if (url) result.url = url
+      return result
     })
     .filter((item): item is MediaSearchResult => item !== null)
 
@@ -196,11 +204,11 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
     [runConfig, manifest]
   )
   const normalizedDataset = React.useMemo(() => normalizeDataset(dataset), [dataset])
-  const editableDataset = React.useMemo<DatasetSample[]>(
+  const editableDataset = React.useMemo<EmbeddingDatasetSample[]>(
     () =>
       normalizedDataset.length > 0
         ? normalizedDataset
-        : ([{ query_id: "q-1", input: "", expected_ids: [] }] as DatasetSample[]),
+        : [{ query_id: "q-1", input: "", expected_ids: [] }],
     [normalizedDataset]
   )
   const candidateQuery = useEmbeddingRecipeCandidates(true)
@@ -230,7 +238,9 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
     onRunConfigChange(normalizeRunConfig(updater(normalizedRunConfig), manifest))
   }
 
-  const applyDataset = (updater: (current: DatasetSample[]) => DatasetSample[]) => {
+  const applyDataset = (
+    updater: (current: EmbeddingDatasetSample[]) => EmbeddingDatasetSample[]
+  ) => {
     onDatasetChange(
       updater(datasetSource === "inline" ? editableDataset : normalizedDataset)
     )
@@ -254,12 +264,12 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
 
   const updateDatasetSample = (
     sampleIndex: number,
-    updater: (sample: Record<string, any>) => DatasetSample
+    updater: (sample: EmbeddingDatasetSample) => EmbeddingDatasetSample
   ) => {
     applyDataset((current) =>
       current.map((sample, index) =>
         index === sampleIndex
-          ? updater({ ...(sample as Record<string, any>) })
+          ? updater(sample)
           : sample
       )
     )
@@ -272,7 +282,7 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
         query_id: `q-${current.length + 1}`,
         input: "",
         expected_ids: []
-      } as DatasetSample
+      }
     ])
   }
 
@@ -351,7 +361,7 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
       return {
         ...sample,
         expected_ids: nextIds
-      } as DatasetSample
+      }
     })
   }
 
@@ -406,21 +416,20 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
       <Card size="small" title="Queries">
         <div className="space-y-3">
           {editableDataset.map((sample, index) => {
-            const record = sample as Record<string, any>
             return (
-              <div key={`${record.query_id}-${index}`} className="space-y-2 border-b border-border-subtle pb-3 last:border-b-0 last:pb-0">
+              <div key={`${sample.query_id}-${index}`} className="space-y-2 border-b border-border-subtle pb-3 last:border-b-0 last:pb-0">
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
                   <div>
                     <Text strong>Query text {index + 1}</Text>
                     <Input
                       aria-label={`Query text ${index + 1}`}
                       className="mt-2"
-                      value={String(record.input ?? "")}
+                      value={sample.input}
                       onChange={(event) =>
                         updateDatasetSample(index, (current) => ({
                           ...current,
                           input: event.target.value
-                        } as DatasetSample))
+                        }))
                       }
                     />
                   </div>
@@ -446,11 +455,10 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
       <Card size="small" title="Expected sources">
         <div className="space-y-4">
           {editableDataset.map((sample, index) => {
-            const record = sample as Record<string, any>
-            const expectedIds = normalizeMediaIdArray(record.expected_ids)
+            const expectedIds = normalizeMediaIdArray(sample.expected_ids)
             const rowResults = searchResults[index] || []
             return (
-              <div key={`sources-${record.query_id}-${index}`} className="space-y-3 border-b border-border-subtle pb-4 last:border-b-0 last:pb-0">
+              <div key={`sources-${sample.query_id}-${index}`} className="space-y-3 border-b border-border-subtle pb-4 last:border-b-0 last:pb-0">
                 <div>
                   <Text strong>Expected media IDs {index + 1}</Text>
                   <Input
@@ -461,7 +469,7 @@ export const EmbeddingsModelSelectionConfig: React.FC<Props> = ({
                       updateDatasetSample(index, (current) => ({
                         ...current,
                         expected_ids: splitMediaIds(event.target.value)
-                      } as DatasetSample))
+                      }))
                     }
                   />
                 </div>

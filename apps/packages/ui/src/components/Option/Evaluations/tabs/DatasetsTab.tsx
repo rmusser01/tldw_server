@@ -5,7 +5,6 @@
 
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -28,6 +27,7 @@ import {
 } from "../hooks/useDatasets"
 import { useEvaluationsStore } from "@/store/evaluations"
 import { CopyButton, DatasetUpload, JsonEditor } from "../components"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 import type { DatasetResponse, DatasetSample } from "@/services/evaluations"
 
 const { Text } = Typography
@@ -62,7 +62,12 @@ export const DatasetsTab: React.FC = () => {
   }))
 
   // Queries & mutations
-  const { data: datasetListResp, isLoading: datasetsLoading, isError: datasetsError } =
+  const {
+    data: datasetListResp,
+    isLoading: datasetsLoading,
+    isError: datasetsError,
+    error: datasetsErrorValue
+  } =
     useDatasetsList()
   const createDatasetMutation = useCreateDataset()
   const deleteDatasetMutation = useDeleteDataset()
@@ -185,12 +190,13 @@ export const DatasetsTab: React.FC = () => {
             <Spin />
           </div>
         ) : datasetsError || datasetListResp?.ok === false ? (
-          <Alert
-            type="warning"
-            showIcon
+          <EvaluationRecoveryCallout
             title={t("evaluations:datasetsErrorTitle", {
               defaultValue: "Unable to load datasets"
             })}
+            endpoint="/api/v1/evaluations/datasets"
+            error={datasetsErrorValue}
+            response={datasetListResp}
           />
         ) : datasets.length === 0 ? (
           <Empty

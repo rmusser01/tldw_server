@@ -5,7 +5,6 @@
 
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -19,6 +18,8 @@ import {
 } from "antd"
 import { useTranslation } from "react-i18next"
 import { useEvaluationsStore } from "@/store/evaluations"
+import { StatePanel } from "@/components/ui/state"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 import type { SyntheticEvalDraftSample } from "@/services/evaluations"
 import {
   usePromoteSyntheticEvalSamples,
@@ -43,6 +44,8 @@ const RECIPE_KIND_OPTIONS = [
   { value: "rag_retrieval_tuning", label: "RAG Retrieval Tuning" },
   { value: "rag_answer_quality", label: "RAG Answer Quality" }
 ]
+
+const EMPTY_SYNTHETIC_QUEUE_ITEMS: SyntheticEvalDraftSample[] = []
 
 const queryPreview = (sample: SyntheticEvalDraftSample): string =>
   String(
@@ -73,7 +76,9 @@ export const SyntheticReviewTab: React.FC = () => {
   const reviewMutation = useReviewSyntheticEvalSample()
   const promoteMutation = usePromoteSyntheticEvalSamples()
 
-  const rawQueueItems = Array.isArray(data?.data?.data) ? data.data.data : []
+  const rawQueueItems = Array.isArray(data?.data?.data)
+    ? data.data.data
+    : EMPTY_SYNTHETIC_QUEUE_ITEMS
   const queueItems = React.useMemo(
     () =>
       !storedBatchId && storedSampleIds.length > 0
@@ -84,9 +89,12 @@ export const SyntheticReviewTab: React.FC = () => {
   const totalQueueItems = typeof data?.data?.total === "number" ? data.data.total : queueItems.length
 
   React.useEffect(() => {
-    setSelectedIds((current) =>
-      current.filter((sampleId) => queueItems.some((sample) => sample.sample_id === sampleId))
-    )
+    setSelectedIds((current) => {
+      const nextSelectedIds = current.filter((sampleId) =>
+        queueItems.some((sample) => sample.sample_id === sampleId)
+      )
+      return nextSelectedIds.length === current.length ? current : nextSelectedIds
+    })
   }, [queueItems])
 
   const handleReviewAction = async (
@@ -205,14 +213,13 @@ export const SyntheticReviewTab: React.FC = () => {
         </div>
 
         {promoteMutation.data?.data?.dataset_id && (
-          <Alert
+          <StatePanel
+            state="ready"
             className="mt-4"
-            type="success"
-            showIcon
             title={t("evaluations:syntheticPromoteSuccessInlineTitle", {
               defaultValue: "Promoted dataset created"
             })}
-            description={`${promoteMutation.data.data.dataset_id} (${promoteMutation.data.data.sample_count})`}
+            message={`${promoteMutation.data.data.dataset_id} (${promoteMutation.data.data.sample_count})`}
           />
         )}
       </Card>
@@ -222,13 +229,12 @@ export const SyntheticReviewTab: React.FC = () => {
           <Spin />
         </div>
       ) : isError ? (
-        <Alert
-          type="error"
-          showIcon
+        <EvaluationRecoveryCallout
           title={t("evaluations:syntheticReviewLoadErrorTitle", {
             defaultValue: "Unable to load synthetic review queue"
           })}
-          description={(error as Error | null)?.message}
+          endpoint="/api/v1/evaluations/synthetic/queue"
+          error={error}
         />
       ) : queueItems.length === 0 ? (
         <Card>

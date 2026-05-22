@@ -1419,39 +1419,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/DatasetsTab.tsx:Alert",
-    "path": "src/components/Option/Evaluations/tabs/DatasetsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/DatasetsTab.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/EvaluationsTab.tsx:Alert#antd-alert-evaluationstab-type-error-line-286-lsy1sa",
-    "path": "src/components/Option/Evaluations/tabs/EvaluationsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/EvaluationsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/EvaluationsTab.tsx:Alert#antd-alert-evaluationstab-type-warning-line-390-1xxjkjc",
-    "path": "src/components/Option/Evaluations/tabs/EvaluationsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/EvaluationsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx:Alert#antd-alert-raganswerqualityconfig-type-error-line-469-ctgble",
     "path": "src/components/Option/Evaluations/tabs/recipe-configs/RagAnswerQualityConfig.tsx",
     "rule": "antd-product-state-import",
@@ -1525,94 +1492,6 @@
     "state": "allowed_legacy_exception",
     "owner": "design-system",
     "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/recipe-configs/RagRetrievalTuningConfig.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RunsTab.tsx:Alert#antd-alert-runstab-type-info-line-292-h54t5s",
-    "path": "src/components/Option/Evaluations/tabs/RunsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RunsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RunsTab.tsx:Alert#antd-alert-runstab-type-warning-line-448-19qcn1z",
-    "path": "src/components/Option/Evaluations/tabs/RunsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RunsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/RunsTab.tsx:Alert#antd-alert-runstab-type-warning-line-654-vf1vls",
-    "path": "src/components/Option/Evaluations/tabs/RunsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/RunsTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx:Alert#antd-alert-syntheticreviewtab-type-error-line-225-1jv4dt5",
-    "path": "src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx:Alert#antd-alert-syntheticreviewtab-type-success-line-208-1h3ienz",
-    "path": "src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/WebhooksTab.tsx:Alert#antd-alert-webhookstab-type-info-line-256-1kpxwdg",
-    "path": "src/components/Option/Evaluations/tabs/WebhooksTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/WebhooksTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/WebhooksTab.tsx:Alert#antd-alert-webhookstab-type-success-line-156-vqfri",
-    "path": "src/components/Option/Evaluations/tabs/WebhooksTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/WebhooksTab.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/Evaluations/tabs/WebhooksTab.tsx:Alert#antd-alert-webhookstab-type-warning-line-180-18m1kkw",
-    "path": "src/components/Option/Evaluations/tabs/WebhooksTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Evaluations/tabs/WebhooksTab.tsx before the stable duplicate-id guard.",
     "replacement": "tldw design-system state primitive",
     "migrationQueue": "shared-product-state"
   },

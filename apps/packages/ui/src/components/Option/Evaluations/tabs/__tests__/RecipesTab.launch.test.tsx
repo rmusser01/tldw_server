@@ -204,12 +204,6 @@ const renderRecipesTab = (queryClient = createTestQueryClient()) => ({
   )
 })
 
-const expectDesignSystemAlertForText = (text: string) => {
-  const alert = screen.getByText(text).closest('[data-ds-component="Alert"]')
-  expect(alert).toHaveAttribute("data-ds-component", "Alert")
-  return alert
-}
-
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -1610,8 +1604,11 @@ describe("RecipesTab recipe launch flow", () => {
 
     renderRecipesTab()
 
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
     expect(screen.getByText("Unable to load recipes")).toBeInTheDocument()
-    expectDesignSystemAlertForText("Unable to load recipes")
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/evaluations/recipes"
+    )
     expect(
       screen.getByText(
         "Add or update your API key in Settings -> tldw server, then try again."

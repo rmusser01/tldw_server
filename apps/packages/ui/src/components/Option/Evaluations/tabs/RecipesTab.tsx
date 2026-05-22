@@ -32,6 +32,7 @@ import {
   useValidateRecipeDataset
 } from "../hooks/useRecipes"
 import { JsonEditor } from "../components"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 import { EmbeddingsModelSelectionConfig } from "./recipe-configs/EmbeddingsModelSelectionConfig"
 import { RagAnswerQualityConfig } from "./recipe-configs/RagAnswerQualityConfig"
 import { RagRetrievalTuningConfig } from "./recipe-configs/RagRetrievalTuningConfig"
@@ -1479,14 +1480,13 @@ export const RecipesTab: React.FC = () => {
             <Spin />
           </div>
         ) : manifestsError ? (
-          <DesignSystemAlert
-            variant="warning"
+          <EvaluationRecoveryCallout
             title={t("evaluations:recipesLoadErrorTitle", {
               defaultValue: "Unable to load recipes"
             })}
-          >
-            {(manifestsErrorValue as Error | null)?.message}
-          </DesignSystemAlert>
+            endpoint="/api/v1/evaluations/recipes"
+            error={manifestsErrorValue}
+          />
         ) : manifests.length === 0 ? (
           <Empty
             description={t("evaluations:recipesEmpty", {
@@ -1958,14 +1958,17 @@ export const RecipesTab: React.FC = () => {
                 <Spin />
               </div>
             ) : reportError ? (
-              <DesignSystemAlert
-                variant="error"
+              <EvaluationRecoveryCallout
                 title={t("evaluations:recipeReportLoadErrorTitle", {
                   defaultValue: "Unable to load the recipe report"
                 })}
-              >
-                {(reportErrorValue as Error | null)?.message || null}
-              </DesignSystemAlert>
+                endpoint={
+                  currentRunId
+                    ? `/api/v1/evaluations/recipe-runs/${currentRunId}/report`
+                    : "/api/v1/evaluations/recipe-runs/{run_id}/report"
+                }
+                error={reportErrorValue}
+              />
             ) : report ? (
               <div className="space-y-4">
                 {report.confidence_summary && (
