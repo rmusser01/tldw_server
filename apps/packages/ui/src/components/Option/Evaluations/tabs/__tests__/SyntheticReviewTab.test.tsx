@@ -30,7 +30,7 @@ const queueState = {
 
 const reviewMutateAsync = vi.fn()
 const promoteMutateAsync = vi.fn()
-const useSyntheticEvalQueueSpy = vi.fn(() => queueState)
+const useSyntheticEvalQueueSpy = vi.fn((_params?: unknown) => queueState)
 const storeState = {
   syntheticReviewRecipeKind: "rag_retrieval_tuning",
   syntheticReviewBatchId: "batch-123",
@@ -159,6 +159,27 @@ describe("SyntheticReviewTab", () => {
     promoteMutateAsync.mockReset()
     useSyntheticEvalQueueSpy.mockClear()
     storeState.setSyntheticReviewRecipeKind.mockReset()
+    queueState.data = {
+      data: {
+        data: [
+          {
+            sample_id: "draft-1",
+            recipe_kind: "rag_retrieval_tuning",
+            provenance: "synthetic_from_corpus",
+            review_state: "draft",
+            sample_payload: {
+              query: "What changed in the rollout?",
+              relevant_media_ids: [1]
+            },
+            sample_metadata: {}
+          }
+        ],
+        total: 1
+      }
+    }
+    queueState.isLoading = false
+    queueState.isError = false
+    queueState.error = null
   })
 
   it("requests the queue filtered to the stored generation batch when present", () => {
@@ -209,5 +230,19 @@ describe("SyntheticReviewTab", () => {
       sample_ids: ["draft-1"],
       dataset_name: "reviewed synthetic retrieval"
     })
+  })
+
+  it("shows synthetic queue endpoint diagnostics when the queue is unavailable", () => {
+    queueState.data = undefined as any
+    queueState.isError = true
+    queueState.error = new Error("HTTP 503")
+
+    render(<SyntheticReviewTab />)
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Unable to load synthetic review queue")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/evaluations/synthetic/queue"
+    )
   })
 })

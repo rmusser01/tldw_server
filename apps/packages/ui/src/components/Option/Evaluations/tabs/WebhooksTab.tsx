@@ -5,7 +5,6 @@
 
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Divider,
@@ -29,7 +28,9 @@ import {
 } from "../hooks/useWebhooks"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useEvaluationsStore } from "@/store/evaluations"
+import { StatePanel } from "@/components/ui/state"
 import { CopyButton } from "../components"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 
 const { Text } = Typography
 
@@ -43,7 +44,12 @@ export const WebhooksTab: React.FC = () => {
   const webhookSecretText = useEvaluationsStore((s) => s.webhookSecretText)
 
   // Queries & mutations
-  const { data: webhooksResp, isLoading: webhooksLoading, isError: webhooksError } =
+  const {
+    data: webhooksResp,
+    isLoading: webhooksLoading,
+    isError: webhooksError,
+    error: webhooksErrorValue
+  } =
     useWebhooksList(isOnline)
   const registerMutation = useRegisterWebhook()
   const deleteMutation = useDeleteWebhook()
@@ -153,13 +159,13 @@ export const WebhooksTab: React.FC = () => {
           </Button>
 
           {webhookSecretText && (
-            <Alert
+            <StatePanel
+              state="ready"
               className="mt-3"
-              type="success"
               title={t("evaluations:webhookSecretTitle", {
                 defaultValue: "Webhook Secret"
               })}
-              description={
+              message={
                 <div className="flex items-center gap-2">
                   <code className="text-xs">{webhookSecretText}</code>
                   <CopyButton text={webhookSecretText} />
@@ -177,11 +183,13 @@ export const WebhooksTab: React.FC = () => {
             <Spin size="small" />
           </div>
         ) : webhooksError || webhooksResp?.ok === false ? (
-          <Alert
-            type="warning"
+          <EvaluationRecoveryCallout
             title={t("evaluations:webhookListErrorTitle", {
               defaultValue: "Unable to load webhooks"
             })}
+            endpoint="/api/v1/evaluations/webhooks"
+            error={webhooksErrorValue}
+            response={webhooksResp}
           />
         ) : webhooks.length === 0 ? (
           <Empty
@@ -253,35 +261,33 @@ export const WebhooksTab: React.FC = () => {
 
       {/* Webhook Info */}
       <Card size="small">
-        <Alert
-          type="info"
-          showIcon
-          title={t("evaluations:webhookInfoTitle", {
-            defaultValue: "About webhooks"
-          })}
-          description={
-            <ul className="mt-2 space-y-1 text-xs list-disc list-inside">
-              <li>
-                {t("evaluations:webhookInfoItem1", {
-                  defaultValue:
-                    "Webhooks receive POST requests when evaluation events occur."
-                })}
-              </li>
-              <li>
-                {t("evaluations:webhookInfoItem2", {
-                  defaultValue:
-                    "Use the secret to verify webhook signatures and prevent spoofing."
-                })}
-              </li>
-              <li>
-                {t("evaluations:webhookInfoItem3", {
-                  defaultValue:
-                    "Events include: started, completed, failed, cancelled, and progress updates."
-                })}
-              </li>
-            </ul>
-          }
-        />
+        <div className="space-y-2 text-sm text-text">
+          <Text strong>
+            {t("evaluations:webhookInfoTitle", {
+              defaultValue: "About webhooks"
+            })}
+          </Text>
+          <ul className="space-y-1 text-xs list-disc list-inside text-text-muted">
+            <li>
+              {t("evaluations:webhookInfoItem1", {
+                defaultValue:
+                  "Webhooks receive POST requests when evaluation events occur."
+              })}
+            </li>
+            <li>
+              {t("evaluations:webhookInfoItem2", {
+                defaultValue:
+                  "Use the secret to verify webhook signatures and prevent spoofing."
+              })}
+            </li>
+            <li>
+              {t("evaluations:webhookInfoItem3", {
+                defaultValue:
+                  "Events include: started, completed, failed, cancelled, and progress updates."
+              })}
+            </li>
+          </ul>
+        </div>
       </Card>
     </div>
   )
