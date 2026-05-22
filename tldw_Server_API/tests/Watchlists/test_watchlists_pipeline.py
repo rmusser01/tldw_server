@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatab
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 
 
@@ -623,15 +624,17 @@ async def test_pipeline_persists_post_run_audio_and_output_stats():
         ),
         patch(
             "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-            new=AsyncMock(return_value="task_stage2"),
+            new=AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task_stage2")),
         ),
     ):
         result = await run_watchlist_job(user_id, job.id)
 
     assert result.get("auto_output_id") == 9876
     assert result.get("audio_briefing_task_id") == "task_stage2"
+    assert result.get("audio_briefing_status") == "queued"
 
     persisted_run = db.get_run(int(result["run_id"]))
     persisted_stats = json.loads(persisted_run.stats_json or "{}")
     assert persisted_stats.get("auto_output_id") == 9876
     assert persisted_stats.get("audio_briefing_task_id") == "task_stage2"
+    assert persisted_stats.get("audio_briefing_status") == "queued"
