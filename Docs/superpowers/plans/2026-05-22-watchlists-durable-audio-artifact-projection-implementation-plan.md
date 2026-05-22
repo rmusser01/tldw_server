@@ -442,7 +442,7 @@ git commit -m "feat: tag watchlists audio artifacts"
 - Create: `tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py`
 
-- [ ] **Step 1: Write failing projection tests**
+- [x] **Step 1: Write failing projection tests**
 
 Cover:
 
@@ -470,7 +470,7 @@ assert projection["final_artifact"]["artifact_id"] == "art_final"
 assert "uri" not in projection["final_artifact"]
 ```
 
-- [ ] **Step 2: Run failing projection tests**
+- [x] **Step 2: Run failing projection tests**
 
 Run:
 
@@ -482,7 +482,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: fails because module does not exist.
 
-- [ ] **Step 3: Implement projection dataless helpers**
+- [x] **Step 3: Implement projection dataless helpers**
 
 Create pure helpers first:
 
@@ -504,7 +504,7 @@ This preserves new run-level metadata while supporting compatibility runs where 
 
 `artifact_download_url(...)` must not append unsupported `target_user_id` query parameters to `/api/v1/workflows/artifacts/{artifact_id}/download`. The existing Workflows endpoint authorizes same-tenant admins by run ownership. If tests show that is insufficient for a target-user Watchlists read, add a Watchlists-scoped proxy endpoint in a later task instead of emitting links that look valid but 404.
 
-- [ ] **Step 4: Implement metadata merge helpers**
+- [x] **Step 4: Implement metadata merge helpers**
 
 Add:
 
@@ -520,7 +520,7 @@ merged["audio_briefing_status"] = projection["status"]
 merged["audio_request_id"] = projection.get("audio_request_id")
 ```
 
-- [ ] **Step 5: Implement DB-facing helpers**
+- [x] **Step 5: Implement DB-facing helpers**
 
 Add functions that accept DB instances explicitly:
 
@@ -537,7 +537,7 @@ Rules:
 - Catch noncritical persistence failures and return `False`; callers should still return canonical responses.
 - Keep DB helpers synchronous. Async endpoints must call blocking read/write helpers via `run_in_threadpool(...)` rather than performing SQLite/Collections writes directly on the event loop.
 
-- [ ] **Step 6: Run projection tests**
+- [x] **Step 6: Run projection tests**
 
 Run:
 
@@ -549,7 +549,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py \

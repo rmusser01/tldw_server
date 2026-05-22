@@ -14,6 +14,7 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/Workflows_DB.py
 - tldw_Server_API/app/core/Scheduler/handlers/workflows.py
 - tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py
+- tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py
 - tldw_Server_API/app/core/Workflows/adapters/_common.py
 - tldw_Server_API/app/core/Workflows/adapters/audio/_config.py
 - tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py
@@ -25,6 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py
 - tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
 - tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
+- tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py
 - tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
 - Docs/superpowers/plans/2026-05-22-watchlists-durable-audio-artifact-projection-implementation-plan.md
 - backlog/tasks/task-483 - Implement-Watchlists-durable-audio-artifact-projection.md
@@ -100,6 +102,19 @@ Task 3 verification:
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py -q` passed, `29 passed`.
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/test_adapter_path_security.py::test_watchlist_artifact_metadata_filters_to_watchlists_source tldw_Server_API/tests/Workflows/test_adapter_path_security.py::test_watchlist_artifact_metadata_ignores_non_watchlists_metadata -q` passed, `2 passed`.
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Workflows/adapters/_common.py tldw_Server_API/app/core/Workflows/adapters/audio/_config.py tldw_Server_API/app/core/Workflows/adapters/audio/multi_voice_tts.py tldw_Server_API/app/core/Workflows/adapters/audio/tts.py tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py -f json -o /tmp/bandit_watchlists_audio_projection_task3.json` passed with `results 0`.
+- `git diff --check` passed.
+
+Task 4 completed:
+- Added pure Watchlists audio projection helpers for status normalization, artifact download URLs, workflow metadata extraction, artifact summarization, and full graph construction.
+- Added request-aware artifact selection so current `audio_request_id` artifacts win over older same-run artifacts.
+- Kept mirrored artifact summaries free of raw `file://` URIs.
+- Added metadata merge and stale-state helpers that preserve unrelated delivery/template/Chatbook fields.
+- Added synchronous DB-facing helpers for mirrored run/output metadata, canonical output lookup, mirrored fallback reads, and matching Workflow run lookup.
+
+Task 4 verification:
+- Red run: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py -q` failed because the helper module did not exist.
+- Green run: same command passed, `8 passed`.
+- `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py -f json -o /tmp/bandit_watchlists_audio_projection_task4.json` passed with `results 0`.
 - `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
