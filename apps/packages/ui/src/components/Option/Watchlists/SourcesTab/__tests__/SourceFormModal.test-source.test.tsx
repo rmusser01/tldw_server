@@ -178,6 +178,10 @@ describe("SourceFormModal test-source preflight", () => {
       )
       expect(screen.getByText("Test Summary")).toBeInTheDocument()
     })
+    const summaryAlert = screen
+      .getByText("Test Summary")
+      .closest("[data-ds-component='Alert']")
+    expect(summaryAlert).toHaveAttribute("data-ds-component", "Alert")
   })
 
   it("tests unsaved draft feeds without requiring save", async () => {
@@ -313,6 +317,10 @@ describe("SourceFormModal test-source preflight", () => {
       expect(screen.getByText("title selector matched 0 nodes")).toBeInTheDocument()
       expect(screen.getByText("Dedupe preview key: guid_xpath")).toBeInTheDocument()
     })
+    const diagnosticsAlert = screen
+      .getByText("Validation diagnostics")
+      .closest("[data-ds-component='Alert']")
+    expect(diagnosticsAlert).toHaveAttribute("data-ds-component", "Alert")
   })
 
   it("shows inline remediation guidance when draft preflight fails", async () => {
@@ -339,6 +347,10 @@ describe("SourceFormModal test-source preflight", () => {
         screen.getByText(/Use a canonical YouTube feed URL \(channel_id or playlist_id\) and retry\./)
       ).toBeInTheDocument()
     })
+    const errorAlert = screen
+      .getByText("Could not test feed preflight.")
+      .closest("[data-ds-component='Alert']")
+    expect(errorAlert).toHaveAttribute("data-ds-component", "Alert")
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
