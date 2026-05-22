@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 import pytest
+
+from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
 
 
 @pytest.fixture
@@ -52,6 +55,62 @@ def test_sidecar_runtime_normalizes_localhost_to_loopback():
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import validate_loopback_host
 
     assert validate_loopback_host("localhost") == "127.0.0.1"  # nosec B101
+
+
+@pytest.mark.unit
+def test_synthesize_request_requires_generation_object_shape():
+    req = OmniVoiceSynthesizeRequest(text="hi", mode="auto", generation={"num_step": 8})
+
+    assert req.generation.compact() == {"num_step": 8}  # nosec B101
+
+
+@pytest.mark.unit
+def test_synthesize_request_rejects_unknown_top_level_keys():
+    with pytest.raises(ValidationError):
+        OmniVoiceSynthesizeRequest(text="hi", mode="auto", temperature=0.7)
+
+
+@pytest.mark.unit
+def test_synthesize_request_rejects_unknown_generation_keys():
+    with pytest.raises(ValidationError, match="generation"):
+        OmniVoiceSynthesizeRequest(text="hi", mode="auto", generation={"unknown": 1})
+
+
+@pytest.mark.unit
+def test_synthesize_request_rejects_mode_field_conflicts():
+    with pytest.raises(ValidationError, match="mode=auto"):
+        OmniVoiceSynthesizeRequest(text="hi", mode="auto", instruct="warm", generation={})
+
+
+@pytest.mark.unit
+def test_synthesize_request_rejects_mixed_design_and_clone_inputs():
+    with pytest.raises(ValidationError, match="instruct"):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="clone",
+            instruct="warm",
+            reference_audio_path="/managed/ref.wav",
+            reference_text="reference transcript",
+            generation={},
+        )
+
+
+@pytest.mark.unit
+def test_synthesize_request_accepts_design_mode_with_instruct():
+    req = OmniVoiceSynthesizeRequest(text="hi", mode="design", instruct="warm narrator", generation={})
+
+    assert req.instruct == "warm narrator"  # nosec B101
+
+
+@pytest.mark.unit
+def test_synthesize_request_clone_requires_reference_text_and_path():
+    with pytest.raises(ValidationError, match="reference_text"):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="clone",
+            reference_audio_path="/managed/ref.wav",
+            generation={},
+        )
 
 
 @pytest.mark.unit
