@@ -349,6 +349,12 @@ def patch_tts_config(
             )
             return False
     providers_indent = _find_providers_indent(lines)
+    if providers_indent is None and _has_unsupported_providers_declaration(lines):
+        logger.warning(
+            "Skipping OmniVoice provider config patch at {} because the providers declaration is unsupported",
+            config_path,
+        )
+        return False
     effective_block_indent = block_indent if block_indent is not None else ((providers_indent or 0) + 2)
     provider_indent = " " * effective_block_indent
     key_indent = provider_indent + "  "
