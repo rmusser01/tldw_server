@@ -75,11 +75,13 @@ describe("FlowCheckDiffPanel", () => {
 
     const issueText = screen.getByText("Missing required section", { exact: false })
     const noDiffText = screen.getByText("Run flow-check to generate suggestions.", { exact: false })
+    const alertWrappers = document.querySelectorAll("[data-ds-component='Alert']")
 
     expect(issueText).toBeInTheDocument()
     expect(noDiffText).toBeInTheDocument()
     expect(screen.getByText("Duplicate transition target")).toBeInTheDocument()
     expect(screen.getAllByRole("listitem")).toHaveLength(2)
+    expect(alertWrappers).toHaveLength(2)
     expect(issueText.closest("[data-ds-component='Alert']")).toBeInTheDocument()
     expect(noDiffText.closest("[data-ds-component='Alert']")).toBeInTheDocument()
   })

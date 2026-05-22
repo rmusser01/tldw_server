@@ -46,13 +46,29 @@ Move the Watchlists Template FlowCheckDiffPanel flow-issue and empty-diff callou
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-TDD red/green completed. Added a focused FlowCheckDiffPanel test requiring the flow-issues and no-diff callout text to be inside canonical data-ds-component Alert wrappers; the corrected red run failed because the existing AntD Alert mock rendered the callout text without that marker. Replaced the component's AntD Alert import/usages with the shared design-system Alert primitive while preserving titles, descriptions, mode controls, and accept/reject actions. Removed the two FlowCheckDiffPanel Alert baseline entries. Review follow-up: Gemini requested list markup for multiple flow issues. Added a red test requiring two listitems for two issues, then rendered issue messages as a list inside the design-system Alert.
+- TDD red/green completed for FlowCheckDiffPanel design-system Alert marker coverage.
+- Added a focused FlowCheckDiffPanel test requiring flow-issues and no-diff callout text to be inside canonical data-ds-component Alert wrappers.
+- Initial red failure confirmed the AntD Alert mock rendered callout text without a design-system Alert marker.
+- Replaced FlowCheckDiffPanel AntD Alert usage with the shared design-system Alert while preserving titles, descriptions, mode controls, and accept/reject actions.
+- Removed the two FlowCheckDiffPanel Alert baseline entries from the product-state baseline.
+- Review follow-up: rendered multiple flow issues as list items inside the design-system Alert and hardened the test to require two distinct Alert wrappers.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated FlowCheckDiffPanel flow-issues and no-diff callouts from AntD Alert to the design-system Alert primitive. Focused coverage now verifies both callouts preserve their copy and render within canonical Alert wrappers, with multiple flow issues rendered as list items for readability. Removed the two FlowCheckDiffPanel product-state baseline exceptions. Verification: red focused FlowCheckDiffPanel test failed on the missing design-system marker; review-fix red test failed on semicolon-flattened issue text; green focused FlowCheckDiffPanel test passed 2/2; bun run verify:design-system-state passed with 303 allowed legacy exceptions; baseline JSON parse passed; git diff --check passed. Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only.
+Migrated FlowCheckDiffPanel flow-issues and no-diff callouts from AntD Alert to the design-system Alert primitive. Focused coverage now verifies both callouts preserve their copy and render within canonical Alert wrappers, with multiple flow issues rendered as list items for readability.
+
+Removed the two FlowCheckDiffPanel product-state baseline exceptions.
+
+Verification:
+- Red test: focused FlowCheckDiffPanel test failed on the missing design-system marker.
+- Review-fix red test: focused FlowCheckDiffPanel test failed on semicolon-flattened issue text.
+- Green test: focused FlowCheckDiffPanel test passed 2/2.
+- Design-system verifier: `bun run verify:design-system-state` passed with 303 allowed legacy exceptions.
+- Baseline JSON parse: passed.
+- `git diff --check`: passed.
+- Bandit: skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
