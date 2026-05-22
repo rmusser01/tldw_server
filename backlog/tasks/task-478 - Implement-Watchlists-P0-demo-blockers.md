@@ -45,7 +45,7 @@ Docs/superpowers/plans/2026-05-22-watchlists-p0-demo-blockers-implementation-pla
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 2 review fixes: run-audio fallback status now reads Scheduler task state only from an already-started global scheduler, avoiding read-only status lookups that initialize a no-worker Scheduler singleton. Added regression coverage for scheduler-unavailable fallback and no-global-scheduler startup. Follow-up review fix now also uses Scheduler status when workflows.db exists but the matching workflow run is not visible yet, propagates asyncio.CancelledError at the helper and endpoint boundary, and covers the matched workflow run-without-id fallback path.
+Task 2 complete after review: run-audio fallback status reads Scheduler task state only from an already-started global scheduler; missing DB, no matching workflow run, matched run without id, and matched run without final audio artifact all expose Scheduler status or safe pending. Cancellation propagates at helper and endpoint boundary. Task 3 implemented Reports drawer live audio status polling for text digest outputs with requested audio, merges live status over stale metadata, renders queue name, and stops polling on close.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
