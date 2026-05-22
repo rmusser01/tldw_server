@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { getDesignSystemState } from "@/design-system"
@@ -201,6 +201,22 @@ describe("QuizWorkspace connection and availability states", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Go to server card" }))
     expect(mocks.scrollToServerCard).toHaveBeenCalled()
+  })
+
+  it("preserves assessment workspace identity and modes while setup is required", () => {
+    mocks.isOnline = false
+    mocks.demoEnabled = false
+    mocks.uxState = "unconfigured"
+
+    render(<QuizWorkspace />)
+
+    expect(screen.getByRole("heading", { level: 1, name: "Quiz" })).toBeInTheDocument()
+    expect(screen.getByText("Study workspace")).toBeInTheDocument()
+
+    const modes = within(screen.getByRole("navigation", { name: "Quiz modes" }))
+    for (const mode of ["Take Quiz", "Generate", "Create", "Manage", "Results"]) {
+      expect(modes.getByText(mode)).toBeInTheDocument()
+    }
   })
 
   it("keeps setup guidance renderable when the setup state registry entry is unavailable", () => {

@@ -14,6 +14,7 @@ import {
   useFlashcardShortcuts,
   useHasCardsQuery,
   useNextDueQuery,
+  useRecentFlashcardReviewSessionsQuery,
   useResetFlashcardSchedulingMutation,
   useReviewAnalyticsSummaryQuery,
   useReviewFlashcardMutation,
@@ -178,6 +179,13 @@ describe("ReviewTab queue state visibility", () => {
     vi.mocked(useReviewAnalyticsSummaryQuery).mockReturnValue({ data: null, isLoading: false } as any)
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
   })
 
   it.each([
