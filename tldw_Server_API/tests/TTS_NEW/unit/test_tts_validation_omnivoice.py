@@ -267,3 +267,34 @@ def test_omnivoice_rejects_invalid_integer_generation_param(value):
 
     assert is_valid is False
     assert "num_step" in str(error)
+
+
+@pytest.mark.parametrize("value", [True, False, "nan", float("nan"), "inf", float("inf")])
+def test_omnivoice_rejects_invalid_float_generation_param(value):
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        extra_params={"guidance_scale": value},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert "guidance_scale" in str(error)
+
+
+def test_omnivoice_accepts_finite_float_generation_string():
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        extra_params={"guidance_scale": "4.5"},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is True
+    assert error is None
