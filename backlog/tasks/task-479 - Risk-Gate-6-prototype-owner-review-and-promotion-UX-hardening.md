@@ -4,7 +4,7 @@ title: Risk Gate 6 prototype owner review and promotion UX hardening
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-05-22 19:47'
+updated_date: '2026-05-22 20:11'
 labels:
   - prototype-workspaces
   - risk-gate
@@ -54,6 +54,14 @@ Verification on 2026-05-22 after rebasing onto origin/dev:
 - source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py tldw_Server_API/app/api/v1/schemas/prototype_workspace_schemas.py tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py -f json -o /tmp/bandit_prototype_risk_gate_6_review_fixes.json: 0 findings.
 - git diff --check HEAD: passed.
 - NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false: exits 2 with 284 existing repo-wide diagnostics; filtering the output for touched PrototypeWorkspace files returned no matches.
+
+PR #1945 follow-up addressed CodeRabbit's remaining pre-merge docstring coverage warning by adding concise docstrings to the new promotion request summary schema and new promotion inventory regression tests. The human-written Change summary gate remains a human-owner action and must not be satisfied with AI-authored text.
+
+Verification on 2026-05-22 for docstring follow-up:
+- AST guard for newly added Python definitions: passed.
+- source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q: 112 passed, 5 warnings.
+- source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py tldw_Server_API/app/api/v1/schemas/prototype_workspace_schemas.py tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py -f json -o /tmp/bandit_prototype_risk_gate_6_docstring_followup.json: 0 findings.
+- git diff --check: passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

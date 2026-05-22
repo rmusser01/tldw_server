@@ -265,6 +265,7 @@ class TestPrototypeWorkspaceEndpoints:
         client: TestClient,
         test_services: SimpleNamespace,
     ) -> None:
+        """Workspace detail includes pending promotion requests needed by the owner UI."""
         workspace, seed_snapshot = _seed_workspace(test_services, title="Promotion inventory prototype")
         access_context = _seed_external_access(
             test_services,

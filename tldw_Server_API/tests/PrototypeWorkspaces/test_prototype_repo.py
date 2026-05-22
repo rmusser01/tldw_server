@@ -566,6 +566,7 @@ async def test_list_promotion_requests_for_workspace_filters_and_orders_requests
     repo,
     prototype_db,
 ) -> None:
+    """Promotion inventory is scoped to one workspace and ordered newest first."""
     workspace = await repo.create_workspace(
         owner_user_id=1,
         title="review queue",
@@ -670,6 +671,7 @@ async def test_list_promotion_requests_for_workspace_filters_unparseable_rows(
     repo,
     monkeypatch,
 ) -> None:
+    """Unparseable promotion request rows are omitted from the owner inventory."""
     workspace = await repo.create_workspace(owner_user_id=1, title="review queue", creation_source="prompt")
     base_snapshot = await repo.create_snapshot(
         prototype_workspace_id=workspace["id"],

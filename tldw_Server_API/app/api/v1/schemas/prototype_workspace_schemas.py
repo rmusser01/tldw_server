@@ -143,6 +143,8 @@ class PrototypeWorkspaceSnapshotSummaryResponse(BaseModel):
 
 
 class PrototypePromotionRequestSummaryResponse(BaseModel):
+    """Owner-facing summary of a collaborator promotion request."""
+
     id: str
     prototype_workspace_id: str
     prototype_session_id: str
