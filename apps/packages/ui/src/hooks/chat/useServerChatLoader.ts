@@ -292,7 +292,7 @@ export const resolveServerChatAssistantIdentity = (
     return {
       assistantKind,
       assistantId,
-      characterId: characterId ?? null,
+      characterId: null,
       personaMemoryMode
     }
   }
