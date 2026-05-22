@@ -208,6 +208,10 @@ def _find_providers_indent(lines: list[str]) -> Optional[int]:
     return None
 
 
+def _has_unsupported_providers_declaration(lines: list[str]) -> bool:
+    return any(line.strip().startswith("providers:") for line in lines)
+
+
 def _insert_provider_block(lines: list[str], provider_name: str, block_lines: list[str]) -> list[str]:
     block_start, block_end, _block_indent = _find_provider_block(lines, provider_name)
     if block_start is not None and block_end is not None:
@@ -317,6 +321,12 @@ def patch_tts_config(
             )
             return False
     providers_indent = _find_providers_indent(lines)
+    if providers_indent is None and _has_unsupported_providers_declaration(lines):
+        logger.warning(
+            "Skipping OmniVoice provider config patch at {} because the providers declaration is unsupported",
+            config_path,
+        )
+        return False
     effective_block_indent = block_indent if block_indent is not None else ((providers_indent or 0) + 2)
     provider_indent = " " * effective_block_indent
     key_indent = provider_indent + "  "
@@ -477,7 +487,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         model_path = validate_local_model_path(model_path)
 
     runtime_base = Path(args.runtime_base)
-    config_path = Path(args.config_path)
+    config_path = _resolve_path_from_repo_root(Path(args.config_path), repo_root)
     source_checkout = resolve_source_checkout(
         repo_root=repo_root,
         source_dir=Path(args.source_dir) if args.source_dir else None,

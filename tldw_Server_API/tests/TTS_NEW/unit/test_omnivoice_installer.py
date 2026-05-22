@@ -162,6 +162,34 @@ providers:
 
 
 @pytest.mark.unit
+def test_omnivoice_installer_rejects_unsupported_flow_style_providers_without_duplicate(tmp_path):
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
+        build_runtime_layout,
+        patch_tts_config,
+    )
+
+    config_path = tmp_path / "tts_providers_config.yaml"
+    original = 'providers: { kitten_tts: { enabled: false } }\n'
+    config_path.write_text(original, encoding="utf-8")
+    layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=tmp_path)
+    source_checkout = tmp_path / "external" / "OmniVoice"
+    source_checkout.mkdir(parents=True)
+    model_path = tmp_path / "models" / "OmniVoice"
+    model_path.mkdir(parents=True)
+
+    changed = patch_tts_config(
+        config_path=config_path,
+        layout=layout,
+        source_checkout=source_checkout,
+        model_path=model_path,
+        repo_root=tmp_path,
+    )
+
+    assert changed is False
+    assert config_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.unit
 def test_omnivoice_installer_patches_when_comments_are_outside_provider_block(tmp_path):
     from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
         build_runtime_layout,
@@ -403,6 +431,43 @@ def test_omnivoice_installer_resolves_relative_model_path_against_repo_root(tmp_
             "models/OmniVoice",
             "--config-path",
             str(config_path),
+            "--runtime-base",
+            str(repo_root / "models" / "omnivoice_sidecar"),
+        ]
+    )
+
+    parsed = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert parsed["providers"]["omnivoice"]["extra_params"]["model_path"] == "models/OmniVoice"
+
+
+@pytest.mark.unit
+def test_omnivoice_installer_resolves_relative_config_path_against_repo_root(tmp_path, monkeypatch):
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    repo_root = tmp_path / "repo"
+    cwd = tmp_path / "elsewhere"
+    repo_root.mkdir()
+    cwd.mkdir()
+    config_path = repo_root / "tts_providers_config.yaml"
+    config_path.write_text("providers:\n  omnivoice:\n    enabled: false\n", encoding="utf-8")
+    model_path = repo_root / "models" / "OmniVoice"
+    model_path.mkdir(parents=True)
+
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(installer, "_ensure_prerequisites", lambda: None)
+    monkeypatch.setattr(installer, "resolve_repo_root", lambda: repo_root)
+    monkeypatch.setattr(installer, "create_runtime_layout", lambda layout: layout)
+    monkeypatch.setattr(installer, "create_virtualenv", lambda venv_dir: None)
+    monkeypatch.setattr(installer, "validate_runtime_layout", lambda layout: [])
+
+    installer.main(
+        [
+            "--skip-clone",
+            "--skip-install",
+            "--model-path",
+            "models/OmniVoice",
+            "--config-path",
+            "tts_providers_config.yaml",
             "--runtime-base",
             str(repo_root / "models" / "omnivoice_sidecar"),
         ]

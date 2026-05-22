@@ -1341,6 +1341,17 @@ def _install_omnivoice() -> None:
 
     _ensure_downloads_allowed("OmniVoice sidecar runtime")
     repo_root = Path(__file__).resolve().parents[4]
+    configured_model_path = os.getenv("TLDW_OMNIVOICE_MODEL_PATH")
+    if not configured_model_path:
+        raise RuntimeError("TLDW_OMNIVOICE_MODEL_PATH is required to enable OmniVoice")
+    candidate_model_path = Path(configured_model_path).expanduser()
+    if not candidate_model_path.is_absolute():
+        candidate_model_path = repo_root / candidate_model_path
+    try:
+        model_path = installer.validate_local_model_path(candidate_model_path)
+    except SystemExit as exc:
+        raise RuntimeError(str(exc)) from exc
+
     runtime_base = repo_root / "models" / "omnivoice_sidecar"
     source_checkout = installer.resolve_source_checkout(repo_root=repo_root)
     layout = installer.build_runtime_layout(runtime_base, repo_root=repo_root)
@@ -1359,6 +1370,7 @@ def _install_omnivoice() -> None:
         config_path=repo_root / installer.DEFAULT_CONFIG_PATH,
         layout=layout,
         source_checkout=source_checkout,
+        model_path=model_path,
         repo_root=repo_root,
     )
     if not config_patched:
