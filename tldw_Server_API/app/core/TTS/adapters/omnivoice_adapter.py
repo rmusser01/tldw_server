@@ -366,7 +366,12 @@ class OmniVoiceAdapter(TTSAdapter):
             )
         return values[0][1] if values else None
 
-    def _resolve_generation(self, extras: dict[str, Any]) -> dict[str, Any]:
+    def _resolve_generation(
+        self,
+        extras: dict[str, Any],
+        *,
+        request_speed: Optional[float] = None,
+    ) -> dict[str, Any]:
         generation: dict[str, Any] = {}
         for key, value in extras.items():
             if key in GENERATION_PARAM_TYPES:
@@ -380,6 +385,10 @@ class OmniVoiceAdapter(TTSAdapter):
                     f"Unknown or unsupported OmniVoice generation parameter: {key}",
                     provider=self.PROVIDER_KEY,
                 )
+        if "speed" not in generation and request_speed is not None:
+            speed = self._coerce_generation_value("speed", request_speed, float)
+            if not math.isclose(speed, 1.0, rel_tol=0.0, abs_tol=1e-12):
+                generation["speed"] = speed
         return generation
 
     def _coerce_generation_value(self, key: str, value: Any, target_type: type) -> Any:
@@ -484,7 +493,7 @@ class OmniVoiceAdapter(TTSAdapter):
             "text": self.preprocess_text(request.text),
             "mode": mode,
             "requested_sample_rate": sample_rate,
-            "generation": self._resolve_generation(extras),
+            "generation": self._resolve_generation(extras, request_speed=request.speed),
         }
         instruct = self._resolve_instruct(extras)
         language_id = self._resolve_language_id(request, extras)
