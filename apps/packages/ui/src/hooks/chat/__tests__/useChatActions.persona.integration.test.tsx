@@ -168,6 +168,7 @@ const createHookOptions = () => ({
   serverChatAssistantKind: null,
   serverChatAssistantId: null,
   serverChatPersonaMemoryMode: null,
+  serverChatMetaLoaded: false,
   serverChatState: "in-progress" as const,
   serverChatTopic: null,
   serverChatClusterId: null,
@@ -238,12 +239,79 @@ describe("useChatActions persona integration", () => {
       })
     })
 
-    expect(createChatMock).toHaveBeenCalledWith(
+    expect(createChatMock).toHaveBeenCalledWith({
+      assistant_kind: "persona",
+      assistant_id: "garden-helper",
+      persona_memory_mode: "read_only",
+      state: "in-progress",
+      topic_label: undefined,
+      cluster_id: undefined,
+      source: undefined,
+      external_ref: undefined
+    })
+    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
+    expect(normalChatModeMock).toHaveBeenCalledWith(
+      "Hello persona",
+      "",
+      false,
+      [],
+      [],
+      expect.any(AbortSignal),
       expect.objectContaining({
+        assistantIdentity: {
+          name: "Garden Helper",
+          avatarUrl: undefined
+        },
+        historyId: "history-persona",
+        serverChatId: "persona-chat-1"
+      })
+    )
+  })
+
+  it("does not forward stale character state into the first persona send", async () => {
+    const options = {
+      ...createHookOptions(),
+      serverChatId: "character-chat-1",
+      serverChatTitle: "Old character chat",
+      serverChatCharacterId: 42,
+      serverChatAssistantKind: "character" as const,
+      serverChatAssistantId: "42",
+      serverChatPersonaMemoryMode: "read_write" as const,
+      serverChatMetaLoaded: true,
+      serverChatState: "resolved" as const,
+      serverChatTopic: "Old topic",
+      serverChatClusterId: "old-cluster",
+      serverChatSource: "old-source",
+      serverChatExternalRef: "old-ref"
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Hello persona",
+        image: ""
+      })
+    })
+
+    expect(options.setServerChatId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
+    expect(options.setServerChatAssistantId).toHaveBeenCalledWith(null)
+    expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
+    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    expect(createChatMock).toHaveBeenCalledWith({
         assistant_kind: "persona",
         assistant_id: "garden-helper",
-        persona_memory_mode: "read_only"
+        persona_memory_mode: "read_only",
+        state: "in-progress",
+        topic_label: undefined,
+        cluster_id: undefined,
+        source: undefined,
+        external_ref: undefined
       })
+    expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
+    expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
+      "garden-helper"
     )
     expect(normalChatModeMock).toHaveBeenCalledWith(
       "Hello persona",
@@ -256,7 +324,8 @@ describe("useChatActions persona integration", () => {
         assistantIdentity: {
           name: "Garden Helper",
           avatarUrl: undefined
-        }
+        },
+        serverChatId: "persona-chat-1"
       })
     )
   })
