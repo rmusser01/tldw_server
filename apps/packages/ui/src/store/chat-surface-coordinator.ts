@@ -8,6 +8,7 @@ export type OptionalPanelId =
   | "mcp-tools"
   | "audio-health"
   | "model-catalog"
+  | "character-control"
 
 export type ChatSurfaceCoordinatorState = {
   routeId: string | null
@@ -26,7 +27,8 @@ const DEFAULT_OPTIONAL_PANELS: Record<OptionalPanelId, boolean> = {
   "server-history": false,
   "mcp-tools": false,
   "audio-health": false,
-  "model-catalog": false
+  "model-catalog": false,
+  "character-control": false
 }
 
 export const createChatSurfaceCoordinatorState = (
