@@ -46,6 +46,8 @@ def load_runtime_config_from_env() -> dict[str, Any]:
 
 
 def _runtime_error_status_code(exc: OmniVoiceRuntimeError) -> int:
+    if exc.code == "RUNTIME_RELOAD_UNSUPPORTED":
+        return status.HTTP_501_NOT_IMPLEMENTED
     if exc.code in {"MODEL_NOT_AVAILABLE", "MODEL_LOAD_FAILED", "RUNTIME_IMPORT_FAILED"}:
         return status.HTTP_503_SERVICE_UNAVAILABLE
     if exc.code in {
@@ -84,8 +86,7 @@ def _runtime_model_id(runtime: OmniVoiceRuntime) -> str | None:
 
 
 def _runtime_model_path(runtime: OmniVoiceRuntime) -> str | None:
-    model_path = getattr(runtime, "_model_path", None)
-    return str(model_path) if model_path else None
+    return None
 
 
 async def _runtime_status(runtime: OmniVoiceRuntime) -> OmniVoiceRuntimeStatus:
@@ -129,8 +130,8 @@ def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -
         return await _runtime_status(runtime)
 
     @app.get("/health", response_model=OmniVoiceHealthResponse)
-    async def health(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus:
-        return await _runtime_status(runtime)
+    async def health(_: None = Depends(require_sidecar_token)) -> OmniVoiceHealthResponse:
+        return OmniVoiceHealthResponse(status="ok", ready=True)
 
     @app.post("/control/warmup", response_model=OmniVoiceHealthResponse)
     async def warmup(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus | JSONResponse:
@@ -144,27 +145,41 @@ def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -
     async def reload_runtime(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus | JSONResponse:
         try:
             reload_method = getattr(runtime, "reload", None)
-            if callable(reload_method):
-                result = reload_method()
-                if inspect.isawaitable(result):
-                    await result
-            else:
-                if hasattr(runtime, "model"):
-                    runtime.model = None
-                if isinstance(getattr(runtime, "status", None), str):
-                    runtime.status = "idle_stopped"
-                if hasattr(runtime, "last_error_code"):
-                    runtime.last_error_code = None
-                await runtime.load()
+            if not callable(reload_method):
+                return _runtime_error_response(
+                    OmniVoiceRuntimeError(
+                        "RUNTIME_RELOAD_UNSUPPORTED",
+                        "OmniVoice runtime reload is not supported",
+                        retryable=False,
+                    )
+                )
+            result = reload_method()
+            if inspect.isawaitable(result):
+                await result
         except OmniVoiceRuntimeError as exc:
             return _runtime_error_response(exc)
         return await _runtime_status(runtime)
 
     @app.post("/control/shutdown", response_model=OmniVoiceHealthResponse)
-    async def shutdown(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus:
-        if isinstance(getattr(runtime, "status", None), str):
-            runtime.status = "shutting-down"
+    async def shutdown(_: None = Depends(require_sidecar_token)) -> OmniVoiceRuntimeStatus | JSONResponse:
+        try:
+            shutdown_method = getattr(runtime, "shutdown", None)
+            if callable(shutdown_method):
+                result = shutdown_method()
+                if inspect.isawaitable(result):
+                    await result
+        except OmniVoiceRuntimeError as exc:
+            return _runtime_error_response(exc)
+
         current_status = await _runtime_status(runtime)
+        if callable(getattr(runtime, "shutdown", None)):
+            return OmniVoiceRuntimeStatus(
+                status=current_status.status,
+                ready=False,
+                model=current_status.model,
+                model_path=current_status.model_path,
+                last_error_code=current_status.last_error_code,
+            )
         return OmniVoiceRuntimeStatus(
             status="shutting-down",
             ready=False,
