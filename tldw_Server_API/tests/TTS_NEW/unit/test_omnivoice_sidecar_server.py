@@ -31,15 +31,24 @@ def _build_test_wav(*, sample_rate: int = 24000, channels: int = 1, sample_width
 
 
 class FakeOmniVoiceRuntime:
-    def __init__(self, *, scratch_dir: Path, synthesize_error: OmniVoiceRuntimeError | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        scratch_dir: Path,
+        synthesize_error: OmniVoiceRuntimeError | None = None,
+        status_model: str = "local-model",
+        synthesize_model: str = "local-model",
+    ) -> None:
         self.status_calls = 0
         self.load_calls = 0
         self.synthesize_calls: list[OmniVoiceSynthesizeRequest] = []
         self.synthesize_error = synthesize_error
+        self.status_model = status_model
+        self.synthesize_model = synthesize_model
         self.status = self.get_status
         self.last_error_code = None
         self.model = "loaded-model"
-        self._model_id = "local-model"
+        self._model_id = status_model
         self._model_path = scratch_dir / "local-model"
 
     async def get_status(self) -> OmniVoiceRuntimeStatus:
@@ -47,7 +56,7 @@ class FakeOmniVoiceRuntime:
         return OmniVoiceRuntimeStatus(
             status="ready",
             ready=True,
-            model="local-model",
+            model=self.status_model,
             model_path=str(self._model_path),
         )
 
@@ -67,7 +76,7 @@ class FakeOmniVoiceRuntime:
             sample_rate=24000,
             channels=1,
             cold_start=False,
-            model="local-model",
+            model=self.synthesize_model,
         )
 
     def _validate_reference_audio_path(self, reference_audio_path: str) -> None:
@@ -131,7 +140,8 @@ class FakeAttributeStatusRuntime:
 def test_client():
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
 
-    app = create_app(sidecar_token="test-sidecar-token")  # nosec B106
+    runtime = FakeOmniVoiceRuntime(scratch_dir=Path("/tmp/omnivoice-test-scratch"))  # nosec B108
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
     with TestClient(app) as client:
         yield client
 
@@ -188,7 +198,41 @@ def test_sidecar_status_returns_runtime_status(fake_runtime_client, auth_headers
     assert payload["status"] == "ready"  # nosec B101
     assert payload["ready"] is True  # nosec B101
     assert payload["model"] == "local-model"  # nosec B101
+    assert payload["model_path"] is None  # nosec B101
     assert runtime.status_calls == 1  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_status_redacts_status_hook_model_path(tmp_path: Path, auth_headers: dict[str, str]):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
+
+    runtime = FakeOmniVoiceRuntime(scratch_dir=tmp_path / "secret-model-parent")
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
+    with TestClient(app) as client:
+        response = client.get("/status", headers=auth_headers)
+
+    assert response.status_code == 200  # nosec B101
+    payload = response.json()
+    assert payload["model"] == "local-model"  # nosec B101
+    assert payload["model_path"] is None  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_status_sanitizes_status_hook_path_like_model(tmp_path: Path, auth_headers: dict[str, str]):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
+
+    runtime = FakeOmniVoiceRuntime(
+        scratch_dir=tmp_path / "secret-model-parent",
+        status_model=str(tmp_path / "models" / "local-model"),
+    )
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
+    with TestClient(app) as client:
+        response = client.get("/status", headers=auth_headers)
+
+    assert response.status_code == 200  # nosec B101
+    payload = response.json()
+    assert payload["model"] == "local-model"  # nosec B101
+    assert payload["model_path"] is None  # nosec B101
 
 
 @pytest.mark.unit
@@ -206,6 +250,44 @@ def test_sidecar_status_redacts_attribute_runtime_model_path(tmp_path: Path, aut
     assert payload["ready"] is True  # nosec B101
     assert payload["model"] == "local-model"  # nosec B101
     assert payload["model_path"] is None  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_synthesize_sanitizes_path_like_model_header(tmp_path: Path, auth_headers: dict[str, str]):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import create_app
+
+    runtime = FakeOmniVoiceRuntime(
+        scratch_dir=tmp_path / "scratch",
+        synthesize_model=str(tmp_path / "models" / "local-model"),
+    )
+    app = create_app(sidecar_token="test-sidecar-token", runtime=runtime)  # nosec B106
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/synthesize",
+            headers=auth_headers,
+            json={"text": "hi", "mode": "auto"},
+        )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.headers["X-OmniVoice-Model"] == "local-model"  # nosec B101
+
+
+@pytest.mark.unit
+def test_sidecar_lifecycle_success_routes_declare_runtime_status_response_model(fake_runtime_client):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceRuntimeStatus
+
+    client, _runtime = fake_runtime_client
+    response_models = {
+        route.path: route.response_model
+        for route in client.app.routes
+        if getattr(route, "path", None) in {"/control/warmup", "/control/reload", "/control/shutdown"}
+    }
+
+    assert response_models == {  # nosec B101
+        "/control/warmup": OmniVoiceRuntimeStatus,
+        "/control/reload": OmniVoiceRuntimeStatus,
+        "/control/shutdown": OmniVoiceRuntimeStatus,
+    }
 
 
 @pytest.mark.unit
