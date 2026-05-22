@@ -214,6 +214,45 @@ describe("PrototypeWorkspaceOwnerView", () => {
               review_notes: null,
               created_at: "2026-05-22T00:00:00Z",
               updated_at: "2026-05-22T00:00:00Z"
+            },
+            {
+              id: "ppr_validation_running",
+              prototype_workspace_id: "pw_owner_review",
+              prototype_session_id: "pss_collab",
+              candidate_snapshot_id: "psnap_candidate",
+              requested_by_user_id: null,
+              requested_by_shared_actor_id: "psa_1",
+              status: "validation-running",
+              reviewed_by_user_id: null,
+              review_notes: null,
+              created_at: "2026-05-22T00:00:00Z",
+              updated_at: "2026-05-22T00:00:00Z"
+            },
+            {
+              id: "ppr_validation_failed",
+              prototype_workspace_id: "pw_owner_review",
+              prototype_session_id: "pss_collab",
+              candidate_snapshot_id: "psnap_candidate",
+              requested_by_user_id: null,
+              requested_by_shared_actor_id: "psa_1",
+              status: "validation-failed",
+              reviewed_by_user_id: 1,
+              review_notes: "Publish validation failed",
+              created_at: "2026-05-22T00:00:00Z",
+              updated_at: "2026-05-22T00:00:00Z"
+            },
+            {
+              id: "ppr_promotion_failed",
+              prototype_workspace_id: "pw_owner_review",
+              prototype_session_id: "pss_collab",
+              candidate_snapshot_id: "psnap_candidate",
+              requested_by_user_id: null,
+              requested_by_shared_actor_id: "psa_1",
+              status: "promotion-failed",
+              reviewed_by_user_id: 1,
+              review_notes: "Promotion failed",
+              created_at: "2026-05-22T00:00:00Z",
+              updated_at: "2026-05-22T00:00:00Z"
             }
           ]
         })}
@@ -223,13 +262,32 @@ describe("PrototypeWorkspaceOwnerView", () => {
     const stale = screen.getByTestId("prototype-promotion-request-ppr_stale")
     const rejected = screen.getByTestId("prototype-promotion-request-ppr_rejected")
     const promoted = screen.getByTestId("prototype-promotion-request-ppr_promoted")
+    const validationRunning = screen.getByTestId(
+      "prototype-promotion-request-ppr_validation_running"
+    )
+    const validationFailed = screen.getByTestId(
+      "prototype-promotion-request-ppr_validation_failed"
+    )
+    const promotionFailed = screen.getByTestId(
+      "prototype-promotion-request-ppr_promotion_failed"
+    )
 
     expect(stale).toHaveTextContent("Stale candidate")
     expect(rejected).toHaveTextContent("Rejected")
     expect(rejected).toHaveTextContent("Validation failed")
     expect(promoted).toHaveTextContent("Promoted")
+    expect(validationRunning).toHaveTextContent("Validation running")
+    expect(validationFailed).toHaveTextContent("Validation failed")
+    expect(promotionFailed).toHaveTextContent("Promotion failed")
 
-    for (const request of [stale, rejected, promoted]) {
+    for (const request of [
+      stale,
+      rejected,
+      promoted,
+      validationRunning,
+      validationFailed,
+      promotionFailed
+    ]) {
       expect(
         within(request).getByRole("button", { name: /Approve promotion/ })
       ).toBeDisabled()
@@ -263,9 +321,34 @@ describe("PrototypeWorkspaceOwnerView", () => {
     )
 
     const result = screen.getByTestId("prototype-promotion-review-result")
-    expect(result).toHaveTextContent("Promotion failed")
+    expect(result).toHaveTextContent("Validation failed")
     expect(result).toHaveTextContent("publish_validation_failed")
     expect(result).toHaveTextContent("Validator rejected the candidate")
+  })
+
+  it("surfaces structured review error state and category", () => {
+    hookState.useReviewPrototypePromotionRequest.mockReturnValue({
+      isPending: false,
+      mutateAsync: reviewMutateAsync,
+      data: null,
+      error: {
+        detail: {
+          message: "Canonical snapshot changed",
+          frontend_state: "promotion_conflict",
+          category: "promotion_conflict"
+        }
+      }
+    })
+
+    render(
+      <PrototypeWorkspaceOwnerView
+        prototypeWorkspaceId="pw_owner_review"
+        workspace={buildWorkspace()}
+      />
+    )
+
+    expect(screen.getAllByText("Promotion conflict")).toHaveLength(2)
+    expect(screen.getByText("Canonical snapshot changed")).toBeInTheDocument()
   })
 
   it("separates branch runtime and preview status and marks revoked sessions not actionable", () => {
@@ -299,7 +382,8 @@ describe("PrototypeWorkspaceOwnerView", () => {
     expect(session).toHaveTextContent("Not actionable")
   })
 
-  it("disables pending promotion review when the branch session is revoked", () => {
+  it("keeps pending rejection available when the branch session is revoked", async () => {
+    const user = userEvent.setup()
     render(
       <PrototypeWorkspaceOwnerView
         prototypeWorkspaceId="pw_owner_review"
@@ -330,10 +414,51 @@ describe("PrototypeWorkspaceOwnerView", () => {
         name: "Approve promotion ppr_pending"
       })
     ).toBeDisabled()
+    const reject = within(request).getByRole("button", {
+      name: "Reject promotion ppr_pending"
+    })
+    expect(reject).toBeEnabled()
+
+    await user.click(reject)
+
+    expect(reviewMutateAsync).toHaveBeenCalledWith({
+      promotion_request_id: "ppr_pending",
+      prototype_workspace_id: "pw_owner_review",
+      decision: "reject"
+    })
+  })
+
+  it("keeps pending rejection available when the candidate snapshot is missing", () => {
+    render(
+      <PrototypeWorkspaceOwnerView
+        prototypeWorkspaceId="pw_owner_review"
+        workspace={buildWorkspace({
+          snapshots: [
+            {
+              snapshot_id: "psnap_canonical",
+              prototype_workspace_id: "pw_owner_review",
+              diff_summary: {},
+              preview_health: {},
+              created_at: "2026-05-21T00:00:00Z",
+              is_canonical: true,
+              is_last_known_good: true
+            }
+          ]
+        })}
+      />
+    )
+
+    const request = screen.getByTestId("prototype-promotion-request-ppr_pending")
+    expect(request).toHaveTextContent("Candidate snapshot missing")
+    expect(
+      within(request).getByRole("button", {
+        name: "Approve promotion ppr_pending"
+      })
+    ).toBeDisabled()
     expect(
       within(request).getByRole("button", {
         name: "Reject promotion ppr_pending"
       })
-    ).toBeDisabled()
+    ).toBeEnabled()
   })
 })

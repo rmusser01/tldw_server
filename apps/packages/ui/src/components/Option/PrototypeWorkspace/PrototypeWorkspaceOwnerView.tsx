@@ -18,38 +18,57 @@ interface PrototypeWorkspaceOwnerViewProps {
   workspace?: PrototypeWorkspaceDetail | null
 }
 
-const promotionStatusCopy: Record<string, string> = {
+const prototypeReviewStateCopy: Record<string, string> = {
   pending: "Pending owner review",
   approved: "Approved",
   rejected: "Rejected",
   promoted: "Promoted",
   stale: "Stale candidate",
+  promotion_stale: "Stale candidate",
+  conflict: "Promotion conflict",
+  promotion_conflict: "Promotion conflict",
+  validation_running: "Validation running",
+  validation_failed: "Validation failed",
+  promotion_validation_failed: "Validation failed",
   failed: "Promotion failed",
-  conflict: "Promotion conflict"
+  promotion_failed: "Promotion failed"
 }
 
-const promotionReviewResultCopy: Record<string, string> = {
-  promoted: "Promoted",
-  rejected: "Rejected",
-  stale: "Stale candidate",
-  failed: "Promotion failed",
-  conflict: "Promotion conflict"
-}
+const normalizePrototypeState = (value: string | null | undefined) =>
+  (value ?? "").trim().toLowerCase().replace(/[-\s]+/g, "_")
 
-const terminalPromotionStatuses = new Set([
-  "approved",
-  "rejected",
-  "promoted",
-  "stale",
-  "failed",
-  "conflict"
-])
+const toDisplayLabel = (value: string) =>
+  value
+    .split(/[_-\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+const getPrototypeReviewStateCopy = (status: string | null | undefined) => {
+  const normalized = normalizePrototypeState(status)
+  return (
+    prototypeReviewStateCopy[normalized] ??
+    (normalized ? toDisplayLabel(normalized) : null)
+  )
+}
 
 const getPromotionStatusCopy = (status: string | null | undefined) =>
-  promotionStatusCopy[(status ?? "").toLowerCase()] ?? "Unknown review state"
+  getPrototypeReviewStateCopy(status) ?? "Unknown review state"
 
-const getReviewResultCopy = (status: string | null | undefined) =>
-  promotionReviewResultCopy[(status ?? "").toLowerCase()] ?? "Review completed"
+const getReviewResultCopy = (
+  status: string | null | undefined,
+  failureCode?: string | null
+) => {
+  const failureState = normalizePrototypeState(failureCode)
+  if (
+    failureState === "publish_validation_failed" ||
+    failureState === "promotion_validation_failed" ||
+    failureState === "validation_failed"
+  ) {
+    return "Validation failed"
+  }
+  return getPrototypeReviewStateCopy(status) ?? "Review completed"
+}
 
 const isSessionActionable = (session: PrototypeWorkspaceSessionSummary) => {
   if (session.is_revoked || session.revoked_at) {
@@ -65,6 +84,14 @@ const getReviewResultReason = (details: Record<string, unknown> | undefined) => 
   const reason = details?.reason
   return typeof reason === "string" && reason.trim() ? reason : null
 }
+
+const getReviewErrorTitle = (detail?: {
+  frontend_state?: string
+  category?: string
+}) =>
+  getPrototypeReviewStateCopy(detail?.frontend_state) ??
+  getPrototypeReviewStateCopy(detail?.category) ??
+  "Review failed"
 
 export const PrototypeWorkspaceOwnerView = ({
   prototypeWorkspaceId,
@@ -146,25 +173,33 @@ export const PrototypeWorkspaceOwnerView = ({
     setShareToken(token.raw_token ?? token.token ?? token.token_prefix)
   }
 
-  const canReviewPromotion = (promotion: PrototypePromotionRequest) => {
+  const canApprovePromotion = (promotion: PrototypePromotionRequest) => {
     const status = promotion.status.toLowerCase()
     const session = sessionsById.get(promotion.prototype_session_id)
     return (
       status === "pending" &&
-      !terminalPromotionStatuses.has(status) &&
-      Boolean(session) &&
-      Boolean(session && isSessionActionable(session)) &&
-      Boolean(snapshotsById.get(promotion.candidate_snapshot_id)) &&
+      !!session &&
+      isSessionActionable(session) &&
+      !!snapshotsById.get(promotion.candidate_snapshot_id) &&
       !reviewPromotion.isPending &&
-      Boolean(resolvedWorkspaceId)
+      !!resolvedWorkspaceId
     )
   }
+
+  const canRejectPromotion = (promotion: PrototypePromotionRequest) =>
+    promotion.status.toLowerCase() === "pending" &&
+    !reviewPromotion.isPending &&
+    !!resolvedWorkspaceId
 
   const handleReviewPromotion = async (
     promotion: PrototypePromotionRequest,
     decision: "approve" | "reject"
   ) => {
-    if (!resolvedWorkspaceId || !canReviewPromotion(promotion)) {
+    const canSubmit =
+      decision === "approve"
+        ? canApprovePromotion(promotion)
+        : canRejectPromotion(promotion)
+    if (!resolvedWorkspaceId || !canSubmit) {
       return
     }
     await reviewPromotion.mutateAsync({
@@ -378,7 +413,10 @@ export const PrototypeWorkspaceOwnerView = ({
             className="mb-3 rounded border px-3 py-2 text-sm"
           >
             <div className="font-medium">
-              {getReviewResultCopy(reviewPromotion.data.status)}
+              {getReviewResultCopy(
+                reviewPromotion.data.status,
+                reviewPromotion.data.failure_code
+              )}
             </div>
             <div className="text-muted-foreground">
               Candidate {reviewPromotion.data.candidate_snapshot_id}
@@ -398,10 +436,18 @@ export const PrototypeWorkspaceOwnerView = ({
         ) : null}
         {reviewError ? (
           <div className="mb-3 rounded border border-destructive px-3 py-2 text-sm">
-            <div className="font-medium">Review failed</div>
+            <div className="font-medium">
+              {getReviewErrorTitle(reviewError.detail)}
+            </div>
             <div className="text-muted-foreground">
               {reviewError.detail?.message ?? reviewError.message ?? "Promotion review failed"}
             </div>
+            {reviewError.detail?.category ? (
+              <div className="text-muted-foreground">
+                {getPrototypeReviewStateCopy(reviewError.detail.category) ??
+                  reviewError.detail.category}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div className="space-y-2 text-sm">
@@ -411,7 +457,8 @@ export const PrototypeWorkspaceOwnerView = ({
             workspace?.promotion_requests.map((promotion) => {
               const candidate = snapshotsById.get(promotion.candidate_snapshot_id)
               const session = sessionsById.get(promotion.prototype_session_id)
-              const reviewable = canReviewPromotion(promotion)
+              const canApprove = canApprovePromotion(promotion)
+              const canReject = canRejectPromotion(promotion)
               return (
                 <div
                   key={promotion.id}
@@ -430,7 +477,7 @@ export const PrototypeWorkspaceOwnerView = ({
                         className="rounded border px-3 py-1"
                         aria-label={`Approve promotion ${promotion.id}`}
                         onClick={() => void handleReviewPromotion(promotion, "approve")}
-                        disabled={!reviewable}
+                        disabled={!canApprove}
                       >
                         Approve
                       </button>
@@ -438,7 +485,7 @@ export const PrototypeWorkspaceOwnerView = ({
                         className="rounded border px-3 py-1"
                         aria-label={`Reject promotion ${promotion.id}`}
                         onClick={() => void handleReviewPromotion(promotion, "reject")}
-                        disabled={!reviewable}
+                        disabled={!canReject}
                       >
                         Reject
                       </button>

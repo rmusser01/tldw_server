@@ -566,7 +566,11 @@ async def test_list_promotion_requests_for_workspace_filters_and_orders_requests
     repo,
     prototype_db,
 ) -> None:
-    workspace = await repo.create_workspace(owner_user_id=1, title="review queue", creation_source="prompt")
+    workspace = await repo.create_workspace(
+        owner_user_id=1,
+        title="review queue",
+        creation_source="prompt",
+    )
     other_workspace = await repo.create_workspace(owner_user_id=1, title="other queue", creation_source="prompt")
     base_snapshot = await repo.create_snapshot(
         prototype_workspace_id=workspace["id"],
@@ -659,6 +663,50 @@ async def test_list_promotion_requests_for_workspace_filters_and_orders_requests
     assert [request["id"] for request in requests] == [newer_request["id"], older_request["id"]]
     assert {request["prototype_workspace_id"] for request in requests} == {workspace["id"]}
     assert requests[0]["candidate_snapshot_id"] == newer_candidate["snapshot_id"]
+
+
+@pytest.mark.asyncio
+async def test_list_promotion_requests_for_workspace_filters_unparseable_rows(
+    repo,
+    monkeypatch,
+) -> None:
+    workspace = await repo.create_workspace(owner_user_id=1, title="review queue", creation_source="prompt")
+    base_snapshot = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_filter_base",
+        created_by_user_id=1,
+    )
+    actor = await repo.create_shared_actor(
+        prototype_workspace_id=workspace["id"],
+        share_link_id=93,
+        display_name="Review queue stakeholder",
+        runtime_policy_profile="locked_collab",
+    )
+    session = await repo.create_session(
+        prototype_workspace_id=workspace["id"],
+        base_snapshot_id=base_snapshot["snapshot_id"],
+        actor_type="external_collaborator",
+        actor_shared_actor_id=actor["id"],
+        share_link_id=93,
+    )
+    candidate = await repo.create_snapshot(
+        prototype_workspace_id=workspace["id"],
+        snapshot_id="snap_review_queue_filter_candidate",
+        created_by_shared_actor_id=actor["id"],
+        parent_snapshot_id=base_snapshot["snapshot_id"],
+        created_from_session_id=session["id"],
+    )
+    await repo.create_promotion_request(
+        prototype_workspace_id=workspace["id"],
+        prototype_session_id=session["id"],
+        candidate_snapshot_id=candidate["snapshot_id"],
+        requested_by_shared_actor_id=actor["id"],
+    )
+    monkeypatch.setattr(repo, "_normalize_promotion_request_row", lambda _row: None)
+
+    requests = await repo.list_promotion_requests_for_workspace(workspace["id"])
+
+    assert requests == []
 
 
 @pytest.mark.asyncio

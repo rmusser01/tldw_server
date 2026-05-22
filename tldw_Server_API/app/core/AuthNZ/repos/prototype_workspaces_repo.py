@@ -1128,7 +1128,12 @@ class PrototypeWorkspacesRepo:
             """,
             (prototype_workspace_id,),
         )
-        return [self._normalize_promotion_request_row(self._row_to_dict(r)) or {} for r in rows]
+        promotion_requests: list[dict[str, Any]] = []
+        for row in rows:
+            normalized = self._normalize_promotion_request_row(self._row_to_dict(row))
+            if normalized:
+                promotion_requests.append(normalized)
+        return promotion_requests
 
     async def update_promotion_request(
         self,
