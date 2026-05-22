@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
 
+from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter import OmniVoiceAdapter
 from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
 
 
@@ -128,6 +130,29 @@ def test_synthesize_request_rejects_auto_mode_reference_audio_path():
 
 
 @pytest.mark.unit
+def test_synthesize_request_rejects_auto_mode_reference_text():
+    with pytest.raises(ValidationError, match="reference_text"):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="auto",
+            reference_text="reference transcript",
+            generation={},
+        )
+
+
+@pytest.mark.unit
+def test_synthesize_request_rejects_design_mode_reference_text():
+    with pytest.raises(ValidationError, match="reference_text"):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="design",
+            instruct="warm narrator",
+            reference_text="reference transcript",
+            generation={},
+        )
+
+
+@pytest.mark.unit
 def test_synthesize_request_rejects_mixed_design_and_clone_inputs():
     with pytest.raises(ValidationError, match="instruct"):
         OmniVoiceSynthesizeRequest(
@@ -156,6 +181,30 @@ def test_synthesize_request_clone_requires_reference_text_and_path():
             reference_audio_path="/managed/ref.wav",
             generation={},
         )
+
+
+@pytest.mark.unit
+def test_omnivoice_adapter_sidecar_payload_matches_protocol_schema():
+    adapter = OmniVoiceAdapter({"sample_rate": 24000})
+    request = TTSRequest(
+        text="hi",
+        voice="narrator",
+        format=AudioFormat.WAV,
+        stream=False,
+        target_sample_rate=22050,
+    )
+
+    payload = adapter._build_sidecar_payload(
+        request,
+        mode="auto",
+        sample_rate=22050,
+        reference_audio_path=None,
+    )
+    parsed = OmniVoiceSynthesizeRequest(**payload)
+
+    assert payload["requested_sample_rate"] == 22050  # nosec B101
+    assert "sample_rate" not in payload  # nosec B101
+    assert parsed.requested_sample_rate == 22050  # nosec B101
 
 
 @pytest.mark.unit

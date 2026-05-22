@@ -493,7 +493,6 @@ class OmniVoiceAdapter(TTSAdapter):
             "text": self.preprocess_text(request.text),
             "mode": mode,
             "requested_sample_rate": sample_rate,
-            "generation": self._resolve_generation(extras, request_speed=request.speed),
         }
         instruct = self._resolve_instruct(extras)
         language_id = self._resolve_language_id(request, extras)
