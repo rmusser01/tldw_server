@@ -51,6 +51,7 @@ export const PRODUCT_STATE_AREA_OWNERSHIP = [
       "src/components/Option/Ingestion",
       "src/components/Option/Library",
       "src/components/Option/Media",
+      "src/components/Media",
       "src/components/Option/Sources",
       "src/components/Option/DataTables",
       "src/components/Option/AudiobookStudio",
@@ -127,28 +128,6 @@ export const PRODUCT_STATE_AREA_OWNERSHIP = [
     paths: [
       "src/components/Option/WritingPlayground",
       "src/components/Review"
-    ]
-  },
-  {
-    area: PRODUCT_STATE_AREA_FALLBACK,
-    paths: [
-      "src/components/Option/Chatbooks",
-      "src/components/Option/Collections",
-      "src/components/Option/ChatWorkflows",
-      "src/components/Option/Speech",
-      "src/components/Option/ScheduledTasks",
-      "src/components/Common/Settings",
-      "src/components/Common/StorageQuotaBanner.tsx",
-      "src/components/Option/AgentRegistry",
-      "src/components/Option/Dictionaries",
-      "src/components/Option/STT",
-      "src/components/WorkflowEditor",
-      "src/components/Common/LocaleJsonDiagnostics.tsx",
-      "src/components/Common/PromptInsertModal.tsx",
-      "src/components/Option/Items",
-      "src/components/Option/KanbanPlayground",
-      "src/components/Option/Models",
-      "src/components/Option/SharedWithMe"
     ]
   }
 ]
@@ -1655,14 +1634,7 @@ function appendEntryDetail(lines, label, value) {
 function formatBaselineTotals(entries) {
   return [
     `Baseline exceptions: ${entries.length}`,
-    "By product area:",
-    ...formatCountGroupBy(entries, (entry) =>
-      productStateAreaForPath(entry.path)
-    ),
-    "By rule:",
-    ...formatCountGroup(entries, "rule"),
-    "By migration queue:",
-    ...formatCountGroup(entries, "migrationQueue")
+    ...formatBaselineBreakdownLines(entries)
   ].join("\n")
 }
 
@@ -1670,6 +1642,12 @@ function formatStaleBaselineTotals(entries) {
   return [
     "Stale baseline cleanup summary",
     `Stale baseline entries: ${entries.length}`,
+    ...formatBaselineBreakdownLines(entries)
+  ].join("\n")
+}
+
+function formatBaselineBreakdownLines(entries) {
+  return [
     "By product area:",
     ...formatCountGroupBy(entries, (entry) =>
       productStateAreaForPath(entry.path)
@@ -1678,7 +1656,7 @@ function formatStaleBaselineTotals(entries) {
     ...formatCountGroup(entries, "rule"),
     "By migration queue:",
     ...formatCountGroup(entries, "migrationQueue")
-  ].join("\n")
+  ]
 }
 
 function formatCountGroup(entries, field) {
@@ -1703,11 +1681,9 @@ function formatCountGroupBy(entries, selectLabel) {
 }
 
 function pathMatchesOwnedPath(relativePath, ownedPath) {
-  const normalizedOwnedPath = normalizePath(ownedPath)
-
   return (
-    relativePath === normalizedOwnedPath ||
-    relativePath.startsWith(`${normalizedOwnedPath}/`)
+    relativePath === ownedPath ||
+    relativePath.startsWith(`${ownedPath}/`)
   )
 }
 

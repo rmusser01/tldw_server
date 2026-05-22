@@ -3,20 +3,22 @@ id: TASK-45.44
 title: Track remaining tldw design-system migration and governance
 status: In Progress
 assignee: []
-created_date: '2026-05-14 03:07'
-updated_date: '2026-05-14 03:48'
+created_date: 2026-05-14 03:07
+updated_date: 2026-05-14 03:48
 labels:
-  - design-system
-  - webui
-  - extension
+- design-system
+- webui
+- extension
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1655'
-  - >-
-    Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
-  - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/issues/1655
+- Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
+- apps/packages/ui/scripts/design-system-product-state-baseline.json
+- Docs/Design/tldw_web_design_system_baseline_reporting.md
 parent_task_id: TASK-45
 priority: medium
+documentation:
+- Docs/Design/tldw_web_design_system_baseline_reporting.md
 ---
 
 ## Description

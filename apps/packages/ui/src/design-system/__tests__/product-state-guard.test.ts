@@ -1341,6 +1341,12 @@ describe("design-system product-state guard baseline handling", () => {
   })
 
   it("groups baseline totals by product area using the tracker path map", () => {
+    expect(
+      guard.productStateAreaForPath(
+        "src/components/Media/MediaIngestJobsPanel.tsx"
+      )
+    ).toBe("Ingestion, Library, and media")
+
     const report = guard.formatReport({
       blocked: [],
       activeMigrationTargets: [
