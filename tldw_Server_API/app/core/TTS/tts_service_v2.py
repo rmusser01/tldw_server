@@ -118,7 +118,7 @@ _TTS_NONCRITICAL_EXCEPTIONS = (
 )
 _OMNIVOICE_ALIAS_VALUES = {"omnivoice", "omni-voice", "omni_voice"}
 _OMNIVOICE_INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
-_OMNIVOICE_GENERATION_KEYS = {
+_OMNIVOICE_SEMANTIC_GENERATION_KEYS = {
     "num_step",
     "guidance_scale",
     "denoise",
@@ -126,8 +126,6 @@ _OMNIVOICE_GENERATION_KEYS = {
     "position_temperature",
     "class_temperature",
     "layer_penalty_factor",
-    "duration",
-    "speed",
     "postprocess_output",
     "preprocess_prompt",
     "audio_chunk_duration",
@@ -2654,7 +2652,7 @@ class TTSServiceV2:
             return has_omnivoice_semantics
         if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
             has_omnivoice_semantics = True
-        if any(key in extras for key in _OMNIVOICE_GENERATION_KEYS):
+        if any(key in extras for key in _OMNIVOICE_SEMANTIC_GENERATION_KEYS):
             has_omnivoice_semantics = True
         mode = extras.get("omnivoice_mode", extras.get("mode"))
         if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
