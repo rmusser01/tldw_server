@@ -39,4 +39,13 @@ describe("StatusTag accessibility labels", () => {
 
     expect(badge).toHaveAttribute("data-ds-size", "sm")
   })
+
+  it("renders backend succeeded status as a successful completed run", () => {
+    const { container } = render(<StatusTag status="succeeded" />)
+    const badge = container.querySelector('[data-ds-component="Badge"]')
+
+    expect(screen.getByLabelText("Run status: Completed")).toHaveTextContent("Completed")
+    expect(screen.getByTestId("watchlists-status-icon-completed")).toBeInTheDocument()
+    expect(badge).toHaveAttribute("data-ds-variant", "success")
+  })
 })

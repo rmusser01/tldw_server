@@ -5517,8 +5517,71 @@ def _audio_projection_response(
         "synced_at": projection.get("synced_at"),
         "stale": projection.get("stale"),
         "superseded_by": projection.get("superseded_by"),
+        "error": projection.get("error"),
     }
     return response
+
+
+def _nonempty_audio_status_value(value: Any) -> str | None:
+    """Return a trimmed audio status/reason/request string when one is present."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _audio_no_task_projection_from_stats(stats: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a public audio status response for requested audio that never enqueued a task."""
+    audio = stats.get("audio") if isinstance(stats.get("audio"), dict) else {}
+    requested = (
+        stats.get("audio_briefing_requested") is True
+        or stats.get("generate_audio") is True
+        or audio.get("requested") is True
+        or audio.get("enabled") is True
+    )
+    status = (
+        _nonempty_audio_status_value(stats.get("audio_briefing_status"))
+        or _nonempty_audio_status_value(stats.get("audio_status"))
+        or _nonempty_audio_status_value(audio.get("status"))
+    )
+    fallback_reason = (
+        _nonempty_audio_status_value(stats.get("audio_briefing_reason"))
+        or _nonempty_audio_status_value(stats.get("audio_briefing_error"))
+        or _nonempty_audio_status_value(audio.get("fallback_reason"))
+        or _nonempty_audio_status_value(audio.get("reason"))
+        or _nonempty_audio_status_value(audio.get("error"))
+    )
+    audio_request_id = (
+        _nonempty_audio_status_value(stats.get("audio_request_id"))
+        or _nonempty_audio_status_value(audio.get("audio_request_id"))
+    )
+    workflow_run_id = _nonempty_audio_status_value(audio.get("workflow_run_id"))
+    schema_version = audio.get("schema_version") if isinstance(audio.get("schema_version"), int) else 1
+    synced_at = _nonempty_audio_status_value(audio.get("synced_at"))
+
+    if not (requested or status or fallback_reason or audio_request_id or workflow_run_id):
+        return None
+
+    return {
+        "task_id": None,
+        "status": status or "unknown",
+        "download_url": None,
+        "artifact_id": None,
+        "size_bytes": None,
+        "mime_type": None,
+        "script_artifact": None,
+        "speaker_artifacts": [],
+        "final_artifact": None,
+        "fallback_reason": fallback_reason,
+        "audio_request_id": audio_request_id,
+        "workflow_run_id": workflow_run_id,
+        "schema_version": schema_version,
+        "synced_at": synced_at,
+        "stale": audio.get("stale") if isinstance(audio.get("stale"), bool) else None,
+        "superseded_by": _nonempty_audio_status_value(audio.get("superseded_by")),
+        "error": _nonempty_audio_status_value(stats.get("audio_briefing_error"))
+        or _nonempty_audio_status_value(audio.get("error")),
+    }
 
 
 def _looks_like_collections_db(collections_db: Any) -> bool:
@@ -5565,8 +5628,20 @@ async def get_run_audio(
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
         stats = {}
 
-    task_id = stats.get("audio_briefing_task_id")
+    audio_stats = stats.get("audio") if isinstance(stats.get("audio"), dict) else {}
+    task_id = (
+        stats.get("audio_briefing_task_id")
+        or stats.get("audio_task_id")
+        or audio_stats.get("task_id")
+    )
     if not task_id:
+        no_task_projection = _audio_no_task_projection_from_stats(stats)
+        if no_task_projection:
+            return _audio_projection_response(
+                no_task_projection,
+                run_id=run_id,
+                task_id=None,
+            )
         raise HTTPException(status_code=404, detail="no_audio_briefing_for_run")
 
     audio_request_id = stats.get("audio_request_id")

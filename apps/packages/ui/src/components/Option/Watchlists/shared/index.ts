@@ -1,5 +1,11 @@
 export { StatusTag } from "./StatusTag"
 export { CronDisplay } from "./CronDisplay"
+export {
+  isWatchlistRunActive,
+  isWatchlistRunSuccessful,
+  isWatchlistRunTerminal,
+  normalizeWatchlistRunStatus
+} from "./runStatus"
 export { WatchlistsHelpTooltip } from "./WatchlistsHelpTooltip"
 export { WatchlistsHealthBar } from "./WatchlistsHealthBar"
 export { WatchlistsEmptyState } from "./WatchlistsEmptyState"

@@ -395,6 +395,49 @@ describe("OverviewTab quick setup flow", () => {
     ).toBeInTheDocument()
   }, 20_000)
 
+  it("offers variable cadence controls in beginner quick setup", async () => {
+    mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
+
+    render(<OverviewTab />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("watchlists-overview-cta-guided-setup")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("watchlists-overview-cta-guided-setup"))
+    fireEvent.change(screen.getByPlaceholderText("e.g., Daily Tech Feed"), {
+      target: { value: "AI Feed" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("https://example.com/feed.xml"), {
+      target: { value: "https://example.com/rss.xml" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Next" }))
+
+    await waitFor(() => {
+      expect(within(getQuickSetupDialog()).getByLabelText("Schedule")).toBeInTheDocument()
+    })
+
+    fireEvent.mouseDown(within(getQuickSetupDialog()).getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Every N hours/minutes"))
+    await waitFor(() => {
+      expect(within(getQuickSetupDialog()).getByLabelText("Every")).toBeInTheDocument()
+      expect(within(getQuickSetupDialog()).getByLabelText("Interval unit")).toBeInTheDocument()
+    })
+
+    fireEvent.mouseDown(within(getQuickSetupDialog()).getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Weekly"))
+    await waitFor(() => {
+      expect(within(getQuickSetupDialog()).getByLabelText("Weekday")).toBeInTheDocument()
+      expect(within(getQuickSetupDialog()).getByLabelText("Time")).toBeInTheDocument()
+    })
+
+    fireEvent.mouseDown(within(getQuickSetupDialog()).getByLabelText("Schedule"))
+    fireEvent.click(await screen.findByText("Advanced cron"))
+    await waitFor(() => {
+      expect(within(getQuickSetupDialog()).getByLabelText("Cron expression")).toBeInTheDocument()
+    })
+  }, 20_000)
+
   it("persists onboarding path selection and restores it on next render", async () => {
     mockState.fetchOverviewMock.mockResolvedValue(createOverviewPayload())
 

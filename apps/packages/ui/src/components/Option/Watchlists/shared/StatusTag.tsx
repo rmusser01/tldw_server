@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import type { RunStatus } from "@/types/watchlists"
+import { normalizeWatchlistRunStatus } from "./runStatus"
 
 interface StatusTagProps {
   status: RunStatus | string
@@ -90,7 +91,7 @@ const toTitleCase = (value: string): string =>
 
 export const StatusTag: React.FC<StatusTagProps> = ({ status, size = "default" }) => {
   const { t } = useTranslation(["watchlists"])
-  const normalizedStatus = String(status || "").trim().toLowerCase()
+  const normalizedStatus = normalizeWatchlistRunStatus(status)
   const config = STATUS_CONFIG[normalizedStatus]
   const statusConfig = config || UNKNOWN_STATUS_CONFIG
   const fallbackLabel = normalizedStatus

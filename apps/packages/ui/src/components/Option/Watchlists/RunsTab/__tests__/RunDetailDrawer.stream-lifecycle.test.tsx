@@ -425,6 +425,30 @@ describe("RunDetailDrawer stream lifecycle", () => {
     })
   })
 
+  it("displays requested audio status from run stats when no task was created", async () => {
+    mocks.getRunDetailsMock.mockResolvedValue({
+      ...baseRunDetails,
+      status: "completed",
+      finished_at: "2026-02-18T10:01:00Z",
+      stats: {
+        ...baseRunDetails.stats,
+        audio_briefing_requested: true,
+        audio_briefing_status: "configuration_required",
+        audio_briefing_reason: "tts_defaults_unavailable",
+        audio_request_id: "wla_no_task"
+      }
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    expect(mocks.getWatchlistRunAudioMock).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.getByText("Audio briefing")).toBeInTheDocument()
+      expect(screen.getByText("Configuration required")).toBeInTheDocument()
+      expect(screen.getByText("Reason: tts_defaults_unavailable")).toBeInTheDocument()
+    })
+  })
+
   it("displays completed audio with a final download link", async () => {
     mocks.getRunDetailsMock.mockResolvedValue({
       ...baseRunDetails,

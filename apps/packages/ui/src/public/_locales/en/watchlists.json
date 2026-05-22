@@ -1721,6 +1721,9 @@
   "runs_detail_audioTask": {
     "message": "Task {{taskId}}"
   },
+  "runs_detail_audioNoTask": {
+    "message": "No audio task created"
+  },
   "runs_detail_audioArtifactsLabel": {
     "message": "Audio artifacts"
   },
@@ -1732,6 +1735,9 @@
   },
   "runs_detail_audioFallback": {
     "message": "Fallback: {{reason}}"
+  },
+  "runs_detail_audioReason": {
+    "message": "Reason: {{reason}}"
   },
   "runs_detail_audioFinalAvailable": {
     "message": "Final audio available"
@@ -2243,6 +2249,21 @@
   "overview_onboarding_quickSetup_fields_schedule": {
     "message": "Schedule"
   },
+  "overview_onboarding_quickSetup_fields_intervalEvery": {
+    "message": "Every"
+  },
+  "overview_onboarding_quickSetup_fields_intervalUnit": {
+    "message": "Interval unit"
+  },
+  "overview_onboarding_quickSetup_fields_weekday": {
+    "message": "Weekday"
+  },
+  "overview_onboarding_quickSetup_fields_time": {
+    "message": "Time"
+  },
+  "overview_onboarding_quickSetup_fields_cronExpression": {
+    "message": "Cron expression"
+  },
   "overview_onboarding_quickSetup_fields_runNow": {
     "message": "Run test generation immediately"
   },
@@ -2254,6 +2275,9 @@
   },
   "overview_onboarding_quickSetup_placeholders_monitorName": {
     "message": "e.g., Morning Brief"
+  },
+  "overview_onboarding_quickSetup_placeholders_cronExpression": {
+    "message": "0 8 * * MON-FRI"
   },
   "overview_onboarding_quickSetup_validation_sourceNameRequired": {
     "message": "Enter a feed name"
@@ -2281,6 +2305,66 @@
   },
   "overview_onboarding_quickSetup_schedule_weekdays": {
     "message": "Weekdays at 08:00"
+  },
+  "overview_onboarding_quickSetup_schedule_interval": {
+    "message": "Every N hours/minutes"
+  },
+  "overview_onboarding_quickSetup_schedule_dailySimple": {
+    "message": "Daily"
+  },
+  "overview_onboarding_quickSetup_schedule_weekdaysSimple": {
+    "message": "Weekdays"
+  },
+  "overview_onboarding_quickSetup_schedule_weekly": {
+    "message": "Weekly"
+  },
+  "overview_onboarding_quickSetup_schedule_advanced": {
+    "message": "Advanced cron"
+  },
+  "overview_onboarding_quickSetup_schedule_dailyAt": {
+    "message": "Daily at {{time}}"
+  },
+  "overview_onboarding_quickSetup_schedule_weekdaysAt": {
+    "message": "Weekdays at {{time}}"
+  },
+  "overview_onboarding_quickSetup_schedule_weeklyAt": {
+    "message": "{{weekday}} at {{time}}"
+  },
+  "overview_onboarding_quickSetup_schedule_everyMinutes": {
+    "message": "Every {{value}} minute{{plural}}"
+  },
+  "overview_onboarding_quickSetup_schedule_everyHours": {
+    "message": "Every {{value}} hour{{plural}}"
+  },
+  "overview_onboarding_quickSetup_schedule_customCron": {
+    "message": "Custom cron: {{cron}}"
+  },
+  "overview_onboarding_quickSetup_intervalUnits_hours": {
+    "message": "Hours"
+  },
+  "overview_onboarding_quickSetup_intervalUnits_minutes": {
+    "message": "Minutes"
+  },
+  "overview_onboarding_quickSetup_weekdays_sun": {
+    "message": "Sunday"
+  },
+  "overview_onboarding_quickSetup_weekdays_mon": {
+    "message": "Monday"
+  },
+  "overview_onboarding_quickSetup_weekdays_tue": {
+    "message": "Tuesday"
+  },
+  "overview_onboarding_quickSetup_weekdays_wed": {
+    "message": "Wednesday"
+  },
+  "overview_onboarding_quickSetup_weekdays_thu": {
+    "message": "Thursday"
+  },
+  "overview_onboarding_quickSetup_weekdays_fri": {
+    "message": "Friday"
+  },
+  "overview_onboarding_quickSetup_weekdays_sat": {
+    "message": "Saturday"
   },
   "overview_onboarding_quickSetup_review_feed": {
     "message": "Feed"
@@ -3261,6 +3345,9 @@
     "message": "Running"
   },
   "runs_statusLabels_completed": {
+    "message": "Completed"
+  },
+  "runs_statusLabels_succeeded": {
     "message": "Completed"
   },
   "runs_statusLabels_failed": {

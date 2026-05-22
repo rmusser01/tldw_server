@@ -75,6 +75,58 @@ class TestGetRunAudioEndpoint:
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
+    async def test_returns_no_task_audio_status_when_audio_was_requested(self):
+        """Requested audio with no task should expose the persisted reason instead of disappearing."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="succeeded",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps(
+                {
+                    "audio_briefing_requested": True,
+                    "audio_briefing_status": "configuration_required",
+                    "audio_briefing_reason": "tts_defaults_unavailable",
+                    "audio_request_id": "wla_no_task",
+                }
+            ),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result == {
+            "run_id": 1,
+            "task_id": None,
+            "queue_name": None,
+            "status": "configuration_required",
+            "audio_uri": None,
+            "download_url": None,
+            "artifact_id": None,
+            "size_bytes": None,
+            "mime_type": None,
+            "script_artifact": None,
+            "speaker_artifacts": [],
+            "final_artifact": None,
+            "fallback_reason": "tts_defaults_unavailable",
+            "audio_request_id": "wla_no_task",
+            "workflow_run_id": None,
+            "schema_version": 1,
+            "synced_at": None,
+            "stale": None,
+            "superseded_by": None,
+            "error": None,
+        }
+
+    @pytest.mark.asyncio
     async def test_missing_workflows_db_returns_queued_scheduler_task(self):
         """Missing Workflows DB should still report queued scheduler task status."""
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio

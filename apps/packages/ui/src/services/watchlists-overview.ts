@@ -138,6 +138,14 @@ const DELIVERY_ATTENTION_STATUSES = new Set([
   "warning"
 ])
 
+const AUDIO_ATTENTION_STATUSES = new Set([
+  "enqueue failed",
+  "failed",
+  "error",
+  "configuration required",
+  "queue unavailable"
+])
+
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Record<string, unknown>
@@ -193,11 +201,7 @@ const hasAudioOutputIssue = (metadata: unknown): boolean => {
       (record.audio_status as string | null | undefined) ||
       (audio?.status as string | null | undefined)
   )
-  if (
-    normalized === "enqueue failed" ||
-    normalized === "failed" ||
-    normalized === "error"
-  ) {
+  if (AUDIO_ATTENTION_STATUSES.has(normalized)) {
     return true
   }
   return requested && normalized === "skipped"
