@@ -5,6 +5,7 @@ Tests the trigger function, workflow input construction, and workflow definition
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -476,7 +477,7 @@ class TestTriggerAudioBriefing:
         scheduler.submit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_trigger_handles_scheduler_failure(self):
+    async def test_trigger_handles_scheduler_resolution_failure(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             trigger_audio_briefing,
         )
@@ -502,10 +503,36 @@ class TestTriggerAudioBriefing:
                 db=db,
             )
 
-        assert result.status == "enqueue_failed"
+        assert result.status == "queue_unavailable"
         assert result.task_id is None
-        assert result.reason == "scheduler_submit_failed"
+        assert result.reason == "scheduler_unavailable"
         assert result.submitted is False
+
+    @pytest.mark.asyncio
+    async def test_trigger_propagates_scheduler_resolution_cancellation(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            trigger_audio_briefing,
+        )
+
+        db = MagicMock()
+        db.list_items.return_value = (
+            [{"title": "Story", "summary": "S", "url": "https://x.com"}],
+            1,
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Scheduler.get_global_scheduler",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await trigger_audio_briefing(
+                    user_id=1,
+                    job_id=1,
+                    run_id=1,
+                    output_prefs={"generate_audio": True},
+                    db=db,
+                )
 
     @pytest.mark.asyncio
     async def test_trigger_handles_db_error(self):
@@ -527,6 +554,27 @@ class TestTriggerAudioBriefing:
         assert result.task_id is None
         assert result.reason == "item_load_failed"
         assert result.submitted is False
+
+    @pytest.mark.asyncio
+    async def test_trigger_propagates_item_load_cancellation(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            trigger_audio_briefing,
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.run_in_threadpool",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+            create=True,
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await trigger_audio_briefing(
+                    user_id=1,
+                    job_id=1,
+                    run_id=1,
+                    output_prefs={"generate_audio": True},
+                    db=MagicMock(),
+                )
 
     @pytest.mark.asyncio
     async def test_trigger_returns_queue_unavailable_when_scale_returns_zero(self):
@@ -587,6 +635,33 @@ class TestTriggerAudioBriefing:
         scheduler.submit.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_trigger_propagates_worker_scale_cancellation(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            trigger_audio_briefing,
+        )
+
+        db = MagicMock()
+        db.list_items.return_value = (
+            [{"title": "Story", "summary": "S", "url": "https://x.com"}],
+            1,
+        )
+        scheduler = self.SubmitOnlyScheduler("task_never_submitted")
+        scheduler.scale_workers = AsyncMock(side_effect=asyncio.CancelledError)
+
+        with pytest.raises(asyncio.CancelledError):
+            await trigger_audio_briefing(
+                user_id=1,
+                job_id=1,
+                run_id=1,
+                output_prefs={"generate_audio": True},
+                db=db,
+                scheduler=scheduler,
+            )
+
+        scheduler.scale_workers.assert_awaited_once_with(1, "workflows")
+        scheduler.submit.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_trigger_returns_enqueue_failed_when_submit_raises(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             trigger_audio_briefing,
@@ -612,6 +687,33 @@ class TestTriggerAudioBriefing:
         assert result.status == "enqueue_failed"
         assert result.task_id is None
         assert result.reason == "scheduler_submit_failed"
+        scheduler.scale_workers.assert_awaited_once_with(1, "workflows")
+        scheduler.submit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_trigger_propagates_submit_cancellation(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            trigger_audio_briefing,
+        )
+
+        db = MagicMock()
+        db.list_items.return_value = (
+            [{"title": "Story", "summary": "S", "url": "https://x.com"}],
+            1,
+        )
+        scheduler = self.SubmitOnlyScheduler("task_never_returned")
+        scheduler.submit = AsyncMock(side_effect=asyncio.CancelledError)
+
+        with pytest.raises(asyncio.CancelledError):
+            await trigger_audio_briefing(
+                user_id=1,
+                job_id=1,
+                run_id=1,
+                output_prefs={"generate_audio": True},
+                db=db,
+                scheduler=scheduler,
+            )
+
         scheduler.scale_workers.assert_awaited_once_with(1, "workflows")
         scheduler.submit.assert_awaited_once()
 

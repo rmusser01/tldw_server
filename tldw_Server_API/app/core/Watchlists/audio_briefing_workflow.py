@@ -6,6 +6,7 @@ when the job's output_prefs has generate_audio=True.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Literal, MutableMapping
 
@@ -26,6 +27,14 @@ AudioBriefingTriggerStatus = Literal[
 
 @dataclass(frozen=True)
 class AudioBriefingTriggerResult:
+    """Outcome contract for requesting a Watchlists audio briefing workflow.
+
+    Attributes:
+        status: Normalized trigger outcome persisted to output metadata.
+        task_id: Scheduler task ID when workflow submission succeeds.
+        reason: Stable diagnostic code for non-submitted or failed outcomes.
+    """
+
     status: AudioBriefingTriggerStatus
     task_id: str | None = None
     reason: str | None = None
@@ -310,6 +319,8 @@ async def trigger_audio_briefing(
             limit=100,
             offset=0,
         )
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "Audio briefing: could not load scraped items for run {} (error_type={})",
@@ -358,16 +369,20 @@ async def trigger_audio_briefing(
             from tldw_Server_API.app.core.Scheduler import get_global_scheduler
 
             scheduler = await get_global_scheduler()
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "Audio briefing: failed to resolve scheduler for run {} (error_type={})",
             run_id,
             type(exc).__name__,
         )
-        return AudioBriefingTriggerResult(status="enqueue_failed", reason="scheduler_submit_failed")
+        return AudioBriefingTriggerResult(status="queue_unavailable", reason="scheduler_unavailable")
 
     try:
         worker_count = await _ensure_workflows_queue_has_worker(scheduler)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "Audio briefing: workflows queue unavailable for run {} (error_type={})",
@@ -405,6 +420,8 @@ async def trigger_audio_briefing(
             f"task_id={task_id}, items={len(items)}"
         )
         return AudioBriefingTriggerResult(status="submitted", task_id=task_id)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "Audio briefing: failed to submit workflow for run {} (error_type={})",

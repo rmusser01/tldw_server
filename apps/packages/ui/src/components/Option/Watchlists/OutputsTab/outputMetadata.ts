@@ -25,6 +25,7 @@ export type AudioStatusLabelKey =
   | "running"
   | "in_progress"
   | "failed"
+  | "disabled"
   | "skipped"
   | "skipped_no_items"
   | "configuration_required"
@@ -120,6 +121,7 @@ const DEFAULT_AUDIO_STATUS_LABELS: Record<AudioStatusLabelKey, string> = {
   running: "Running",
   in_progress: "In progress",
   failed: "Failed",
+  disabled: "Disabled",
   skipped: "Skipped",
   skipped_no_items: "Skipped: no items",
   configuration_required: "Configuration required",
@@ -156,6 +158,7 @@ export const createOutputMetadataLabels = (
       DEFAULT_AUDIO_STATUS_LABELS.in_progress
     ),
     failed: t("watchlists:outputs.audioStatus.failed", DEFAULT_AUDIO_STATUS_LABELS.failed),
+    disabled: t("watchlists:outputs.audioStatus.disabled", DEFAULT_AUDIO_STATUS_LABELS.disabled),
     skipped: t("watchlists:outputs.audioStatus.skipped", DEFAULT_AUDIO_STATUS_LABELS.skipped),
     skipped_no_items: t(
       "watchlists:outputs.audioStatus.skippedNoItems",
@@ -524,6 +527,7 @@ export const getAudioStatusColor = (status: string): string => {
   }
   if (
     normalized === "skipped" ||
+    normalized === "disabled" ||
     normalized === "skipped_no_items" ||
     normalized === "cancelled"
   ) {

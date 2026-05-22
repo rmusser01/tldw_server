@@ -5300,9 +5300,19 @@ async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | Non
         task = await scheduler.get_task(task_id)
     except asyncio.CancelledError:
         raise
-    except SchedulerError:
+    except SchedulerError as exc:
+        logger.warning(
+            "Watchlists audio: scheduler status lookup failed for task {} (error_type={})",
+            task_id,
+            type(exc).__name__,
+        )
         return None
-    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "Watchlists audio: scheduler status lookup failed for task {} (error_type={})",
+            task_id,
+            type(exc).__name__,
+        )
         return None
     if task is None:
         return None

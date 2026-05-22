@@ -3,6 +3,7 @@ import {
   buildDeliveryDisclosureSummary,
   buildRegenerateOutputRequest,
   createOutputMetadataLabels,
+  getAudioStatusColor,
   getAudioStatusLabel,
   getDeliveryStatusColor,
   getDeliveryStatusLabel,
@@ -231,6 +232,17 @@ describe("outputMetadata helpers", () => {
     expect(summary.statusLabel).toBe("Queue unavailable")
     expect(summary.statusColor).toBe("gold")
     expect(summary.fallbackReason).toBe("workflows_queue_has_no_workers")
+  })
+
+  it("labels structured audio non-submission statuses", () => {
+    expect(getAudioStatusLabel("disabled")).toBe("Disabled")
+    expect(getAudioStatusColor("disabled")).toBe("default")
+    expect(getAudioStatusLabel("skipped_no_items")).toBe("Skipped: no items")
+    expect(getAudioStatusColor("skipped_no_items")).toBe("default")
+    expect(getAudioStatusLabel("configuration_required")).toBe("Configuration required")
+    expect(getAudioStatusColor("configuration_required")).toBe("gold")
+    expect(getAudioStatusLabel("queue_unavailable")).toBe("Queue unavailable")
+    expect(getAudioStatusColor("queue_unavailable")).toBe("gold")
   })
 
   it("returns artifact labels and tag colors by output kind", () => {

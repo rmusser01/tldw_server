@@ -162,6 +162,32 @@ class TestGetRunAudioEndpoint:
         assert sensitive_error not in json.dumps(result)
 
     @pytest.mark.asyncio
+    async def test_scheduler_status_lookup_logs_failures_without_leaking_error_text(self):
+        """Scheduler lookup fallback should be observable without exposing raw exception text."""
+        from tldw_Server_API.app.core.Scheduler import SchedulerError
+        from tldw_Server_API.app.api.v1.endpoints import watchlists
+
+        sensitive_error = "scheduler failed at /tmp/secret/path with bearer token abc123"
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=SchedulerError(sensitive_error))
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+            patch.object(watchlists.logger, "warning") as warning,
+        ):
+            result = await watchlists._get_audio_scheduler_task_status("task_pending")
+
+        assert result is None
+        warning.assert_called_once()
+        logged = " ".join(str(part) for part in warning.call_args.args)
+        assert "task_pending" in logged
+        assert "SchedulerError" in logged
+        assert sensitive_error not in logged
+
+    @pytest.mark.asyncio
     async def test_missing_workflows_db_does_not_start_global_scheduler_for_status_lookup(self):
         """Read-only audio status should not initialize the process-global Scheduler."""
         from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
