@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  formatQuickSetupCadenceLabel,
   getLocalTimezone,
+  normalizeQuickSetupIntervalCadence,
   parseQuickSetupExtraSourceUrls,
   QUICK_SETUP_DEFAULT_VALUES,
   resolveQuickSetupSchedule,
@@ -82,6 +84,46 @@ describe("watchlists overview quick setup helpers", () => {
     })
 
     timezoneSpy.mockRestore()
+  })
+
+  it("normalizes interval cadence labels and payload bounds consistently", () => {
+    expect(normalizeQuickSetupIntervalCadence(30, "hours")).toEqual({
+      kind: "interval",
+      every: 23,
+      unit: "hours"
+    })
+    expect(normalizeQuickSetupIntervalCadence(1, "minutes")).toEqual({
+      kind: "interval",
+      every: 5,
+      unit: "minutes"
+    })
+
+    const intervalCopy = {
+      interval: (value: number, unit: "minutes" | "hours") => `Every ${value} ${unit}`
+    }
+    expect(
+      formatQuickSetupCadenceLabel({ kind: "interval", every: 30, unit: "hours" }, intervalCopy)
+    ).toBe("Every 23 hours")
+    expect(
+      resolveQuickSetupSchedule({ kind: "interval", every: 30, unit: "hours" }).schedule_expr
+    ).toBe("0 */23 * * *")
+    expect(
+      formatQuickSetupCadenceLabel({ kind: "interval", every: 1, unit: "minutes" }, intervalCopy)
+    ).toBe("Every 5 minutes")
+    expect(
+      resolveQuickSetupSchedule({ kind: "interval", every: 1, unit: "minutes" }).schedule_expr
+    ).toBe("*/5 * * * *")
+  })
+
+  it("passes weekly cadence tokens to label copy for localization", () => {
+    expect(
+      formatQuickSetupCadenceLabel(
+        { kind: "weekly", weekday: "fri", time: "06:30" },
+        {
+          weekly: (weekday, time) => `${weekday}:${time}`
+        }
+      )
+    ).toBe("FRI:06:30")
   })
 
   it("does not serialize invalid advanced cron drafts", () => {

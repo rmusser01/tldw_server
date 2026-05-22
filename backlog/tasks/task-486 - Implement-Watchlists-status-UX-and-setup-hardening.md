@@ -64,9 +64,11 @@ Docs/superpowers/plans/2026-05-22-watchlists-status-ux-setup-hardening-implement
 - Added shared frontend run-status normalization so `succeeded` behaves as completed in badges, preview lookup, terminal stream handling, polling helpers, and notifications.
 - Overview health now treats `queue_unavailable` and `configuration_required` as actionable audio output attention states while leaving `disabled` and `skipped_no_items` informational.
 - PR review follow-up: aligned Overview audio health attention constants to canonical snake_case status keys and kept normalization tolerant of space/hyphen variants.
+- PR review follow-up: Quick Setup interval cadence is clamped on unit changes and label/payload generation now share the same interval bounds.
+- PR review follow-up: weekly cadence review labels now pass weekday tokens to the UI copy layer so localized weekday strings are used by the caller.
 - `GET /api/v1/watchlists/runs/{run_id}/audio` returns metadata-only requested audio status when no task was created, and still returns `404 no_audio_briefing_for_run` when no audio request/status evidence exists.
 - Verification recorded: focused Vitest Watchlists status/setup group passed (8 files, 72 tests); RunsTab accessibility live-region test passed (2 tests); full `test_audio_output_delivery.py` passed (26 tests); locale JSON parse passed; Bandit on `tldw_Server_API/app/api/v1/endpoints/watchlists.py` passed with 0 findings.
-- PR review follow-up verification: `bun run test src/services/__tests__/watchlists-overview.test.ts --maxWorkers=1 --no-file-parallelism` passed (7 tests).
+- PR review follow-up verification: `bun run test src/services/__tests__/watchlists-overview.test.ts --maxWorkers=1 --no-file-parallelism` passed (7 tests); `bun run test src/components/Option/Watchlists/OverviewTab/__tests__/quick-setup.test.ts --maxWorkers=1 --no-file-parallelism` passed (11 tests); `bun run test src/components/Option/Watchlists/OverviewTab/__tests__/OverviewTab.quick-setup.test.tsx --maxWorkers=1 --no-file-parallelism` passed (23 tests); `bun run test:watchlists:typecheck` passed (3 tests).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

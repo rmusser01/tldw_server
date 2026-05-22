@@ -6,6 +6,10 @@ import type {
 import {
   buildCronFromPreset,
   formatScheduleTimeValue,
+  INTERVAL_HOURS_MAX,
+  INTERVAL_HOURS_MIN,
+  INTERVAL_MINUTES_MAX,
+  INTERVAL_MINUTES_MIN,
   normalizeWeekdayToken,
   parseScheduleTime,
   validateCronSchedule,
@@ -16,7 +20,7 @@ import { normalizeWatchlistTemplateName } from "../shared/templateNames"
 
 export type QuickSetupSchedulePreset = "none" | "hourly" | "daily" | "weekdays"
 export type QuickSetupScheduleMode = WatchlistCadenceDraft["kind"]
-type WatchlistCadenceIntervalUnit = "minute" | "minutes" | "hour" | "hours"
+export type WatchlistCadenceIntervalUnit = "minute" | "minutes" | "hour" | "hours"
 export type WatchlistCadenceDraft =
   | { kind: "manual" }
   | { kind: "interval"; every: number; unit: WatchlistCadenceIntervalUnit }
@@ -64,6 +68,26 @@ const normalizeCadenceIntervalUnit = (
   return unit === "minute" || unit === "minutes" ? "minutes" : "hours"
 }
 
+const clampInteger = (value: unknown, min: number, max: number): number => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return min
+  return Math.min(max, Math.max(min, Math.floor(parsed)))
+}
+
+export const normalizeQuickSetupIntervalCadence = (
+  every: unknown,
+  unit: WatchlistCadenceIntervalUnit
+): Extract<WatchlistCadenceDraft, { kind: "interval" }> => {
+  const normalizedUnit = normalizeCadenceIntervalUnit(unit)
+  const min = normalizedUnit === "minutes" ? INTERVAL_MINUTES_MIN : INTERVAL_HOURS_MIN
+  const max = normalizedUnit === "minutes" ? INTERVAL_MINUTES_MAX : INTERVAL_HOURS_MAX
+  return {
+    kind: "interval",
+    every: clampInteger(every, min, max),
+    unit: normalizedUnit
+  }
+}
+
 export const createDefaultQuickSetupCadenceDraft = (
   kind: QuickSetupScheduleMode,
   current?: WatchlistCadenceDraft
@@ -74,13 +98,10 @@ export const createDefaultQuickSetupCadenceDraft = (
       : "08:00"
   if (kind === "manual") return { kind: "manual" }
   if (kind === "interval") {
-    return {
-      kind: "interval",
-      every: current?.kind === "interval" && Number.isFinite(Number(current.every))
-        ? Number(current.every)
-        : 5,
-      unit: current?.kind === "interval" ? current.unit : "hours"
-    }
+    return normalizeQuickSetupIntervalCadence(
+      current?.kind === "interval" ? current.every : 5,
+      current?.kind === "interval" ? current.unit : "hours"
+    )
   }
   if (kind === "daily") return { kind: "daily", time }
   if (kind === "weekdays") return { kind: "weekdays", time }
@@ -135,7 +156,7 @@ export const formatQuickSetupCadenceLabel = (
     hourly: string
     daily: (time: string) => string
     weekdays: (time: string) => string
-    weekly: (weekday: string, time: string) => string
+    weekly: (weekday: WeekdayToken, time: string) => string
     interval: (value: number, unit: ScheduleIntervalUnit) => string
     advanced: (cron: string) => string
   }>
@@ -145,8 +166,9 @@ export const formatQuickSetupCadenceLabel = (
     : legacyPresetToQuickSetupCadenceDraft(draft)
   if (cadence.kind === "manual") return copy?.manual || "Manual only"
   if (cadence.kind === "interval") {
-    const every = Math.max(1, Math.floor(Number(cadence.every) || 1))
-    const unit = normalizeCadenceIntervalUnit(cadence.unit)
+    const interval = normalizeQuickSetupIntervalCadence(cadence.every, cadence.unit)
+    const every = interval.every
+    const unit = normalizeCadenceIntervalUnit(interval.unit)
     if (every === 1 && unit === "hours" && copy?.hourly) return copy.hourly
     if (copy?.interval) return copy.interval(every, unit)
     return `Every ${every} ${unit === "minutes" ? "minute" : "hour"}${every === 1 ? "" : "s"}`
@@ -161,8 +183,8 @@ export const formatQuickSetupCadenceLabel = (
     return copy?.weekdays ? copy.weekdays(time) : `Weekdays at ${time}`
   }
   if (cadence.kind === "weekly") {
-    const weekday = WEEKDAY_LABELS[normalizeWeekdayToken(cadence.weekday)]
-    return copy?.weekly ? copy.weekly(weekday, time) : `${weekday} at ${time}`
+    const weekday = normalizeWeekdayToken(cadence.weekday)
+    return copy?.weekly ? copy.weekly(weekday, time) : `${WEEKDAY_LABELS[weekday]} at ${time}`
   }
   return copy?.daily ? copy.daily(time) : `Daily at ${time}`
 }
@@ -185,11 +207,12 @@ export const resolveQuickSetupSchedule = (
     }
     const time = parseScheduleTime("time" in schedule ? schedule.time : undefined)
     if (schedule.kind === "interval") {
+      const interval = normalizeQuickSetupIntervalCadence(schedule.every, schedule.unit)
       return {
         schedule_expr: buildCronFromPreset({
           preset: "interval",
-          intervalValue: schedule.every,
-          intervalUnit: normalizeCadenceIntervalUnit(schedule.unit),
+          intervalValue: interval.every,
+          intervalUnit: normalizeCadenceIntervalUnit(interval.unit),
           hour: time.hour,
           minute: time.minute,
           weekday: "MON"

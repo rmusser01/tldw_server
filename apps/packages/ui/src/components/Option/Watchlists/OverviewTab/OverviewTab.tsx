@@ -54,8 +54,10 @@ import {
   createDefaultQuickSetupCadenceDraft,
   formatQuickSetupCadenceLabel,
   legacyPresetToQuickSetupCadenceDraft,
+  normalizeQuickSetupIntervalCadence,
   parseQuickSetupExtraSourceUrls,
   QUICK_SETUP_DEFAULT_VALUES,
+  type WatchlistCadenceIntervalUnit,
   type QuickSetupScheduleMode,
   type QuickSetupValues,
   toQuickSetupJobPayload,
@@ -2031,6 +2033,16 @@ export const OverviewTab: React.FC = () => {
                       <Select
                         aria-label={t("watchlists:overview.onboarding.quickSetup.fields.intervalUnit", "Interval unit")}
                         options={quickSetupIntervalUnitOptions}
+                        onChange={(value) => {
+                          const cadence = normalizeQuickSetupIntervalCadence(
+                            quickSetupForm.getFieldValue(["scheduleCadence", "every"]),
+                            value as WatchlistCadenceIntervalUnit
+                          )
+                          quickSetupForm.setFieldsValue({
+                            scheduleCadence: cadence,
+                            schedulePreset: cadenceDraftToLegacyPreset(cadence)
+                          })
+                        }}
                       />
                     </Form.Item>
                   </div>
@@ -2185,12 +2197,15 @@ export const OverviewTab: React.FC = () => {
                         t("watchlists:overview.onboarding.quickSetup.schedule.weekdaysAt", "Weekdays at {{time}}", {
                           time
                         }),
-                      weekly: (weekday, time) =>
-                        t(
+                      weekly: (weekday, time) => {
+                        const weekdayLabel =
+                          quickSetupWeekdayOptions.find((option) => option.value === weekday)?.label || weekday
+                        return t(
                           "watchlists:overview.onboarding.quickSetup.schedule.weeklyAt",
                           "{{weekday}} at {{time}}",
-                          { weekday, time }
-                        ),
+                          { weekday: weekdayLabel, time }
+                        )
+                      },
                       interval: (value, unit) =>
                         unit === "minutes"
                           ? t(
