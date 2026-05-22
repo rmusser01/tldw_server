@@ -277,6 +277,25 @@ async def test_implicit_omnivoice_priority_without_semantics_can_fallback():
     assert service.fake_openai.calls == 1
 
 
+@pytest.mark.parametrize("extra_params", [{"speed": 1.0}, {"duration": 2.0}])
+@pytest.mark.asyncio
+async def test_implicit_omnivoice_priority_with_generic_generation_key_can_fallback(extra_params):
+    service = _service_with_failing_omnivoice_and_successful_openai()
+    request = OpenAISpeechRequest(
+        model="tts-1",
+        input="hello",
+        voice="auto",
+        response_format="wav",
+        stream=False,
+        extra_params=extra_params,
+    )
+
+    audio = await _collect(request, service)
+
+    assert audio == b"fallback-audio"
+    assert service.fake_openai.calls == 1
+
+
 @pytest.mark.asyncio
 async def test_explicit_non_omnivoice_custom_voice_keeps_fallback_enabled():
     service = _service_with_failing_openai_and_successful_fallback()
