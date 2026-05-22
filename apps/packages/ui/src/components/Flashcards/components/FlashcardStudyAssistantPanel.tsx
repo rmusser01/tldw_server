@@ -1,8 +1,9 @@
 import React from "react"
-import { Alert, Button, Card, Empty, Input, Space, Tag, Typography } from "antd"
+import { Button, Card, Empty, Input, Space, Tag, Typography } from "antd"
 import { Lightbulb, MessageSquareText, Sparkles, Volume2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Link as RouterLink, useInRouterContext } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives"
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition"
 import { useTTS } from "@/hooks/useTTS"
 import type {
@@ -239,6 +240,9 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
       defaultValue: "Study assistant requires an LLM provider. Configure one in Settings \u2192 LLM Providers."
     })
   }, [isError, queryError, t])
+  const assistantUnavailableTitle = t("option:flashcards.studyAssistantUnavailable", {
+    defaultValue: "Study assistant unavailable"
+  })
 
   const { speak, isSpeaking } = useTTS()
   const {
@@ -258,6 +262,7 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
   const [factCheckOpen, setFactCheckOpen] = React.useState(false)
   const lastAutoSubmitTokenRef = React.useRef<number | null>(null)
   const resetTranscriptRef = React.useRef(resetTranscript)
+  const assistantWarningMessage = assistantError ?? classifiedQueryError
 
   React.useEffect(() => {
     resetTranscriptRef.current = resetTranscript
@@ -528,18 +533,13 @@ export const FlashcardStudyAssistantPanel: React.FC<FlashcardStudyAssistantPanel
       }
     >
       <Space orientation="vertical" size={12} className="w-full">
-        {(assistantError || isError) && (
+        {(assistantWarningMessage || isError) && (
           <Alert
-            showIcon
-            type="warning"
-            title={
-              assistantError ??
-              classifiedQueryError ??
-              t("option:flashcards.studyAssistantUnavailable", {
-                defaultValue: "Study assistant unavailable"
-              })
-            }
-          />
+            variant="warning"
+            title={assistantUnavailableTitle}
+          >
+            {assistantWarningMessage}
+          </Alert>
         )}
         {conflictRequest && (
           <div className="rounded border border-amber-300 bg-amber-50 p-3">
