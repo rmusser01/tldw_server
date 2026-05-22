@@ -4945,6 +4945,7 @@ def _output_row_summary(row: Any) -> dict[str, Any]:
         "delivery_plan_present": isinstance(metadata.get("delivery_plan"), dict),
         "audio_briefing_status": metadata.get("audio_briefing_status"),
         "audio_briefing_task_id": metadata.get("audio_briefing_task_id"),
+        "audio_briefing_reason": metadata.get("audio_briefing_reason"),
     }
 
 
@@ -5011,9 +5012,6 @@ async def retry_run_audio(
         output_prefs=output_prefs,
         db=target_db,
     )
-    if not audio_result.submitted:
-        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
-
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
     persisted_audio_status = "queued" if audio_result.submitted else audio_result.status
     run_stats["audio_briefing_status"] = persisted_audio_status
@@ -5027,6 +5025,9 @@ async def retry_run_audio(
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("watchlists.retry_audio failed to persist retry state for run={}: {}", run_id, exc)
         raise HTTPException(status_code=500, detail="audio_retry_state_update_failed") from exc
+
+    if not audio_result.submitted:
+        raise HTTPException(status_code=409, detail="audio_retry_not_queued")
 
     return RunStageRetryResponse(
         run_id=run_id,
