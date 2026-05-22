@@ -32,12 +32,17 @@ const renderReferencesTab = () => {
 }
 
 describe("ReferencesTab design-system empty states", () => {
+  let previousWorkspaceState = useDocumentWorkspaceStore.getState()
+  let previousConnectionStoreState = useConnectionStore.getState()
+
   beforeEach(() => {
+    previousWorkspaceState = useDocumentWorkspaceStore.getState()
+    previousConnectionStoreState = useConnectionStore.getState()
+
     useDocumentWorkspaceStore.setState({ activeDocumentId: 1 })
-    const previousConnectionState = useConnectionStore.getState().state
     useConnectionStore.setState({
       state: {
-        ...previousConnectionState,
+        ...previousConnectionStoreState.state,
         isConnected: true,
         mode: "normal"
       }
@@ -52,15 +57,8 @@ describe("ReferencesTab design-system empty states", () => {
 
   afterEach(() => {
     cleanup()
-    useDocumentWorkspaceStore.setState({ activeDocumentId: null })
-    const previousConnectionState = useConnectionStore.getState().state
-    useConnectionStore.setState({
-      state: {
-        ...previousConnectionState,
-        isConnected: false,
-        mode: "normal"
-      }
-    })
+    useDocumentWorkspaceStore.setState(previousWorkspaceState)
+    useConnectionStore.setState(previousConnectionStoreState)
     vi.clearAllMocks()
   })
 
@@ -92,7 +90,9 @@ describe("ReferencesTab design-system empty states", () => {
     const { container } = renderReferencesTab()
 
     const title = screen.getByText("Failed to load references")
-    expect(title.closest('[data-ds-component="EmptyState"]')).not.toBeNull()
+    const emptyState = title.closest('[data-ds-component="EmptyState"]')
+    expect(emptyState).not.toBeNull()
+    expect(emptyState?.querySelector("svg")).toHaveClass("text-error")
     expect(screen.getByText("Reference endpoint unavailable")).toBeInTheDocument()
     expect(container.querySelectorAll('[data-ds-component="EmptyState"]')).toHaveLength(1)
   })

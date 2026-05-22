@@ -50,13 +50,16 @@ Continue the Document and Workspace product-state design-system migration by rep
 - Red test evidence: `bunx vitest run src/components/DocumentWorkspace/LeftSidebar/__tests__/ReferencesTab.design-system-empty.test.tsx --reporter=dot` failed on missing `data-ds-component="EmptyState"` ancestors for both states before the component migration.
 - Migrated only the guarded ReferencesTab server-unavailable and reference-load error Empty surfaces to the shared design-system EmptyState primitive. The no-references and filtered-empty states remain out of scope for this product-state baseline slice.
 - Removed two baseline rows for `ReferencesTab.tsx`, reducing total product-state baseline exceptions from 294 to 292 and Document/Workspace exceptions from 3 to 1.
+- PR review remediation:
+  - Added `iconClassName="text-error"` to the reference-load error EmptyState and covered it with a focused assertion. Red evidence: the focused test failed because the icon still had `text-text-subtle`; after the change it passed.
+  - Updated the focused test to snapshot and fully restore `useDocumentWorkspaceStore` and `useConnectionStore` state in `afterEach`, matching the nearby loading-state test pattern and avoiding singleton store leakage.
 - Verification:
   - `bunx vitest run src/components/DocumentWorkspace/LeftSidebar/__tests__/ReferencesTab.design-system-empty.test.tsx --reporter=dot` passed: 2 tests.
   - `bunx vitest run src/components/DocumentWorkspace/LeftSidebar/__tests__/ReferencesTab.test.tsx --reporter=dot` passed: 3 tests.
   - `bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot` passed: 54 tests.
   - `node -e "JSON.parse(require('fs').readFileSync('apps/packages/ui/scripts/design-system-product-state-baseline.json','utf8')); console.log('baseline json ok')"` passed.
   - `bun run verify:design-system-state` passed with 292 baseline exceptions total and 1 remaining Document/Workspace exception.
-  - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails on existing repo-wide UI type debt outside the touched ReferencesTab files; `/tmp/tldw_refs_tab_tsc.log` contains no `ReferencesTab` or `design-system-empty` matches.
+  - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails on existing repo-wide UI type debt outside the touched ReferencesTab files; `/tmp/tldw_refs_tab_review_tsc.log` contains no `ReferencesTab` or `design-system-empty` matches.
 - Bandit is not applicable to this UI-only TypeScript/React slice; no Python files were touched.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

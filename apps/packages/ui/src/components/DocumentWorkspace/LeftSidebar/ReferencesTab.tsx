@@ -417,6 +417,7 @@ const ErrorState: React.FC<{ error: Error }> = ({ error }) => {
         variant="inline"
         size="md"
         icon={FileText}
+        iconClassName="text-error"
         title={t(
           "option:documentWorkspace.referencesError",
           "Failed to load references"
