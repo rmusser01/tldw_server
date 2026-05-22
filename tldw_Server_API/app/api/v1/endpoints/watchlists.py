@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
+from tldw_Server_API.app.core.Scheduler import get_global_scheduler
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
@@ -5283,6 +5284,53 @@ async def get_run_diagnostics(
 # Audio Briefing
 # --------------------
 
+_SCHEDULER_AUDIO_STATUS_MAP = {
+    "queued": "queued",
+    "pending": "pending",
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "dead": "dead",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+}
+
+
+async def _get_audio_scheduler_task_status(task_id: str) -> dict[str, Any] | None:
+    """Return a safe Scheduler status snapshot for a Watchlists audio task."""
+    try:
+        scheduler = await get_global_scheduler(start_workers=False)
+        task = await scheduler.get_task(task_id)
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
+        return None
+    if task is None:
+        return None
+
+    raw_status = getattr(getattr(task, "status", None), "value", None) or str(getattr(task, "status", "unknown"))
+    raw_status = raw_status.rsplit(".", 1)[-1].lower()
+    status_value = _SCHEDULER_AUDIO_STATUS_MAP.get(raw_status, "unknown")
+    result: dict[str, Any] = {
+        "task_id": task_id,
+        "status": status_value,
+        "queue_name": getattr(task, "queue_name", None),
+    }
+    if getattr(task, "error", None):
+        result["fallback_reason"] = "scheduler_task_error"
+    return result
+
+
+def _pending_audio_scheduler_fallback(run_id: int, task_id: Any) -> dict[str, Any]:
+    """Build the safe pending response used before workflow artifacts exist."""
+    return {
+        "run_id": run_id,
+        "task_id": task_id,
+        "status": "pending",
+        "queue_name": "workflows",
+        "audio_uri": None,
+        "download_url": None,
+        "fallback_reason": "workflow_run_not_started",
+    }
+
 
 @router.get(
     "/runs/{run_id}/audio",
@@ -5333,7 +5381,15 @@ async def get_run_audio(
         user_dir = DatabasePaths.get_user_base_directory(int(resolved_user_id))
         wf_db_path = os.path.join(str(user_dir), "workflows", "workflows.db")
         if not os.path.exists(wf_db_path):
-            raise HTTPException(status_code=404, detail="no_workflow_db")
+            scheduler_status = await _get_audio_scheduler_task_status(str(task_id))
+            if scheduler_status:
+                return {
+                    "run_id": run_id,
+                    **scheduler_status,
+                    "audio_uri": None,
+                    "download_url": None,
+                }
+            return _pending_audio_scheduler_fallback(run_id, task_id)
 
         wf_db = WorkflowsDatabase(db_path=wf_db_path)
         tenant_id = await _resolve_watchlist_workflow_tenant_id(
@@ -5394,13 +5450,7 @@ async def get_run_audio(
             page_idx += 1
 
         if not matching_run:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": "pending",
-                "audio_uri": None,
-                "download_url": None,
-            }
+            return _pending_audio_scheduler_fallback(run_id, task_id)
 
         # Check for artifacts
         matching_run_id = None
@@ -5409,13 +5459,7 @@ async def get_run_audio(
         else:
             matching_run_id = getattr(matching_run, "run_id", None) or getattr(matching_run, "id", None)
         if not matching_run_id:
-            return {
-                "run_id": run_id,
-                "task_id": task_id,
-                "status": "pending",
-                "audio_uri": None,
-                "download_url": None,
-            }
+            return _pending_audio_scheduler_fallback(run_id, task_id)
 
         artifacts: list[Any] = []
         used_legacy_artifacts_api = False
