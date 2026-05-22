@@ -9,6 +9,15 @@ const mocks = vi.hoisted(() => ({
   listPersonaProfiles: vi.fn(async () => []),
   getPersonaProfile: vi.fn(async () => null),
   getCharacter: vi.fn(async () => null),
+  selectedAssistant: {
+    value: null as
+      | null
+      | {
+          kind: "character" | "persona"
+          id: string
+          name: string
+        }
+  },
   setSelectedAssistant: vi.fn(async () => undefined),
   updateSettings: vi.fn(async () => null)
 }))
@@ -46,7 +55,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: () => [
-    null,
+    mocks.selectedAssistant.value,
     mocks.setSelectedAssistant,
     { isLoading: false, setRenderValue: vi.fn() }
   ]
@@ -147,6 +156,7 @@ const renderAssistantSelect = (
 describe("AssistantSelect behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.selectedAssistant.value = null
     state.option = {
       historyId: "history-overlay-1",
       serverChatId: "chat-overlay-1",
