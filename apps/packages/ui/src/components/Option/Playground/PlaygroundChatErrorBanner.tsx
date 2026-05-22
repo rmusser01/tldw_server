@@ -7,6 +7,7 @@ import {
   TLDW_ERROR_BUBBLE_PREFIX,
   type ChatErrorPayload
 } from "@/utils/chat-error-message"
+import { openModelSettings } from "./playground-cockpit-actions"
 
 type ChatErrorMessageCandidate = {
   id?: string | number | null
@@ -156,6 +157,19 @@ export const PlaygroundChatErrorBanner: React.FC<
     return null
   }
 
+  const primaryAction =
+    error.recoveryAction === "open-model-settings"
+      ? {
+          label: error.recoveryLabel || "Open model settings",
+          ariaLabel: error.recoveryLabel || "Open model settings",
+          onClick: () => openModelSettings()
+        }
+      : {
+          label: diagnosticsLabel,
+          ariaLabel: diagnosticsLabel,
+          onClick: () => navigate("/settings/health")
+        }
+
   return (
     <RecoveryCallout
       state="error"
@@ -164,11 +178,7 @@ export const PlaygroundChatErrorBanner: React.FC<
       message={error.hint}
       role="alert"
       className="mb-2"
-      primaryAction={{
-        label: diagnosticsLabel,
-        ariaLabel: diagnosticsLabel,
-        onClick: () => navigate("/settings/health")
-      }}
+      primaryAction={primaryAction}
       secondaryActions={[
         {
           label: dismissLabel,

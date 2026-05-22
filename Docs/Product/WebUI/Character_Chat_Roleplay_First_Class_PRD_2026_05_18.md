@@ -1,11 +1,13 @@
 # PRD: First-Class Character Chat and Role-Play Workflow
 
-Status: Draft
+Status: Draft, canonical phased PRD
 Date: 2026-05-18
+Last updated: 2026-05-20
 Backlog: TASK-426
+Post-Phase-6 update: TASK-455
 Primary surface: `/chat`
 Related surfaces: `/characters`, extension sidepanel chat, Persona Garden only where picker parity requires it
-Evidence base: code inspection on `origin/dev` at `65430b962`, browser-backed UX audits in `Docs/Reviews`, existing terminology taxonomy in `Docs/Product/WebUI/Character_Chat_Terminology_Taxonomy_2026_05_09.md`
+Evidence base: code inspection on `origin/dev` at `65430b962`, browser-backed UX audits in `Docs/Reviews`, existing terminology taxonomy in `Docs/Product/WebUI/Character_Chat_Terminology_Taxonomy_2026_05_09.md`, and post-Phase-6 real-backend review on `origin/dev` at `d2c0e5eaa`
 
 ## 1. Executive Summary
 
@@ -21,18 +23,30 @@ This PRD restores Character Chat / Role-play as a first-class `/chat` experience
 
 The product direction is not a separate competing chat system. It is a Character Chat mode inside `/chat`, with a dedicated IA, readiness model, session/history affordances, and extension parity.
 
+As of the post-Phase-6 review, the foundation for Character Chat mode, role-play setup, saved setup safety, mobile behavior, session panel structure, and real-backend signoff has materially improved. This PRD now tracks the remaining post-Phase-6 remediation needed before the product should claim Character Chat / Role-play is first-class again.
+
 ## 2. Problem Statement
 
-The current UI has the parts needed for character role-play, but they are spread across generic chat controls:
+The original first-class Character Chat problem was that the product had the parts needed for character role-play, but they were spread across generic chat controls:
 
-- `/chat` routes into generic `Playground`.
-- The starter card opens the assistant picker but does not activate a durable role-play workspace.
-- The header "Character" button clears chat and opens selection only when needed.
-- The role-play setup surface is a drawer attached to composer controls.
-- Character conversations can be filtered by server metadata, but `/chat` does not expose this as a first-class character-session rail.
-- The extension sidepanel has character support, but it is buried under Conversation context rather than presented as a role-play mode.
+- `/chat` routed into generic `Playground`.
+- The starter card opened the assistant picker but did not activate a durable role-play workspace.
+- The header "Character" button could clear chat and open selection only when needed.
+- The role-play setup surface was a drawer attached to composer controls.
+- Character conversations could be filtered by server metadata, but `/chat` did not expose this as a first-class character-session rail.
+- The extension sidepanel had character support, but it was buried under Conversation context rather than presented as a role-play mode.
 
-This makes character chat feel secondary even though the backend and earlier product behavior treat it as a core feature.
+Phase 0-6 work materially improved that baseline. The remaining problem is narrower and should not be treated as a greenfield role-play redesign:
+
+- model/provider readiness can still disagree across status surfaces and allow invalid sends;
+- WebUI character sessions can still receive extension-specific fallback titles;
+- direct character-mode entry does not yet make last-used/session resume obvious enough;
+- first-time users still lack create/import affordances at the point of character-chat intent;
+- role-play setup is improved but still needs dependable primary desktop access;
+- sidepanel character chat is supported but not yet first-viewport first-class;
+- final confidence still requires real-backend signoff for the remaining failure and resume paths.
+
+These issues keep character chat from feeling fully trustworthy even though the core mode, setup surface, sessions panel, and backend runtime now exist.
 
 ## 3. Goals
 
@@ -71,6 +85,7 @@ This makes character chat feel secondary even though the backend and earlier pro
 | `ConversationContextPopover.tsx`, `CharacterSelect.tsx`, sidepanel chat route | Extension sidepanel supports character selection and backend character chat, but it sits under Conversation context. | Extension needs a compact first-class character state, not a hidden context-only affordance. |
 | `Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_AUDIT_2026_05_09.md` | Earlier audit found a corrupt default per-user chat DB, generic onboarding, fragmented model readiness, row-chat context loss, terminology competition, dense creation flow, and misleading search counts. | This PRD must cover both existing residual issues and newer first-class `/chat` gaps. |
 | `Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_REAUDIT_2026_05_09.md` | P1 fixes improved onboarding and row-chat blockers, but search count, provider-backed send coverage, debugging noise, and final character-mode sequencing remained unresolved. | The phased path must include real backend E2E and no-provider/provider-failure recovery. |
+| Post-Phase-6 real-backend review on `origin/dev` at `d2c0e5eaa` | `/chat` Character Chat mode is discoverable, character selection works, the greeting appears, and the mobile role-play setup drawer fits narrow width. The same run found contradictory model readiness, WebUI-created character sessions titled `Extension chat`, incomplete resume continuity, weak create/import affordance from the picker, fragile desktop setup access, sidepanel discoverability gaps, and insufficient send gating. | The remaining plan should extend the shipped Phase 0-6 track, not restart it. The next work must focus on truth, continuity, setup access, sidepanel parity, and real-backend release gates. |
 
 ## 6. User Journeys
 
@@ -100,6 +115,8 @@ The returning user enters `/chat`, toggles Character Chat, and can act quickly:
 The workflow should be denser for experienced users but predictable: the same controls stay in the same places, destructive state changes require confirmation or undo, and saved state is inspectable.
 
 ## 7. Product Requirements
+
+R1-R11 remain the canonical product requirements for first-class Character Chat. Some are already partially or fully satisfied by Phase 0-6. Section 8 summarizes the shipped foundation, and Section 11 defines the remaining post-Phase-6 remediation work. Implementation planning should not reopen a completed requirement unless the latest branch reproduces a regression.
 
 ### R1. Add Character Chat As A First-Class `/chat` Mode
 
@@ -260,8 +277,9 @@ Likely files:
 
 Requirements:
 
-- Add command palette actions for: switch character, open role-play setup, apply saved setup, resume last character chat, toggle scene, open prompt picker, open parameter preset picker.
-- Add keyboard shortcuts or configurable shortcuts for the most common actions, with no collisions against editor input.
+- Prioritize recents, focus order, resume, and quick-switch flows before adding new shortcuts.
+- Add command palette actions for: switch character, open role-play setup, apply saved setup, resume last character chat, toggle scene, open prompt picker, open parameter preset picker where the command palette infrastructure already supports route-local actions.
+- Add keyboard shortcuts or configurable shortcuts only after the target actions are stable and only if they do not collide with editor input.
 - Add recents and favorites for characters and saved role-play setups.
 - Add quick switcher search across character name, tags, description, and recent session titles.
 - Preserve state across refreshes, route changes, and session switches with clear precedence rules.
@@ -305,14 +323,14 @@ Requirements:
 
 - Core acceptance must run against the real FastAPI backend and real frontend.
 - Unit tests may mock components and API clients, but release signoff must include browser tests against a running backend.
-- Message-send verification must use either a configured local model provider or an OpenAI-compatible deterministic provider wired through the backend provider path. It must not rely on frontend-only interception as the only proof.
+- Message-send verification must use a real configured local/provider path wired through the backend provider path. It must not rely on frontend-only interception or simulated frontend responses as proof.
+- If no real callable provider is available in the verification environment, mark successful-send signoff blocked and continue verifying no-provider, model-unavailable, provider-failure, and send-gating behavior against the real backend.
 - Tests must verify that character context is included in the backend request/stream path.
 
 Likely files:
 
 - `apps/tldw-frontend/e2e/workflows/journeys/character-chat.spec.ts`
 - `apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts`
-- `mock_openai_server`
 - `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
 
 ### R11. Track Chat/Character Database Health As A Release Dependency
@@ -346,212 +364,342 @@ Likely files:
 - `apps/packages/ui/src/components/Common/WorkspaceConnectionGate.tsx`
 - `apps/packages/ui/src/routes/option-setup.tsx`
 
-## 8. Prioritized Issue And Requirement Matrix
+## 8. Completed Foundation Through Phase 6
+
+The original Phase 0-6 track is treated as shipped foundation, not as a second active roadmap. Future work should not recreate these phases unless a regression proves that a shipped capability no longer works.
+
+| Phase | Shipped foundation | Representative tracking |
+| --- | --- | --- |
+| Phase 0 | Baseline contracts and real-backend harness for character chat. | TASK-428 |
+| Phase 1 | Durable Character Chat mode and route intent for `/chat`. | TASK-431 |
+| Phase 2 | Readiness, errors, empty states, and selected-character recovery. | TASK-438 |
+| Phase 3 | Role-play setup surface, saved setup workflows, delete safety, and generation-style accessibility. | TASK-446, TASK-447 |
+| Phase 4 | Character sessions, recents, and continuity panel. | TASK-449 |
+| Phase 5 | Power-user and extension parity foundations, including sidepanel handoff. | TASK-452 |
+| Phase 6 | Accessibility, mobile behavior, scoped stream/persist fixes, and real-backend signoff. | TASK-454, PR #1892 |
+
+The post-Phase-6 plan below extends this foundation. It should use Phase 7-13 numbering so future agents do not confuse new remediation work with already-merged Phase 0-6 implementation slices.
+
+## 9. Post-Phase-6 Real-Backend Findings
+
+The latest review ran against `origin/dev` at `d2c0e5eaa` with a real FastAPI backend and the real Next WebUI. The backend health check passed, default characters were created by the server, character selection created real server chats, and the send attempt used the real `/api/v1/chats/{id}/complete-v2` path.
+
+Positive evidence:
+
+- `/chat` now exposes Character Chat / role-play from the first viewport.
+- Character mode opens a real character picker and can select server-backed characters.
+- Selecting `Helpful AI Assistant` injects the greeting and creates a saved server chat.
+- `RolePlaySetupDrawer` is usable on narrow/mobile width without horizontal overflow.
+- `CharacterChatSessionsPanel` exists and separates character sessions from saved role-play setups.
+- Sidepanel code has handoff support to full `/chat`.
+
+Remaining findings:
 
 | Severity | User type | Evidence | Why it matters | Requirement | Suggested acceptance test |
 | --- | --- | --- | --- | --- | --- |
-| P0 | First-time and returning users | Earlier audit verified malformed default `ChaChaNotes.db` blocking backend startup. | Character chat cannot be first-class if local chat data failure prevents reaching recovery. | R11 | Backend integration: corrupt per-user chat DB is identified and recoverable without silent overwrite. |
-| P0 | First-time and power users | Real runtime exists, but `/chat` is generic Playground. | Character role-play feels secondary despite being a core capability. | R1 | Browser: `/chat` exposes Character Chat mode in first viewport and can enter setup without leaving `/chat`. |
-| P0 | First-time users | Starter only opens picker event. | Setup sequence is incomplete and easy to lose. | R1, R2 | Vitest: starter sets Character Chat mode, opens character step, and returns focus predictably. |
-| P0 | Power users | Character streaming path exists with `character_id` and `include_character_context`. | A PRD that invents new runtime would increase risk. | R10 | Real backend E2E: send one character message and verify backend stream path includes character context. |
-| P1 | First-time users | Model/provider blockers appear across different surfaces. | Users do not know what to fix before typing. | R2 | Browser: no-provider state keeps selected character and shows model action, retry, and return controls. |
-| P1 | First-time users | Role-play setup is a drawer attached to generic toolbar. | Scene and behavior setup feels advanced or hidden. | R3 | Browser: Character Chat mode shows setup/readiness without opening toolbar overflow first. |
-| P1 | First-time users | Terminology mixes Assistant, Character, Persona, Companion, Scene, Actor. | Users must learn internal architecture before acting. | R4 | Text snapshot tests: user-facing labels follow taxonomy at picker/setup/runtime decision points. |
-| P1 | Power users | Character-scoped history API exists but not surfaced as character sessions. | Resume workflows are slower than they need to be. | R5 | Vitest: character history rail queries `filterMode: "character"` and renders recent sessions. |
-| P1 | Power users | Header Character action can clear current chat. | Hidden destructive state changes damage trust. | R1, R8 | Vitest: active chat character switch requires confirm or explicit new-session action. |
-| P1 | Extension users | Sidepanel selection sits inside Conversation context. | Extension role-play does not match WebUI mental model. | R7 | Browser extension test: sidepanel shows active character chip and compact switch/clear action. |
-| P2 | First-time users | PromptSelect can render nothing when prompt query has no data. AssistantSelect swallows catalog load errors in common path. | Missing controls look like unavailable features instead of recoverable states. | R4 | Component tests: prompt and assistant selectors expose loading, empty, and error states. |
-| P2 | Power users | Saved role-play setup delete is immediate in panel. | Deleting reusable setup has weak recovery. | R3 | Component test: delete saved setup requires confirm or offers undo. |
-| P2 | Power users | Search count issue remains from audit. | Status feedback becomes untrustworthy. | R5 | Characters test: filtered count reads `1 of N shown` and updates live region. |
-| P2 | All users | Mobile wraps dense controls, current audit found no overflow but high density. | Usability degrades on narrow widths. | R6, R9 | Playwright: 390px viewport has no horizontal overflow and setup controls remain reachable. |
-| P2 | Screen-reader and keyboard users | Some segmented options use pressed buttons, not radio semantics. | Assistive tech receives weak state semantics. | R3, R9 | RTL: generation style controls expose radiogroup/radio or equivalent accessible state. |
-| P2 | Engineers and QA | No-provider environments prevent final send verification. | Role-play can regress without deterministic real-backend tests. | R10 | CI or local E2E profile runs with backend-wired deterministic provider. |
-| P2 | Engineers and QA | Re-audit saw repeated form warnings and route-churn request abort noise. | Debugging signal is weaker during role-play UX verification. | R10 | Browser E2E logs expected navigation aborts separately and fails unexpected console errors in touched flows. |
-| P3 | Power users | Shortcuts exist generally but no role-play-specific command set. | Frequent switch/setup workflows are slower than necessary. | R8 | Shortcut tests: command palette exposes switch character, saved setup, and role-play setup actions. |
+| P1 | First-time and power users | Readiness says choose a chat model while the model selector reports `OpenAI / gpt-4o Healthy`; SEND can still call real `/complete-v2` and receive `503`. | Users cannot trust setup state and are led into avoidable failure. | R2, R6, R10 | Browser: selected-character plus no usable model disables or gates SEND; no `/complete-v2` request is made; all status surfaces agree. |
+| P1 | Power users | Real WebUI-created character sessions were titled `Extension chat`; fallback strings exist in persistence/title paths and locale defaults. | Recents and history are hard to reuse and look like the wrong surface created them. | R5 | Component and real-backend browser: WebUI character chat titles include character name or first prompt, never `Extension chat` unless true extension context is the only source. |
+| P1 | Power users | Direct `/chat?mode=character` enters character mode but does not foreground last-used character/session. | Returning users must rebuild context instead of resuming. | R5, R8 | Browser: direct character mode shows `Resume last character chat` or restores explicit route/server chat identity using documented precedence. |
+| P1 | First-time and power users | Desktop setup access did not reliably open the setup drawer after selection in the automated walkthrough; mobile setup did open. | Role-play setup remains discoverable but not dependable as a primary control. | R3, R9 | Playwright: after desktop character selection, one click on Role-play setup opens the drawer/panel, traps focus, and restores focus on close. |
+| P2 | First-time users | Character picker exposes existing characters/personas but no visible create/import affordance in the role-play path. | A new role-play user cannot bring in a character at the moment of intent. | R1, R4 | Component/browser: picker footer and no-results state include `Create character` and `Import character card`, returning to `/chat?mode=character&characterId=...`. |
+| P2 | First-time users | Character mode still competes with dense cockpit rails, model/runtime controls, and advanced setup concepts. | The first-time path requires too much architecture knowledge. | R2, R3, R6 | Browser: first-time character mode foregrounds Character, Model, Message, and optional Role-play setup before advanced rails. |
+| P2 | First-time and power users | Generic server-error recovery appears after a model/provider setup failure. | Users retry impossible states instead of fixing configuration. | R2, R10 | Browser: provider/model setup failures show model-specific recovery, not generic retry guidance. |
+| P2 | Extension users | Sidepanel first viewport does not present Character Chat as first-class unless state is already active. | Extension users do not see the same workflow as WebUI users. | R7 | Sidepanel QA: initial chat surface exposes compact Character Chat state/entry and full-app handoff. |
+| P3 | Keyboard users | Character-mode focus order prioritizes general composer tools before character/setup/model/preset controls. | Power users need avoidable tabbing for core role-play changes. | R8, R9 | RTL/browser: from composer in character mode, core role-play controls are reachable before secondary attachment/tool controls. |
 
-## 9. Phased Implementation Plan
+## 10. Model Usability Contract
 
-### Phase 0: Baseline Contracts And Test Harness
+The next implementation must not treat `selectedModel`, model catalog presence, provider label, provider health, and callable send readiness as interchangeable. Character Chat needs one model usability contract that feeds all status surfaces and send gating.
 
-Goal: Freeze the existing behavior and prove the implementation will reuse real backend seams.
+Required states:
 
-Scope:
+| State | Meaning | Primary action |
+| --- | --- | --- |
+| `loading` | Model/provider data is still hydrating. | Wait or refresh. |
+| `no_server` | The WebUI cannot reach tldw_server. | Connect to server. |
+| `no_selection` | No chat model is selected. | Choose model. |
+| `selected_missing` | Stored selected model is not present in the current model catalog. | Choose a different model. |
+| `provider_unconfigured` | Model is known, but the provider lacks required configuration or API key. | Open model/provider settings. |
+| `model_unavailable` | Model/provider is known but not currently callable. | Refresh, switch model, or inspect provider. |
+| `ready` | Selected model is known and callable for character chat. | Enable send. |
+| `degraded` | Model is callable but has a known limitation relevant to the current role-play mode. | Allow send with a specific notice. |
 
-- Add or update route/mode contract tests for `/chat`.
-- Add fixture coverage for `useServerChatHistory(filterMode: "character")`.
-- Document state precedence rules for server chat metadata, URL intent, stored selected assistant, and default character.
-- Add deterministic real-backend E2E plan for character message send.
-- Confirm whether R11 is covered by an existing backend recovery task or open a separate dependency before GA work starts.
+Contract requirements:
 
-Acceptance criteria:
+- The readiness panel, status strip, model selector chip, composer SEND gate, and error recovery must consume the same model usability result.
+- Users can always type and preserve drafts. Only SEND is blocked or converted into a setup action when readiness is invalid.
+- A blocked send must not call `/complete-v2`.
+- Provider/model setup errors must not be presented as generic server failures when the client can classify them.
+- The UI must never show a selected model as `Healthy` while Character Chat readiness says that no chat model is usable.
 
-- Tests verify current character chat creation and streaming payload shape at the service/hook level.
-- A real-backend E2E profile is documented and runnable locally.
-- The per-user chat DB corruption blocker has an owner, linked task, and release-gate decision.
-- No production behavior changes except optional test IDs or diagnostics needed for reliable tests.
+## 11. Post-Phase-6 Remediation Phases
 
-### Phase 1: First-Class Character Chat Mode
+### Phase 7: Model Usability, Readiness Truth, And SEND Gating
 
-Goal: Make `/chat` visibly support Character Chat as a primary mode.
+Goal: make setup state truthful before the user sends.
 
 Scope:
 
-- Add durable Character Chat mode state to Playground.
-- Update starter card and header action to enter Character Chat mode.
-- Add URL bootstrapping for `mode=character` and optional `characterId`.
-- Update `/characters` Chat and Chat in new tab actions to open `/chat` with character intent where applicable.
-- Prevent implicit clear on active chat unless confirmed.
+- Add the model usability contract described above.
+- Unify model/provider readiness across readiness panel, status strip, model selector, runtime inspector, and SEND eligibility.
+- Gate character SEND when model usability is not `ready` or explicitly allowed `degraded`.
+- Preserve drafts and selected character while blocking invalid sends.
+- Classify provider/model setup failures into actionable recovery states.
 
 Acceptance criteria:
 
-- First-time user can open `/chat`, choose Character Chat, select/create/import a character, and see where to type.
-- Returning user can launch a character from `/characters` into `/chat` without losing task context.
-- Active chat is not cleared by Character Chat action without explicit confirmation.
+- No-provider state never shows `Healthy` in any character-chat status surface.
+- Character selected plus no usable model disables SEND or turns it into a setup action.
+- Blocked SEND does not create a `/complete-v2` request.
+- Error recovery names the missing/unconfigured model/provider state and offers a local fix.
 
-### Phase 2: Readiness, Errors, And Empty States
+Likely files:
 
-Goal: Make incomplete setup, loading, no-provider, and failure states local and actionable.
+- `apps/packages/ui/src/utils/chat-model-availability.ts`
+- `apps/packages/ui/src/components/Option/Playground/CharacterChatReadinessPanel.tsx`
+- `apps/packages/ui/src/components/Option/Playground/PlaygroundStatusStrip.tsx`
+- `apps/packages/ui/src/components/Option/Playground/PlaygroundRuntimeInspector.tsx`
+- `apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx`
+- send-control and character chat action hooks
+
+### Phase 8: Character Session Naming And Resume Continuity
+
+Goal: make character chat history understandable and resumable.
 
 Scope:
 
-- Add Character Chat readiness panel.
-- Extend model/provider readiness copy for selected character context.
-- Add explicit PromptSelect and AssistantSelect loading/error/empty states.
-- Add persistence state messaging for server/local/temporary chat.
-- Handle deleted/missing character on restored chat with clear recovery options.
+- Replace WebUI-created `Extension chat` fallback titles with character-aware WebUI titles.
+- Audit all title fallback paths, including persistence, message branching, locale defaults, and sidepanel-specific creation.
+- Show character name, chat title/topic, updated time, message count, and persistence state in recent character sessions.
+- Add a primary `Resume last character chat` action when entering character mode with no explicit active chat.
+- Preserve selected character/session intent across refresh and direct `/chat?mode=character`.
+
+State precedence:
+
+1. Active server chat metadata is authoritative.
+2. Explicit URL `chatId` applies next.
+3. Explicit URL `characterId` applies only to new or empty chat state.
+4. User-selected last-used character/session applies only when no explicit route/server state exists.
+5. Default character applies only to fresh chat state and only once per fresh session.
 
 Acceptance criteria:
 
-- Missing server, missing character, missing model, unavailable model, prompt load failure, and character catalog failure all have visible local states.
-- Selecting a character before model setup preserves the character through settings handoff and retry.
-- Screen readers receive setup status changes through appropriate live regions.
+- WebUI character chats are not titled `Extension chat` unless they actually came from extension context and no better title exists.
+- Recent sessions are distinguishable by character and topic or first user prompt.
+- Returning to `/chat?mode=character` foregrounds last character chat or an explicit resume choice.
+- Switching sessions does not leak prior character, prompt, scene, or generation style state.
 
-### Phase 3: Role-Play Setup And Saved Setup Workflow
+Likely files:
 
-Goal: Turn the existing Role-play setup drawer into a first-class setup experience.
+- `apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundPersistence.tsx`
+- `apps/packages/ui/src/hooks/handlers/messageHandlers.ts`
+- `apps/packages/ui/src/components/Option/Playground/CharacterChatSessionsPanel.tsx`
+- `apps/packages/ui/src/hooks/useServerChatHistory.ts`
+- `apps/packages/ui/src/hooks/chat/useServerChatLoader.ts`
+- route/query state helpers and relevant locale defaults
+
+### Phase 9: First-Time Create/Import Entry From `/chat`
+
+Goal: let a new role-play user create, import, or select a character from the point of intent.
 
 Scope:
 
-- Add setup panel variant for desktop Character Chat mode.
-- Keep drawer behavior for compact/mobile surfaces.
-- Expose character/persona identity, behavior template, prompt, generation style, parameter preset, scene, and saved setups in one coherent surface.
-- Add saved setup preview, apply, rename, delete confirm/undo, and save-current flows.
-- Clarify behavior between saved role-play setup and saved conversation.
+- Add `Create character` and `Import character card` affordances to the character picker footer.
+- Add the same actions to empty and no-results states.
+- Reuse existing `/characters` create/import flows instead of redesigning the character editor.
+- Return to `/chat?mode=character&characterId=...` after create/import.
+- Keep first-time character mode focused on Character, Model, Message, and optional Role-play setup.
 
 Acceptance criteria:
 
-- User can save current role-play setup, apply it to a fresh chat, preview changes, and undo or confirm destructive setup deletion.
-- Scene controls are optional and appear after character selection.
-- Generation style controls meet keyboard and screen-reader expectations.
+- A default-only or empty character library still gives the user an obvious way forward.
+- A newly created/imported character returns to `/chat` selected and subject to the same model readiness checks.
+- The create/import handoff preserves any draft when technically feasible, or explicitly warns before leaving.
 
-### Phase 4: Character Sessions, Recents, And Continuity
+Likely files:
 
-Goal: Make continuing role-play sessions fast and safe.
+- `apps/packages/ui/src/components/Common/AssistantSelect.tsx`
+- character create/import launch utilities
+- `apps/packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx`
+- `apps/packages/ui/src/components/Option/Playground/PlaygroundEmpty.tsx`
+- route-path helpers
+
+### Phase 10: Role-Play Setup Access And Desktop Reliability
+
+Goal: make Role-play setup a primary control, not a fragile toolbar detail.
 
 Scope:
 
-- Add Character Chat sessions rail or filtered history panel using character-scoped history.
-- Show recent characters and recent character chats.
-- Restore server chat character/persona identity before stored selected state.
-- Add session actions: rename, duplicate/fork if supported, archive, restore, delete with existing safety patterns.
-- Add state persistence tests across refresh, route change, and chat switch.
+- Place `Role-play setup` beside the selected character/readiness area in character mode.
+- Ensure the character picker closes after selection and cannot obstruct setup actions.
+- Add deterministic desktop coverage that setup opens after character selection.
+- Preserve current mobile drawer behavior that already fits narrow width.
+- Ensure setup drawer/panel focus trap and focus restoration are tested.
 
 Acceptance criteria:
 
-- Returning user can resume a recent character chat in two clicks or fewer from `/chat`.
-- Refreshing a character-backed server chat restores character identity and composer context.
-- Switching from one character chat to another does not leak old character/prompt/scene state.
+- After selecting a character on desktop, one click opens Role-play setup.
+- The setup surface opens from the same semantic action on desktop and mobile.
+- Focus is trapped while open and restored to the invoking control on close.
+- No character picker popover remains layered over setup controls after character selection.
 
-### Phase 5: Power-User Controls And Extension Parity
+Likely files:
 
-Goal: Make frequent role-play work fast across WebUI and extension.
+- `apps/packages/ui/src/components/Option/Playground/RolePlaySetupDrawer.tsx`
+- `apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx`
+- `apps/packages/ui/src/components/Option/Playground/CharacterChatReadinessPanel.tsx`
+- `apps/packages/ui/src/components/Option/Playground/PlaygroundForm.tsx`
+- setup drawer tests and browser smoke tests
+
+### Phase 11: Power-User Focus Order, Recents, And Persistence
+
+Goal: reduce repeat-work friction for regular role-play users without burying first-time users in controls.
 
 Scope:
 
-- Add command palette actions for role-play operations.
-- Add shortcut support where it does not conflict with text entry.
-- Add favorites/recents for characters and role-play setups.
-- Add compact sidepanel active-character chip and switch/clear/retry actions.
-- Carry intent from sidepanel `Open full app` into `/chat`.
+- Improve keyboard order in character mode: character, role-play setup, model, prompt/behavior, generation style, then secondary attachment/tool controls.
+- Persist recent character, prompt/template, model, generation style, and saved setup choices where existing storage supports it.
+- Add quick switch/change actions for character, behavior template, generation style, and saved setup.
+- Use recents before configurable shortcuts. Configurable shortcuts are optional unless command infrastructure already exists.
+- Confirm or preserve state when switching would discard a draft or active session.
 
 Acceptance criteria:
 
-- Power user can switch character, apply saved setup, and resume last character chat without opening settings.
-- Extension sidepanel and WebUI use the same visible labels for Character, Persona, Scene, and Character Chat.
-- Sidepanel tab switching preserves selected character/persona state.
+- From the composer in character mode, core role-play controls are reached before secondary tools.
+- Frequent users can resume or switch without rebuilding setup from scratch.
+- Drafts and selected character are not lost silently.
+- Any new shortcuts avoid collisions with text entry and remain discoverable.
 
-### Phase 6: Accessibility, Mobile, And Real Backend Signoff
+Likely files:
 
-Goal: Close the UX quality gates before release.
+- composer toolbar and overflow controls
+- `RolePlaySetupDrawer.tsx`
+- saved setup helpers
+- selected character/model/prompt stores
+- keyboard/focus tests
+
+### Phase 12: Extension Sidepanel First-Class Character State
+
+Goal: make extension-side character chat visible and consistent without cloning the full WebUI setup.
 
 Scope:
 
-- Keyboard focus pass for mode switch, setup panel, session rail, selectors, composer, and dialogs.
-- Screen-reader label and live-region pass.
-- Contrast and density pass for status chips and disabled states.
-- Mobile/narrow responsive pass at 390px, 768px, and desktop.
-- Real backend E2E with deterministic provider or configured local provider.
-- Update user docs and release notes.
+- Add compact Character Chat state/chip to the sidepanel first viewport.
+- Expose choose, switch, clear, and retry actions without hiding them only under Conversation context.
+- Ensure `Open full app` carries `mode=character`, selected character, and active conversation when possible.
+- Keep terminology aligned with WebUI: Character Chat, Role-play setup, Scene, Generation style.
+- Do not implement the full role-play setup drawer inside the sidepanel.
 
 Acceptance criteria:
 
-- Playwright captures pass for desktop and narrow layouts without horizontal overflow.
-- Keyboard-only user can complete first-time character setup and send path.
-- Real backend E2E verifies create/select/send/resume for character chat.
-- Chat/character DB health dependency is either resolved or explicitly release-blocked with an owner.
-- No known P0/P1 issues remain open.
+- A sidepanel user can discover character chat without already knowing it lives in Conversation context.
+- Handoff to WebUI preserves role-play intent.
+- Sidepanel remains compact and does not add a parallel setup workflow.
+- Sidepanel tab snapshots preserve selected character/persona state.
 
-## 10. Quick Wins Under One Day
+Likely files:
 
-1. Make the `/chat` empty-state Character card enter a persistent Character Chat mode flag before opening the picker.
-2. Change header Character button behavior to avoid silent chat clear and show a confirm/new-session choice when needed.
-3. Add visible loading/error/empty states to PromptSelect and AssistantSelect.
-4. Add confirm or undo to saved role-play setup deletion.
-5. Update labels to match the terminology taxonomy in the current picker/setup/header surfaces.
-6. Add a first-pass character readiness summary using existing `buildCharacterChatReadiness`.
-7. Add direct `Open Role-play setup` command palette action if command infrastructure already supports route-local actions.
+- `apps/packages/ui/src/routes/sidepanel-chat.tsx`
+- `apps/packages/ui/src/components/Sidepanel/Chat/form.tsx`
+- `apps/packages/ui/src/components/Sidepanel/Chat/ControlRow.tsx`
+- `apps/packages/ui/src/components/Sidepanel/Chat/ConversationContextPopover.tsx`
+- `apps/packages/ui/src/components/Sidepanel/Chat/CharacterSelect.tsx`
+- sidepanel full-app route helpers
 
-## 11. Larger Improvements
+### Phase 13: Real-Backend Release Signoff Matrix
 
-1. Character Chat mode shell inside Playground with dedicated setup, sessions, and composer context.
-2. Character-scoped session rail backed by `useServerChatHistory(filterMode: "character")`.
-3. Saved role-play setup library distinct from chat history.
-4. Real backend deterministic provider harness for character chat E2E.
-5. Extension sidepanel parity pass with compact active-character state.
-6. Full accessibility and responsive redesign of role-play setup controls.
+Goal: prevent another "passes in mocked tests, fails in the real app" loop.
 
-## 12. Telemetry And Success Metrics
+Scope:
+
+- Add a repeatable signoff matrix for real backend plus real WebUI.
+- Required scenarios: backend health, no-provider, configured-provider where available, character selection, send gating, successful or explicitly blocked completion, provider failure, resume, refresh, mobile setup, and sidepanel handoff.
+- Keep simulated/unit tests for coverage, but never use them as final proof.
+- Store screenshots, request logs, or concise browser artifacts with each signoff PR.
+- Sidepanel signoff should use the packaged extension when practical. The `/__debug__/sidepanel-chat` route is acceptable for component-level reproduction, but it is not sufficient by itself for final extension parity claims.
+
+Acceptance criteria:
+
+- Each phase records focused Vitest coverage plus real-browser evidence when behavior is visible.
+- Final first-class signoff cannot pass unless `/api/v1/health`, `/chat`, and sidepanel flows are verified against a running backend.
+- If no real callable provider is configured, the successful-send scenario is explicitly marked blocked, while no-provider/send-gating remains verified. Frontend interception is not accepted as proof of successful character completion.
+
+Signoff matrix:
+
+| Scenario | Required evidence |
+| --- | --- |
+| Backend health | `/api/v1/health` succeeds before testing. |
+| No provider | UI shows one consistent unavailable state. |
+| Character selected | Greeting appears and chat is saved with character metadata. |
+| Send blocked | No `/complete-v2` request is made. |
+| Successful completion | A real configured backend provider returns a character response, or this scenario is explicitly marked blocked because no real callable provider is available. |
+| Provider failure | Error copy maps to model/provider recovery. |
+| Resume | Recent session title is character-aware. |
+| Refresh | Character/session intent is preserved or explicitly recoverable. |
+| Mobile | No horizontal overflow; setup remains usable. |
+| Sidepanel | Character entry is visible and full-app handoff preserves intent. |
+
+## 12. Release Dependencies
+
+The following items are release dependencies for declaring Character Chat first-class. They should not be mixed into the post-Phase-6 UX remediation sequence unless they directly fail the current `/chat` flow.
+
+1. **ChaChaNotes DB health and recovery**: keep R11 as a backend release dependency with a dedicated owner and task. It is valid and important, but it should not block documenting or implementing the post-Phase-6 UX remediation phases unless the live backend health check fails.
+2. **Real callable provider availability**: successful message-send signoff requires a real configured local/provider path. If none is available, document that single scenario as blocked and continue verifying no-provider, model-unavailable, provider-failure, and send-gating behavior.
+3. **No parallel runtime**: all remediation must reuse existing Character Chat runtime, stream, persist, and history contracts.
+4. **Sidepanel scope boundary**: extension parity means compact state and handoff, not a full sidepanel setup clone.
+
+## 13. Quick Wins Under One Day
+
+1. Add a model usability helper and wire it to one visible status surface plus SEND gating tests.
+2. Change WebUI character-chat fallback titles away from `Extension chat`.
+3. Add `Create character` and `Import character card` actions to the picker footer and no-results state.
+4. Move or duplicate `Role-play setup` next to the selected-character/readiness area in character mode.
+5. Add a desktop regression test proving setup opens after character selection.
+6. Add a sidepanel first-viewport Character Chat chip or entry row when character state is inactive.
+7. Add a focused tab-order test for character-mode core controls.
+
+## 14. Larger Improvements
+
+1. Model usability contract consumed by all chat readiness/status/send surfaces.
+2. Character-aware session naming and resume flow across WebUI and sidepanel-created chats.
+3. First-time create/import handoff from `/chat` into existing `/characters` flows and back.
+4. Role-play setup access model that works identically on desktop and narrow/mobile layouts.
+5. Power-user recents, quick switchers, and optional command-palette actions after continuity is reliable.
+6. Real-backend signoff harness that can distinguish no-provider, provider-unconfigured, provider-failure, and success scenarios.
+
+## 15. Telemetry And Success Metrics
 
 No external telemetry is required. If local analytics or internal event logs exist, capture only local/self-hosted usage signals.
 
 Suggested product metrics:
 
-- First-time success: user reaches a ready Character Chat composer from `/chat` without leaving the flow.
+- First-time success: user reaches a ready or clearly blocked Character Chat composer from `/chat` without losing selected character intent.
 - Time to first ready state: target under 90 seconds when a model is already configured.
 - Returning-user resume speed: resume recent character chat in two clicks or fewer.
 - Error recovery: missing model/provider states preserve selected character and draft in 100% of tested flows.
+- Session clarity: recent character chats show character-aware titles in 100% of WebUI-created character sessions.
 - Accessibility: zero known critical keyboard or screen-reader blockers in Character Chat mode.
-- Reliability: real backend E2E passes create/select/send/resume workflow.
+- Reliability: real backend E2E passes create/select/gate/send-or-explicitly-block/resume workflow.
 
-## 13. Open Questions
+## 16. Open Questions
 
-1. Should Character Chat mode be visible as a segmented top-level mode in `/chat`, or as a prominent cockpit lane inside the existing Playground shell?
-2. Should URL intent use `characterId` only, or also support `assistantKind=persona&assistantId=...` for persona parity?
+1. Should successful-send signoff standardize on a local OpenAI-compatible provider profile, or remain environment-dependent with explicit blocked notation when absent?
+2. Should URL intent support `chatId` in addition to `mode=character&characterId=...` for resume links?
 3. Should saved role-play setups remain local storage bundles, or eventually become server-backed assets?
 4. Should "continue as user", "impersonate user", and "force narrate" be visible by default in Character Chat mode or remain in Pro/advanced controls?
-5. Should character-specific parameter presets be supported later, or should presets remain global in this PRD?
+5. Should character-specific parameter presets be supported later, or should generation styles remain global in this PRD?
 
-## 14. Release Gates
+## 17. Release Gates
 
-- Product: Character Chat is visible and coherent as a first-class `/chat` workflow.
+- Product: Character Chat is visible and coherent as a first-class `/chat` workflow after the post-Phase-6 remediation findings are resolved or explicitly deferred.
 - Engineering: implementation reuses existing backend/runtime seams and does not create a parallel character chat stack.
-- QA: real backend E2E passes create/select/send/resume and no-provider recovery.
+- QA: real backend signoff covers health, no-provider, selected character, send gating, provider error, resume, refresh, mobile setup, and sidepanel handoff.
 - UX: first-time and power-user walkthroughs pass on desktop and narrow widths.
 - Accessibility: keyboard and screen-reader checks pass for primary setup and send flow.
-- Safety: destructive actions have confirm or undo, and state-changing mode switches are explicit.
+- Safety: destructive actions have confirm or undo, state-changing mode switches are explicit, and invalid sends do not hit `/complete-v2`.
 
-## 15. Recommended First Fix
+## 18. Recommended First Fix
 
-Fix Phase 1 first: make `/chat` enter and preserve a visible Character Chat mode from the starter card, header action, and `/characters` launch paths.
+Fix Phase 7 first: model usability, readiness truth, and SEND gating.
 
-Reason: this creates the product container that every other improvement needs. Readiness, sessions, saved setups, power controls, and extension parity all become simpler once Character Chat is a durable mode rather than a set of generic chat controls plus picker events.
+Reason: the post-Phase-6 browser review found that the UI can simultaneously claim no usable model, show a model as healthy, and still allow a real failing `/complete-v2` send. That is the highest-trust defect. Session naming and resume should follow immediately after because they determine whether power users can reliably reuse the improved workflow.

@@ -10,6 +10,8 @@ export type ChatErrorPayload = {
   detail: string
   upgradeUrl?: string
   category?: string
+  recoveryAction?: "open-model-settings"
+  recoveryLabel?: string
 }
 
 export const encodeChatErrorPayload = (payload: ChatErrorPayload): string =>
@@ -33,6 +35,12 @@ export const decodeChatErrorPayload = (
       detail: typeof parsed.detail === "string" ? parsed.detail : "",
       upgradeUrl: typeof parsed.upgradeUrl === "string" ? parsed.upgradeUrl : undefined,
       category: typeof parsed.category === "string" ? parsed.category : undefined,
+      recoveryAction:
+        parsed.recoveryAction === "open-model-settings"
+          ? parsed.recoveryAction
+          : undefined,
+      recoveryLabel:
+        typeof parsed.recoveryLabel === "string" ? parsed.recoveryLabel : undefined,
     }
   } catch {
     return null

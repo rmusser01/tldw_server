@@ -137,6 +137,15 @@ describe("parseProviderQualifiedModelSelection", () => {
     })
   })
 
+  it("splits known provider:model selections after the internal tldw namespace", () => {
+    expect(parseProviderQualifiedModelSelection("tldw:openai:gpt-4o")).toEqual({
+      raw: "tldw:openai:gpt-4o",
+      modelId: "gpt-4o",
+      provider: "openai",
+      isProviderQualified: true
+    })
+  })
+
   it("leaves unknown colon-delimited model ids intact", () => {
     expect(parseProviderQualifiedModelSelection("family:model")).toEqual({
       raw: "family:model",

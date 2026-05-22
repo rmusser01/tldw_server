@@ -16,6 +16,7 @@ import {
   type RuntimeToolChoice,
 } from "./PlaygroundRuntimeInspector";
 import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
+import type { PlaygroundSendBlocker } from "./PlaygroundSendControl";
 import {
   CharacterChatReadinessPanel,
   type MissingCharacterRecovery,
@@ -123,8 +124,10 @@ import {
   getCharacterChatRouteIntent,
 } from "@/utils/character-chat-mode-intent";
 import {
+  buildChatModelUsability,
   buildCharacterChatReadiness,
   getCharacterChatReadinessCopy,
+  getMatchingCharacterChatModelUsabilityCopy,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
@@ -249,23 +252,31 @@ export const Playground = () => {
       "standard",
     );
 
+  const refreshCharacterChatModels = React.useCallback(
+    async (isCancelled?: () => boolean) => {
+      setCharacterChatAvailableModels(null);
+      try {
+        const models = await fetchChatModels({
+          returnEmpty: true,
+          forceRefresh: true,
+        });
+        if (isCancelled?.()) return;
+        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
+      } catch {
+        if (isCancelled?.()) return;
+        setCharacterChatAvailableModels([]);
+      }
+    },
+    [],
+  );
+
   React.useEffect(() => {
     let cancelled = false;
-
-    void fetchChatModels({ returnEmpty: true, forceRefresh: true })
-      .then((models) => {
-        if (cancelled) return;
-        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setCharacterChatAvailableModels([]);
-      });
-
+    void refreshCharacterChatModels(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshCharacterChatModels]);
   const [characterModeIntentActive, setCharacterModeIntentActive] =
     React.useState(false);
   const [chatLayoutMode, setChatLayoutMode] = useStorage<PlaygroundCockpitMode>(
@@ -2048,6 +2059,22 @@ export const Playground = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
+  const characterChatModelUsability = React.useMemo(
+    () =>
+      buildChatModelUsability({
+        isServerConnected: serverReadinessState !== "blocked",
+        selectedModel: providerRouteSummary.selectedModel,
+        availableModels: characterChatAvailableModels,
+        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        serverDegraded: serverReadinessState === "degraded",
+        allowDegradedSend: false,
+      }),
+    [
+      characterChatAvailableModels,
+      providerRouteSummary.selectedModel,
+      serverReadinessState,
+    ],
+  );
   const characterChatReadiness = React.useMemo(
     () =>
       buildCharacterChatReadiness({
@@ -2055,6 +2082,9 @@ export const Playground = () => {
         selectedCharacter,
         selectedModel: providerRouteSummary.selectedModel,
         availableModels: characterChatAvailableModels,
+        modelsLoading: !Array.isArray(characterChatAvailableModels),
+        serverDegraded: serverReadinessState === "degraded",
+        allowDegradedSend: false,
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
@@ -2071,8 +2101,7 @@ export const Playground = () => {
     characterWorkflowActive && characterChatReadiness.status === "blocked";
   const characterChatModelUnavailable =
     characterChatBlocked &&
-    (characterChatReadiness.reason === "selected-model-unavailable" ||
-      characterChatReadiness.reason === "no-models-available");
+    characterChatReadiness.missingRequirement === "chat-model";
   const characterChatReadinessCopy = React.useMemo(
     () =>
       characterChatBlocked
@@ -2081,6 +2110,82 @@ export const Playground = () => {
           })
         : null,
     [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
+  );
+  const activeCharacterChatModelUsability = characterWorkflowActive
+    ? characterChatModelUsability
+    : null;
+  const characterChatModelUsabilityMessage =
+    getMatchingCharacterChatModelUsabilityCopy({
+      modelUsability: activeCharacterChatModelUsability,
+      readiness: characterChatReadiness,
+      readinessTitle: characterChatReadinessCopy?.title ?? null,
+    });
+  const characterChatModelSelectorLabel = React.useMemo(() => {
+    if (
+      !activeCharacterChatModelUsability ||
+      activeCharacterChatModelUsability.status === "ready" ||
+      (activeCharacterChatModelUsability.status === "degraded" &&
+        activeCharacterChatModelUsability.canSend)
+    ) {
+      return null;
+    }
+
+    switch (activeCharacterChatModelUsability.status) {
+      case "loading":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityChecking",
+            "Checking model readiness",
+          ),
+        );
+      case "no_server":
+        return toText(
+          t("playground:composer.modelUsabilityServer", "Server unavailable"),
+        );
+      case "no_selection":
+        return toText(
+          t("playground:composer.modelUsabilityChoose", "Choose model"),
+        );
+      case "no_models":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityNoModels",
+            "No chat models configured",
+          ),
+        );
+      case "selected_missing":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityUnavailable",
+            "Model unavailable",
+          ),
+        );
+      case "provider_unconfigured":
+        return toText(
+          t(
+            "playground:composer.modelUsabilityProviderSetup",
+            "Provider setup needed",
+          ),
+        );
+      case "model_unavailable":
+        return toText(
+          t("playground:composer.modelUsabilityNotCallable", "Not callable"),
+        );
+      case "degraded":
+        return toText(
+          t("playground:composer.modelUsabilityBlocked", "Model blocked"),
+        );
+      default:
+        return null;
+    }
+  }, [activeCharacterChatModelUsability, t]);
+  const characterChatModelSelectorTitle = characterChatModelSelectorLabel
+    ? characterChatModelUsabilityMessage ?? characterChatModelSelectorLabel
+    : null;
+  const characterChatModelUsabilityBlocks = Boolean(
+    activeCharacterChatModelUsability &&
+      activeCharacterChatModelUsability.status !== "ready" &&
+      !activeCharacterChatModelUsability.canSend,
   );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2444,8 +2549,13 @@ export const Playground = () => {
     toolSummary: cockpitToolSummary,
     compositionStatus,
     composition: null,
+    modelUsabilityStatus: activeCharacterChatModelUsability?.status ?? null,
+    modelUsabilityCanSend: activeCharacterChatModelUsability?.canSend ?? null,
+    modelUsabilityDetail: characterChatModelUsabilityMessage,
     modelUnavailable: characterChatModelUnavailable,
-    modelUnavailableDetail: characterChatReadinessCopy?.title ?? null,
+    modelUnavailableDetail: characterChatModelUnavailable
+      ? characterChatReadinessCopy?.title ?? null
+      : null,
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
@@ -2490,12 +2600,41 @@ export const Playground = () => {
       }
       if (action === "open-server-settings") {
         openServerSettingsFromCockpit();
+        return;
+      }
+      if (action === "retry") {
+        void refreshCharacterChatModels();
       }
     },
     [
       openCharacterSelectorFromReadiness,
       openModelSettingsFromCockpit,
+      refreshCharacterChatModels,
       openServerSettingsFromCockpit,
+    ],
+  );
+  const characterChatSendBlocker = React.useMemo<PlaygroundSendBlocker | null>(
+    () =>
+      characterWorkflowActive &&
+      characterChatReadiness.status === "blocked" &&
+      characterChatReadiness.missingRequirement === "chat-model" &&
+      characterChatReadinessCopy
+        ? {
+            active: true,
+            title: characterChatReadinessCopy.title,
+            actionLabel: characterChatReadinessCopy.actionLabel,
+            onAction: () =>
+              handleCharacterChatReadinessAction(
+                characterChatReadiness.recommendedAction ??
+                  "open-model-settings",
+              ),
+          }
+        : null,
+    [
+      characterChatReadiness,
+      characterChatReadinessCopy,
+      characterWorkflowActive,
+      handleCharacterChatReadinessAction,
     ],
   );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
@@ -2611,14 +2750,21 @@ export const Playground = () => {
       selectedProvider={providerRouteSummary.selectedProvider}
       selectedModel={providerRouteSummary.selectedModel}
       providerRouteLabel={providerRouteSummary.providerRouteLabel}
+      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
+      modelUsabilityDetail={characterChatModelUsabilityMessage}
       runtimeStatus={
-        characterChatModelUnavailable || serverReadinessState === "blocked"
+        serverReadinessState === "blocked"
           ? "error"
           : streaming
             ? "streaming"
-            : serverReadinessState === "degraded"
-              ? "degraded"
-              : "ready"
+            : activeCharacterChatModelUsability?.status === "loading"
+              ? "loading"
+            : characterChatModelUsabilityBlocks
+              ? "error"
+              : serverReadinessState === "degraded"
+                ? "degraded"
+                : "ready"
       }
       runtimeStatusDetail={
         characterChatReadinessCopy?.title ?? runtimeStatusDetail
@@ -2664,8 +2810,13 @@ export const Playground = () => {
       degradedChecks={serverDegradedChecks}
       errorMessage={null}
       serverBlocked={serverReadinessState === "blocked"}
+      modelUsabilityStatus={activeCharacterChatModelUsability?.status ?? null}
+      modelUsabilityCanSend={activeCharacterChatModelUsability?.canSend ?? null}
+      modelUsabilityMessage={characterChatModelUsabilityMessage}
       modelUnavailable={characterChatModelUnavailable}
-      modelUnavailableMessage={characterChatReadinessCopy?.title ?? null}
+      modelUnavailableMessage={
+        characterChatModelUnavailable ? characterChatReadinessCopy?.title ?? null : null
+      }
       compositionStatus={compositionStatus}
       onStopStreaming={() => stopStreamingRequest()}
       onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
@@ -3215,6 +3366,14 @@ export const Playground = () => {
                   handleSelectAttachedResearchContextHistory
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
+                characterChatSendBlocker={characterChatSendBlocker}
+                characterChatModelUsability={activeCharacterChatModelUsability}
+                characterChatModelUsabilityLabel={
+                  characterChatModelSelectorLabel
+                }
+                characterChatModelUsabilityTitle={
+                  characterChatModelSelectorTitle
+                }
               />
             </div>
           </div>

@@ -81,6 +81,56 @@ describe("TldwApiClient getModels normalization", () => {
     expect(models[0]?.name).toBe("GPT-4o Mini (openai/gpt-4o-mini)")
   })
 
+  it("preserves backend model configuration flags for readiness gating", async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string }) => {
+      if (request.path === "/api/v1/llm/models/metadata") {
+        return {
+          models: [
+            {
+              name: "gpt-4o",
+              provider: "openai",
+              type: "chat",
+              is_configured: false,
+              provider_is_configured: false,
+              catalog_only: true
+            },
+            {
+              name: "legacy-model",
+              provider: "custom",
+              type: "chat",
+              is_configured: "false",
+              provider_is_configured: 1,
+              catalog_only: null
+            }
+          ]
+        }
+      }
+      return {}
+    })
+
+    const client = new TldwApiClient()
+    const models = await client.getModels()
+
+    expect(models[0]).toEqual(
+      expect.objectContaining({
+        id: "gpt-4o",
+        provider: "openai",
+        is_configured: false,
+        provider_is_configured: false,
+        catalog_only: true
+      })
+    )
+    expect(models[1]).toEqual(
+      expect.objectContaining({
+        id: "legacy-model",
+        provider: "custom",
+        is_configured: undefined,
+        provider_is_configured: undefined,
+        catalog_only: undefined
+      })
+    )
+  })
+
   it("routes llama.cpp profile runtime methods to managed runtime endpoints", async () => {
     const requests: Array<{ path?: string; method?: string; body?: unknown }> = []
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: unknown }) => {

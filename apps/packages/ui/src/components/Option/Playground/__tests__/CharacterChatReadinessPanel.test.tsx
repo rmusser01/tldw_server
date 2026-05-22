@@ -75,8 +75,39 @@ describe("CharacterChatReadinessPanel", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Choose a chat model before chatting as Ariadne",
+      "Choose an available chat model before chatting as Ariadne",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(action).toHaveBeenCalledWith("open-model-settings");
+  });
+
+  it("shows provider setup blockers with selected character context", () => {
+    const action = vi.fn();
+
+    render(
+      <CharacterChatReadinessPanel
+        readiness={buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: "ariadne", name: "Ariadne" },
+          selectedModel: "openai:gpt-4o",
+          availableModels: [
+            {
+              id: "gpt-4o",
+              model: "tldw:gpt-4o",
+              provider: "openai",
+              is_configured: false,
+            } as any,
+          ],
+        })}
+        characterName="Ariadne"
+        onAction={action}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Configure the selected model provider before chatting as Ariadne",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("draft are kept");
     fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
     expect(action).toHaveBeenCalledWith("open-model-settings");
   });

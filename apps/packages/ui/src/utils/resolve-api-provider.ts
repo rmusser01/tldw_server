@@ -112,23 +112,47 @@ export const parseProviderQualifiedModelSelection = (
     provider: undefined,
     isProviderQualified: false
   }
-  const separatorIndex = raw.indexOf(":")
-  if (separatorIndex <= 0 || separatorIndex === raw.length - 1) {
-    return fallback
+
+  const parseCandidate = (
+    candidate: string
+  ): Omit<ProviderQualifiedModelSelection, "raw"> | null => {
+    const separatorIndex = candidate.indexOf(":")
+    if (separatorIndex <= 0 || separatorIndex === candidate.length - 1) {
+      return null
+    }
+
+    const provider = normalizeKnownProvider(candidate.slice(0, separatorIndex))
+    if (!provider) return null
+
+    const modelId = candidate.slice(separatorIndex + 1).trim()
+    if (!modelId) return null
+
+    return {
+      modelId,
+      provider,
+      isProviderQualified: true
+    }
   }
 
-  const provider = normalizeKnownProvider(raw.slice(0, separatorIndex))
-  if (!provider) return fallback
-
-  const modelId = raw.slice(separatorIndex + 1).trim()
-  if (!modelId) return fallback
-
-  return {
-    raw,
-    modelId,
-    provider,
-    isProviderQualified: true
+  const parsed = parseCandidate(raw)
+  if (parsed) {
+    return {
+      raw,
+      ...parsed
+    }
   }
+
+  const normalized = normalizeModelId(raw)
+  const normalizedParsed =
+    normalized !== raw ? parseCandidate(normalized) : null
+  if (normalizedParsed) {
+    return {
+      raw,
+      ...normalizedParsed
+    }
+  }
+
+  return fallback
 }
 
 export const resolveExplicitProviderForSelectedModel = ({

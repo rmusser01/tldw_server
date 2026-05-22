@@ -15,6 +15,9 @@ type ChatModelSelectorDropdownProps = {
   modelDropdownMenuItems: MenuProps["items"]
   modelDropdownOpen: boolean
   modelSelectorWarning?: boolean
+  modelUsabilityLabel?: string | null
+  modelUsabilityTitle?: string | null
+  modelUsabilityWarning?: boolean
   onBeforeOpen?: () => void
   placement?: "topLeft" | "bottomLeft"
   resolvedProviderKey: string
@@ -32,6 +35,9 @@ export const ChatModelSelectorDropdown = React.memo(
     modelDropdownMenuItems,
     modelDropdownOpen,
     modelSelectorWarning = false,
+    modelUsabilityLabel = null,
+    modelUsabilityTitle = null,
+    modelUsabilityWarning = false,
     onBeforeOpen,
     placement = "topLeft",
     resolvedProviderKey,
@@ -39,6 +45,15 @@ export const ChatModelSelectorDropdown = React.memo(
     setModelSearchQuery
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
+    const trimmedModelUsabilityLabel = modelUsabilityLabel?.trim() || null
+    const hasModelUsabilityOverride = Boolean(trimmedModelUsabilityLabel)
+    const selectorLabel = hasModelUsabilityOverride
+      ? `${apiModelLabel} - ${trimmedModelUsabilityLabel}`
+      : apiModelLabel
+    const selectorTitle = hasModelUsabilityOverride
+      ? modelUsabilityTitle?.trim() || selectorLabel
+      : apiModelLabel
+    const selectorWarning = modelSelectorWarning || modelUsabilityWarning
 
     return (
       <Dropdown
@@ -86,7 +101,9 @@ export const ChatModelSelectorDropdown = React.memo(
       >
         <Tooltip
           title={
-            modelSelectorWarning
+            hasModelUsabilityOverride
+              ? selectorTitle
+              : modelSelectorWarning
               ? t(
                   "playground:composer.selectModelTooltip",
                   "Click to select a model"
@@ -97,13 +114,13 @@ export const ChatModelSelectorDropdown = React.memo(
         >
           <button
             type="button"
-            title={apiModelLabel}
-            aria-label={apiModelLabel}
+            title={selectorTitle}
+            aria-label={selectorTitle}
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
             className={`inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
-              modelSelectorWarning
+              selectorWarning
                 ? "border-warn/50 bg-warn/10 text-warn hover:bg-warn/20"
                 : "border-border bg-surface hover:bg-surface-hover"
             }`}
@@ -111,25 +128,27 @@ export const ChatModelSelectorDropdown = React.memo(
             <ProviderIcons
               provider={resolvedProviderKey}
               className={`h-3 w-3 ${
-                modelSelectorWarning ? "text-warn" : "text-text-subtle"
+                selectorWarning ? "text-warn" : "text-text-subtle"
               }`}
             />
-            <span className="max-w-[120px] truncate">{apiModelLabel}</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[9px] ${
-                connectionStatusWarning
-                  ? "bg-warn/10 text-warn"
-                  : "bg-success/10 text-success"
-              }`}
-              title={
-                t(
-                  "playground:composer.providerStatusTooltip",
-                  "Provider status"
-                ) as string
-              }
-            >
-              {connectionStatusLabel}
-            </span>
+            <span className="max-w-[120px] truncate">{selectorLabel}</span>
+            {!hasModelUsabilityOverride && (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[9px] ${
+                  connectionStatusWarning
+                    ? "bg-warn/10 text-warn"
+                    : "bg-success/10 text-success"
+                }`}
+                title={
+                  t(
+                    "playground:composer.providerStatusTooltip",
+                    "Provider status"
+                  ) as string
+                }
+              >
+                {connectionStatusLabel}
+              </span>
+            )}
           </button>
         </Tooltip>
       </Dropdown>

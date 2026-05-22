@@ -13,6 +13,7 @@ import {
   UserRound,
   Wrench,
 } from "lucide-react";
+import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
 import {
   formatCockpitMessageCount,
   useCockpitMessageCount,
@@ -56,7 +57,10 @@ export type PlaygroundRuntimeInspectorProps = {
   selectedProvider?: string | null | undefined;
   selectedModel: string | null | undefined;
   providerRouteLabel?: string | null;
-  runtimeStatus?: "ready" | "streaming" | "error" | "degraded";
+  modelUsabilityStatus?: ChatModelUsabilityStatus | null;
+  modelUsabilityCanSend?: boolean | null;
+  modelUsabilityDetail?: string | null;
+  runtimeStatus?: "ready" | "streaming" | "loading" | "error" | "degraded";
   runtimeStatusDetail?: string | null;
   messageCount: number;
   threadSearchOpen: boolean;
@@ -91,6 +95,9 @@ export const PlaygroundRuntimeInspector = ({
   selectedProvider,
   selectedModel,
   providerRouteLabel,
+  modelUsabilityStatus = null,
+  modelUsabilityCanSend = null,
+  modelUsabilityDetail = null,
   runtimeStatus,
   runtimeStatusDetail,
   messageCount,
@@ -139,10 +146,27 @@ export const PlaygroundRuntimeInspector = ({
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`
         : selectedModel || null);
-  const status = runtimeStatus || (streaming ? "streaming" : "ready");
+  const modelUsabilityBlocks =
+    Boolean(modelUsabilityStatus) &&
+    modelUsabilityStatus !== "ready" &&
+    !(
+      modelUsabilityStatus === "degraded" &&
+      modelUsabilityCanSend !== false
+    );
+  const status =
+    runtimeStatus ||
+    (streaming
+      ? "streaming"
+      : modelUsabilityStatus === "loading"
+        ? "loading"
+        : modelUsabilityBlocks
+          ? "error"
+          : "ready");
   const statusLabel =
     status === "streaming"
       ? t("cockpit.streaming", "Streaming")
+      : status === "loading"
+        ? t("cockpit.modelChecking", "Checking model")
       : status === "degraded"
         ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
         : status === "error"
@@ -270,6 +294,9 @@ export const PlaygroundRuntimeInspector = ({
                 route: routeLabel,
               })}
             </p>
+            {modelUsabilityDetail ? (
+              <p className={cockpitRailStyles.muted}>{modelUsabilityDetail}</p>
+            ) : null}
           </div>
         ) : null}
       </PlaygroundRailSection>

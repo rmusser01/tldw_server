@@ -39,6 +39,20 @@
     "noModel": "Please select a model",
     "noEmbeddingModel": "Please set an embedding model on the Settings > Knowledge page"
   },
+  "characterChatFailure": {
+    "providerUnconfigured": {
+      "summary": "Character chat model setup needs attention.",
+      "message": "Open model settings and configure the selected model provider. Your character chat state and draft are kept so you can return and try again."
+    },
+    "modelUnavailable": {
+      "summary": "The selected Character Chat model is not callable.",
+      "message": "Open model settings and choose or configure a callable chat model. Your character chat state and draft are kept so you can return and try again."
+    },
+    "transient": {
+      "summary": "Character chat response failed.",
+      "message": "Try again in a moment, or open Health & diagnostics to inspect server health."
+    }
+  },
   "imageCommand": {
     "invalidUsage": "Use /generate-image:<provider> <prompt>.",
     "missingProvider": "Pick an Image provider in More tools or use /generate-image:<provider> <prompt>.",

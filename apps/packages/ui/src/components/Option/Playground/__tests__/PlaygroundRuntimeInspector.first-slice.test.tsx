@@ -562,4 +562,50 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Provider failed")).toBeInTheDocument();
   });
+
+  it("keeps streaming primary over blocked model usability", () => {
+    renderInspector({
+      streaming: true,
+      runtimeStatus: undefined,
+      modelUsabilityStatus: "provider_unconfigured",
+      modelUsabilityCanSend: false,
+      modelUsabilityDetail:
+        "Configure the selected model provider before chatting as Ada",
+    });
+
+    expect(screen.getByText("Streaming")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).toBeNull();
+    expect(
+      screen.getByText("Configure the selected model provider before chatting as Ada"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows blocked model usability when not streaming", () => {
+    renderInspector({
+      runtimeStatus: undefined,
+      modelUsabilityStatus: "degraded",
+      modelUsabilityCanSend: false,
+      modelUsabilityDetail: "Character chat is preparing",
+    });
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Character chat is preparing")).toBeInTheDocument();
+  });
+
+  it("shows model readiness loading without treating it as an error", () => {
+    renderInspector({
+      runtimeStatus: "loading",
+      runtimeStatusDetail: "Checking chat model readiness",
+      modelUsabilityStatus: "loading",
+      modelUsabilityCanSend: false,
+      modelUsabilityDetail: "Checking chat model readiness",
+    });
+
+    expect(screen.getByText("Checking model")).toBeInTheDocument();
+    expect(screen.getAllByText("Checking chat model readiness").length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.queryByText("Error")).toBeNull();
+    expect(screen.queryByText("Ready")).toBeNull();
+  });
 });

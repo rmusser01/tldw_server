@@ -78,6 +78,8 @@ export const modelsAudioMethods = {
       const trimmed = value.trim()
       return trimmed.length > 0 ? trimmed : null
     }
+    const toOptionalBoolean = (value: unknown): boolean | undefined =>
+      typeof value === "boolean" ? value : undefined
     const isLikelyModelId = (value: string): boolean => {
       if (/\s/.test(value)) return false
       return /[/:._-]/.test(value)
@@ -131,6 +133,9 @@ export const modelsAudioMethods = {
           (m.capabilities && m.capabilities.json_mode) ?? m.json_output
         ),
         type: typeof m.type === "string" ? m.type : undefined,
+        is_configured: toOptionalBoolean(m.is_configured),
+        provider_is_configured: toOptionalBoolean(m.provider_is_configured),
+        catalog_only: toOptionalBoolean(m.catalog_only),
         modalities:
           m.modalities && typeof m.modalities === "object"
             ? {

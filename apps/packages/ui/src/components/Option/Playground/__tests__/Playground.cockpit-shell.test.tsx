@@ -620,6 +620,53 @@ describe("Playground cockpit shell", () => {
     }
   });
 
+  it("retries character chat model catalog loading from readiness recovery", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
+    let resolveInitialModels:
+      | ((models: Array<Record<string, unknown>>) => void)
+      | null = null;
+    const initialModels = new Promise<Array<Record<string, unknown>>>(
+      (resolve) => {
+        resolveInitialModels = resolve;
+      },
+    );
+    tldwServerState.fetchChatModels
+      .mockImplementationOnce(() => initialModels)
+      .mockResolvedValueOnce([
+        {
+          model: "openai:gpt-4.1-mini",
+          provider: "openai",
+          is_configured: true,
+          provider_is_configured: true,
+        },
+      ]);
+
+    render(<Playground />);
+
+    expect(
+      within(
+        await screen.findByTestId("character-chat-readiness-panel"),
+      ).getByText("Checking chat model readiness"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => {
+      expect(tldwServerState.fetchChatModels).toHaveBeenCalledTimes(2);
+    });
+    expect(tldwServerState.fetchChatModels).toHaveBeenLastCalledWith({
+      returnEmpty: true,
+      forceRefresh: true,
+    });
+
+    resolveInitialModels?.([]);
+  });
+
   it("surfaces unavailable selected chat models from the model catalog", async () => {
     storageState.values.set("playgroundChatWorkflowMode", "character");
     messageOptionState.value.selectedCharacter = {
@@ -641,7 +688,7 @@ describe("Playground cockpit shell", () => {
     expect(
       within(
         await screen.findByTestId("character-chat-readiness-panel"),
-      ).getByText("Choose a chat model before chatting as Ariadne"),
+      ).getByText("Choose an available chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
     const chatStatus = screen.getByRole("status", { name: "Chat status" });
     expect(chatStatus).toHaveTextContent("Model unavailable");
@@ -698,7 +745,41 @@ describe("Playground cockpit shell", () => {
     expect(
       within(
         await screen.findByTestId("character-chat-readiness-panel"),
-      ).getByText("Choose a chat model before chatting as Ariadne"),
+      ).getByText("Configure the selected model provider before chatting as Ariadne"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not treat provider-qualified catalog-only backend models as ready for character chat", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedCharacter = {
+      id: "char-1",
+      name: "Ariadne",
+    };
+    messageOptionState.value.selectedModel = "tldw:openai:gpt-4o";
+    tldwServerState.fetchChatModels.mockResolvedValueOnce([
+      {
+        id: "gpt-4o",
+        model: "tldw:gpt-4o",
+        provider: "openai",
+        is_configured: false,
+        provider_is_configured: false,
+        catalog_only: true,
+      } as any,
+      {
+        id: "gemma3:1b",
+        model: "tldw:gemma3:1b",
+        provider: "ollama",
+        is_configured: true,
+        provider_is_configured: true,
+      } as any,
+    ]);
+
+    render(<Playground />);
+
+    expect(
+      within(
+        await screen.findByTestId("character-chat-readiness-panel"),
+      ).getByText("Configure the selected model provider before chatting as Ariadne"),
     ).toBeInTheDocument();
   });
 
