@@ -223,6 +223,24 @@ def test_omnivoice_adapter_rejects_conflicting_instruct_aliases():
         )
 
 
+def test_omnivoice_adapter_rejects_invalid_bool_generation_param():
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        stream=False,
+        extra_params={"denoise": "maybe"},
+    )
+
+    with pytest.raises(TTSValidationError, match="denoise"):
+        OmniVoiceAdapter({})._build_sidecar_payload(
+            request,
+            mode="auto",
+            sample_rate=24000,
+            reference_audio_path=None,
+        )
+
+
 @pytest.mark.asyncio
 async def test_omnivoice_reference_audio_materializes_under_configured_scratch_dir(tmp_path, monkeypatch):
     scratch_dir = tmp_path / "runtime" / "scratch"

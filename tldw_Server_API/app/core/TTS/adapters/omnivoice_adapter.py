@@ -26,7 +26,6 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
 from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse
 from .omnivoice_sidecar_protocol import build_sidecar_auth_headers
 from .omnivoice_sidecar_supervisor import create_sidecar_async_client
@@ -56,6 +55,8 @@ VALIDATION_ERROR_CODES = {
     "INVALID_GENERATION_PARAMETER",
     "REFERENCE_PATH_NOT_ALLOWED",
 }
+STRICT_TRUE_VALUES = {"1", "true", "t", "yes", "y", "on"}
+STRICT_FALSE_VALUES = {"0", "false", "f", "no", "n", "off"}
 
 
 class OmniVoiceAdapter(TTSAdapter):
@@ -382,7 +383,7 @@ class OmniVoiceAdapter(TTSAdapter):
     def _coerce_generation_value(self, key: str, value: Any, target_type: type) -> Any:
         try:
             if target_type is bool:
-                return parse_bool(value, default=False)
+                return self._coerce_bool_generation_value(key, value)
             if target_type is int:
                 return int(value)
             if target_type is float:
@@ -393,6 +394,20 @@ class OmniVoiceAdapter(TTSAdapter):
                 provider=self.PROVIDER_KEY,
             ) from exc
         return value
+
+    def _coerce_bool_generation_value(self, key: str, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in STRICT_TRUE_VALUES:
+                return True
+            if normalized in STRICT_FALSE_VALUES:
+                return False
+        raise TTSValidationError(
+            f"OmniVoice generation parameter {key} must be a boolean",
+            provider=self.PROVIDER_KEY,
+        )
 
     def _resolve_reference_text(self, extras: dict[str, Any]) -> Optional[str]:
         for key in REFERENCE_TEXT_KEYS:
