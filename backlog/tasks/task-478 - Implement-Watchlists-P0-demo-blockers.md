@@ -11,6 +11,8 @@ modified_files:
 - tldw_Server_API/app/core/Watchlists/pipeline.py
 - tldw_Server_API/app/api/v1/endpoints/watchlists.py
 - tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py
+- tldw_Server_API/app/core/Scheduler/scheduler.py
+- tldw_Server_API/app/core/Scheduler/__init__.py
 - tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 - tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py
 - tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
@@ -43,7 +45,7 @@ Docs/superpowers/plans/2026-05-22-watchlists-p0-demo-blockers-implementation-pla
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 2 review fix: run-audio fallback status now reads Scheduler task state only from an already-started global scheduler, avoiding read-only status lookups that initialize a no-worker Scheduler singleton. Added regression coverage for scheduler-unavailable fallback and no-global-scheduler startup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
