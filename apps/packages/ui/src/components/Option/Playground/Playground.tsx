@@ -471,6 +471,23 @@ export const Playground = () => {
   const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
   const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
+  const {
+    restoreSession,
+    sessionScopeReady,
+    hasPersistedSession,
+    persistedHistoryId,
+    persistedServerChatId,
+  } = usePlaygroundSessionPersistence();
+  const shouldRestorePersistedSessionOnInit =
+    shouldRestorePersistedPlaygroundSession({
+      hasPersistedSession,
+      persistedHistoryId,
+      persistedServerChatId,
+      currentHistoryId: historyId ?? null,
+      currentServerChatId: serverChatId ?? null,
+      currentMessagesLength: messages.length,
+      currentHistoryLength: history.length,
+    });
   const normalizedChatWorkflowMode =
     normalizeChatWorkflowMode(chatWorkflowMode);
   const characterWorkflowActive =
@@ -584,6 +601,7 @@ export const Playground = () => {
   React.useEffect(() => {
     if (!routeCharacterIntentId) return;
     if (routeCharacterIntentChatId) return;
+    if (shouldRestorePersistedSessionOnInit) return;
     const hasActiveConversation =
       Boolean(serverChatId) ||
       Boolean(stableHistoryId) ||
@@ -653,6 +671,7 @@ export const Playground = () => {
     routeCharacterIntentId,
     routeCharacterRetryToken,
     serverChatId,
+    shouldRestorePersistedSessionOnInit,
     setSelectedCharacter,
     stableHistoryId,
   ]);
@@ -1187,15 +1206,6 @@ export const Playground = () => {
     persistAttachedResearchContext,
   ]);
 
-  // Session persistence for draft restoration
-  const {
-    restoreSession,
-    sessionScopeReady,
-    hasPersistedSession,
-    persistedHistoryId,
-    persistedServerChatId,
-  } = usePlaygroundSessionPersistence();
-
   const initializePlayground = React.useCallback(async () => {
     if (routeCharacterIntentChatId) {
       if (serverChatId !== routeCharacterIntentChatId) {
@@ -1203,25 +1213,17 @@ export const Playground = () => {
       }
       return;
     }
-    if (routeCharacterIntentId) {
+    if (routeCharacterIntentId && !shouldRestorePersistedSessionOnInit) {
       return;
     }
 
     // 1. Try session persistence first (restores exact state from nav-away)
-    const shouldRestorePersistedSession =
-      shouldRestorePersistedPlaygroundSession({
-        hasPersistedSession,
-        persistedHistoryId,
-        persistedServerChatId,
-        currentHistoryId: historyId ?? null,
-        currentServerChatId: serverChatId ?? null,
-        currentMessagesLength: messages.length,
-        currentHistoryLength: history.length,
-      });
-
-    if (shouldRestorePersistedSession) {
+    if (shouldRestorePersistedSessionOnInit) {
       const restored = await restoreSession();
       if (restored) return;
+    }
+    if (routeCharacterIntentId) {
+      return;
     }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
@@ -1254,11 +1256,7 @@ export const Playground = () => {
     }
   }, [
     history.length,
-    historyId,
-    hasPersistedSession,
     messages.length,
-    persistedHistoryId,
-    persistedServerChatId,
     restoreSession,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
@@ -1269,6 +1267,7 @@ export const Playground = () => {
     setServerChatId,
     setSelectedSystemPrompt,
     setSystemPrompt,
+    shouldRestorePersistedSessionOnInit,
   ]);
 
   React.useEffect(() => {

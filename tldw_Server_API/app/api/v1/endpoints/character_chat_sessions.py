@@ -1163,7 +1163,11 @@ def _attach_conversation_assistant_names(
             user_id,
         )
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to resolve assistant display name for chat {}: {}", conv_data.get("id"), exc)
+        logger.debug(
+            "Failed to resolve assistant display name for chat {}: {}",
+            conv_data.get("id"),
+            exc,
+        )
         return conv_data
 
     if character_name is not None:

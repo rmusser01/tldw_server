@@ -3086,6 +3086,12 @@
   "playground_composer_persistence_serverDefaultTitle": {
     "message": "Extension chat"
   },
+  "playground_composer_persistence_serverWebUiDefaultTitle": {
+    "message": "WebUI chat"
+  },
+  "playground_composer_persistence_characterFallbackTitle": {
+    "message": "{{name}} role-play"
+  },
   "playground_composer_persistence_serverSavedTitle": {
     "message": "Chat now saved on server"
   },
@@ -3112,6 +3118,9 @@
   },
   "playground_composer_persistence_serverInlineBody": {
     "message": "This chat is stored both in this browser and on your tldw server, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations."
+  },
+  "playground_characterChat_sessionFallbackTitle": {
+    "message": "{{name}} role-play"
   },
   "playground_composer_conversationTags": {
     "message": "Conversation tags"

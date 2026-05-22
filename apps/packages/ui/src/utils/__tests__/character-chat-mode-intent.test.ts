@@ -34,6 +34,18 @@ describe("character chat mode intent", () => {
     })
   })
 
+  it("falls back to chat id aliases when the canonical chat id is empty", () => {
+    expect(
+      getCharacterChatRouteIntent(
+        "?mode=character&chatId=&serverChatId=chat-123&characterId=char-1"
+      )
+    ).toEqual({
+      mode: "character",
+      chatId: "chat-123",
+      characterId: "char-1"
+    })
+  })
+
   it("ignores non-character chat modes", () => {
     expect(getCharacterChatRouteIntent("?mode=rag&characterId=char-1")).toBeNull()
     expect(getCharacterChatRouteIntent("?characterId=char-1")).toBeNull()

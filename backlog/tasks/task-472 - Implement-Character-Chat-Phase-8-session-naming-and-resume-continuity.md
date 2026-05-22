@@ -32,10 +32,10 @@ Implement the PRD Phase 8 slice for /chat Character Chat: character-aware WebUI 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 WebUI-created character chats are not titled Extension chat unless they actually came from extension context and no better title exists.
-- [ ] #2 Recent character sessions show enough metadata to distinguish character, topic or first prompt, updated time, message count, and persistence state.
-- [ ] #3 Entering /chat?mode=character foregrounds the last character chat or offers an explicit resume action when no chat is active.
-- [ ] #4 Switching sessions does not leak prior character, prompt, scene, or generation style state.
+- [x] #1 WebUI-created character chats are not titled Extension chat unless they actually came from extension context and no better title exists.
+- [x] #2 Recent character sessions show enough metadata to distinguish character, topic or first prompt, updated time, message count, and persistence state.
+- [x] #3 Entering /chat?mode=character foregrounds the last character chat or offers an explicit resume action when no chat is active.
+- [x] #4 Switching sessions does not leak prior character, prompt, scene, or generation style state.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -58,10 +58,10 @@ Implemented Phase 8 Character Chat session continuity and metadata. WebUI-create
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

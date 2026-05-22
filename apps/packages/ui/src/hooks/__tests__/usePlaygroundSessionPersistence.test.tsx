@@ -70,6 +70,11 @@ describe("usePlaygroundSessionPersistence", () => {
   })
 
   it("restores a persisted server-backed character chat even without local Dexie history", async () => {
+    useStoreMessageOption.setState({
+      historyId: "stale-local-history",
+      history: [{ role: "user", content: "stale local message" }],
+      messages: [{ sender: "user", content: "stale local message" }]
+    })
     usePlaygroundSessionStore.getState().saveSession({
       historyId: null,
       serverChatId: "character-chat-42",
@@ -97,6 +102,9 @@ describe("usePlaygroundSessionPersistence", () => {
     expect(useStoreMessageOption.getState().serverChatId).toBe(
       "character-chat-42"
     )
+    expect(useStoreMessageOption.getState().historyId).toBeNull()
+    expect(useStoreMessageOption.getState().history).toEqual([])
+    expect(useStoreMessageOption.getState().messages).toEqual([])
     expect(mocks.getFullChatData).not.toHaveBeenCalled()
   })
 })

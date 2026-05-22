@@ -279,6 +279,11 @@ export function usePlaygroundSessionPersistence() {
 
       // Restore settings from session store
       if (savedServerChatId) {
+        if (!savedHistoryId) {
+          setHistoryId(null)
+          setHistory([])
+          setMessages([])
+        }
         setServerChatId(savedServerChatId)
       }
       setChatMode(sessionStore.chatMode)

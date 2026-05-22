@@ -261,6 +261,26 @@ describe("Playground coordinator integration", () => {
     expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
   })
 
+  it("restores persisted sessions before applying a character route id", async () => {
+    const restoreSession = vi.fn(async () => true)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = true
+    window.history.pushState(
+      {},
+      "",
+      "/chat?mode=character&characterId=route-character"
+    )
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(restoreSession).toHaveBeenCalledTimes(1)
+    })
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+  })
+
   it("does not apply explicit character ids over an active server chat", async () => {
     messageOptionState.value.serverChatId = "active-chat"
     window.history.pushState(

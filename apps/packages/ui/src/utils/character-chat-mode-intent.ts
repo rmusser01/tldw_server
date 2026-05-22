@@ -36,14 +36,19 @@ export const getCharacterChatRouteIntent = (
   const params = new URLSearchParams(search)
   const mode = params.get("mode")?.trim().toLowerCase()
   if (mode !== "character") return null
+  const chatId =
+    [
+      params.get("chatId"),
+      params.get("chat_id"),
+      params.get("serverChatId"),
+      params.get("server_chat_id")
+    ]
+      .map((value) => normalizeCharacterChatSessionId(value))
+      .find((value): value is string => value !== null) ?? null
+
   return {
     mode: "character",
-    chatId: normalizeCharacterChatSessionId(
-      params.get("chatId") ??
-        params.get("chat_id") ??
-        params.get("serverChatId") ??
-        params.get("server_chat_id")
-    ),
+    chatId,
     characterId: normalizeCharacterChatCharacterId(
       params.get("characterId") ?? params.get("character_id")
     )

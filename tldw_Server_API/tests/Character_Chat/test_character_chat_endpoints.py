@@ -166,7 +166,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             r = await client.get("/api/v1/chats/", headers=headers)
             assert r.status_code == 200
             listed_chats = r.json()["chats"]
-            listed_chat = next(item for item in listed_chats if item["id"] == chat_id)
+            listed_chat = next((item for item in listed_chats if item["id"] == chat_id), None)
+            assert listed_chat is not None, f"chat with id {chat_id} not found in listed_chats"
             assert listed_chat["character_name"] == character_name
             assert listed_chat["assistant_name"] == character_name
 
