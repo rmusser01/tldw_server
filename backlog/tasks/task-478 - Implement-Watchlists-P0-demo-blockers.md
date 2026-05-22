@@ -1,7 +1,7 @@
 ---
 id: TASK-478
 title: Implement Watchlists P0 demo blockers
-status: In Progress
+status: Done
 references:
 - Docs/superpowers/plans/2026-05-22-watchlists-p0-demo-blockers-implementation-plan.md
 - Docs/superpowers/specs/2026-05-22-watchlists-staged-demo-remediation-design.md
@@ -34,6 +34,11 @@ Implement the focused P0 demo-blocker plan for /watchlists only: workflows queue
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Structured audio trigger results distinguish submitted, skipped, configuration-required, queue-unavailable, and enqueue-failed paths.
+- [x] #2 Run-audio status exposes Scheduler-backed pending/queued/running/failed state when workflow artifacts are not yet available.
+- [x] #3 Reports output preview polls live audio status for text digest outputs with requested audio and preserves metadata artifacts/fallbacks.
+- [x] #4 Initial watchlist selection prefers the current valid selection or a first-class active watchlist instead of blindly selecting the first API item.
+- [x] #5 Focused backend, frontend, Bandit, diff, and browser-smoke verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,15 +56,15 @@ Task 2 complete after review: run-audio fallback status reads Scheduler task sta
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the focused Watchlists P0 demo-blocker slice: audio briefing trigger paths now return structured results and ensure a workflows queue worker before submit; run-audio status can report Scheduler-backed progress before durable workflow artifacts exist; Reports preview polls and merges live audio status for digest outputs with requested audio; and first-class active watchlists are selected atomically instead of transiently falling back to an imported placeholder. Verification on the rebased branch passed the focused backend Watchlists pytest subset, focused frontend Watchlists Vitest subset, touched-scope Bandit, and git diff whitespace check. Browser smoke with local FastAPI and Next.js verified `/watchlists` route load, Reports tab access, and Create report modal access; the first cold load produced a transient fetch error while services were warming, then the warm route/API pass reached the expected Watchlists and Reports states.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
