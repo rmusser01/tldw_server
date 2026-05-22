@@ -48,6 +48,7 @@ def client_with_user():
 @pytest.mark.asyncio
 async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingestion(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import watchlists
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
 
     retry_run_audio = watchlists.retry_run_audio
 
@@ -72,7 +73,7 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     db.get_run.return_value = run
     db.get_job.return_value = job
     db.update_run.return_value = run
-    trigger = AsyncMock(return_value="task-retry-10")
+    trigger = AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task-retry-10"))
     rerun_job = AsyncMock()
     monkeypatch.setattr(watchlists, "run_watchlist_job", rerun_job)
     monkeypatch.setattr(
@@ -98,6 +99,10 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     trigger.assert_awaited_once()
     rerun_job.assert_not_called()
     db.update_run.assert_called_once()
+    persisted_stats = json.loads(db.update_run.call_args.kwargs["stats_json"])
+    assert persisted_stats["audio_briefing_status"] == "submitted"
+    assert persisted_stats["audio_briefing_task_id"] == "task-retry-10"
+    assert persisted_stats["audio_briefing_retry_task_id"] == "task-retry-10"
 
 
 @pytest.mark.asyncio

@@ -1763,15 +1763,18 @@ async def run_watchlist_job(
                     trigger_audio_briefing,
                 )
 
-                audio_task_id = await trigger_audio_briefing(
+                audio_result = await trigger_audio_briefing(
                     user_id=user_id,
                     job_id=job_id,
                     run_id=run.id,
                     output_prefs=job_output_prefs,
                     db=db,
                 )
-                if audio_task_id:
-                    stats["audio_briefing_task_id"] = audio_task_id
+                stats["audio_briefing_status"] = audio_result.status
+                if audio_result.task_id:
+                    stats["audio_briefing_task_id"] = audio_result.task_id
+                if audio_result.reason:
+                    stats["audio_briefing_reason"] = audio_result.reason
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
                 "Audio briefing trigger failed for job {} (error_type={})",

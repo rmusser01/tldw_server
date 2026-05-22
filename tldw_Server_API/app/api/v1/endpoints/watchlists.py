@@ -5004,20 +5004,23 @@ async def retry_run_audio(
 
     if str(getattr(run, "status", "")).lower() in {"running", "queued"}:
         raise HTTPException(status_code=409, detail="audio_retry_run_in_progress")
-    task_id = await trigger_audio_briefing(
+    audio_result = await trigger_audio_briefing(
         user_id=int(resolved_user_id),
         job_id=int(run.job_id),
         run_id=run_id,
         output_prefs=output_prefs,
         db=target_db,
     )
-    if not task_id:
+    if not audio_result.submitted:
         raise HTTPException(status_code=409, detail="audio_retry_not_queued")
 
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
-    run_stats["audio_briefing_task_id"] = task_id
-    run_stats["audio_briefing_retry_task_id"] = task_id
-    run_stats["audio_briefing_status"] = "pending"
+    run_stats["audio_briefing_status"] = audio_result.status
+    if audio_result.task_id:
+        run_stats["audio_briefing_task_id"] = audio_result.task_id
+        run_stats["audio_briefing_retry_task_id"] = audio_result.task_id
+    if audio_result.reason:
+        run_stats["audio_briefing_reason"] = audio_result.reason
     try:
         await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
@@ -5028,7 +5031,7 @@ async def retry_run_audio(
         run_id=run_id,
         stage="audio",
         retried=True,
-        task_id=str(task_id),
+        task_id=str(audio_result.task_id),
     )
 
 
@@ -6803,7 +6806,7 @@ async def create_output(
                 trigger_audio_briefing,
             )
 
-            audio_task_id = await trigger_audio_briefing(
+            audio_result = await trigger_audio_briefing(
                 user_id=user_id,
                 job_id=job_id,
                 run_id=payload.run_id,
@@ -6829,17 +6832,21 @@ async def create_output(
                 },
                 db=db,
             )
-            if audio_task_id:
-                metadata["audio_briefing_task_id"] = audio_task_id
-                metadata["audio_briefing_status"] = "pending"
-                with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
-                    run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
-                    if not isinstance(run_stats, dict):
-                        run_stats = {}
-                    run_stats["audio_briefing_task_id"] = audio_task_id
-                    db.update_run(run.id, stats_json=json.dumps(run_stats))
-            else:
-                metadata["audio_briefing_status"] = "skipped"
+            metadata["audio_briefing_status"] = audio_result.status
+            if audio_result.task_id:
+                metadata["audio_briefing_task_id"] = audio_result.task_id
+            if audio_result.reason:
+                metadata["audio_briefing_reason"] = audio_result.reason
+            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+                run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
+                if not isinstance(run_stats, dict):
+                    run_stats = {}
+                run_stats["audio_briefing_status"] = audio_result.status
+                if audio_result.task_id:
+                    run_stats["audio_briefing_task_id"] = audio_result.task_id
+                if audio_result.reason:
+                    run_stats["audio_briefing_reason"] = audio_result.reason
+                db.update_run(run.id, stats_json=json.dumps(run_stats))
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
                 "Watchlists output audio briefing enqueue failed for run {} (error_type={})",

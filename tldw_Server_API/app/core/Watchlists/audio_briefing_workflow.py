@@ -6,10 +6,34 @@ when the job's output_prefs has generate_audio=True.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
+
+from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
+
+AudioBriefingTriggerStatus = Literal[
+    "disabled",
+    "submitted",
+    "skipped_no_items",
+    "configuration_required",
+    "queue_unavailable",
+    "enqueue_failed",
+]
+
+
+@dataclass(frozen=True)
+class AudioBriefingTriggerResult:
+    status: AudioBriefingTriggerStatus
+    task_id: str | None = None
+    reason: str | None = None
+
+    @property
+    def submitted(self) -> bool:
+        return self.status == "submitted" and bool(self.task_id)
+
 
 # ---------------------------------------------------------------------------
 # Built-in workflow definition
@@ -116,11 +140,39 @@ def _normalize_audio_cast_voice_map(audio_cast: Any) -> dict[str, str] | None:
     return voice_map or None
 
 
+def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str, str] | None:
+    """Resolve Watchlists audio prefs through the same defaults as /audio/speech."""
+    provider = output_prefs.get("audio_provider") or output_prefs.get("tts_provider")
+    model = output_prefs.get("audio_model")
+    if not provider and not model:
+        provider = "kitten_tts"
+    try:
+        resolved = resolve_tts_request_defaults(
+            provider=provider,
+            model=model,
+            voice=output_prefs.get("audio_voice"),
+        )
+    except Exception as exc:
+        logger.warning("Audio briefing: failed to resolve TTS defaults (error_type={})", type(exc).__name__)
+        return None
+
+    model = str(resolved.model or "").strip()
+    voice = str(resolved.voice or "").strip()
+    if not model or not voice:
+        return None
+    return model, voice
+
+
 def _build_workflow_inputs(
     items: list[dict[str, Any]],
     output_prefs: dict[str, Any],
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Build workflow inputs dict from watchlist output_prefs."""
+    tts_defaults = _resolve_workflow_tts_defaults(output_prefs)
+    if tts_defaults is None:
+        return None
+    tts_model, tts_voice = tts_defaults
+
     audio_cast = output_prefs.get("audio_cast")
     voice_map = output_prefs.get("voice_map")
     if not isinstance(voice_map, dict):
@@ -130,8 +182,8 @@ def _build_workflow_inputs(
         "items": items,
         "target_audio_minutes": output_prefs.get("target_audio_minutes", 10),
         "audio_language": output_prefs.get("audio_language") or "en",
-        "tts_model": output_prefs.get("audio_model") or "kokoro",
-        "tts_voice": output_prefs.get("audio_voice") or "af_heart",
+        "tts_model": tts_model,
+        "tts_voice": tts_voice,
         "tts_speed": output_prefs.get("audio_speed") or 1.0,
         "llm_provider": output_prefs.get("llm_provider"),
         "llm_model": output_prefs.get("llm_model"),
@@ -156,7 +208,7 @@ async def trigger_audio_briefing(
     output_prefs: dict[str, Any],
     db: Any,
     scheduler: Any | None = None,
-) -> str | None:
+) -> AudioBriefingTriggerResult:
     """Trigger the audio briefing workflow for a completed watchlist run.
 
     Args:
@@ -168,10 +220,10 @@ async def trigger_audio_briefing(
         scheduler: Optional scheduler instance. Defaults to the global Scheduler.
 
     Returns:
-        The Scheduler task ID if successfully submitted, None otherwise.
+        Structured status for the trigger attempt.
     """
     if not output_prefs.get("generate_audio"):
-        return None
+        return AudioBriefingTriggerResult(status="disabled")
 
     # Gather scraped items for this run
     try:
@@ -188,11 +240,11 @@ async def trigger_audio_briefing(
             run_id,
             type(exc).__name__,
         )
-        return None
+        return AudioBriefingTriggerResult(status="enqueue_failed", reason="item_load_failed")
 
     if not scraped_items:
         logger.info(f"Audio briefing: no ingested items for run {run_id}, skipping")
-        return None
+        return AudioBriefingTriggerResult(status="skipped_no_items", reason="no_ingested_items")
 
     # Build items context (title, summary, url)
     items: list[dict[str, Any]] = []
@@ -218,6 +270,11 @@ async def trigger_audio_briefing(
         )
 
     workflow_inputs = _build_workflow_inputs(items, output_prefs)
+    if workflow_inputs is None:
+        return AudioBriefingTriggerResult(
+            status="configuration_required",
+            reason="tts_defaults_unavailable",
+        )
 
     # Submit as a scheduler workflow task.
     try:
@@ -225,6 +282,28 @@ async def trigger_audio_briefing(
             from tldw_Server_API.app.core.Scheduler import get_global_scheduler
 
             scheduler = await get_global_scheduler()
+    except Exception as exc:
+        logger.warning(
+            "Audio briefing: failed to resolve scheduler for run {} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
+        return AudioBriefingTriggerResult(status="enqueue_failed", reason="scheduler_submit_failed")
+
+    try:
+        worker_count = await scheduler.scale_workers(1, "workflows")
+    except Exception as exc:
+        logger.warning(
+            "Audio briefing: workflows queue unavailable for run {} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
+        return AudioBriefingTriggerResult(status="queue_unavailable", reason="workflows_queue_scale_failed")
+
+    if worker_count < 1:
+        return AudioBriefingTriggerResult(status="queue_unavailable", reason="workflows_queue_has_no_workers")
+
+    try:
         metadata = {
             "source": "watchlist_audio_briefing",
             "watchlist_job_id": job_id,
@@ -249,11 +328,11 @@ async def trigger_audio_briefing(
             f"Audio briefing workflow submitted for watchlist run {run_id}, "
             f"task_id={task_id}, items={len(items)}"
         )
-        return task_id
+        return AudioBriefingTriggerResult(status="submitted", task_id=task_id)
     except Exception as exc:
         logger.warning(
             "Audio briefing: failed to submit workflow for run {} (error_type={})",
             run_id,
             type(exc).__name__,
         )
-        return None
+        return AudioBriefingTriggerResult(status="enqueue_failed", reason="scheduler_submit_failed")
