@@ -22,14 +22,6 @@ const FlashcardsManager = React.lazy(() =>
   import("./FlashcardsManager").then((m) => ({ default: m.FlashcardsManager }))
 )
 
-const FLASHCARD_STUDY_MODES = [
-  "Study",
-  "Manage",
-  "Import / Export",
-  "Templates",
-  "Scheduler"
-] as const
-
 const FlashcardsStudyFrame = ({
   children,
   stateLabel,
@@ -38,44 +30,84 @@ const FlashcardsStudyFrame = ({
   children: React.ReactNode
   stateLabel?: React.ReactNode
   constrainContent?: boolean
-}) => (
-  <div className="space-y-4" data-testid="flashcards-study-workspace">
-    <header
-      className="mx-auto max-w-6xl px-4 pt-4"
-      data-testid="flashcards-study-header"
-    >
-      <div className="rounded-lg border border-border bg-surface px-4 py-3 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="text-xs font-semibold text-text-muted">Study workspace</div>
-            <h1 className="mt-1 text-2xl font-semibold text-text">Flashcards</h1>
+}) => {
+  const { t } = useTranslation(["option", "common"])
+  const studyModes = [
+    {
+      key: "study",
+      label: t("option:flashcards.tabStudy", { defaultValue: "Study" })
+    },
+    {
+      key: "manage",
+      label: t("option:flashcards.tabManage", { defaultValue: "Manage" })
+    },
+    {
+      key: "importExport",
+      label: t("option:flashcards.tabImportExport", {
+        defaultValue: "Import / Export"
+      })
+    },
+    {
+      key: "templates",
+      label: t("option:flashcards.tabTemplates", { defaultValue: "Templates" })
+    },
+    {
+      key: "scheduler",
+      label: t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" })
+    }
+  ]
+
+  return (
+    <div className="space-y-4" data-testid="flashcards-study-workspace">
+      <header
+        className="mx-auto max-w-6xl px-4 pt-4"
+        data-testid="flashcards-study-header"
+      >
+        <div className="rounded-lg border border-border bg-surface px-4 py-3 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold text-text-muted">
+                {t("option:flashcards.studyWorkspaceLabel", {
+                  defaultValue: "Study workspace"
+                })}
+              </div>
+              <h1 className="mt-1 text-2xl font-semibold text-text">
+                {t("option:header.modeFlashcards", {
+                  defaultValue: "Flashcards"
+                })}
+              </h1>
+            </div>
+            {stateLabel ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {stateLabel}
+              </div>
+            ) : null}
           </div>
-          {stateLabel ? (
-            <div className="flex shrink-0 items-center gap-2">{stateLabel}</div>
-          ) : null}
+          <nav
+            aria-label={t("option:flashcards.modesAriaLabel", {
+              defaultValue: "Flashcards modes"
+            })}
+            className="mt-3 flex flex-wrap gap-2"
+          >
+            {studyModes.map((mode) => (
+              <span
+                key={mode.key}
+                className="rounded-full border border-border bg-bg px-2.5 py-1 text-xs font-medium text-text-muted"
+              >
+                {mode.label}
+              </span>
+            ))}
+          </nav>
         </div>
-        <nav
-          aria-label="Flashcards modes"
-          className="mt-3 flex flex-wrap gap-2"
-        >
-          {FLASHCARD_STUDY_MODES.map((mode) => (
-            <span
-              key={mode}
-              className="rounded-full border border-border bg-bg px-2.5 py-1 text-xs font-medium text-text-muted"
-            >
-              {mode}
-            </span>
-          ))}
-        </nav>
+      </header>
+      <div
+        className={constrainContent ? "mx-auto max-w-6xl px-4 pb-4" : undefined}
+      >
+        {children}
       </div>
-    </header>
-    <div
-      className={constrainContent ? "mx-auto max-w-6xl px-4 pb-4" : undefined}
-    >
-      {children}
     </div>
-  </div>
-)
+  )
+}
 
 const InlineConnectionWarning = ({
   message,
@@ -144,7 +176,9 @@ export const FlashcardsWorkspace: React.FC = () => {
   const offlineBannerProps = React.useMemo(() => {
     if (uxState === "error_auth" || uxState === "configuring_auth") {
       return {
-        badgeLabel: "Credentials required",
+        badgeLabel: t("common:credentialsRequired", {
+          defaultValue: "Credentials required"
+        }),
         title: t("option:flashcards.authTitle", {
           defaultValue: "Add your credentials to use Flashcards"
         }),
@@ -194,7 +228,9 @@ export const FlashcardsWorkspace: React.FC = () => {
     }
     if (uxState === "error_unreachable") {
       return {
-        badgeLabel: "Server unreachable",
+        badgeLabel: t("common:serverUnreachable", {
+          defaultValue: "Server unreachable"
+        }),
         title: t("option:flashcards.unreachableTitle", {
           defaultValue: "Can't reach your tldw server right now"
         }),
@@ -218,7 +254,7 @@ export const FlashcardsWorkspace: React.FC = () => {
       }
     }
     return {
-      badgeLabel: "Not connected",
+      badgeLabel: t("common:notConnected", { defaultValue: "Not connected" }),
       title: t("option:flashcards.emptyConnectTitle", {
         defaultValue: "Connect to use Flashcards"
       }),
@@ -252,18 +288,24 @@ export const FlashcardsWorkspace: React.FC = () => {
   const demoConnectionWarning = React.useMemo(() => {
     if (uxState === "error_auth" || uxState === "configuring_auth") {
       return {
-        message:
-          "Demo stays available, but your Flashcards credentials need attention."
+        message: t("option:flashcards.demoAuthWarning", {
+          defaultValue:
+            "Demo stays available, but your Flashcards credentials need attention."
+        })
       }
     }
     if (uxState === "unconfigured" || uxState === "configuring_url") {
       return {
-        message: "Demo stays available while you finish Flashcards setup."
+        message: t("option:flashcards.demoSetupWarning", {
+          defaultValue: "Demo stays available while you finish Flashcards setup."
+        })
       }
     }
     if (uxState === "error_unreachable") {
       return {
-        message: "Demo stays available, but your tldw server is unreachable.",
+        message: t("option:flashcards.demoUnreachableWarning", {
+          defaultValue: "Demo stays available, but your tldw server is unreachable."
+        }),
         retryActionLabel: t("option:buttonRetry", "Retry connection"),
         onRetry: handleRetryConnection,
         retryDisabled: checkingConnection
@@ -277,7 +319,11 @@ export const FlashcardsWorkspace: React.FC = () => {
     return (
       <FlashcardsStudyFrame
         stateLabel={
-          demoEnabled ? <StatusBadge variant="demo">Local demo</StatusBadge> : undefined
+          demoEnabled ? (
+            <StatusBadge variant="demo">
+              {t("common:localDemo", { defaultValue: "Local demo" })}
+            </StatusBadge>
+          ) : undefined
         }
         constrainContent
       >
@@ -295,7 +341,9 @@ export const FlashcardsWorkspace: React.FC = () => {
             <FeatureEmptyState
               title={
                 <span className="inline-flex items-center gap-2">
-                  <StatusBadge variant="demo">Demo</StatusBadge>
+                  <StatusBadge variant="demo">
+                    {t("common:demo", { defaultValue: "Demo" })}
+                  </StatusBadge>
                   <span>
                     {t("option:flashcards.demoTitle", {
                       defaultValue: "Explore Flashcards in demo mode"
@@ -356,15 +404,21 @@ export const FlashcardsWorkspace: React.FC = () => {
 
   // Feature not supported on this server
   if (flashcardsUnsupported) {
+    const featureUnavailableLabel = t("common:featureUnavailable", {
+      defaultValue: "Feature unavailable"
+    })
+
     return (
       <FlashcardsStudyFrame
-        stateLabel={<StatusBadge variant="error">Feature unavailable</StatusBadge>}
+        stateLabel={
+          <StatusBadge variant="error">{featureUnavailableLabel}</StatusBadge>
+        }
         constrainContent
       >
         <FeatureEmptyState
           title={
             <span className="inline-flex items-center gap-2">
-              <StatusBadge variant="error">Feature unavailable</StatusBadge>
+              <StatusBadge variant="error">{featureUnavailableLabel}</StatusBadge>
               <span>
                 {t("option:flashcards.offlineTitle", {
                   defaultValue: "Flashcards API not available on this server"

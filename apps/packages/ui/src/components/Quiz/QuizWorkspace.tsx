@@ -26,14 +26,6 @@ type DemoPreviewMode = "catalog" | "taking" | "results"
 
 const QUIZ_BETA_TOOLTIP_ID = "quiz-beta-tooltip"
 
-const QUIZ_STUDY_MODES = [
-  "Take Quiz",
-  "Generate",
-  "Create",
-  "Manage",
-  "Results"
-] as const
-
 const normalizeDemoAnswer = (value: string | undefined): string => value?.trim().toLowerCase() ?? ""
 
 const isDemoQuestionCorrect = (question: DemoQuizQuestion, answer: string | undefined): boolean => {
@@ -109,46 +101,80 @@ const QuizStudyFrame = ({
   children: React.ReactNode
   stateLabel?: React.ReactNode
   constrainContent?: boolean
-}) => (
-  <div className="space-y-4" data-testid="quiz-study-workspace">
-    <header
-      className="mx-auto max-w-6xl px-4 pt-4"
-      data-testid="quiz-study-header"
-    >
-      <div className="rounded-lg border border-border bg-surface px-4 py-3 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="text-xs font-semibold text-text-muted">Study workspace</div>
-            <h1 className="mt-1 text-2xl font-semibold text-text">Quiz</h1>
-          </div>
-          {stateLabel ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {stateLabel}
+}) => {
+  const { t } = useTranslation(["option", "common"])
+  const studyModes = [
+    {
+      key: "take",
+      label: t("option:quiz.take", { defaultValue: "Take Quiz" })
+    },
+    {
+      key: "generate",
+      label: t("option:quiz.generate", { defaultValue: "Generate" })
+    },
+    {
+      key: "create",
+      label: t("option:quiz.create", { defaultValue: "Create" })
+    },
+    {
+      key: "manage",
+      label: t("option:quiz.manage", { defaultValue: "Manage" })
+    },
+    {
+      key: "results",
+      label: t("option:quiz.results", { defaultValue: "Results" })
+    }
+  ]
+
+  return (
+    <div className="space-y-4" data-testid="quiz-study-workspace">
+      <header
+        className="mx-auto max-w-6xl px-4 pt-4"
+        data-testid="quiz-study-header"
+      >
+        <div className="rounded-lg border border-border bg-surface px-4 py-3 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-xs font-semibold text-text-muted">
+                {t("option:quiz.studyWorkspaceLabel", {
+                  defaultValue: "Study workspace"
+                })}
+              </div>
+              <h1 className="mt-1 text-2xl font-semibold text-text">
+                {t("option:quiz.quiz", { defaultValue: "Quiz" })}
+              </h1>
             </div>
-          ) : null}
+            {stateLabel ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {stateLabel}
+              </div>
+            ) : null}
+          </div>
+          <nav
+            aria-label={t("option:quiz.modesAriaLabel", {
+              defaultValue: "Quiz modes"
+            })}
+            className="mt-3 flex flex-wrap gap-2"
+          >
+            {studyModes.map((mode) => (
+              <span
+                key={mode.key}
+                className="rounded-full border border-border bg-bg px-2.5 py-1 text-xs font-medium text-text-muted"
+              >
+                {mode.label}
+              </span>
+            ))}
+          </nav>
         </div>
-        <nav
-          aria-label="Quiz modes"
-          className="mt-3 flex flex-wrap gap-2"
-        >
-          {QUIZ_STUDY_MODES.map((mode) => (
-            <span
-              key={mode}
-              className="rounded-full border border-border bg-bg px-2.5 py-1 text-xs font-medium text-text-muted"
-            >
-              {mode}
-            </span>
-          ))}
-        </nav>
+      </header>
+      <div
+        className={constrainContent ? "mx-auto max-w-6xl px-4 pb-4" : undefined}
+      >
+        {children}
       </div>
-    </header>
-    <div
-      className={constrainContent ? "mx-auto max-w-6xl px-4 pb-4" : undefined}
-    >
-      {children}
     </div>
-  </div>
-)
+  )
+}
 
 const DemoQuizPreview: React.FC<{ quizzes: DemoQuiz[] }> = ({ quizzes }) => {
   const [selectedQuizId, setSelectedQuizId] = React.useState<string | null>(
@@ -564,7 +590,9 @@ export const QuizWorkspace: React.FC = () => {
   const offlineBannerProps = React.useMemo(() => {
     if (uxState === "error_auth" || uxState === "configuring_auth") {
       return {
-        badgeLabel: "Credentials required",
+        badgeLabel: t("common:credentialsRequired", {
+          defaultValue: "Credentials required"
+        }),
         title: t("option:quiz.authTitle", {
           defaultValue: "Add your credentials to use Quiz Playground"
         }),
@@ -615,7 +643,9 @@ export const QuizWorkspace: React.FC = () => {
     }
     if (uxState === "error_unreachable") {
       return {
-        badgeLabel: "Server unreachable",
+        badgeLabel: t("common:serverUnreachable", {
+          defaultValue: "Server unreachable"
+        }),
         title: t("option:quiz.unreachableTitle", {
           defaultValue: "Can't reach your tldw server right now"
         }),
@@ -639,7 +669,7 @@ export const QuizWorkspace: React.FC = () => {
       }
     }
     return {
-      badgeLabel: "Not connected",
+      badgeLabel: t("common:notConnected", { defaultValue: "Not connected" }),
       title: t("option:quiz.emptyConnectTitle", {
         defaultValue: "Connect to use Quiz Playground"
       }),
@@ -673,18 +703,25 @@ export const QuizWorkspace: React.FC = () => {
   const demoConnectionWarning = React.useMemo(() => {
     if (uxState === "error_auth" || uxState === "configuring_auth") {
       return {
-        message:
-          "Demo stays available, but your Quiz Playground credentials need attention."
+        message: t("option:quiz.demoAuthWarning", {
+          defaultValue:
+            "Demo stays available, but your Quiz Playground credentials need attention."
+        })
       }
     }
     if (uxState === "unconfigured" || uxState === "configuring_url") {
       return {
-        message: "Demo stays available while you finish Quiz Playground setup."
+        message: t("option:quiz.demoSetupWarning", {
+          defaultValue:
+            "Demo stays available while you finish Quiz Playground setup."
+        })
       }
     }
     if (uxState === "error_unreachable") {
       return {
-        message: "Demo stays available, but your tldw server is unreachable.",
+        message: t("option:quiz.demoUnreachableWarning", {
+          defaultValue: "Demo stays available, but your tldw server is unreachable."
+        }),
         retryActionLabel: t("option:buttonRetry", "Retry connection"),
         onRetry: handleRetryConnection,
         retryDisabled: checkingConnection
@@ -695,11 +732,15 @@ export const QuizWorkspace: React.FC = () => {
 
   // Offline state - show demo or connection banner
   if (!isOnline) {
+    const localDemoLabel = t("common:localDemo", {
+      defaultValue: "Local demo"
+    })
+
     return demoEnabled ? (
       <QuizStudyFrame
         stateLabel={
           <>
-            <StatusBadge variant="demo">Local demo</StatusBadge>
+            <StatusBadge variant="demo">{localDemoLabel}</StatusBadge>
             <QuizBetaBadge
               label={t("common:beta", { defaultValue: "Beta" })}
               description={betaDescription}
@@ -721,7 +762,9 @@ export const QuizWorkspace: React.FC = () => {
           <FeatureEmptyState
             title={
               <span className="inline-flex items-center gap-2">
-                <StatusBadge variant="demo">Demo</StatusBadge>
+                <StatusBadge variant="demo">
+                  {t("common:demo", { defaultValue: "Demo" })}
+                </StatusBadge>
                 <span>
                   {t("option:quiz.demoTitle", {
                     defaultValue: "Explore Quiz Playground in demo mode"
@@ -785,12 +828,15 @@ export const QuizWorkspace: React.FC = () => {
   // Feature not supported on this server
   if (quizzesUnsupported) {
     const specVersion = capabilities?.specVersion ?? "unknown"
+    const featureUnavailableLabel = t("common:featureUnavailable", {
+      defaultValue: "Feature unavailable"
+    })
 
     return (
       <QuizStudyFrame
         stateLabel={
           <>
-            <StatusBadge variant="error">Feature unavailable</StatusBadge>
+            <StatusBadge variant="error">{featureUnavailableLabel}</StatusBadge>
             <QuizBetaBadge
               label={t("common:beta", { defaultValue: "Beta" })}
               description={betaDescription}
@@ -803,7 +849,7 @@ export const QuizWorkspace: React.FC = () => {
           <FeatureEmptyState
             title={
               <span className="inline-flex items-center gap-2">
-                <StatusBadge variant="error">Feature unavailable</StatusBadge>
+                <StatusBadge variant="error">{featureUnavailableLabel}</StatusBadge>
                 <span>
                   {t("option:quiz.offlineTitle", {
                     defaultValue: "Quiz API not available on this server"
