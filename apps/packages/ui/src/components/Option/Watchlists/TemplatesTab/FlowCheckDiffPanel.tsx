@@ -42,7 +42,13 @@ export const FlowCheckDiffPanel: React.FC<FlowCheckDiffPanelProps> = ({
 
       {issues.length > 0 ? (
         <Alert variant="warning" title="Flow issues">
-          {issues.map((issue) => issue.message).join("; ")}
+          <ul className="list-inside list-disc">
+            {issues.map((issue, index) => (
+              <li key={`${issue.section_id ?? "flow-issue"}-${index}`}>
+                {issue.message}
+              </li>
+            ))}
+          </ul>
         </Alert>
       ) : null}
 

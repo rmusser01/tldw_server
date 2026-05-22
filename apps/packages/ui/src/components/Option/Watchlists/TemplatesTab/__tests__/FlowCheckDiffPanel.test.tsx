@@ -64,7 +64,10 @@ describe("FlowCheckDiffPanel", () => {
     render(
       <FlowCheckDiffPanel
         diff=""
-        issues={[{ message: "Missing required section" }]}
+        issues={[
+          { severity: "warning", message: "Missing required section" },
+          { severity: "warning", message: "Duplicate transition target" }
+        ]}
         onAcceptChunk={vi.fn()}
         onRejectChunk={vi.fn()}
       />
@@ -75,6 +78,8 @@ describe("FlowCheckDiffPanel", () => {
 
     expect(issueText).toBeInTheDocument()
     expect(noDiffText).toBeInTheDocument()
+    expect(screen.getByText("Duplicate transition target")).toBeInTheDocument()
+    expect(screen.getAllByRole("listitem")).toHaveLength(2)
     expect(issueText.closest("[data-ds-component='Alert']")).toBeInTheDocument()
     expect(noDiffText.closest("[data-ds-component='Alert']")).toBeInTheDocument()
   })
