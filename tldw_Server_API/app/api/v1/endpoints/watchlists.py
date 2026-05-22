@@ -5704,6 +5704,8 @@ async def get_run_audio(
 
     except HTTPException:
         raise
+    except asyncio.CancelledError:
+        raise
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.opt(exception=exc).warning(f"Failed to look up audio artifact for run {run_id}")
         return {

@@ -313,6 +313,70 @@ class TestGetRunAudioEndpoint:
         assert result["fallback_reason"] == "scheduler_task_error"
 
     @pytest.mark.asyncio
+    async def test_matching_workflow_run_without_id_uses_scheduler_status(self):
+        """A matched workflow run without a run id should still expose live Scheduler status."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_running"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        wf_run_without_id = SimpleNamespace(
+            status="running",
+            metadata_json=json.dumps({"watchlist_run_id": 1}),
+        )
+        mock_wf_db = MagicMock()
+        mock_wf_db.list_runs.return_value = [wf_run_without_id]
+
+        scheduler_task = SimpleNamespace(
+            id="task_running",
+            status="running",
+            queue_name="workflows",
+            error=None,
+        )
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(return_value=scheduler_task)
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=True),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.Workflows_DB.WorkflowsDatabase",
+                return_value=mock_wf_db,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            result = await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
+
+        assert result["run_id"] == 1
+        assert result["task_id"] == "task_running"
+        assert result["status"] == "running"
+        assert result["queue_name"] == "workflows"
+        assert result["audio_uri"] is None
+        assert result["download_url"] is None
+
+    @pytest.mark.asyncio
     async def test_scheduler_status_lookup_propagates_cancellation(self):
         """Cancelled status lookups should not be converted into a pending response."""
         from tldw_Server_API.app.api.v1.endpoints.watchlists import _get_audio_scheduler_task_status
@@ -326,6 +390,47 @@ class TestGetRunAudioEndpoint:
         ):
             with pytest.raises(asyncio.CancelledError):
                 await _get_audio_scheduler_task_status("task_cancelled")
+
+    @pytest.mark.asyncio
+    async def test_get_run_audio_propagates_scheduler_status_cancellation(self):
+        """Endpoint cancellation during Scheduler status lookup should propagate."""
+        from tldw_Server_API.app.api.v1.endpoints.watchlists import get_run_audio
+
+        run = SimpleNamespace(
+            id=1,
+            job_id=1,
+            status="completed",
+            started_at=None,
+            finished_at=None,
+            stats_json=json.dumps({"audio_briefing_task_id": "task_cancelled"}),
+            error_msg=None,
+        )
+        db = MagicMock()
+        db.get_run.return_value = run
+
+        user = MagicMock()
+        user.role = "admin"
+
+        scheduler = MagicMock()
+        scheduler.get_task = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.resolve_user_id_for_request",
+                return_value=1,
+            ),
+            patch(
+                "tldw_Server_API.app.core.DB_Management.db_path_utils.DatabasePaths.get_user_base_directory",
+                return_value="/tmp/test_user",  # nosec B108
+            ),
+            patch("os.path.exists", return_value=False),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.watchlists.get_existing_global_scheduler",
+                new=AsyncMock(return_value=scheduler),
+            ),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await get_run_audio(run_id=1, target_user_id=None, current_user=user, db=db)
 
     @pytest.mark.asyncio
     async def test_returns_audio_when_artifact_found(self):
