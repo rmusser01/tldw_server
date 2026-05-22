@@ -1723,7 +1723,6 @@ class TTSServiceV2:
             bool(getattr(request, "stream", False)),
             metadata_only,
         )
-        fallback = fallback and not self._is_explicit_omnivoice_request(request, provider)
         factory = await self._ensure_factory()
 
         provider_hint: Optional[str] = None
@@ -1744,6 +1743,11 @@ class TTSServiceV2:
                         provider_hint = getattr(provider_enum, "value", str(provider_enum)).lower()
             except _TTS_NONCRITICAL_EXCEPTIONS:
                 provider_hint = None
+        fallback = fallback and not self._is_explicit_omnivoice_request(
+            request,
+            provider=provider,
+            provider_hint=provider_hint,
+        )
 
         try:
             adapter, provider_key, request_for_provider = await self._prepare_generate_speech_request(
@@ -2622,10 +2626,13 @@ class TTSServiceV2:
     def _is_explicit_omnivoice_request(
         request: OpenAISpeechRequest,
         provider: Optional[str] = None,
+        provider_hint: Optional[str] = None,
     ) -> bool:
         provider_value = (provider or "").strip().lower()
         if provider_value in _OMNIVOICE_ALIAS_VALUES:
             return True
+        if provider_value:
+            return False
         model_value = (getattr(request, "model", None) or "").strip().lower()
         if (
             model_value.startswith("omnivoice")
@@ -2633,22 +2640,26 @@ class TTSServiceV2:
             or model_value.startswith("omni_voice")
         ):
             return True
+        provider_hint_value = (provider_hint or "").strip().lower()
+        if provider_hint_value and provider_hint_value not in _OMNIVOICE_ALIAS_VALUES:
+            return False
         voice = (getattr(request, "voice", None) or "").strip().lower()
+        has_omnivoice_semantics = False
         if voice.startswith("custom:"):
-            return True
+            has_omnivoice_semantics = True
         if getattr(request, "voice_reference", None):
-            return True
+            has_omnivoice_semantics = True
         extras = getattr(request, "extra_params", None)
         if not isinstance(extras, dict):
-            return False
+            return has_omnivoice_semantics
         if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
-            return True
+            has_omnivoice_semantics = True
         if any(key in extras for key in _OMNIVOICE_GENERATION_KEYS):
-            return True
+            has_omnivoice_semantics = True
         mode = extras.get("omnivoice_mode", extras.get("mode"))
         if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
-            return True
-        return False
+            has_omnivoice_semantics = True
+        return has_omnivoice_semantics
 
     def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
         if self._closing:
