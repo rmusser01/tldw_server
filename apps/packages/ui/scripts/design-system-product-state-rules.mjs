@@ -32,6 +32,127 @@ export const CANONICAL_ROOTS = [
   "src/assets/tailwind-shared.css"
 ]
 
+export const PRODUCT_STATE_AREA_FALLBACK =
+  "Other shared surfaces and long-tail triage"
+
+export const PRODUCT_STATE_AREA_OWNERSHIP = [
+  {
+    area: "Chat and Playground",
+    paths: [
+      "src/components/Option/Playground",
+      "src/components/Common/Playground",
+      "src/components/Sidepanel/Chat",
+      "src/routes/sidepanel-chat.tsx"
+    ]
+  },
+  {
+    area: "Ingestion, Library, and media",
+    paths: [
+      "src/components/Option/Ingestion",
+      "src/components/Option/Library",
+      "src/components/Option/Media",
+      "src/components/Option/Sources",
+      "src/components/Option/DataTables",
+      "src/components/Option/AudiobookStudio",
+      "src/components/Option/ChunkingPlayground",
+      "src/components/Common/QuickIngest",
+      "src/components/Timeline"
+    ]
+  },
+  {
+    area: "Jobs, Scheduler, and Watchlists",
+    paths: [
+      "src/components/Option/Watchlists",
+      "src/components/Option/AgentTasks",
+      "src/components/Common/Workflow"
+    ]
+  },
+  {
+    area: "MCP and ACP",
+    paths: [
+      "src/components/Option/MCPHub",
+      "src/components/Option/ACPPlayground",
+      "src/components/Option/WorkspacePlayground"
+    ]
+  },
+  {
+    area: "Evaluations",
+    paths: ["src/components/Option/Evaluations"]
+  },
+  {
+    area: "Settings and account/security",
+    paths: [
+      "src/components/Option/Settings",
+      "src/components/Option/Setup",
+      "src/components/Option/Integrations",
+      "src/components/Option/TTS"
+    ]
+  },
+  {
+    area: "Admin and health expansion",
+    paths: ["src/components/Option/Admin"]
+  },
+  {
+    area: "Prompt and Prompt Studio",
+    paths: [
+      "src/components/Option/Prompt",
+      "src/components/Option/PromptStudio"
+    ]
+  },
+  {
+    area: "Flashcards, Quiz, and study flows",
+    paths: [
+      "src/components/Flashcards",
+      "src/components/Quiz",
+      "src/components/StudySuggestions"
+    ]
+  },
+  {
+    area: "Document and Workspace surfaces",
+    paths: [
+      "src/components/DocumentWorkspace",
+      "src/components/Option/Workspace"
+    ]
+  },
+  {
+    area: "Character, Persona, and presentation surfaces",
+    paths: [
+      "src/components/Option/Characters",
+      "src/components/Option/PresentationStudio",
+      "src/components/PersonaGarden"
+    ]
+  },
+  {
+    area: "Writing and Review surfaces",
+    paths: [
+      "src/components/Option/WritingPlayground",
+      "src/components/Review"
+    ]
+  },
+  {
+    area: PRODUCT_STATE_AREA_FALLBACK,
+    paths: [
+      "src/components/Option/Chatbooks",
+      "src/components/Option/Collections",
+      "src/components/Option/ChatWorkflows",
+      "src/components/Option/Speech",
+      "src/components/Option/ScheduledTasks",
+      "src/components/Common/Settings",
+      "src/components/Common/StorageQuotaBanner.tsx",
+      "src/components/Option/AgentRegistry",
+      "src/components/Option/Dictionaries",
+      "src/components/Option/STT",
+      "src/components/WorkflowEditor",
+      "src/components/Common/LocaleJsonDiagnostics.tsx",
+      "src/components/Common/PromptInsertModal.tsx",
+      "src/components/Option/Items",
+      "src/components/Option/KanbanPlayground",
+      "src/components/Option/Models",
+      "src/components/Option/SharedWithMe"
+    ]
+  }
+]
+
 const CANONICAL_STATE_LABELS = [
   "Unavailable",
   "Setup required",
@@ -340,6 +461,7 @@ export function formatReport(result) {
 
   if (staleBaseline.length > 0) {
     sections.push(formatEntryList("Stale baseline entries", staleBaseline))
+    sections.push(formatStaleBaselineTotals(staleBaseline))
   }
 
   const remainingBaseline = sortedEntries([
@@ -351,6 +473,22 @@ export function formatReport(result) {
   }
 
   return sections.join("\n\n")
+}
+
+export function productStateAreaForPath(relativePath) {
+  const normalizedPath = normalizePath(relativePath)
+
+  for (const ownership of PRODUCT_STATE_AREA_OWNERSHIP) {
+    if (
+      ownership.paths.some((ownedPath) =>
+        pathMatchesOwnedPath(normalizedPath, ownedPath)
+      )
+    ) {
+      return ownership.area
+    }
+  }
+
+  return PRODUCT_STATE_AREA_FALLBACK
 }
 
 function isExcludedPath(relativePath) {
@@ -1517,6 +1655,25 @@ function appendEntryDetail(lines, label, value) {
 function formatBaselineTotals(entries) {
   return [
     `Baseline exceptions: ${entries.length}`,
+    "By product area:",
+    ...formatCountGroupBy(entries, (entry) =>
+      productStateAreaForPath(entry.path)
+    ),
+    "By rule:",
+    ...formatCountGroup(entries, "rule"),
+    "By migration queue:",
+    ...formatCountGroup(entries, "migrationQueue")
+  ].join("\n")
+}
+
+function formatStaleBaselineTotals(entries) {
+  return [
+    "Stale baseline cleanup summary",
+    `Stale baseline entries: ${entries.length}`,
+    "By product area:",
+    ...formatCountGroupBy(entries, (entry) =>
+      productStateAreaForPath(entry.path)
+    ),
     "By rule:",
     ...formatCountGroup(entries, "rule"),
     "By migration queue:",
@@ -1525,19 +1682,33 @@ function formatBaselineTotals(entries) {
 }
 
 function formatCountGroup(entries, field) {
+  return formatCountGroupBy(entries, (entry) => entry[field])
+}
+
+function formatCountGroupBy(entries, selectLabel) {
   const counts = new Map()
 
   for (const entry of entries) {
-    if (!entry[field]) {
+    const label = selectLabel(entry)
+    if (!label) {
       continue
     }
 
-    counts.set(entry[field], (counts.get(entry[field]) ?? 0) + 1)
+    counts.set(label, (counts.get(label) ?? 0) + 1)
   }
 
   return [...counts.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([label, count]) => `- ${label}: ${count}`)
+}
+
+function pathMatchesOwnedPath(relativePath, ownedPath) {
+  const normalizedOwnedPath = normalizePath(ownedPath)
+
+  return (
+    relativePath === normalizedOwnedPath ||
+    relativePath.startsWith(`${normalizedOwnedPath}/`)
+  )
 }
 
 function lineForNode(sourceFile, node) {
