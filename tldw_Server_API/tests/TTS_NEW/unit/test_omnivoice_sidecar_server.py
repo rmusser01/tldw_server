@@ -43,6 +43,20 @@ def test_sidecar_accepts_authorized_health_probe(test_client: TestClient):
 
 
 @pytest.mark.unit
+def test_sidecar_accepts_authorized_auto_synthesize(test_client: TestClient):
+    response = test_client.post(
+        "/v1/synthesize",
+        headers={"X-TLDW-Sidecar-Token": "test-sidecar-token"},
+        json={"text": "hi", "mode": "auto"},
+    )
+
+    assert response.status_code == 200  # nosec B101
+    assert response.headers["X-OmniVoice-Sample-Rate"] == "24000"  # nosec B101
+    assert response.headers["X-OmniVoice-Mode"] == "auto"  # nosec B101
+    assert response.content.startswith(b"RIFF")  # nosec B101
+
+
+@pytest.mark.unit
 def test_sidecar_runtime_rejects_non_loopback_bind_host():
     from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_server import validate_loopback_host
 
@@ -83,6 +97,17 @@ def test_synthesize_request_rejects_mode_field_conflicts():
 
 
 @pytest.mark.unit
+def test_synthesize_request_rejects_auto_mode_reference_audio_path():
+    with pytest.raises(ValidationError, match="mode=auto"):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="auto",
+            reference_audio_path="/managed/ref.wav",
+            generation={},
+        )
+
+
+@pytest.mark.unit
 def test_synthesize_request_rejects_mixed_design_and_clone_inputs():
     with pytest.raises(ValidationError, match="instruct"):
         OmniVoiceSynthesizeRequest(
@@ -118,7 +143,7 @@ def test_sidecar_clone_mode_requires_reference_audio_path(test_client: TestClien
     response = test_client.post(
         "/v1/synthesize",
         headers={"X-TLDW-Sidecar-Token": "test-sidecar-token"},
-        json={"text": "hi", "mode": "clone", "sample_rate": 24000},
+        json={"text": "hi", "mode": "clone", "requested_sample_rate": 24000},
     )
 
     assert response.status_code == 422  # nosec B101
@@ -132,8 +157,9 @@ def test_sidecar_clone_mode_rejects_directory_reference(test_client: TestClient,
         json={
             "text": "hi",
             "mode": "clone",
-            "sample_rate": 24000,
+            "requested_sample_rate": 24000,
             "reference_audio_path": str(tmp_path),
+            "reference_text": "reference transcript",
         },
     )
 
