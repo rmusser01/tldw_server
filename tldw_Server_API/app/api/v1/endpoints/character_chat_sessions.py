@@ -213,6 +213,7 @@ _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS = (
 THROTTLE_WINDOW_SIZE = 100
 MAX_CHAT_SETTINGS_BYTES = 200_000
 MAX_AUTHOR_NOTE_CHARS = 20_000
+MAX_ASSISTANT_OVERLAY_TEXT_CHARS = MAX_AUTHOR_NOTE_CHARS
 DEFAULT_AUTO_SUMMARY_THRESHOLD_MESSAGES = 40
 DEFAULT_AUTO_SUMMARY_WINDOW_MESSAGES = 12
 MAX_AUTO_SUMMARY_LINES = 24
@@ -1262,6 +1263,80 @@ def _validate_chat_settings_payload(
         owner_user_id=owner_user_id,
         strip_invalid_reference=strip_invalid_deep_research,
     )
+
+    assistant_overlay = settings.get("assistantOverlay")
+    if assistant_overlay is not None:
+        if not isinstance(assistant_overlay, dict):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid assistantOverlay. Expected object or null",
+            )
+        unknown_keys = sorted(
+            set(assistant_overlay.keys())
+            - {"kind", "id", "name", "avatar_url", "system_prompt_snapshot", "updatedAt"}
+        )
+        if unknown_keys:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Invalid assistantOverlay. Unknown keys: "
+                    + ", ".join(unknown_keys)
+                ),
+            )
+
+        kind = assistant_overlay.get("kind")
+        if not isinstance(kind, str) or kind.strip().lower() not in {"character", "persona"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid assistantOverlay.kind. Allowed values: character, persona",
+            )
+        assistant_overlay["kind"] = kind.strip().lower()
+
+        for field_name in ("id", "name"):
+            field_value = assistant_overlay.get(field_name)
+            if not isinstance(field_value, str) or not field_value.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid assistantOverlay.{field_name}. Expected non-empty string",
+                )
+            if len(field_value) > MAX_ASSISTANT_OVERLAY_TEXT_CHARS:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        f"assistantOverlay.{field_name} exceeds "
+                        f"{MAX_ASSISTANT_OVERLAY_TEXT_CHARS} characters"
+                    ),
+                )
+            assistant_overlay[field_name] = field_value.strip()
+
+        for field_name in ("avatar_url", "system_prompt_snapshot"):
+            field_value = assistant_overlay.get(field_name)
+            if field_value is None:
+                continue
+            if not isinstance(field_value, str):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid assistantOverlay.{field_name}. Expected string or null",
+                )
+            if len(field_value) > MAX_ASSISTANT_OVERLAY_TEXT_CHARS:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        f"assistantOverlay.{field_name} exceeds "
+                        f"{MAX_ASSISTANT_OVERLAY_TEXT_CHARS} characters"
+                    ),
+                )
+            if field_name == "avatar_url":
+                assistant_overlay[field_name] = field_value.strip() or None
+            elif not field_value.strip():
+                assistant_overlay[field_name] = None
+
+        overlay_updated_at = assistant_overlay.get("updatedAt")
+        if not isinstance(overlay_updated_at, str) or _parse_iso_timestamp(overlay_updated_at) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid assistantOverlay.updatedAt. Expected ISO timestamp string",
+            )
 
     memory_by_id = settings.get("characterMemoryById")
     if memory_by_id is not None:

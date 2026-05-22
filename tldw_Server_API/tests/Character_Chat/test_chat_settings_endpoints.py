@@ -116,6 +116,193 @@ async def test_chat_settings_roundtrip_persists_deep_research_attachment(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_chat_settings_roundtrip_persists_assistant_overlay(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_assistant_overlay_")
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    reset_settings()
+    try:
+        from tldw_Server_API.app.main import app
+
+        headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chat_id = await _create_chat(client, headers)
+            payload = {
+                "settings": {
+                    "schemaVersion": 2,
+                    "updatedAt": "2026-05-22T20:00:00Z",
+                    "assistantOverlay": {
+                        "kind": "persona",
+                        "id": "persona-7",
+                        "name": "Research Guide",
+                        "avatar_url": "https://example.com/persona-7.png",
+                        "system_prompt_snapshot": "Be concise and evidence-driven.",
+                        "updatedAt": "2026-05-22T20:00:00Z",
+                    },
+                }
+            }
+
+            put_response = await client.put(
+                f"/api/v1/chats/{chat_id}/settings",
+                headers=headers,
+                json=payload,
+            )
+            assert put_response.status_code == 200, put_response.text
+            stored_put = put_response.json()["settings"]["assistantOverlay"]
+            assert stored_put["system_prompt_snapshot"] == "Be concise and evidence-driven."
+
+            get_response = await client.get(
+                f"/api/v1/chats/{chat_id}/settings",
+                headers=headers,
+            )
+            assert get_response.status_code == 200, get_response.text
+            stored = get_response.json()["settings"]["assistantOverlay"]
+            assert stored["kind"] == "persona"
+            assert stored["id"] == "persona-7"
+            assert stored["name"] == "Research Guide"
+            assert stored["avatar_url"] == "https://example.com/persona-7.png"
+            assert stored["system_prompt_snapshot"] == "Be concise and evidence-driven."
+    finally:
+        reset_settings()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_chat_settings_rejects_invalid_assistant_overlay_kind(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_assistant_overlay_kind_")
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    reset_settings()
+    try:
+        from tldw_Server_API.app.main import app
+
+        headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chat_id = await _create_chat(client, headers)
+            payload = {
+                "settings": {
+                    "schemaVersion": 2,
+                    "updatedAt": "2026-05-22T20:00:00Z",
+                    "assistantOverlay": {
+                        "kind": "regular",
+                        "id": "overlay-1",
+                        "name": "Overlay Name",
+                        "updatedAt": "2026-05-22T20:00:00Z",
+                    },
+                }
+            }
+
+            put_response = await client.put(
+                f"/api/v1/chats/{chat_id}/settings",
+                headers=headers,
+                json=payload,
+            )
+            assert put_response.status_code == 422, put_response.text
+            assert "assistantOverlay.kind" in put_response.json()["detail"]
+    finally:
+        reset_settings()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("oversized_field", ["id", "name"])
+async def test_chat_settings_rejects_oversized_assistant_overlay_identity_fields(
+    monkeypatch,
+    oversized_field,
+):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_assistant_overlay_identity_")
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    reset_settings()
+    try:
+        from tldw_Server_API.app.main import app
+
+        headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chat_id = await _create_chat(client, headers)
+            assistant_overlay = {
+                "kind": "character",
+                "id": "overlay-2",
+                "name": "Overlay Name",
+                "updatedAt": "2026-05-22T20:00:00Z",
+            }
+            assistant_overlay[oversized_field] = "x" * 20_001
+            payload = {
+                "settings": {
+                    "schemaVersion": 2,
+                    "updatedAt": "2026-05-22T20:00:00Z",
+                    "assistantOverlay": assistant_overlay,
+                }
+            }
+
+            put_response = await client.put(
+                f"/api/v1/chats/{chat_id}/settings",
+                headers=headers,
+                json=payload,
+            )
+            assert put_response.status_code == 413, put_response.text
+            assert f"assistantOverlay.{oversized_field}" in put_response.json()["detail"]
+    finally:
+        reset_settings()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("assistant_overlay_overrides", "drop_updated_at", "expected_status", "expected_detail"),
+    [
+        ({"system_prompt_snapshot": {"text": "bad"}}, False, 422, "assistantOverlay.system_prompt_snapshot"),
+        ({"system_prompt_snapshot": "x" * 20_001}, False, 413, "assistantOverlay.system_prompt_snapshot"),
+        ({}, True, 422, "assistantOverlay.updatedAt"),
+    ],
+)
+async def test_chat_settings_rejects_invalid_assistant_overlay_prompt_snapshot(
+    monkeypatch,
+    assistant_overlay_overrides,
+    drop_updated_at,
+    expected_status,
+    expected_detail,
+):
+    tmpdir = tempfile.mkdtemp(prefix="chacha_assistant_overlay_prompt_")
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    reset_settings()
+    try:
+        from tldw_Server_API.app.main import app
+
+        headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            chat_id = await _create_chat(client, headers)
+            assistant_overlay = {
+                "kind": "character",
+                "id": "overlay-2",
+                "name": "Overlay Name",
+                "updatedAt": "2026-05-22T20:00:00Z",
+                **assistant_overlay_overrides,
+            }
+            if drop_updated_at:
+                assistant_overlay.pop("updatedAt", None)
+            payload = {
+                "settings": {
+                    "schemaVersion": 2,
+                    "updatedAt": "2026-05-22T20:00:00Z",
+                    "assistantOverlay": assistant_overlay,
+                }
+            }
+
+            put_response = await client.put(
+                f"/api/v1/chats/{chat_id}/settings",
+                headers=headers,
+                json=payload,
+            )
+            assert put_response.status_code == expected_status, put_response.text
+            assert expected_detail in put_response.json()["detail"]
+    finally:
+        reset_settings()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
 async def test_chat_settings_canonicalize_owned_completed_deep_research_attachment(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="chacha_deep_research_attachment_canonical_")
     monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)

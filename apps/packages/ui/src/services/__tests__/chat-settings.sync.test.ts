@@ -145,6 +145,55 @@ describe("syncChatSettingsForServerChat", () => {
     )
     expect(result).toEqual(localSettings)
   })
+
+  it("reconciles locally persisted assistant overlay settings once a server chat id exists", async () => {
+    const historyId = "history-overlay-sync"
+    const serverChatId = "chat-overlay-sync"
+    const localSettings = createSettings({
+      updatedAt: "2026-05-22T18:10:00.000Z",
+      assistantOverlay: {
+        kind: "persona",
+        id: "persona-11",
+        name: "Research Guide",
+        avatar_url: "https://example.com/persona-11.png",
+        system_prompt_snapshot: "Keep answers structured and calm.",
+        updatedAt: "2026-05-22T18:10:00.000Z"
+      }
+    })
+    state.storage.set(
+      getChatSettingsStorageKey(
+        resolveChatSettingsKey({ historyId, serverChatId: null })
+      ),
+      localSettings
+    )
+    state.remoteSettings = null
+
+    const result = await syncChatSettingsForServerChat({
+      historyId,
+      serverChatId
+    })
+
+    expect(mocks.updateChatSettings).toHaveBeenCalledTimes(1)
+    expect(mocks.updateChatSettings).toHaveBeenCalledWith(
+      serverChatId,
+      expect.objectContaining({
+        assistantOverlay: expect.objectContaining({
+          id: "persona-11",
+          system_prompt_snapshot: "Keep answers structured and calm."
+        })
+      })
+    )
+    expect(
+      state.storage.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({ historyId: null, serverChatId })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({ id: "persona-11" })
+    })
+    expect(result).toEqual(localSettings)
+  })
 })
 
 describe("normalizeChatSettingsRecord", () => {
