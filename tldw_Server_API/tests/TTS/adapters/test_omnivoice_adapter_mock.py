@@ -298,6 +298,26 @@ def test_omnivoice_adapter_accepts_finite_float_generation_string():
     assert payload["generation"]["guidance_scale"] == pytest.approx(4.5)
 
 
+def test_omnivoice_adapter_forwards_public_speed_to_generation_params():
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        stream=False,
+        speed=1.5,
+        extra_params={"num_step": 8},
+    )
+
+    payload = OmniVoiceAdapter({})._build_sidecar_payload(
+        request,
+        mode="auto",
+        sample_rate=24000,
+        reference_audio_path=None,
+    )
+
+    assert payload["generation"] == {"num_step": 8, "speed": pytest.approx(1.5)}
+
+
 @pytest.mark.asyncio
 async def test_omnivoice_empty_direct_voice_reference_is_rejected():
     adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
