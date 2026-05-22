@@ -45,7 +45,7 @@ Docs/superpowers/plans/2026-05-22-watchlists-p0-demo-blockers-implementation-pla
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 2 complete after review: run-audio fallback status reads Scheduler task state only from an already-started global scheduler; missing DB, no matching workflow run, matched run without id, and matched run without final audio artifact all expose Scheduler status or safe pending. Cancellation propagates at helper and endpoint boundary. Task 3 implemented Reports drawer live audio status polling for text digest outputs with requested audio, merges live status over stale metadata, renders queue name, and stops polling on close.
+Task 2 complete after review: run-audio fallback status reads Scheduler task state only from an already-started global scheduler; missing DB, no matching workflow run, matched run without id, and matched run without final audio artifact all expose Scheduler status or safe pending. Cancellation propagates at helper and endpoint boundary. Task 3 implemented Reports drawer live audio status polling for text digest outputs with requested audio, merges live status over stale metadata, renders queue name, and stops polling on close. Task 4 implemented deterministic watchlist selection that preserves valid current selection and otherwise prefers active, non-archived/non-deleted, non-imported, news/CTI watchlists before falling back by recency and source order.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
