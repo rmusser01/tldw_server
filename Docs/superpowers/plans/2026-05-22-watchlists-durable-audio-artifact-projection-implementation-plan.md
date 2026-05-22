@@ -678,7 +678,7 @@ git commit -m "feat: mirror watchlists audio artifacts"
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py`
 
-- [ ] **Step 1: Write failing retry stale-state tests**
+- [x] **Step 1: Write failing retry stale-state tests**
 
 Test setup:
 
@@ -693,7 +693,7 @@ Assert:
 - old graph is stale or moved to `previous_audio`
 - active final artifact is not the old final artifact
 
-- [ ] **Step 2: Run failing retry tests**
+- [x] **Step 2: Run failing retry tests**
 
 Run:
 
@@ -704,7 +704,7 @@ source .venv/bin/activate && python -m pytest \
   -q
 ```
 
-- [ ] **Step 3: Use projection stale helper in retry path**
+- [x] **Step 3: Use projection stale helper in retry path**
 
 In `retry_run_audio(...)`, add `collections_db=Depends(get_collections_db_for_user)` and resolve target Collections DB the same way `retry_run_delivery(...)` does:
 
@@ -723,7 +723,7 @@ Then, before or after applying the new trigger result:
 - clear active artifacts for the new request
 - update canonical output metadata if a canonical output exists
 
-- [ ] **Step 4: Run retry tests**
+- [x] **Step 4: Run retry tests**
 
 Run:
 
@@ -736,7 +736,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/watchlists.py \

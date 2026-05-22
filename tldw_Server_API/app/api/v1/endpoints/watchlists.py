@@ -4962,6 +4962,72 @@ async def _list_run_watchlist_outputs(collections_db: Any, run_id: int, *, limit
     return list(rows or [])
 
 
+def _output_row_id(row: Any) -> Any:
+    if isinstance(row, dict):
+        return row.get("id")
+    return getattr(row, "id", None)
+
+
+def _output_row_metadata(row: Any) -> dict[str, Any]:
+    if isinstance(row, dict):
+        return _parse_json_object(row.get("metadata_json") or row.get("metadata"))
+    return _parse_json_object(getattr(row, "metadata_json", None))
+
+
+def _retry_audio_projection(run_id: int, audio_result: Any, status: str) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "task_id": str(audio_result.task_id) if audio_result.task_id else None,
+        "status": status,
+        "audio_request_id": audio_result.audio_request_id,
+        "script_artifact": None,
+        "speaker_artifacts": [],
+        "final_artifact": None,
+        "artifact_id": None,
+        "download_url": None,
+        "size_bytes": None,
+        "mime_type": None,
+        "stale": False,
+    }
+
+
+def _mirror_audio_retry_state_to_output(
+    collections_db: Any,
+    *,
+    run_id: int,
+    active_projection: dict[str, Any],
+    superseded_by: str | None,
+) -> bool:
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        find_canonical_watchlist_output,
+        mark_audio_projection_stale,
+        merge_audio_projection_metadata,
+    )
+
+    try:
+        output = find_canonical_watchlist_output(collections_db, run_id)
+        if output is None:
+            return False
+        output_id = _output_row_id(output)
+        if output_id is None:
+            return False
+        output_metadata = _output_row_metadata(output)
+        output_metadata = mark_audio_projection_stale(output_metadata, superseded_by=superseded_by)
+        output_metadata = merge_audio_projection_metadata(output_metadata, active_projection)
+        collections_db.update_output_artifact_metadata(
+            output_id,
+            metadata_json=json.dumps(output_metadata, sort_keys=True),
+        )
+        return True
+    except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(
+            "watchlists.retry_audio output metadata mirror failed for run={} (error_type={})",
+            run_id,
+            type(exc).__name__,
+        )
+        return False
+
+
 @router.post(
     "/runs/{run_id}/retry-audio",
     response_model=RunStageRetryResponse,
@@ -4976,6 +5042,7 @@ async def retry_run_audio(
     ),
     current_user: User = Depends(get_request_user),
     db=Depends(get_watchlists_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ) -> RunStageRetryResponse:
     """Retry the audio briefing stage for a completed or failed watchlist run."""
     _enforce_runs_admin_if_configured(current_user)
@@ -4984,6 +5051,13 @@ async def retry_run_audio(
         current_db=db,
         target_user_id=target_user_id,
     )
+    target_collections_db = None
+    if _looks_like_collections_db(collections_db):
+        target_collections_db = _resolve_collections_db_for_target_user(
+            current_user=current_user,
+            current_db=collections_db,
+            target_user_id=resolved_user_id,
+        )
     try:
         run = target_db.get_run(run_id)
     except KeyError:
@@ -5002,7 +5076,12 @@ async def retry_run_audio(
 
     from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
         apply_audio_briefing_result_metadata,
+        persisted_audio_briefing_status,
         trigger_audio_briefing,
+    )
+    from tldw_Server_API.app.core.Watchlists.audio_artifact_projection import (
+        mark_audio_projection_stale,
+        merge_audio_projection_metadata,
     )
 
     if str(getattr(run, "status", "")).lower() in {"running", "queued"}:
@@ -5015,20 +5094,27 @@ async def retry_run_audio(
         db=target_db,
     )
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
-    prior_audio = run_stats.get("audio")
-    if isinstance(prior_audio, dict):
-        previous_audio = dict(prior_audio)
-        previous_audio["stale"] = True
-        if audio_result.audio_request_id:
-            previous_audio["superseded_by"] = audio_result.audio_request_id
-        run_stats["previous_audio"] = previous_audio
-    run_stats.pop("audio", None)
+    run_stats = mark_audio_projection_stale(run_stats, superseded_by=audio_result.audio_request_id)
+    active_audio_projection = _retry_audio_projection(
+        run_id,
+        audio_result,
+        persisted_audio_briefing_status(audio_result),
+    )
+    run_stats = merge_audio_projection_metadata(run_stats, active_audio_projection)
     apply_audio_briefing_result_metadata(run_stats, audio_result, retry=True)
     try:
         await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
         logger.error("watchlists.retry_audio failed to persist retry state for run={}: {}", run_id, exc)
         raise HTTPException(status_code=500, detail="audio_retry_state_update_failed") from exc
+    if target_collections_db is not None:
+        await run_in_threadpool(
+            _mirror_audio_retry_state_to_output,
+            target_collections_db,
+            run_id=run_id,
+            active_projection=active_audio_projection,
+            superseded_by=audio_result.audio_request_id,
+        )
 
     if not audio_result.submitted:
         raise HTTPException(status_code=409, detail="audio_retry_not_queued")

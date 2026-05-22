@@ -140,6 +140,21 @@ Task 5 verification:
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `67 passed, 1 skipped`.
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py -f json -o /tmp/bandit_watchlists_audio_projection_task5.json` passed with `results 0`.
 - `git diff --check` passed.
+
+Task 6 completed:
+- Updated audio retry to use the projection stale helper instead of hand-copying stale audio state.
+- Retry now leaves a new active queued audio graph for the new request while moving the old completed graph to `previous_audio`.
+- Added `collections_db` handling to `retry_run_audio(...)` and best-effort mirrored retry state into the canonical Watchlists output metadata.
+- Preserved unrelated output metadata such as delivery status while clearing active old final artifacts.
+
+Task 6 verification:
+- Red run: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py::test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingestion tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py::test_retry_run_audio_marks_output_audio_stale -q` failed for missing active retry graph and missing `collections_db` support.
+- Green run: same focused command passed, `2 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py::TestGetRunAudioEndpoint tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py -q` passed, `36 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py -q` passed, `36 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `75 passed, 1 skipped`.
+- `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py -f json -o /tmp/bandit_watchlists_audio_projection_task6.json` passed with `results 0`.
+- `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -128,10 +128,104 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     assert persisted_stats["audio_briefing_task_id"] == "task-retry-10"
     assert persisted_stats["audio_briefing_retry_task_id"] == "task-retry-10"
     assert persisted_stats["audio_request_id"] == "wla_retry_request"
-    assert "audio" not in persisted_stats
+    assert persisted_stats["audio"]["status"] == "queued"
+    assert persisted_stats["audio"]["audio_request_id"] == "wla_retry_request"
+    assert persisted_stats["audio"]["final_artifact"] is None
+    assert persisted_stats["audio"].get("artifact_id") is None
     assert persisted_stats["previous_audio"]["stale"] is True
     assert persisted_stats["previous_audio"]["superseded_by"] == "wla_retry_request"
     assert persisted_stats["previous_audio"]["final_artifact"]["artifact_id"] == "old-final"
+
+
+@pytest.mark.asyncio
+async def test_retry_run_audio_marks_output_audio_stale(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import watchlists
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
+
+    run = SimpleNamespace(
+        id=10,
+        job_id=7,
+        stats_json=json.dumps(
+            {
+                "items_ingested": 2,
+                "audio_briefing_task_id": "stale-task",
+                "audio_request_id": "wla_old_request",
+                "audio": {
+                    "status": "completed",
+                    "audio_request_id": "wla_old_request",
+                    "artifact_id": "old-final",
+                    "final_artifact": {"artifact_id": "old-final"},
+                },
+            }
+        ),
+        error_msg=None,
+    )
+    job = SimpleNamespace(id=7, output_prefs_json=json.dumps({"generate_audio": True}))
+    db = MagicMock()
+    db.get_run.return_value = run
+    db.get_job.return_value = job
+    db.update_run.return_value = run
+
+    output_row = SimpleNamespace(
+        id=55,
+        run_id=10,
+        job_id=7,
+        type="briefing_markdown",
+        format="md",
+        metadata_json=json.dumps(
+            {
+                "origin": "watchlists",
+                "delivery_status": "sent",
+                "audio_request_id": "wla_old_request",
+                "audio": {
+                    "status": "completed",
+                    "audio_request_id": "wla_old_request",
+                    "artifact_id": "old-final",
+                    "final_artifact": {"artifact_id": "old-final"},
+                },
+            }
+        ),
+    )
+    collections_db = MagicMock()
+    collections_db.list_output_artifacts.return_value = ([output_row], 1)
+    collections_db.update_output_artifact_metadata.return_value = output_row
+
+    trigger = AsyncMock(
+        return_value=AudioBriefingTriggerResult(
+            status="submitted",
+            task_id="task-retry-10",
+            audio_request_id="wla_retry_request",
+        )
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
+        trigger,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists._resolve_target_watchlists_context",
+        AsyncMock(return_value=(945, db)),
+    )
+
+    user = SimpleNamespace(id=945, role="admin")
+    await watchlists.retry_run_audio(
+        run_id=10,
+        target_user_id=None,
+        current_user=user,
+        db=db,
+        collections_db=collections_db,
+    )
+
+    collections_db.update_output_artifact_metadata.assert_called_once()
+    persisted_output = json.loads(collections_db.update_output_artifact_metadata.call_args.kwargs["metadata_json"])
+    assert persisted_output["delivery_status"] == "sent"
+    assert persisted_output["audio_request_id"] == "wla_retry_request"
+    assert persisted_output["audio"]["status"] == "queued"
+    assert persisted_output["audio"]["audio_request_id"] == "wla_retry_request"
+    assert persisted_output["audio"]["final_artifact"] is None
+    assert persisted_output["audio"].get("artifact_id") is None
+    assert persisted_output["previous_audio"]["stale"] is True
+    assert persisted_output["previous_audio"]["superseded_by"] == "wla_retry_request"
+    assert persisted_output["previous_audio"]["final_artifact"]["artifact_id"] == "old-final"
 
 
 @pytest.mark.asyncio
