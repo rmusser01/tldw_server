@@ -518,10 +518,13 @@ class OmniVoiceAdapter(TTSAdapter):
                     payload = parsed
         error = payload.get("error") if isinstance(payload, dict) else None
         code = None
+        message = None
         retryable = False
         if isinstance(error, dict):
             raw_code = error.get("code")
             code = str(raw_code).strip() if raw_code is not None else None
+            raw_message = error.get("message")
+            message = str(raw_message).strip() if raw_message is not None else None
             retryable = bool(error.get("retryable", False))
         details = {
             "status_code": response.status_code,
@@ -530,6 +533,8 @@ class OmniVoiceAdapter(TTSAdapter):
         if code:
             details["sidecar_error_code"] = code
             details["retryable"] = retryable
+        if message:
+            details["sidecar_error_message"] = self._sanitize_sidecar_error_text(message)
         logger.warning(
             "OmniVoice sidecar returned status {} with sanitized error code {}",
             response.status_code,
