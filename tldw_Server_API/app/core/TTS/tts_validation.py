@@ -4,6 +4,7 @@
 # Imports
 import base64
 import html
+import math
 import re
 import unicodedata
 from typing import Any, Optional, Union
@@ -1064,7 +1065,7 @@ class TTSInputValidator:
             if expected_type is int:
                 parsed = self._coerce_omnivoice_int_generation_value(key, value)
             else:
-                parsed = float(value)
+                parsed = self._coerce_omnivoice_float_generation_value(key, value)
         except Exception as exc:
             raise TTSInvalidInputError(f"OmniVoice generation parameter {key} has invalid type") from exc
         if min_value is not None:
@@ -1095,6 +1096,17 @@ class TTSInputValidator:
             if re.fullmatch(r"[+-]?\d+", stripped):
                 return int(stripped)
         raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be an integer")
+
+    def _coerce_omnivoice_float_generation_value(self, key: str, value: Any) -> float:
+        if isinstance(value, bool):
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a finite number")
+        try:
+            parsed = float(value)
+        except Exception as exc:
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a finite number") from exc
+        if not math.isfinite(parsed):
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a finite number")
+        return parsed
 
     def _validate_voice_reference(
         self,

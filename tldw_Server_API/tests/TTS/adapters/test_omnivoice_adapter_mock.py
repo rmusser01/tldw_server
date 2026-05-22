@@ -260,6 +260,64 @@ def test_omnivoice_adapter_rejects_invalid_integer_generation_values(value):
         )
 
 
+@pytest.mark.parametrize("value", [True, False, "nan", float("nan"), "inf", float("inf")])
+def test_omnivoice_adapter_rejects_invalid_float_generation_values(value):
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        stream=False,
+        extra_params={"guidance_scale": value},
+    )
+
+    with pytest.raises(TTSValidationError, match="guidance_scale"):
+        OmniVoiceAdapter({})._build_sidecar_payload(
+            request,
+            mode="auto",
+            sample_rate=24000,
+            reference_audio_path=None,
+        )
+
+
+def test_omnivoice_adapter_accepts_finite_float_generation_string():
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        stream=False,
+        extra_params={"guidance_scale": "4.5"},
+    )
+
+    payload = OmniVoiceAdapter({})._build_sidecar_payload(
+        request,
+        mode="auto",
+        sample_rate=24000,
+        reference_audio_path=None,
+    )
+
+    assert payload["generation"]["guidance_scale"] == pytest.approx(4.5)
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_empty_direct_voice_reference_is_rejected():
+    adapter = OmniVoiceAdapter({"sample_rate": 24000, "timeout": 5})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter.set_supervisor(_FakeSupervisor())
+
+    with pytest.raises(TTSValidationError, match="voice_reference|reference"):
+        await adapter.generate(
+            TTSRequest(
+                text="clone me",
+                voice="clone",
+                format=AudioFormat.WAV,
+                stream=False,
+                voice_reference=b"",
+                extra_params={"reference_text": "reference transcript"},
+            )
+        )
+
+
 @pytest.mark.asyncio
 async def test_omnivoice_reference_audio_materializes_under_configured_scratch_dir(tmp_path, monkeypatch):
     scratch_dir = tmp_path / "runtime" / "scratch"
