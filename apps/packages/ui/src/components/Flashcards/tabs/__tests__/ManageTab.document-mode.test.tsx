@@ -318,7 +318,11 @@ describe("ManageTab document mode", () => {
     fireEvent.click(screen.getByTestId("flashcards-density-toggle-document"))
     fireEvent.click(screen.getByTestId(`flashcards-document-row-select-${sampleCard.uuid}`))
 
-    expect(screen.getByTestId("flashcards-document-truncation-banner")).toBeInTheDocument()
+    const banner = screen.getByTestId("flashcards-document-truncation-banner")
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
+    expect(banner).toHaveTextContent("Document results are truncated to the current scan limit.")
+    expect(banner).toHaveTextContent("Refine filters or reduce tags to enable selecting across the full result set.")
     expect(screen.getByTestId("flashcards-select-all-across")).toBeDisabled()
   })
 
