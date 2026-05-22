@@ -10,6 +10,7 @@ labels:
 priority: medium
 parent_task_id: TASK-45.44.10
 references:
+- https://github.com/rmusser01/tldw_server/pull/1955
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentWorkspacePage.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - Docs/Design/tldw_web_design_system_contract.md
@@ -63,7 +64,7 @@ Continue the Document and Workspace product-state design-system migration by rep
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the DocumentWorkspacePage loading and workspace storage health Alert states from AntD Alert to the shared design-system Alert primitive, added focused regression coverage for both states, and removed the two matching baseline entries.
+Migrated the DocumentWorkspacePage loading and workspace storage health Alert states from AntD Alert to the shared design-system Alert primitive, added focused regression coverage for both states, and removed the two matching baseline entries. PR: https://github.com/rmusser01/tldw_server/pull/1955.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

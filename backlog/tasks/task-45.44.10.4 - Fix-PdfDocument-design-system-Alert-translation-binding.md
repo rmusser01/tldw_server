@@ -10,6 +10,7 @@ labels:
 priority: medium
 parent_task_id: TASK-45.44.10
 references:
+- https://github.com/rmusser01/tldw_server/pull/1955
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/__tests__/DocumentViewerAlerts.design-system.test.tsx
 modified_files:
@@ -51,7 +52,7 @@ Fix the missing translation function binding in PdfDocument introduced by the pr
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed the merged PdfDocument design-system Alert translation binding by calling `useTranslation` in the component before using `t(...)`.
+Fixed the merged PdfDocument design-system Alert translation binding by calling `useTranslation` in the component before using `t(...)`. PR: https://github.com/rmusser01/tldw_server/pull/1955.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
