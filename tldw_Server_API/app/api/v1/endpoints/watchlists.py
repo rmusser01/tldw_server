@@ -2399,16 +2399,23 @@ def _apply_fetch_diagnostic_events(
     diagnostics: SourcePreviewDiagnostics,
     events: list[dict[str, Any]],
 ) -> None:
-    """Copy fetch status/error observations onto source preview diagnostics."""
+    """Copy the first meaningful fetch status/error observation onto diagnostics."""
     selected_status: int | None = None
     selected_error: str | None = None
     for event in events:
         status = event.get("status")
         if isinstance(status, int):
-            if selected_status is None or status // 100 != 2:
+            if selected_status is None:
                 selected_status = status
-        if selected_error is None:
-            selected_error = _format_fetch_diagnostic_error(event.get("error"))
+            status_is_failure = status // 100 != 2 and status != 304
+        else:
+            status_is_failure = False
+        formatted_error = _format_fetch_diagnostic_error(event.get("error"))
+        if selected_error is None and (formatted_error or status_is_failure):
+            if isinstance(status, int):
+                selected_status = status
+            selected_error = formatted_error or f"HTTP {status}"
+            break
     diagnostics.fetch_status = selected_status
     diagnostics.fetch_error = selected_error
 

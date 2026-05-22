@@ -229,5 +229,6 @@ async def test_fetch_site_items_with_rules_reports_fetch_status(monkeypatch):
         {
             "url": "https://example.com/blog",
             "status": 503,
+            "error": "HTTP 503",
         }
     ]

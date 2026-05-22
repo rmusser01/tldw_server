@@ -1633,7 +1633,10 @@ async def fetch_site_items_with_rules(
             try:
                 resp = await afetch(method="GET", url=page_url, headers=headers, timeout=timeout)
                 status_code = int(resp.status_code)
-                emit_fetch_diagnostic({"url": page_url, "status": status_code})
+                diagnostic_event: dict[str, Any] = {"url": page_url, "status": status_code}
+                if status_code // 100 != 2 and status_code != 304:
+                    diagnostic_event["error"] = f"HTTP {status_code}"
+                emit_fetch_diagnostic(diagnostic_event)
                 if status_code // 100 != 2:
                     logger.debug(f"fetch_site_items_with_rules HTTP {status_code} for {page_url}")
                     continue
