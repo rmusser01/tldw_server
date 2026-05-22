@@ -15,6 +15,7 @@ references:
 - apps/packages/ui/src/components/Flashcards/tabs/ImageOcclusionTransferPanel.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/1924
 modified_files:
 - apps/packages/ui/src/components/Flashcards/tabs/ImageOcclusionTransferPanel.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx
@@ -43,7 +44,7 @@ Replace the ImageOcclusionTransferPanel generation/save error banner from AntD A
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-ImageOcclusionTransferPanel generation/save error output now uses the canonical design-system Alert while preserving the existing error text and message.error behavior. Removed the matching product-state baseline exception, reducing verify:design-system-state from 323 to 322 allowed legacy exceptions. Verification: focused ImageOcclusionTransferPanel Vitest passed (3 tests), product-state guard Vitest passed (52 tests), bun run verify:design-system-state passed with 322 exceptions, git diff --check passed. NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false remains red on inherited repo-wide TypeScript debt; a targeted diagnostic filter for ImageOcclusionTransferPanel, design-system-product-state-baseline, and TASK-45.44.9.1 produced no matches. Bandit not applicable because this slice touched TS/TSX/JSON/Backlog markdown only.
+ImageOcclusionTransferPanel generation/save error output now uses the canonical design-system Alert while preserving the existing error text and message.error behavior. Removed the matching product-state baseline exception, reducing verify:design-system-state from 323 to 322 allowed legacy exceptions. Draft PR: https://github.com/rmusser01/tldw_server/pull/1924. Verification: focused ImageOcclusionTransferPanel Vitest passed (3 tests), product-state guard Vitest passed (52 tests), bun run verify:design-system-state passed with 322 exceptions, git diff --check passed. NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false remains red on inherited repo-wide TypeScript debt; a targeted diagnostic filter for ImageOcclusionTransferPanel, design-system-product-state-baseline, and TASK-45.44.9.1 produced no matches. Bandit not applicable because this slice touched TS/TSX/JSON/Backlog markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
