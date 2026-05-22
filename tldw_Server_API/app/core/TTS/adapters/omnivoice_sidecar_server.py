@@ -235,13 +235,22 @@ def create_app(*, sidecar_token: str, runtime: OmniVoiceRuntime | None = None) -
     async def synthesize(
         request: OmniVoiceSynthesizeRequest,
         _: None = Depends(require_sidecar_token),
-    ) -> Response | JSONResponse:
-        try:
-            result = await runtime.synthesize(request)
-        except OmniVoiceRuntimeError as exc:
-            return _runtime_error_response(exc)
-
-        content_type = f"audio/{result.audio_format}"
+    ) -> Response:
+        if request.mode == "clone":
+            if not request.reference_audio_path:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Clone reference audio path does not exist",
+                )
+            reference_path = Path(request.reference_audio_path)
+            if not reference_path.is_file():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Clone reference audio path does not exist",
+                )
+        sample_rate = request.requested_sample_rate or 24000
+        metadata = OmniVoiceSynthesizeResponse(sample_rate=sample_rate, mode=request.mode)
+        audio_bytes = _build_silent_wav(sample_rate=sample_rate, channels=metadata.channels)
         return Response(
             content=result.audio_bytes,
             media_type=content_type,
