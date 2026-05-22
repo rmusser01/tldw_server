@@ -254,7 +254,24 @@ describe("ImageOcclusionTransferPanel", () => {
     const errorText = await screen.findByText("Unable to prepare image occlusion assets.")
 
     expect(errorText.closest('[data-ds-component="Alert"]')).not.toBeNull()
+    expect(errorText).not.toHaveClass("font-medium")
     expect(messageSpies.error).toHaveBeenCalledWith("Unable to prepare image occlusion assets.")
+  })
+
+  it("renders validation warnings through a warning design-system alert", async () => {
+    render(<ImageOcclusionTransferPanel />)
+
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+
+    const warningText = await screen.findByText("Select a source image before generating drafts.")
+    const warningAlert = warningText.closest('[data-ds-component="Alert"]')
+
+    expect(warningAlert).not.toBeNull()
+    expect(warningAlert).toHaveClass("border-warn/30")
+    expect(warningText).not.toHaveClass("font-medium")
+    expect(messageSpies.warning).toHaveBeenCalledWith(
+      "Select a source image before generating drafts."
+    )
   })
 
   it("creates a new occlusion deck with scheduler settings from the selector flow", async () => {
