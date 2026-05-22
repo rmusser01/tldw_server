@@ -10,6 +10,7 @@ labels:
 priority: medium
 parent_task_id: TASK-45.44.10
 references:
+- https://github.com/rmusser01/tldw_server/pull/1952
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/EpubViewer/index.tsx
 - apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
@@ -66,7 +67,7 @@ Continue the Document and Workspace product-state design-system migration by rep
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated the DocumentViewer EPUB/PDF warning and load-error Alert surfaces from AntD Alert to the shared design-system Alert primitive, added focused regression coverage for all four states, and removed the four matching baseline entries.
+Migrated the DocumentViewer EPUB/PDF warning and load-error Alert surfaces from AntD Alert to the shared design-system Alert primitive, added focused regression coverage for all four states, and removed the four matching baseline entries. PR: https://github.com/rmusser01/tldw_server/pull/1952.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
