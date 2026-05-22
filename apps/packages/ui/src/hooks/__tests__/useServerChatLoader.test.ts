@@ -227,12 +227,43 @@ describe("resolveServerChatAssistantIdentity", () => {
     })
   })
 
+  it("ignores legacy character_id when persona assistant metadata is present", () => {
+    expect(
+      resolveServerChatAssistantIdentity({
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
+        persona_memory_mode: "read_only",
+        character_id: 42
+      } as any)
+    ).toEqual({
+      assistantKind: "persona",
+      assistantId: "garden-helper",
+      characterId: null,
+      personaMemoryMode: "read_only"
+    })
+  })
+
   it("keeps persona identity even when memory mode metadata is invalid", () => {
     expect(
       resolveServerChatAssistantIdentity({
         assistant_kind: "persona",
         assistant_id: "garden-helper",
         persona_memory_mode: "session",
+        character_id: null
+      } as any)
+    ).toEqual({
+      assistantKind: "persona",
+      assistantId: "garden-helper",
+      characterId: null,
+      personaMemoryMode: null
+    })
+  })
+
+  it("keeps persona identity without synthesizing memory mode when metadata is missing", () => {
+    expect(
+      resolveServerChatAssistantIdentity({
+        assistant_kind: "persona",
+        assistant_id: "garden-helper",
         character_id: null
       } as any)
     ).toEqual({
