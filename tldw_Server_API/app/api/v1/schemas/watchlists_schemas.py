@@ -642,6 +642,8 @@ class PreviewItem(BaseModel):
 
 class SourcePreviewDiagnostics(BaseModel):
     fetch_mode: str | None = None
+    fetch_status: int | None = None
+    fetch_error: str | None = None
     selector_errors: list[str] = Field(default_factory=list)
     selector_warnings: list[str] = Field(default_factory=list)
     no_match_warnings: list[str] = Field(default_factory=list)

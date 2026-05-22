@@ -287,6 +287,8 @@ describe("SourceFormModal test-source preflight", () => {
       filtered: 0,
       diagnostics: {
         fetch_mode: "scrape_rules",
+        fetch_status: 503,
+        fetch_error: "HTTP 503 from list page",
         selector_warnings: ["title selector matched 0 nodes"],
         dedupe_preview_key: "guid_xpath"
       }
@@ -306,6 +308,8 @@ describe("SourceFormModal test-source preflight", () => {
     await waitFor(() => {
       expect(screen.getByText("Validation diagnostics")).toBeInTheDocument()
       expect(screen.getByText("Fetch mode: scrape_rules")).toBeInTheDocument()
+      expect(screen.getByText("Fetch status: HTTP 503")).toBeInTheDocument()
+      expect(screen.getByText("Fetch issue: HTTP 503 from list page")).toBeInTheDocument()
       expect(screen.getByText("title selector matched 0 nodes")).toBeInTheDocument()
       expect(screen.getByText("Dedupe preview key: guid_xpath")).toBeInTheDocument()
     })

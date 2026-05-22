@@ -170,6 +170,75 @@ def test_draft_source_test_returns_scrape_rule_diagnostics(client_with_user: Tes
     assert "selector_warnings" in diagnostics
 
 
+def test_draft_source_test_returns_fetch_failure_diagnostics(client_with_user: TestClient, monkeypatch):
+    c = client_with_user
+
+    async def fail_fetch(*args, **kwargs):
+        raise RuntimeError("upstream timeout")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists.fetch_site_items_with_rules",
+        fail_fetch,
+        raising=True,
+    )
+
+    r = c.post(
+        "/api/v1/watchlists/sources/test",
+        json={
+            "name": "Draft Site",
+            "url": "https://example.com/news",
+            "source_type": "site",
+            "settings": {
+                "scrape_rules": {
+                    "list_url": "https://example.com/news",
+                    "item_selector": "css:article",
+                    "link_xpath": ".//a/@href",
+                }
+            },
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    diagnostics = r.json().get("diagnostics") or {}
+    assert diagnostics.get("fetch_mode") == "scrape_rules"
+    assert diagnostics.get("fetch_error") == "upstream timeout"
+
+
+def test_draft_source_test_returns_fetch_status_diagnostics(client_with_user: TestClient, monkeypatch):
+    c = client_with_user
+
+    async def status_fetch(*args, fetch_diagnostics=None, **kwargs):
+        if fetch_diagnostics:
+            fetch_diagnostics({"url": "https://example.com/news", "status": 503})
+        return []
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.watchlists.fetch_site_items_with_rules",
+        status_fetch,
+        raising=True,
+    )
+
+    r = c.post(
+        "/api/v1/watchlists/sources/test",
+        json={
+            "name": "Draft Site",
+            "url": "https://example.com/news",
+            "source_type": "site",
+            "settings": {
+                "scrape_rules": {
+                    "list_url": "https://example.com/news",
+                    "item_selector": "css:article",
+                    "link_xpath": ".//a/@href",
+                }
+            },
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    diagnostics = r.json().get("diagnostics") or {}
+    assert diagnostics.get("fetch_status") == 503
+
+
 def test_source_diagnostics_preserve_warning_detail_and_selector_identity():
     from tldw_Server_API.app.api.v1.endpoints.watchlists import (
         _format_selector_diagnostic,
