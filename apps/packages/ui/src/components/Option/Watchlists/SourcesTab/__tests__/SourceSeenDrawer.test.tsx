@@ -270,8 +270,10 @@ describe("SourceSeenDrawer", () => {
         <SourceSeenDrawer open={true} onClose={vi.fn()} sourceId={42} />
       )
       await waitFor(() => {
-        expect(screen.getByTestId("alert-error")).toBeInTheDocument()
-        expect(screen.getByTestId("alert-error")).toHaveTextContent("Network error")
+        const alert = screen.getByTestId("alert-error")
+        expect(alert).toBeInTheDocument()
+        expect(alert).toHaveTextContent("Network error")
+        expect(alert.closest("[data-ds-component='Alert']")).toBeInTheDocument()
       })
     } finally {
       consoleErrorSpy.mockRestore()
