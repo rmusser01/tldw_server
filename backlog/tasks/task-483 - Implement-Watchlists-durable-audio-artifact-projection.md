@@ -13,7 +13,12 @@ documentation:
 modified_files:
 - tldw_Server_API/app/core/DB_Management/Workflows_DB.py
 - tldw_Server_API/app/core/Scheduler/handlers/workflows.py
+- tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py
+- tldw_Server_API/app/api/v1/endpoints/watchlists.py
 - tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+- tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
+- tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
+- Docs/superpowers/plans/2026-05-22-watchlists-durable-audio-artifact-projection-implementation-plan.md
 - backlog/tasks/task-483 - Implement-Watchlists-durable-audio-artifact-projection.md
 ---
 
@@ -57,6 +62,21 @@ Task 1 verification:
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/test_workflows_postgres_migrations.py -q` skipped locally, `1 skipped`.
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/test_workflows_postgres_indexes.py -q` skipped locally, `2 skipped`.
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/Workflows_DB.py tldw_Server_API/app/core/Scheduler/handlers/workflows.py -f json -o /tmp/bandit_watchlists_audio_projection_task1.json` passed with `results 0`.
+
+Task 2 completed:
+- Added opaque `wla_...` audio request IDs to Watchlists audio trigger results.
+- Propagated `audio_request_id` into Workflow inputs, Workflow payload metadata, Scheduler metadata, and the Scheduler idempotency key.
+- Kept `audio_request_id` out of user/job `output_prefs`; stale supplied values are ignored.
+- Persisted the active request ID through `apply_audio_briefing_result_metadata(...)`.
+- Updated audio retry handling to drop the active `audio` projection, preserve the previous one under `previous_audio`, and mark it stale/superseded by the new request ID.
+
+Task 2 verification:
+- Red run: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py::TestBuildWorkflowInputs::test_audio_result_metadata_persists_request_id tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py::TestTriggerAudioBriefing::test_trigger_submits_workflow tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py::test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingestion -q` failed for missing `audio_request_id` support.
+- Green run: same command passed, `3 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py -q` passed, `40 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `38 passed, 1 skipped`.
+- `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py tldw_Server_API/app/api/v1/endpoints/watchlists.py -f json -o /tmp/bandit_watchlists_audio_projection_task2.json` passed with `results 0`.
+- `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

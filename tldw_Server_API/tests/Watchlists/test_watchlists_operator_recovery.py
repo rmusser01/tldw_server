@@ -61,6 +61,12 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
                 "audio_briefing_task_id": "stale-task",
                 "audio_briefing_retry_task_id": "stale-retry-task",
                 "audio_briefing_reason": "old_reason",
+                "audio_request_id": "wla_old_request",
+                "audio": {
+                    "status": "completed",
+                    "audio_request_id": "wla_old_request",
+                    "final_artifact": {"artifact_id": "old-final"},
+                },
             }
         ),
         error_msg=None,
@@ -85,7 +91,13 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     db.get_run.return_value = run
     db.get_job.return_value = job
     db.update_run.return_value = run
-    trigger = AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task-retry-10"))
+    trigger = AsyncMock(
+        return_value=AudioBriefingTriggerResult(
+            status="submitted",
+            task_id="task-retry-10",
+            audio_request_id="wla_retry_request",
+        )
+    )
     rerun_job = AsyncMock()
     monkeypatch.setattr(watchlists, "run_watchlist_job", rerun_job)
     monkeypatch.setattr(
@@ -115,6 +127,11 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
     assert persisted_stats["audio_briefing_status"] == "queued"
     assert persisted_stats["audio_briefing_task_id"] == "task-retry-10"
     assert persisted_stats["audio_briefing_retry_task_id"] == "task-retry-10"
+    assert persisted_stats["audio_request_id"] == "wla_retry_request"
+    assert "audio" not in persisted_stats
+    assert persisted_stats["previous_audio"]["stale"] is True
+    assert persisted_stats["previous_audio"]["superseded_by"] == "wla_retry_request"
+    assert persisted_stats["previous_audio"]["final_artifact"]["artifact_id"] == "old-final"
 
 
 @pytest.mark.asyncio

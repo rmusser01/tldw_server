@@ -96,7 +96,7 @@ Docs/backlog:
 - Modify: `tldw_Server_API/app/core/Scheduler/handlers/workflows.py`
 - Test: `tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py`
 
-- [ ] **Step 1: Write failing SQLite run metadata tests**
+- [x] **Step 1: Write failing SQLite run metadata tests**
 
 Add tests that create a temporary `WorkflowsDatabase`, call `create_run(..., metadata={...})`, and assert `get_run()` / `list_runs()` return `metadata_json`.
 
@@ -125,7 +125,7 @@ def test_create_run_persists_metadata_json(tmp_path):
     assert json.loads(run.metadata_json)["audio_request_id"] == "wla_test_1"
 ```
 
-- [ ] **Step 2: Run failing metadata test**
+- [x] **Step 2: Run failing metadata test**
 
 Run:
 
@@ -135,7 +135,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Workflows/te
 
 Expected: fails because `create_run()` does not accept `metadata` and `WorkflowRun` has no `metadata_json`.
 
-- [ ] **Step 3: Implement Workflows DB metadata support**
+- [x] **Step 3: Implement Workflows DB metadata support**
 
 In `Workflows_DB.py`:
 
@@ -153,7 +153,7 @@ Minimal shape:
 metadata_json = json.dumps(metadata or {})
 ```
 
-- [ ] **Step 4: Pass Scheduler payload metadata into Workflow runs**
+- [x] **Step 4: Pass Scheduler payload metadata into Workflow runs**
 
 In `tldw_Server_API/app/core/Scheduler/handlers/workflows.py`, pass sanitized payload metadata:
 
@@ -181,7 +181,7 @@ if isinstance(definition_snapshot, dict):
 
 This is separate from `workflow_runs.metadata_json`: run metadata makes lookup durable; definition metadata makes artifact tagging possible.
 
-- [ ] **Step 5: Add handler test for payload metadata propagation**
+- [x] **Step 5: Add handler test for payload metadata propagation**
 
 Patch `_get_wf_db()` with a fake DB and assert:
 
@@ -189,7 +189,7 @@ Patch `_get_wf_db()` with a fake DB and assert:
 - the saved `definition_snapshot["metadata"]` contains the payload metadata
 - the original `payload["definition_snapshot"]` object is unchanged
 
-- [ ] **Step 6: Run metadata tests**
+- [x] **Step 6: Run metadata tests**
 
 Run:
 
@@ -201,7 +201,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/Workflows_DB.py \
@@ -221,7 +221,7 @@ git commit -m "feat: persist workflow run metadata"
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
 
-- [ ] **Step 1: Write failing trigger test for `audio_request_id`**
+- [x] **Step 1: Write failing trigger test for `audio_request_id`**
 
 Add coverage to `test_audio_briefing_workflow.py`:
 
@@ -234,7 +234,7 @@ assert submit_kwargs["idempotency_key"].endswith(f":{result.audio_request_id}")
 
 Also add a regression assertion that a stale or user-supplied `output_prefs["audio_request_id"]` is ignored unless passed through the explicit internal test hook.
 
-- [ ] **Step 2: Run failing trigger test**
+- [x] **Step 2: Run failing trigger test**
 
 Run:
 
@@ -246,7 +246,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: fails because `AudioBriefingTriggerResult` has no `audio_request_id` and idempotency key does not include it.
 
-- [ ] **Step 3: Implement request ID creation and propagation**
+- [x] **Step 3: Implement request ID creation and propagation**
 
 In `audio_briefing_workflow.py`:
 
@@ -271,7 +271,7 @@ Idempotency key:
 idempotency_key=f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}:{audio_request_id}"
 ```
 
-- [ ] **Step 4: Persist request ID in trigger metadata application**
+- [x] **Step 4: Persist request ID in trigger metadata application**
 
 Update `apply_audio_briefing_result_metadata(...)` to set or clear `audio_request_id` consistently:
 
@@ -284,7 +284,7 @@ else:
 
 Keep flat compatibility fields unchanged.
 
-- [ ] **Step 5: Update retry endpoint stale-state setup**
+- [x] **Step 5: Update retry endpoint stale-state setup**
 
 In `retry_run_audio(...)`, make retry create a new request ID via `trigger_audio_briefing(...)`. Do not reuse old `audio_request_id`, and do not let a stale value in `output_prefs` override the generated request ID.
 
@@ -300,7 +300,7 @@ run_stats.pop("audio", None)
 
 The exact helper will move into Task 4, but add test coverage now.
 
-- [ ] **Step 6: Run Watchlists audio workflow tests**
+- [x] **Step 6: Run Watchlists audio workflow tests**
 
 Run:
 
@@ -313,7 +313,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass after implementation.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/Watchlists/audio_briefing_workflow.py \

@@ -5015,6 +5015,14 @@ async def retry_run_audio(
         db=target_db,
     )
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
+    prior_audio = run_stats.get("audio")
+    if isinstance(prior_audio, dict):
+        previous_audio = dict(prior_audio)
+        previous_audio["stale"] = True
+        if audio_result.audio_request_id:
+            previous_audio["superseded_by"] = audio_result.audio_request_id
+        run_stats["previous_audio"] = previous_audio
+    run_stats.pop("audio", None)
     apply_audio_briefing_result_metadata(run_stats, audio_result, retry=True)
     try:
         await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))

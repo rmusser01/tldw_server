@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Literal, MutableMapping
+from uuid import uuid4
 
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
@@ -32,11 +33,13 @@ class AudioBriefingTriggerResult:
     Attributes:
         status: Normalized trigger outcome persisted to output metadata.
         task_id: Scheduler task ID when workflow submission succeeds.
+        audio_request_id: Stable request ID for correlating workflow inputs and run state.
         reason: Stable diagnostic code for non-submitted or failed outcomes.
     """
 
     status: AudioBriefingTriggerStatus
     task_id: str | None = None
+    audio_request_id: str | None = None
     reason: str | None = None
 
     @property
@@ -77,6 +80,11 @@ def apply_audio_briefing_result_metadata(
         target["audio_briefing_reason"] = result.reason
     else:
         target.pop("audio_briefing_reason", None)
+
+    if result.audio_request_id:
+        target["audio_request_id"] = result.audio_request_id
+    else:
+        target.pop("audio_request_id", None)
 
     return status
 
@@ -248,6 +256,11 @@ async def _ensure_workflows_queue_has_worker(scheduler: Any) -> int:
     return await scheduler.scale_workers(1, "workflows")
 
 
+def _new_audio_request_id() -> str:
+    """Create an opaque Watchlists audio request ID for retries and artifacts."""
+    return f"wla_{uuid4().hex}"
+
+
 def _build_workflow_inputs(
     items: list[dict[str, Any]],
     output_prefs: dict[str, Any],
@@ -293,6 +306,7 @@ async def trigger_audio_briefing(
     output_prefs: dict[str, Any],
     db: Any,
     scheduler: Any | None = None,
+    audio_request_id: str | None = None,
 ) -> AudioBriefingTriggerResult:
     """Trigger the audio briefing workflow for a completed watchlist run.
 
@@ -303,6 +317,7 @@ async def trigger_audio_briefing(
         output_prefs: The job's output_prefs dict.
         db: The WatchlistsDB instance.
         scheduler: Optional scheduler instance. Defaults to the global Scheduler.
+        audio_request_id: Optional caller-supplied request ID for deterministic retries/tests.
 
     Returns:
         Structured status for the trigger attempt.
@@ -362,6 +377,15 @@ async def trigger_audio_briefing(
             status="configuration_required",
             reason="tts_defaults_unavailable",
         )
+    if audio_request_id is not None:
+        audio_request_id = str(audio_request_id).strip()
+        if not audio_request_id.startswith("wla_"):
+            raise ValueError("audio_request_id must start with 'wla_'")
+    active_audio_request_id = audio_request_id or _new_audio_request_id()
+    workflow_inputs = {
+        **workflow_inputs,
+        "audio_request_id": active_audio_request_id,
+    }
 
     # Submit as a scheduler workflow task.
     try:
@@ -399,6 +423,7 @@ async def trigger_audio_briefing(
             "source": "watchlist_audio_briefing",
             "watchlist_job_id": job_id,
             "watchlist_run_id": run_id,
+            "audio_request_id": active_audio_request_id,
         }
         scheduler_metadata = {**metadata, "user_id": str(user_id)}
         task_id = await scheduler.submit(
@@ -411,7 +436,9 @@ async def trigger_audio_briefing(
                 "metadata": metadata,
             },
             queue_name="workflows",
-            idempotency_key=f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}",
+            idempotency_key=(
+                f"watchlist-audio-briefing:{user_id}:{job_id}:{run_id}:{active_audio_request_id}"
+            ),
             metadata=scheduler_metadata,
             max_retries=1,
         )
@@ -419,7 +446,11 @@ async def trigger_audio_briefing(
             f"Audio briefing workflow submitted for watchlist run {run_id}, "
             f"task_id={task_id}, items={len(items)}"
         )
-        return AudioBriefingTriggerResult(status="submitted", task_id=task_id)
+        return AudioBriefingTriggerResult(
+            status="submitted",
+            task_id=task_id,
+            audio_request_id=active_audio_request_id,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:

@@ -198,6 +198,7 @@ class TestBuildWorkflowInputs:
             "audio_briefing_retry_task_id": "old-retry-task",
             "audio_briefing_reason": "old_reason",
             "audio_briefing_error": "OldError",
+            "audio_request_id": "wla_old",
         }
 
         status = apply_audio_briefing_result_metadata(
@@ -212,6 +213,31 @@ class TestBuildWorkflowInputs:
         assert "audio_briefing_retry_task_id" not in metadata
         assert "audio_briefing_reason" not in metadata
         assert "audio_briefing_error" not in metadata
+        assert "audio_request_id" not in metadata
+
+    def test_audio_result_metadata_persists_request_id(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            AudioBriefingTriggerResult,
+            apply_audio_briefing_result_metadata,
+        )
+
+        metadata: dict[str, Any] = {}
+
+        status = apply_audio_briefing_result_metadata(
+            metadata,
+            AudioBriefingTriggerResult(
+                status="submitted",
+                task_id="task_audio",
+                audio_request_id="wla_test_123",
+            ),
+            requested=True,
+        )
+
+        assert status == "queued"
+        assert metadata["audio_briefing_requested"] is True
+        assert metadata["audio_briefing_status"] == "queued"
+        assert metadata["audio_briefing_task_id"] == "task_audio"
+        assert metadata["audio_request_id"] == "wla_test_123"
 
     def test_structured_audio_cast_inputs_preserve_voice_map_compatibility(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
@@ -401,6 +427,7 @@ class TestTriggerAudioBriefing:
                 output_prefs={
                     "generate_audio": True,
                     "target_audio_minutes": 5,
+                    "audio_request_id": "wla_stale_user_supplied",
                     "voice_map": {"HOST": "af_bella"},
                     "background_audio_uri": "file:///tmp/bed.mp3",
                     "background_volume": 0.22,
@@ -413,6 +440,9 @@ class TestTriggerAudioBriefing:
 
         assert result.status == "submitted"
         assert result.task_id == "task_abc123"
+        assert result.audio_request_id
+        assert result.audio_request_id.startswith("wla_")
+        assert result.audio_request_id != "wla_stale_user_supplied"
         assert result.reason is None
         assert result.submitted is True
         mock_scheduler.scale_workers.assert_awaited_once_with(1, "workflows")
@@ -424,12 +454,13 @@ class TestTriggerAudioBriefing:
         kwargs = mock_scheduler.submit.call_args.kwargs
         assert args == ("workflow_run",)
         assert kwargs["queue_name"] == "workflows"
-        assert kwargs["idempotency_key"] == "watchlist-audio-briefing:1:42:7"
+        assert kwargs["idempotency_key"] == f"watchlist-audio-briefing:1:42:7:{result.audio_request_id}"
         assert kwargs["max_retries"] == 1
         assert kwargs["metadata"] == {
             "source": "watchlist_audio_briefing",
             "watchlist_job_id": 42,
             "watchlist_run_id": 7,
+            "audio_request_id": result.audio_request_id,
             "user_id": "1",
         }
         payload = kwargs["payload"]
@@ -442,9 +473,11 @@ class TestTriggerAudioBriefing:
         assert payload["inputs"]["background_volume"] == 0.22
         assert payload["inputs"]["persona_summarize"] is True
         assert payload["inputs"]["persona_id"] == "host_style"
+        assert payload["inputs"]["audio_request_id"] == result.audio_request_id
         assert len(payload["inputs"]["items"]) == 2
         assert payload["metadata"]["watchlist_job_id"] == 42
         assert payload["metadata"]["watchlist_run_id"] == 7
+        assert payload["metadata"]["audio_request_id"] == result.audio_request_id
         mock_threadpool.assert_awaited_once()
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
 
