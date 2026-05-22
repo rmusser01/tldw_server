@@ -44,13 +44,13 @@ Move the Flashcards study-assistant warning UI off AntD Alert and onto the canon
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-TDD red/green completed. The first red run exposed a stale test harness mock for recent flashcard sessions; after adding the default hook mock, the focused test failed on the intended missing data-ds-component="Alert" assertion. Production code now imports the canonical design-system Alert primitive and renders the study-assistant warning with variant="warning". Removed the now-stale baseline entry for FlashcardStudyAssistantPanel Alert.
+TDD red/green completed. The first red run exposed a stale test harness mock for recent flashcard sessions; after adding the default hook mock, the focused test failed on the intended missing data-ds-component="Alert" assertion. Production code now imports the canonical design-system Alert primitive and renders the study-assistant warning with variant="warning". PR review follow-up moved the longer assistant warning message into Alert children while keeping a short "Study assistant unavailable" title, with a focused red/green assertion. Removed the now-stale baseline entry for FlashcardStudyAssistantPanel Alert.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Migrated FlashcardStudyAssistantPanel's study-assistant warning from AntD Alert to the design-system Alert primitive. Added focused ReviewTab assistant coverage that verifies the warning remains visible and carries the design-system Alert marker. Removed the stale product-state baseline exception and verified the guard passes with 319 remaining legacy exceptions. Verification: bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx; bun run verify:design-system-state; git diff --check. Bandit skipped: frontend-only TSX/test/JSON change.
+Migrated FlashcardStudyAssistantPanel's study-assistant warning from AntD Alert to the design-system Alert primitive. Added focused ReviewTab assistant coverage that verifies the warning remains visible, carries the design-system Alert marker, and uses a short design-system Alert title with the longer warning message in the body. Removed the stale product-state baseline exception and verified the guard passes with 319 remaining legacy exceptions. Verification: bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx; bun run verify:design-system-state; git diff --check. Bandit skipped: frontend-only TSX/test/JSON change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -382,6 +382,7 @@ describe("ReviewTab study assistant panel", () => {
         )
       ).toBeInTheDocument()
     })
+    expect(screen.getByText("Study assistant unavailable")).toBeInTheDocument()
     const banner = screen
       .getByText("Study assistant requires an LLM provider. Configure one in Settings → LLM Providers.")
       .closest("[role='alert']")
