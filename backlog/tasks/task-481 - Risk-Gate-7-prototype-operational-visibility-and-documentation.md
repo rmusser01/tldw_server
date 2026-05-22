@@ -11,6 +11,7 @@ priority: high
 references:
 - https://github.com/rmusser01/tldw_server/issues/1460
 - https://github.com/rmusser01/tldw_server/issues/1440
+- https://github.com/rmusser01/tldw_server/pull/1949
 documentation:
 - Docs/superpowers/specs/2026-05-09-prototype-workspace-productionization-issue-tree-design.md
 - Docs/API-related/Prototype_Workspaces_Contract_Matrix.md
