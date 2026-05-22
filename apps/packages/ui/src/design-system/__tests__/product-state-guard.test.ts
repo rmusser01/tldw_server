@@ -1335,7 +1335,108 @@ describe("design-system product-state guard baseline handling", () => {
     expect(report).toContain("Baseline exceptions: 2")
     expect(report).toContain("local-status-badge: 1")
     expect(report).toContain("local-empty-state: 1")
+    expect(report).toContain("By product area:")
+    expect(report).toContain("Other shared surfaces and long-tail triage: 2")
     expect(report).toContain("shared-product-state: 2")
+  })
+
+  it("groups baseline totals by product area using the tracker path map", () => {
+    expect(
+      guard.productStateAreaForPath(
+        "src/components/Media/MediaIngestJobsPanel.tsx"
+      )
+    ).toBe("Ingestion, Library, and media")
+
+    const report = guard.formatReport({
+      blocked: [],
+      activeMigrationTargets: [
+        {
+          id: "antd-product-state-import:src/components/Option/Watchlists/JobsTab.tsx:Alert",
+          path: "src/components/Option/Watchlists/JobsTab.tsx",
+          rule: "antd-product-state-import",
+          subject: "Alert",
+          message: "Alert from AntD is rendering product-state UI directly.",
+          replacement: "tldw design-system state primitive",
+          state: "active_migration_target",
+          owner: "design-system",
+          reason: "Selected for the next watchlists cleanup.",
+          migrationQueue: "jobs-scheduler-watchlists"
+        }
+      ],
+      allowedLegacy: [
+        {
+          id: "canonical-state-label:src/components/Option/Playground/PlaygroundTopbar.tsx:Ready",
+          path: "src/components/Option/Playground/PlaygroundTopbar.tsx",
+          rule: "canonical-state-label",
+          subject: "Ready",
+          message: "Use the design-system state registry label.",
+          replacement: "design-system state registry",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing ready label before the guard.",
+          migrationQueue: "chat-playground"
+        },
+        {
+          id: "antd-product-state-import:src/components/Option/Admin/ServerHealth.tsx:Alert",
+          path: "src/components/Option/Admin/ServerHealth.tsx",
+          rule: "antd-product-state-import",
+          subject: "Alert",
+          message: "Alert from AntD is rendering product-state UI directly.",
+          replacement: "tldw design-system state primitive",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Existing admin alert before the guard.",
+          migrationQueue: "admin-health"
+        }
+      ],
+      staleBaseline: [],
+      baselineErrors: []
+    })
+
+    expect(report).toContain("By product area:")
+    expect(report).toContain("Admin and health expansion: 1")
+    expect(report).toContain("Chat and Playground: 1")
+    expect(report).toContain("Jobs, Scheduler, and Watchlists: 1")
+  })
+
+  it("summarizes stale baseline cleanup by rule and product area", () => {
+    const report = guard.formatReport({
+      blocked: [],
+      activeMigrationTargets: [],
+      allowedLegacy: [],
+      staleBaseline: [
+        {
+          id: "antd-product-state-import:src/components/Option/Settings/HealthStatus.tsx:Alert",
+          path: "src/components/Option/Settings/HealthStatus.tsx",
+          rule: "antd-product-state-import",
+          subject: "Alert",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Migrated settings alert should be removed.",
+          replacement: "tldw design-system state primitive",
+          migrationQueue: "settings-account-security"
+        },
+        {
+          id: "canonical-state-label:src/components/Option/Playground/ReadyLabel.tsx:Ready",
+          path: "src/components/Option/Playground/ReadyLabel.tsx",
+          rule: "canonical-state-label",
+          subject: "Ready",
+          state: "allowed_legacy_exception",
+          owner: "design-system",
+          reason: "Migrated ready label should be removed.",
+          replacement: "design-system state registry",
+          migrationQueue: "chat-playground"
+        }
+      ],
+      baselineErrors: []
+    })
+
+    expect(report).toContain("Stale baseline cleanup summary")
+    expect(report).toContain("Stale baseline entries: 2")
+    expect(report).toContain("canonical-state-label: 1")
+    expect(report).toContain("antd-product-state-import: 1")
+    expect(report).toContain("Chat and Playground: 1")
+    expect(report).toContain("Settings and account/security: 1")
   })
 
   it("formats an empty result as no product-state guard issues", () => {
