@@ -251,3 +251,19 @@ def test_omnivoice_rejects_invalid_bool_generation_param():
 
     assert is_valid is False
     assert "denoise" in str(error)
+
+
+@pytest.mark.parametrize("value", [True, 1.5, "1.5"])
+def test_omnivoice_rejects_invalid_integer_generation_param(value):
+    validator = TTSInputValidator()
+    request = TTSRequest(
+        text="hello",
+        voice="auto",
+        format=AudioFormat.WAV,
+        extra_params={"num_step": value},
+    )
+
+    is_valid, error = validator.validate_request(request, provider="omnivoice")
+
+    assert is_valid is False
+    assert "num_step" in str(error)
