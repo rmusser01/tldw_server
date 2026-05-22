@@ -868,16 +868,17 @@ const AUDITED_ROUTE_METADATA: RouteMetadata[] = [
   },
   {
     path: "/claims-review",
-    canonicalPath: "/claims-review",
+    canonicalPath: "/content-review",
     label: "Claims Review",
     group: "safety",
-    surface: "advanced_self_hosted",
+    surface: "redirect",
     availability: webOnly,
-    smoke: "include",
-    commandPalette: "show",
-    nav: "secondary",
+    redirectsTo: "/content-review",
+    smoke: "exclude",
+    commandPalette: "alias_only",
+    nav: "hidden",
     requiresBackend: true,
-    rationale: "Claims review is a focused verification workflow and secondary to content review."
+    rationale: "Legacy claims review route redirects to the canonical content review workflow."
   },
   {
     path: "/data-tables",

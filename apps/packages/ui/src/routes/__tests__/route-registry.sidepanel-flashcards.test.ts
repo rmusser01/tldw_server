@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS } from "../study-safety-specialized-route-jobs"
 
 const registryPathCandidates = [
   "src/routes/sidepanel-route-registry.tsx",
@@ -33,6 +34,18 @@ describe("sidepanel flashcards route registration", () => {
   it("registers a /flashcards route in the sidepanel registry", () => {
     expect(registrySource).toMatch(/path:\s*"\/flashcards"/)
     expect(registrySource).toContain("SidepanelFlashcards")
+  })
+
+  it("keeps flashcards as the only Task 11B sidepanel route", () => {
+    const sidepanelOnlyRoutes = STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS.filter(
+      (job) => job.route !== "/flashcards"
+    )
+
+    for (const job of sidepanelOnlyRoutes) {
+      expect(registrySource).not.toMatch(
+        new RegExp(`path:\\s*"${job.route.replace("/", "\\/")}"`)
+      )
+    }
   })
 
   it("lazy-imports the SidepanelFlashcards component", () => {
