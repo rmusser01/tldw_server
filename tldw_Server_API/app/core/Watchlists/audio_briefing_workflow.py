@@ -7,7 +7,7 @@ when the job's output_prefs has generate_audio=True.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, MutableMapping
 
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
@@ -33,6 +33,43 @@ class AudioBriefingTriggerResult:
     @property
     def submitted(self) -> bool:
         return self.status == "submitted" and bool(self.task_id)
+
+
+def persisted_audio_briefing_status(result: AudioBriefingTriggerResult) -> str:
+    """Return the externally visible status for an audio briefing trigger."""
+    return "queued" if result.submitted else result.status
+
+
+def apply_audio_briefing_result_metadata(
+    target: MutableMapping[str, Any],
+    result: AudioBriefingTriggerResult,
+    *,
+    requested: bool | None = None,
+    retry: bool = False,
+) -> str:
+    """Persist trigger result fields while clearing stale task/reason values."""
+    if requested is not None:
+        target["audio_briefing_requested"] = requested
+
+    status = persisted_audio_briefing_status(result)
+    target["audio_briefing_status"] = status
+    target.pop("audio_briefing_error", None)
+
+    if result.task_id:
+        target["audio_briefing_task_id"] = result.task_id
+        if retry:
+            target["audio_briefing_retry_task_id"] = result.task_id
+    else:
+        target.pop("audio_briefing_task_id", None)
+        if retry:
+            target.pop("audio_briefing_retry_task_id", None)
+
+    if result.reason:
+        target["audio_briefing_reason"] = result.reason
+    else:
+        target.pop("audio_briefing_reason", None)
+
+    return status
 
 
 # ---------------------------------------------------------------------------
@@ -140,15 +177,30 @@ def _normalize_audio_cast_voice_map(audio_cast: Any) -> dict[str, str] | None:
     return voice_map or None
 
 
+def _first_non_empty_pref(output_prefs: dict[str, Any], *keys: str) -> Any:
+    """Return the first non-empty preference value for current and legacy keys."""
+    for key in keys:
+        value = output_prefs.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+            continue
+        if value is not None:
+            return value
+    return None
+
+
 def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str, str] | None:
     """Resolve Watchlists audio prefs through the same defaults as /audio/speech."""
-    provider = output_prefs.get("audio_provider") or output_prefs.get("tts_provider")
-    model = output_prefs.get("audio_model")
+    provider = _first_non_empty_pref(output_prefs, "audio_provider", "tts_provider")
+    model = _first_non_empty_pref(output_prefs, "audio_model", "tts_model")
+    voice = _first_non_empty_pref(output_prefs, "audio_voice", "tts_voice")
     try:
         resolved = resolve_tts_request_defaults(
             provider=provider,
             model=model,
-            voice=output_prefs.get("audio_voice"),
+            voice=voice,
         )
     except Exception as exc:
         logger.warning("Audio briefing: failed to resolve TTS defaults (error_type={})", type(exc).__name__)
@@ -159,6 +211,32 @@ def _resolve_workflow_tts_defaults(output_prefs: dict[str, Any]) -> tuple[str, s
     if not model or not voice:
         return None
     return model, voice
+
+
+def _get_scheduler_queue_worker_count(scheduler: Any, queue_name: str) -> int | None:
+    """Read current queue worker count without requiring Scheduler internals."""
+    worker_pool = getattr(scheduler, "worker_pool", None)
+    get_status = getattr(worker_pool, "get_status", None)
+    if not callable(get_status):
+        return None
+    status = get_status()
+    if not isinstance(status, dict):
+        return None
+    workers_by_queue = status.get("workers_by_queue")
+    if not isinstance(workers_by_queue, dict):
+        return None
+    raw_count = workers_by_queue.get(queue_name)
+    if isinstance(raw_count, int):
+        return raw_count
+    return None
+
+
+async def _ensure_workflows_queue_has_worker(scheduler: Any) -> int:
+    """Ensure the workflows queue has at least one worker without downscaling it."""
+    current_count = _get_scheduler_queue_worker_count(scheduler, "workflows")
+    if current_count is not None and current_count >= 1:
+        return current_count
+    return await scheduler.scale_workers(1, "workflows")
 
 
 def _build_workflow_inputs(
@@ -289,7 +367,7 @@ async def trigger_audio_briefing(
         return AudioBriefingTriggerResult(status="enqueue_failed", reason="scheduler_submit_failed")
 
     try:
-        worker_count = await scheduler.scale_workers(1, "workflows")
+        worker_count = await _ensure_workflows_queue_has_worker(scheduler)
     except Exception as exc:
         logger.warning(
             "Audio briefing: workflows queue unavailable for run {} (error_type={})",

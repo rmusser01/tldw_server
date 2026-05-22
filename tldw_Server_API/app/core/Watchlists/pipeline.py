@@ -613,7 +613,9 @@ async def _maybe_auto_generate_output(
         "item_count": len(items_payload),
         "format": template_format,
         "type": output_type,
-        "origin": "auto_output",
+        "origin": "watchlists",
+        "generation_mode": "auto_output",
+        "auto_output": True,
         "run_id": run.id,
         "job_id": getattr(job, "id", None),
     }
@@ -627,6 +629,33 @@ async def _maybe_auto_generate_output(
         run_id=run.id,
     )
     return artifact.id
+
+
+def _update_auto_output_audio_metadata(
+    collections_db: CollectionsDatabase,
+    output_id: int,
+    audio_result: Any,
+) -> None:
+    """Attach audio trigger state to an auto-generated output artifact."""
+    from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+        apply_audio_briefing_result_metadata,
+    )
+
+    row = collections_db.get_output_artifact(output_id)
+    metadata: dict[str, Any] = {}
+    raw_metadata = getattr(row, "metadata_json", None)
+    if raw_metadata:
+        try:
+            parsed = json.loads(raw_metadata)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+            metadata = {}
+    apply_audio_briefing_result_metadata(metadata, audio_result, requested=True)
+    collections_db.update_output_artifact_metadata(
+        output_id,
+        metadata_json=json.dumps(metadata),
+    )
 
 
 async def run_watchlist_job(
@@ -1760,6 +1789,7 @@ async def run_watchlist_job(
         try:
             if isinstance(job_output_prefs, dict) and job_output_prefs.get("generate_audio"):
                 from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+                    apply_audio_briefing_result_metadata,
                     trigger_audio_briefing,
                 )
 
@@ -1770,11 +1800,12 @@ async def run_watchlist_job(
                     output_prefs=job_output_prefs,
                     db=db,
                 )
-                stats["audio_briefing_status"] = "queued" if audio_result.submitted else audio_result.status
-                if audio_result.task_id:
-                    stats["audio_briefing_task_id"] = audio_result.task_id
-                if audio_result.reason:
-                    stats["audio_briefing_reason"] = audio_result.reason
+                apply_audio_briefing_result_metadata(stats, audio_result)
+                if auto_output_id:
+                    try:
+                        _update_auto_output_audio_metadata(collections_db, int(auto_output_id), audio_result)
+                    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
+                        logger.debug(f"auto-output audio metadata update failed for output {auto_output_id}: {exc}")
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
                 "Audio briefing trigger failed for job {} (error_type={})",

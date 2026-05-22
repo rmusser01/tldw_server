@@ -617,10 +617,28 @@ async def test_pipeline_persists_post_run_audio_and_output_stats():
         ),
     )
 
+    def create_auto_output_artifact(**kwargs):
+        return kwargs["collections_db"].create_output_artifact(
+            type_="briefing_markdown",
+            title="Auto Output",
+            format_="md",
+            storage_path="auto-output.md",
+            metadata_json=json.dumps(
+                {
+                    "origin": "watchlists",
+                    "generation_mode": "auto_output",
+                    "run_id": kwargs["run"].id,
+                    "job_id": kwargs["job"].id,
+                }
+            ),
+            job_id=kwargs["job"].id,
+            run_id=kwargs["run"].id,
+        ).id
+
     with (
         patch(
             "tldw_Server_API.app.core.Watchlists.pipeline._maybe_auto_generate_output",
-            new=AsyncMock(return_value=9876),
+            new=AsyncMock(side_effect=create_auto_output_artifact),
         ),
         patch(
             "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
@@ -629,12 +647,20 @@ async def test_pipeline_persists_post_run_audio_and_output_stats():
     ):
         result = await run_watchlist_job(user_id, job.id)
 
-    assert result.get("auto_output_id") == 9876
+    auto_output_id = int(result["auto_output_id"])
     assert result.get("audio_briefing_task_id") == "task_stage2"
     assert result.get("audio_briefing_status") == "queued"
 
     persisted_run = db.get_run(int(result["run_id"]))
     persisted_stats = json.loads(persisted_run.stats_json or "{}")
-    assert persisted_stats.get("auto_output_id") == 9876
+    assert persisted_stats.get("auto_output_id") == auto_output_id
     assert persisted_stats.get("audio_briefing_task_id") == "task_stage2"
     assert persisted_stats.get("audio_briefing_status") == "queued"
+
+    output_row = CollectionsDatabase.for_user(user_id).get_output_artifact(auto_output_id)
+    output_metadata = json.loads(output_row.metadata_json or "{}")
+    assert output_metadata["origin"] == "watchlists"
+    assert output_metadata["generation_mode"] == "auto_output"
+    assert output_metadata["audio_briefing_requested"] is True
+    assert output_metadata["audio_briefing_status"] == "queued"
+    assert output_metadata["audio_briefing_task_id"] == "task_stage2"

@@ -361,6 +361,56 @@ describe("OutputPreviewDrawer audio support", () => {
     }
   })
 
+  it("continues polling when live audio status is unknown but task id is present", async () => {
+    const originalSetTimeout = globalThis.setTimeout
+    const scheduledAudioPolls: Array<() => void> = []
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        if (timeout === 3000 && typeof handler === "function") {
+          scheduledAudioPolls.push(() => handler(...args))
+          return 0 as unknown as ReturnType<typeof setTimeout>
+        }
+        return originalSetTimeout(handler, timeout, ...args)
+      }) as typeof setTimeout
+    )
+    try {
+      serviceMocks.getWatchlistRunAudio.mockResolvedValueOnce({
+        run_id: 9,
+        task_id: "task_audio_pending",
+        queue_name: "workflows",
+        status: "unknown",
+        audio_uri: null,
+        download_url: null
+      })
+
+      const { unmount } = render(
+        <OutputPreviewDrawer
+          open
+          onClose={vi.fn()}
+          output={buildOutput({
+            type: "brief",
+            format: "md",
+            metadata: {
+              audio_briefing_requested: true,
+              audio_briefing_status: "unknown",
+              audio_briefing_task_id: "task_audio_pending"
+            }
+          })}
+        />
+      )
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledTimes(1)
+      expect(scheduledAudioPolls).toHaveLength(1)
+      unmount()
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
+  })
+
   it("stops live audio polling when the drawer closes", async () => {
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
     try {
@@ -440,6 +490,32 @@ describe("OutputPreviewDrawer audio support", () => {
     expect(screen.queryByText(/value_to_redact/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Users\/local/)).not.toBeInTheDocument()
     expect(screen.getByText("No content available")).toBeInTheDocument()
+  })
+
+  it("renders structured audio trigger reasons from flat output metadata", async () => {
+    render(
+      <OutputPreviewDrawer
+        open
+        onClose={vi.fn()}
+        output={buildOutput({
+          type: "brief",
+          format: "md",
+          metadata: {
+            audio_briefing_requested: true,
+            audio_briefing_status: "queue_unavailable",
+            audio_briefing_reason: "workflows_queue_has_no_workers"
+          }
+        })}
+      />
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
+    })
+
+    expect(screen.getByText("Queue unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Fallback: workflows_queue_has_no_workers")).toBeInTheDocument()
+    expect(serviceMocks.getWatchlistRunAudio).not.toHaveBeenCalled()
   })
 
   it("restores focus to the launch control when the drawer closes", async () => {

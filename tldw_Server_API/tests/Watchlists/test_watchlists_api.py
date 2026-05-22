@@ -1557,6 +1557,16 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     r = c.post(f"/api/v1/watchlists/jobs/{job_id}/run")
     assert r.status_code == 200, r.text
     run_id = r.json()["id"]
+    WatchlistsDatabase.for_user(555).update_run(
+        run_id,
+        stats_json=json.dumps(
+            {
+                "audio_briefing_status": "queued",
+                "audio_briefing_task_id": "stale-task",
+                "audio_briefing_reason": "old_reason",
+            }
+        ),
+    )
 
     with patch(
         "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
@@ -1589,6 +1599,7 @@ def test_outputs_generate_audio_trigger_returns_none_marks_skipped_metadata(
     assert r.status_code == 200, r.text
     run_payload = r.json()
     assert run_payload.get("stats", {}).get("audio_briefing_task_id") is None
+    assert run_payload.get("stats", {}).get("audio_briefing_reason") == "no_ingested_items"
 
 
 def test_outputs_generate_audio_trigger_failure_marks_enqueue_failed_metadata(

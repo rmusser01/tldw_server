@@ -5001,6 +5001,7 @@ async def retry_run_audio(
     output_prefs["generate_audio"] = True
 
     from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+        apply_audio_briefing_result_metadata,
         trigger_audio_briefing,
     )
 
@@ -5014,13 +5015,7 @@ async def retry_run_audio(
         db=target_db,
     )
     run_stats = _parse_json_object(getattr(run, "stats_json", None))
-    persisted_audio_status = "queued" if audio_result.submitted else audio_result.status
-    run_stats["audio_briefing_status"] = persisted_audio_status
-    if audio_result.task_id:
-        run_stats["audio_briefing_task_id"] = audio_result.task_id
-        run_stats["audio_briefing_retry_task_id"] = audio_result.task_id
-    if audio_result.reason:
-        run_stats["audio_briefing_reason"] = audio_result.reason
+    apply_audio_briefing_result_metadata(run_stats, audio_result, retry=True)
     try:
         await run_in_threadpool(target_db.update_run, run_id, stats_json=json.dumps(run_stats))
     except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
@@ -6874,9 +6869,9 @@ async def create_output(
     metadata_update_needed = False
 
     if effective_generate_audio:
-        metadata["audio_briefing_requested"] = True
         try:
             from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+                apply_audio_briefing_result_metadata,
                 trigger_audio_briefing,
             )
 
@@ -6906,30 +6901,33 @@ async def create_output(
                 },
                 db=db,
             )
-            persisted_audio_status = "queued" if audio_result.submitted else audio_result.status
-            metadata["audio_briefing_status"] = persisted_audio_status
-            if audio_result.task_id:
-                metadata["audio_briefing_task_id"] = audio_result.task_id
-            if audio_result.reason:
-                metadata["audio_briefing_reason"] = audio_result.reason
+            apply_audio_briefing_result_metadata(metadata, audio_result, requested=True)
             with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
                 run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
                 if not isinstance(run_stats, dict):
                     run_stats = {}
-                run_stats["audio_briefing_status"] = persisted_audio_status
-                if audio_result.task_id:
-                    run_stats["audio_briefing_task_id"] = audio_result.task_id
-                if audio_result.reason:
-                    run_stats["audio_briefing_reason"] = audio_result.reason
-                db.update_run(run.id, stats_json=json.dumps(run_stats))
+                apply_audio_briefing_result_metadata(run_stats, audio_result)
+                await run_in_threadpool(db.update_run, run.id, stats_json=json.dumps(run_stats))
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(
                 "Watchlists output audio briefing enqueue failed for run {} (error_type={})",
                 payload.run_id,
                 type(exc).__name__,
             )
+            metadata["audio_briefing_requested"] = True
             metadata["audio_briefing_status"] = "enqueue_failed"
+            metadata.pop("audio_briefing_task_id", None)
+            metadata.pop("audio_briefing_reason", None)
             metadata["audio_briefing_error"] = type(exc).__name__
+            with contextlib.suppress(_WATCHLISTS_NONCRITICAL_EXCEPTIONS):
+                run_stats = json.loads(run.stats_json or "{}") if getattr(run, "stats_json", None) else {}
+                if not isinstance(run_stats, dict):
+                    run_stats = {}
+                run_stats["audio_briefing_status"] = "enqueue_failed"
+                run_stats.pop("audio_briefing_task_id", None)
+                run_stats.pop("audio_briefing_reason", None)
+                run_stats["audio_briefing_error"] = type(exc).__name__
+                await run_in_threadpool(db.update_run, run.id, stats_json=json.dumps(run_stats))
         metadata_update_needed = True
 
     if isinstance(delivery_plan, dict):

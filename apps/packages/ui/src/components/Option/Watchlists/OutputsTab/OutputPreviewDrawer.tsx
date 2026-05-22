@@ -265,7 +265,10 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
         if (!active) return
         setLiveAudioStatus(nextStatus)
         const normalizedStatus = (nextStatus.status || "").toLowerCase()
-        if (AUDIO_STATUS_POLLABLE.has(normalizedStatus)) {
+        if (
+          AUDIO_STATUS_POLLABLE.has(normalizedStatus) ||
+          (normalizedStatus === "unknown" && Boolean(nextStatus.task_id))
+        ) {
           scheduleNextPoll()
         }
       } catch (err) {

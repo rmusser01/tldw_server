@@ -152,6 +152,66 @@ class TestBuildWorkflowInputs:
         assert inputs["background_delay_ms"] == 500
         assert inputs["background_fade_seconds"] == 3.0
 
+    def test_legacy_tts_keys_feed_default_resolution(self):
+        from tldw_Server_API.app.core.TTS.tts_request_resolution import ResolvedTTSRequestDefaults
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            _build_workflow_inputs,
+        )
+
+        with patch(
+            "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.resolve_tts_request_defaults",
+            return_value=ResolvedTTSRequestDefaults(
+                provider="legacy-provider",
+                model="legacy-model",
+                voice="legacy-voice",
+            ),
+        ) as resolver:
+            inputs = _build_workflow_inputs(
+                [{"title": "News", "summary": "Story"}],
+                {
+                    "generate_audio": True,
+                    "tts_provider": "legacy-provider",
+                    "tts_model": "legacy-model",
+                    "tts_voice": "legacy-voice",
+                },
+            )
+
+        resolver.assert_called_once_with(
+            provider="legacy-provider",
+            model="legacy-model",
+            voice="legacy-voice",
+        )
+        assert inputs["tts_model"] == "legacy-model"
+        assert inputs["tts_voice"] == "legacy-voice"
+
+    def test_audio_result_metadata_clears_stale_task_and_reason(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            AudioBriefingTriggerResult,
+            apply_audio_briefing_result_metadata,
+        )
+
+        metadata = {
+            "audio_briefing_requested": True,
+            "audio_briefing_status": "queued",
+            "audio_briefing_task_id": "old-task",
+            "audio_briefing_retry_task_id": "old-retry-task",
+            "audio_briefing_reason": "old_reason",
+            "audio_briefing_error": "OldError",
+        }
+
+        status = apply_audio_briefing_result_metadata(
+            metadata,
+            AudioBriefingTriggerResult(status="queue_unavailable"),
+            retry=True,
+        )
+
+        assert status == "queue_unavailable"
+        assert metadata["audio_briefing_status"] == "queue_unavailable"
+        assert "audio_briefing_task_id" not in metadata
+        assert "audio_briefing_retry_task_id" not in metadata
+        assert "audio_briefing_reason" not in metadata
+        assert "audio_briefing_error" not in metadata
+
     def test_structured_audio_cast_inputs_preserve_voice_map_compatibility(self):
         from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
             _build_workflow_inputs,
@@ -257,6 +317,13 @@ class TestTriggerAudioBriefing:
             if not isinstance(user_id, str) or not user_id.strip():
                 raise ValueError("Task metadata must include a non-empty 'user_id'")
             return self.return_value
+
+    class WorkerPoolStatus:
+        def __init__(self, workflows_count: int) -> None:
+            self.workflows_count = workflows_count
+
+        def get_status(self) -> dict[str, Any]:
+            return {"workers_by_queue": {"workflows": self.workflows_count}}
 
     @pytest.mark.asyncio
     async def test_trigger_skips_when_generate_audio_false(self):
@@ -379,6 +446,34 @@ class TestTriggerAudioBriefing:
         assert payload["metadata"]["watchlist_run_id"] == 7
         mock_threadpool.assert_awaited_once()
         db.list_items.assert_called_once_with(run_id=7, status="ingested", limit=100, offset=0)
+
+    @pytest.mark.asyncio
+    async def test_trigger_does_not_downscale_existing_workflow_workers(self):
+        from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import (
+            trigger_audio_briefing,
+        )
+
+        db = MagicMock()
+        db.list_items.return_value = (
+            [{"title": "Story", "summary": "Summary", "url": "https://example.com/1"}],
+            1,
+        )
+        scheduler = self.SubmitOnlyScheduler("task_existing_workers")
+        scheduler.worker_pool = self.WorkerPoolStatus(workflows_count=3)
+
+        result = await trigger_audio_briefing(
+            user_id=1,
+            job_id=42,
+            run_id=7,
+            output_prefs={"generate_audio": True},
+            db=db,
+            scheduler=scheduler,
+        )
+
+        assert result.status == "submitted"
+        assert result.task_id == "task_existing_workers"
+        scheduler.scale_workers.assert_not_awaited()
+        scheduler.submit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_trigger_handles_scheduler_failure(self):

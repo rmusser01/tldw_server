@@ -52,7 +52,19 @@ async def test_retry_run_audio_reuses_job_audio_config_without_rerunning_ingesti
 
     retry_run_audio = watchlists.retry_run_audio
 
-    run = SimpleNamespace(id=10, job_id=7, stats_json=json.dumps({"items_ingested": 2}), error_msg=None)
+    run = SimpleNamespace(
+        id=10,
+        job_id=7,
+        stats_json=json.dumps(
+            {
+                "items_ingested": 2,
+                "audio_briefing_task_id": "stale-task",
+                "audio_briefing_retry_task_id": "stale-retry-task",
+                "audio_briefing_reason": "old_reason",
+            }
+        ),
+        error_msg=None,
+    )
     job = SimpleNamespace(
         id=7,
         output_prefs_json=json.dumps(

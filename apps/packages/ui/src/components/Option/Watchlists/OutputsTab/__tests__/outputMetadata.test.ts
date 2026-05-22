@@ -15,6 +15,7 @@ import {
   getOutputDeliveryStatuses,
   getOutputFileExtension,
   getOutputMimeType,
+  getOutputAudioStatusSummary,
   getOutputReportPreset,
   getOutputReportReadiness,
   getOutputReportSnapshotAvailable,
@@ -216,6 +217,20 @@ describe("outputMetadata helpers", () => {
         audio_briefing_task_id: "task-123"
       }).status
     ).toBe("queued")
+  })
+
+  it("normalizes flat audio briefing reasons from output metadata", () => {
+    const summary = getOutputAudioStatusSummary({
+      audio_briefing_requested: true,
+      audio_briefing_status: "queue_unavailable",
+      audio_briefing_reason: "workflows_queue_has_no_workers"
+    })
+
+    expect(summary.requested).toBe(true)
+    expect(summary.status).toBe("queue_unavailable")
+    expect(summary.statusLabel).toBe("Queue unavailable")
+    expect(summary.statusColor).toBe("gold")
+    expect(summary.fallbackReason).toBe("workflows_queue_has_no_workers")
   })
 
   it("returns artifact labels and tag colors by output kind", () => {

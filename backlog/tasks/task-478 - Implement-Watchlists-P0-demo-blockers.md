@@ -16,11 +16,15 @@ modified_files:
 - tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 - tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py
 - tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
+- tldw_Server_API/tests/Watchlists/test_watchlist_gap_coverage.py
+- tldw_Server_API/tests/Watchlists/test_watchlists_api.py
+- tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py
 - apps/packages/ui/src/types/watchlists.ts
 - apps/packages/ui/src/services/__tests__/watchlists-audio.test.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
 - apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
 - apps/packages/ui/src/components/Option/Watchlists/WatchlistsPlaygroundPage.tsx
 - apps/packages/ui/src/components/Option/Watchlists/watchlist-selection.ts
 - apps/packages/ui/src/components/Option/Watchlists/__tests__/watchlist-selection.test.ts
@@ -51,12 +55,14 @@ Docs/superpowers/plans/2026-05-22-watchlists-p0-demo-blockers-implementation-pla
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 2 complete after review: run-audio fallback status reads Scheduler task state only from an already-started global scheduler; missing DB, no matching workflow run, matched run without id, and matched run without final audio artifact all expose Scheduler status or safe pending. Cancellation propagates at helper and endpoint boundary. Task 3 implemented Reports drawer live audio status polling for text digest outputs with requested audio, merges live status scalars over metadata artifacts/fallbacks, renders queue name, retries after transient status fetch failures, and stops polling on close. Task 4 implemented deterministic watchlist selection and review fix now passes the preferred selection into setWatchlists atomically to avoid the store's old items[0] transient fallback.
+
+Code review follow-up complete: auto-generated monitor outputs now use watchlists output origin, persist audio trigger metadata onto the output artifact, and remain visible in Reports; structured non-submitted audio reasons are normalized into the Reports drawer; live polling continues for unknown Scheduler statuses that still have a task id; workflows worker availability no longer downscales an existing queue; legacy tts_* preferences feed TTS default resolution; and retry/output paths clear stale audio task, retry, reason, and error fields before persisting new trigger state.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the focused Watchlists P0 demo-blocker slice: audio briefing trigger paths now return structured results and ensure a workflows queue worker before submit; run-audio status can report Scheduler-backed progress before durable workflow artifacts exist; Reports preview polls and merges live audio status for digest outputs with requested audio; and first-class active watchlists are selected atomically instead of transiently falling back to an imported placeholder. Verification on the rebased branch passed the focused backend Watchlists pytest subset, focused frontend Watchlists Vitest subset, touched-scope Bandit, and git diff whitespace check. Browser smoke with local FastAPI and Next.js verified `/watchlists` route load, Reports tab access, and Create report modal access; the first cold load produced a transient fetch error while services were warming, then the warm route/API pass reached the expected Watchlists and Reports states.
+Implemented the focused Watchlists P0 demo-blocker slice: audio briefing trigger paths now return structured results and ensure a workflows queue worker before submit without downscaling existing workers; run-audio status can report Scheduler-backed progress before durable workflow artifacts exist; Reports preview polls and merges live audio status for digest outputs with requested audio, including auto-generated monitor outputs; and first-class active watchlists are selected atomically instead of transiently falling back to an imported placeholder. Code review follow-up addressed auto-output audio metadata, flat reason visibility, unknown-with-task polling, stale retry/output state clearing, and legacy tts_* preference compatibility. Verification on the rebased branch passed the focused backend Watchlists pytest subset, focused frontend Watchlists Vitest subset, touched-scope Bandit, and git diff whitespace check. Browser smoke with local FastAPI and Next.js verified `/watchlists` route load, Reports tab access, and Create report modal access; the first cold load produced a transient fetch error while services were warming, then the warm route/API pass reached the expected Watchlists and Reports states.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
