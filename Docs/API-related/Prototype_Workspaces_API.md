@@ -219,6 +219,8 @@ Frontend/backend state names, HTTP status expectations, retryability, and frozen
 
 Operational setup, status-field diagnosis, and support escalation guidance live in `Docs/Operations/Prototype_Workspaces_Runbook.md`. Owner and collaborator workflow examples live in `Docs/User_Guides/Prototype_Workspaces.md`.
 
+Risk Gate 8 release-readiness matrices and smoke evidence live in `Docs/Operations/Prototype_Workspaces_Release_Readiness.md`.
+
 ## Risk Gate 4 Error Contract
 
 Prototype-specific endpoint failures use the normal FastAPI `detail` envelope with a stable structured payload:

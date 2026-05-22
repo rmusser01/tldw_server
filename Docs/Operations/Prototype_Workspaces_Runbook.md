@@ -8,6 +8,7 @@ Canonical contracts:
 
 - API overview: `Docs/API-related/Prototype_Workspaces_API.md`
 - Frontend/backend state matrix: `Docs/API-related/Prototype_Workspaces_Contract_Matrix.md`
+- Release-readiness evidence: `Docs/Operations/Prototype_Workspaces_Release_Readiness.md`
 - Security model: `Docs/Security/Prototype_Workspaces_Threat_Model.md`
 
 ## Setup Checklist
