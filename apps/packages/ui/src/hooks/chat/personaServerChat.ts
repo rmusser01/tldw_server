@@ -136,14 +136,17 @@ export const ensurePersonaServerChat = async ({
       ? serverChatIdOverride.trim()
       : null
   const resolvedServerChatId = overrideChatId || serverChatId
-  const personaMemoryMode =
-    serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
   const assistantId = String(assistant.id)
-  const shouldResetServerChat =
+  const isMatchingPersonaChat =
     Boolean(resolvedServerChatId) &&
-    (serverChatAssistantKind !== "persona" ||
-      !serverChatAssistantId ||
-      String(serverChatAssistantId) !== assistantId)
+    serverChatAssistantKind === "persona" &&
+    Boolean(serverChatAssistantId) &&
+    String(serverChatAssistantId) === assistantId
+  const personaMemoryMode = isMatchingPersonaChat
+    ? serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
+    : DEFAULT_PERSONA_MEMORY_MODE
+  const shouldResetServerChat =
+    Boolean(resolvedServerChatId) && !isMatchingPersonaChat
 
   if (shouldResetServerChat) {
     resetAssistantServerChatState({
@@ -169,11 +172,19 @@ export const ensurePersonaServerChat = async ({
       assistant_kind: "persona",
       assistant_id: assistantId,
       persona_memory_mode: personaMemoryMode,
-      state: serverChatState || "in-progress",
-      topic_label: serverChatTopic || undefined,
-      cluster_id: serverChatClusterId || undefined,
-      source: serverChatSource || undefined,
-      external_ref: serverChatExternalRef || undefined
+      state: shouldResetServerChat
+        ? "in-progress"
+        : serverChatState || "in-progress",
+      topic_label: shouldResetServerChat
+        ? undefined
+        : serverChatTopic || undefined,
+      cluster_id: shouldResetServerChat
+        ? undefined
+        : serverChatClusterId || undefined,
+      source: shouldResetServerChat ? undefined : serverChatSource || undefined,
+      external_ref: shouldResetServerChat
+        ? undefined
+        : serverChatExternalRef || undefined
     }, scope ? { scope } : undefined)
 
     let rawId: string | number | undefined
