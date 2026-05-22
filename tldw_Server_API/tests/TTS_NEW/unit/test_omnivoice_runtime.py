@@ -202,6 +202,23 @@ async def test_runtime_empty_audio_output_raises(tmp_path, fake_omnivoice):
 
 
 @pytest.mark.asyncio
+async def test_runtime_invalid_audio_output_raises_structured_encoding_error(
+    tmp_path,
+    fake_omnivoice,
+):
+    fake_omnivoice.reset(generated_audio=np.array(["not-a-number"], dtype=object))
+    runtime = OmniVoiceRuntime(_runtime_config(tmp_path))
+    request = OmniVoiceSynthesizeRequest(text="hello", mode="auto")
+
+    with pytest.raises(OmniVoiceRuntimeError) as exc:
+        await runtime.synthesize(request)
+
+    assert exc.value.code == "AUDIO_ENCODING_FAILED"
+    assert runtime.status == "error"
+    assert runtime.last_error_code == "AUDIO_ENCODING_FAILED"
+
+
+@pytest.mark.asyncio
 async def test_runtime_success_after_failure_restores_ready_status(tmp_path, fake_omnivoice):
     fake_omnivoice.reset(generated_audio=np.array([], dtype=np.float32))
     runtime = OmniVoiceRuntime(_runtime_config(tmp_path))
