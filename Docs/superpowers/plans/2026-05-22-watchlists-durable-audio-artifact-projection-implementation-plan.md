@@ -566,7 +566,7 @@ git commit -m "feat: add watchlists audio projection helper"
 - Modify: `tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py`
 
-- [ ] **Step 1: Write failing endpoint tests**
+- [x] **Step 1: Write failing endpoint tests**
 
 Add tests for:
 
@@ -577,7 +577,7 @@ Add tests for:
 - admin target links are target-aware or Watchlists-scoped
 - projection write failure still returns canonical response
 
-- [ ] **Step 2: Run failing endpoint tests**
+- [x] **Step 2: Run failing endpoint tests**
 
 Run:
 
@@ -589,7 +589,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: new tests fail because endpoint does not use projection helper.
 
-- [ ] **Step 3: Add `collections_db` dependency to `get_run_audio`**
+- [x] **Step 3: Add `collections_db` dependency to `get_run_audio`**
 
 Update signature:
 
@@ -620,7 +620,7 @@ workflow_db = create_workflows_database(backend=get_content_backend_instance())
 
 Do not manually construct `DatabasePaths.get_user_base_directory(resolved_user_id) / "workflows" / "workflows.db"` inside the endpoint. That path can diverge from where the Scheduler writes Workflow runs, especially outside single-user SQLite mode.
 
-- [ ] **Step 4: Replace inline artifact classification with projection helper**
+- [x] **Step 4: Replace inline artifact classification with projection helper**
 
 Keep endpoint behavior, but delegate:
 
@@ -633,7 +633,7 @@ Do this incrementally. Preserve existing status fallback tests while moving logi
 
 Call blocking projection lookups and mirror writes through `run_in_threadpool(...)` from this async endpoint.
 
-- [ ] **Step 5: Extend response schema**
+- [x] **Step 5: Extend response schema**
 
 In `WatchlistRunAudioResponse`, add optional:
 
@@ -643,11 +643,11 @@ In `WatchlistRunAudioResponse`, add optional:
 - `synced_at`
 - `stale`
 
-- [ ] **Step 6: Ensure raw URI mirror boundary**
+- [x] **Step 6: Ensure raw URI mirror boundary**
 
 Endpoint may continue returning `audio_uri` for compatibility, but mirrored `metadata.audio` must use `download_url` and no raw file path display fields.
 
-- [ ] **Step 7: Run endpoint tests**
+- [x] **Step 7: Run endpoint tests**
 
 Run:
 
@@ -659,7 +659,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/watchlists.py \

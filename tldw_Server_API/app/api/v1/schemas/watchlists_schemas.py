@@ -992,6 +992,11 @@ class WatchlistRunAudioResponse(BaseModel):
     speaker_artifacts: list[WatchlistAudioArtifactSummary] = Field(default_factory=list)
     final_artifact: WatchlistAudioArtifactSummary | None = None
     fallback_reason: str | None = None
+    audio_request_id: str | None = None
+    workflow_run_id: str | int | None = None
+    schema_version: int | None = None
+    synced_at: str | None = None
+    stale: bool | None = None
     error: str | None = None
 
 

@@ -2,14 +2,18 @@
 id: TASK-483
 title: Implement Watchlists durable audio artifact projection
 status: In Progress
+assignee: []
+created_date: ''
+updated_date: 2026-05-22 21:00
 labels:
 - watchlists
 - audio
 - implementation
-priority: high
+dependencies: []
 documentation:
 - Docs/superpowers/specs/2026-05-22-watchlists-durable-audio-artifact-projection-design.md
 - Docs/superpowers/plans/2026-05-22-watchlists-durable-audio-artifact-projection-implementation-plan.md
+priority: high
 modified_files:
 - tldw_Server_API/app/core/DB_Management/Workflows_DB.py
 - tldw_Server_API/app/core/Scheduler/handlers/workflows.py
@@ -21,12 +25,14 @@ modified_files:
 - tldw_Server_API/app/core/Workflows/adapters/audio/tts.py
 - tldw_Server_API/app/core/Workflows/adapters/content/audio_briefing.py
 - tldw_Server_API/app/api/v1/endpoints/watchlists.py
+- tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py
 - tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
 - tldw_Server_API/tests/Workflows/test_adapter_path_security.py
 - tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py
 - tldw_Server_API/tests/Workflows/adapters/test_content_adapters.py
 - tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py
 - tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py
+- tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py
 - tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
 - Docs/superpowers/plans/2026-05-22-watchlists-durable-audio-artifact-projection-implementation-plan.md
 - backlog/tasks/task-483 - Implement-Watchlists-durable-audio-artifact-projection.md
@@ -40,14 +46,14 @@ Implement the approved Watchlists durable audio artifact projection plan. Work i
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] Workflows runs persist audio correlation metadata and expose it through `get_run`, `list_runs`, and idempotency lookup paths.
-- [ ] Scheduler `workflow_run` propagates payload metadata into both run metadata and workflow definition metadata without mutating caller payloads.
-- [ ] Watchlists audio triggers generate retry-safe `audio_request_id` values and persist them in run/output metadata.
-- [ ] Workflow audio/script artifacts carry enough correlation and role metadata for projection.
-- [ ] `/watchlists` run audio endpoint can repair and return durable script/speaker/final audio projections from canonical Workflows artifacts.
-- [ ] Retry paths do not present stale audio artifacts as the active request.
-- [ ] Frontend renders durable mirrored audio graph, stale state, and live overrides without raw file paths.
-- [ ] Focused backend/frontend tests and Bandit/diff hygiene are recorded.
+- [ ] #1 Workflows runs persist audio correlation metadata and expose it through `get_run`, `list_runs`, and idempotency lookup paths.
+- [ ] #2 Scheduler `workflow_run` propagates payload metadata into both run metadata and workflow definition metadata without mutating caller payloads.
+- [ ] #3 Watchlists audio triggers generate retry-safe `audio_request_id` values and persist them in run/output metadata.
+- [ ] #4 Workflow audio/script artifacts carry enough correlation and role metadata for projection.
+- [ ] #5 `/watchlists` run audio endpoint can repair and return durable script/speaker/final audio projections from canonical Workflows artifacts.
+- [ ] #6 Retry paths do not present stale audio artifacts as the active request.
+- [ ] #7 Frontend renders durable mirrored audio graph, stale state, and live overrides without raw file paths.
+- [ ] #8 Focused backend/frontend tests and Bandit/diff hygiene are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -116,12 +122,29 @@ Task 4 verification:
 - Green run: same command passed, `8 passed`.
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py -f json -o /tmp/bandit_watchlists_audio_projection_task4.json` passed with `results 0`.
 - `git diff --check` passed.
+
+Task 5 completed:
+- Replaced `/runs/{run_id}/audio` inline Workflow artifact scanning/classification with the Watchlists audio projection helper.
+- Resolved Workflows DB through `create_workflows_database(get_content_backend_instance())` instead of manually constructing a user SQLite path.
+- Added `collections_db` dependency and lazy read-repair mirror writes into Watchlists run stats plus canonical output metadata.
+- Preserved live Scheduler fallback when canonical Workflow artifacts are not available.
+- Returned mirrored audio projection metadata when canonical lookup fails.
+- Extended `WatchlistRunAudioResponse` with durable projection fields: `audio_request_id`, `workflow_run_id`, `schema_version`, `synced_at`, and `stale`.
+- Ensured mirrored `metadata.audio` stores download URLs/artifact summaries without raw file URIs while preserving legacy `audio_uri` in endpoint responses.
+
+Task 5 verification:
+- Red run: focused Task 5 endpoint tests failed for missing `collections_db` support and mirrored fallback behavior.
+- Green run: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py::TestGetRunAudioEndpoint::test_canonical_workflow_audio_projection_is_mirrored tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py::TestGetRunAudioEndpoint::test_workflows_lookup_failure_returns_mirrored_audio_metadata -q` passed, `2 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py -q` passed, `23 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py -q` passed, `43 passed`.
+- `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `67 passed, 1 skipped`.
+- `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/api/v1/schemas/watchlists_schemas.py -f json -o /tmp/bandit_watchlists_audio_projection_task5.json` passed with `results 0`.
+- `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
