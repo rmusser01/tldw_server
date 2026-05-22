@@ -1397,7 +1397,7 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
   }),
   registryRoute({
     path: "/chat/agent",
-    canonicalPath: "/agent",
+    canonicalPath: "/agents",
     label: "Agent Chat",
     group: "chat",
     surface: "advanced_self_hosted",
@@ -1493,6 +1493,54 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
     rationale: "Source creation is a task route owned by the sources workflow."
   }),
   registryRoute({
+    path: "/sources/:sourceId",
+    canonicalPath: "/sources",
+    label: "Source Detail",
+    group: "knowledge",
+    surface: "default_self_hosted",
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Dynamic source detail route belongs to the canonical Sources workflow."
+  }),
+  registryRoute({
+    path: "/share/:token",
+    canonicalPath: "/shared",
+    label: "Public Share",
+    group: "knowledge",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Tokenized public share route depends on share state and should not appear in navigation."
+  }),
+  registryRoute({
+    path: "/knowledge/thread/:threadId",
+    canonicalPath: "/knowledge",
+    label: "Knowledge Thread",
+    group: "knowledge",
+    surface: "default_self_hosted",
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Dynamic knowledge thread routes resolve inside the canonical Knowledge workspace."
+  }),
+  registryRoute({
+    path: "/knowledge/shared/:shareToken",
+    canonicalPath: "/knowledge",
+    label: "Shared Knowledge Thread",
+    group: "knowledge",
+    surface: "advanced_self_hosted",
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale: "Shared knowledge thread links are tokenized stateful routes under the Knowledge workspace."
+  }),
+  registryRoute({
     path: "/companion/conversation",
     label: "Companion Conversation",
     group: "chat",
@@ -1578,6 +1626,17 @@ const ROUTE_REGISTRY_METADATA: RouteMetadata[] = [
     rationale: "Presentation startup flow is a nested task route owned by Presentation Studio."
   }),
   registryRoute({
+    path: "/presentation-studio/:projectId",
+    canonicalPath: "/presentation-studio",
+    label: "Presentation Detail",
+    group: "workspace",
+    surface: "labs_beta",
+    smoke: "manual",
+    commandPalette: "hide",
+    nav: "hidden",
+    rationale: "Dynamic presentation project route belongs to the canonical Presentation Studio workflow."
+  }),
+  registryRoute({
     path: "/moderation",
     label: "Moderation Review",
     group: "safety",
@@ -1634,7 +1693,7 @@ export const ROUTE_METADATA: RouteMetadata[] = [
   ...ROUTE_REGISTRY_METADATA
 ]
 
-const normalizeRoutePath = (path: string): string => {
+export const normalizeRoutePath = (path: string): string => {
   const trimmed = path.trim()
   if (!trimmed) {
     return "/"
