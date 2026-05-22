@@ -468,6 +468,7 @@ export const Playground = () => {
     () => getCharacterChatRouteIntent(location.search),
     [location.search],
   );
+  const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
   const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const normalizedChatWorkflowMode =
@@ -572,7 +573,24 @@ export const Playground = () => {
   }, [routeRequestsCharacterMode, setChatWorkflowMode]);
 
   React.useEffect(() => {
+    if (!routeCharacterIntentChatId) return;
+    if (serverChatId === routeCharacterIntentChatId) return;
+    setServerChatId(routeCharacterIntentChatId);
+    routeCharacterIntentAppliedRef.current = null;
+    routeCharacterIntentInFlightRef.current = null;
+    setRouteCharacterRecovery(null);
+  }, [routeCharacterIntentChatId, serverChatId, setServerChatId]);
+
+  React.useEffect(() => {
     if (!routeCharacterIntentId) return;
+    if (routeCharacterIntentChatId) return;
+    const hasActiveConversation =
+      Boolean(serverChatId) ||
+      Boolean(stableHistoryId) ||
+      messages.length > 0 ||
+      history.length > 0 ||
+      composerHasDraft;
+    if (hasActiveConversation) return;
     if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
       return;
     }
@@ -627,7 +645,17 @@ export const Playground = () => {
         routeCharacterIntentRequestRef.current += 1;
       }
     };
-  }, [routeCharacterIntentId, routeCharacterRetryToken, setSelectedCharacter]);
+  }, [
+    composerHasDraft,
+    history.length,
+    messages.length,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
+    routeCharacterRetryToken,
+    serverChatId,
+    setSelectedCharacter,
+    stableHistoryId,
+  ]);
 
   React.useEffect(() => {
     if (!routeCharacterIntentId) {
@@ -1169,6 +1197,16 @@ export const Playground = () => {
   } = usePlaygroundSessionPersistence();
 
   const initializePlayground = React.useCallback(async () => {
+    if (routeCharacterIntentChatId) {
+      if (serverChatId !== routeCharacterIntentChatId) {
+        setServerChatId(routeCharacterIntentChatId);
+      }
+      return;
+    }
+    if (routeCharacterIntentId) {
+      return;
+    }
+
     // 1. Try session persistence first (restores exact state from nav-away)
     const shouldRestorePersistedSession =
       shouldRestorePersistedPlaygroundSession({
@@ -1222,10 +1260,13 @@ export const Playground = () => {
     persistedHistoryId,
     persistedServerChatId,
     restoreSession,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
     serverChatId,
     setHistory,
     setHistoryId,
     setMessages,
+    setServerChatId,
     setSelectedSystemPrompt,
     setSystemPrompt,
   ]);

@@ -193,7 +193,9 @@ describe("createCharacterChatMode contract", () => {
       expect.objectContaining({
         character_id: 42,
         state: "in-progress",
-        topic_label: "first-class-roleplay"
+        topic_label: "first-class-roleplay",
+        source: "webui-character-chat",
+        title: "Mira: Hello Mira"
       }),
       { scope }
     )
@@ -340,6 +342,7 @@ describe("createCharacterChatMode contract", () => {
       }
     )
     mocks.streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      yield* []
       throw providerSetupError
     })
     const saveMessageOnError = vi.fn(async () => "history-1")

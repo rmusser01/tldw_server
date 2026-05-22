@@ -156,11 +156,13 @@ class ChatSessionResponse(BaseModel):
         description="Workspace ID when scope_type='workspace'",
     )
     character_id: int | None = Field(None, description="ID of the associated character")
+    character_name: str | None = Field(None, description="Display name of the associated character")
     assistant_kind: Literal["character", "persona"] | None = Field(
         None,
         description="Normalized assistant identity kind for the chat",
     )
     assistant_id: str | None = Field(None, description="Normalized assistant identity ID for the chat")
+    assistant_name: str | None = Field(None, description="Display name for the chat assistant identity")
     persona_memory_mode: Literal["read_only", "read_write"] | None = Field(
         None,
         description="Persona durable memory behavior for this chat",

@@ -150,4 +150,37 @@ describe("usePlaygroundPersistence", () => {
       expect(notificationApi.error).toHaveBeenCalledTimes(1)
     })
   })
+
+  it("uses a WebUI character-aware fallback title for server persistence", async () => {
+    const notificationApi = {
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      success: vi.fn()
+    }
+
+    renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          notificationApi,
+          history: [{ role: "assistant", content: "Welcome to the archive." }],
+          selectedCharacter: {
+            id: "mira",
+            name: "Mira"
+          }
+        })
+      }
+    )
+
+    await waitFor(() => {
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          character_id: "mira",
+          title: "Mira role-play",
+          source: "webui-character-chat"
+        })
+      )
+    })
+  })
 })

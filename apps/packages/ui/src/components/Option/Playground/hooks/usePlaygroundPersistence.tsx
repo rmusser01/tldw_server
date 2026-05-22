@@ -3,6 +3,11 @@ import { Button, Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersistenceMode } from "@/hooks/playground"
 import type { Character } from "@/types/character"
+import {
+  WEBUI_CHARACTER_CHAT_SOURCE,
+  WEBUI_CHAT_SOURCE,
+  buildCharacterChatSessionTitle
+} from "@/utils/character-chat-session"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -214,20 +219,51 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       }
       await tldwClient.initialize()
       const firstUser = snapshot.find((m) => m.role === "user")
-      const fallbackTitle = t(
-        "playground:composer.persistence.serverDefaultTitle",
-        "Extension chat"
-      )
-      const titleSource =
-        typeof firstUser?.content === "string" &&
-        firstUser.content.trim().length > 0
-          ? firstUser.content.trim()
-          : fallbackTitle
-      const title =
-        titleSource.length > 80 ? `${titleSource.slice(0, 77)}…` : titleSource
-
       let characterId: string | number | null =
         (selectedCharacterRef.current as any)?.id ?? null
+      const selectedCharacterName =
+        typeof selectedCharacterRef.current?.name === "string"
+          ? selectedCharacterRef.current.name.trim()
+          : ""
+      const explicitSource =
+        serverChatSourceRef.current &&
+        serverChatSourceRef.current.trim().length > 0
+          ? serverChatSourceRef.current.trim()
+          : null
+      const isCharacterPersistence = Boolean(characterId)
+      const title =
+        isCharacterPersistence && selectedCharacterName
+          ? buildCharacterChatSessionTitle({
+              characterName: selectedCharacterName,
+              firstUserMessage: firstUser?.content,
+              fallbackTitle: String(
+                t(
+                  "playground:composer.persistence.characterFallbackTitle",
+                  "{{name}} role-play",
+                  { name: selectedCharacterName }
+                )
+              ).replace("{{name}}", selectedCharacterName)
+            })
+          : (() => {
+              const fallbackTitle =
+                explicitSource === "extension"
+                  ? t(
+                      "playground:composer.persistence.serverDefaultTitle",
+                      "Extension chat"
+                    )
+                  : t(
+                      "playground:composer.persistence.serverWebUiDefaultTitle",
+                      "WebUI chat"
+                    )
+              const titleSource =
+                typeof firstUser?.content === "string" &&
+                firstUser.content.trim().length > 0
+                  ? firstUser.content.trim()
+                  : fallbackTitle
+              return titleSource.length > 80
+                ? `${titleSource.slice(0, 77)}…`
+                : titleSource
+            })()
 
       if (!characterId) {
         const DEFAULT_NAME = "Helpful AI Assistant"
@@ -309,10 +345,10 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         character_id: characterId,
         state: serverChatStateRef.current || "in-progress",
         source:
-          serverChatSourceRef.current &&
-          serverChatSourceRef.current.trim().length > 0
-            ? serverChatSourceRef.current.trim()
-            : undefined
+          explicitSource ||
+          (isCharacterPersistence
+            ? WEBUI_CHARACTER_CHAT_SOURCE
+            : WEBUI_CHAT_SOURCE)
       })
       const rawId = (created as any)?.id ?? (created as any)?.chat_id ?? created
       const cid = rawId != null ? String(rawId) : ""

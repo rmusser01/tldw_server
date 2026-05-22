@@ -67,6 +67,35 @@ const getSessionCharacterIdentity = (
   return normalizeId(session.assistant_id);
 };
 
+const getSessionCharacterLabel = (
+  session: ServerChatHistoryItem,
+  activeCharacterId: string | number | null | undefined,
+  activeCharacterName: string | null | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null => {
+  const explicitName =
+    typeof session.character_name === "string" &&
+    session.character_name.trim().length > 0
+      ? session.character_name.trim()
+      : typeof session.assistant_name === "string" &&
+          session.assistant_name.trim().length > 0
+        ? session.assistant_name.trim()
+        : null;
+  if (explicitName) return explicitName;
+
+  const sessionCharacterId = getSessionCharacterIdentity(session);
+  if (!sessionCharacterId) return null;
+  if (
+    activeCharacterName &&
+    normalizeId(activeCharacterId) === sessionCharacterId
+  ) {
+    return activeCharacterName;
+  }
+  return t("characterChatSessions.characterFallback", "Character {{id}}", {
+    id: sessionCharacterId,
+  });
+};
+
 const partitionCharacterSessions = (
   sessions: ServerChatHistoryItem[],
   activeCharacterId: string | number | null | undefined,
@@ -103,6 +132,8 @@ const partitionCharacterSessions = (
 type SessionListProps = {
   label: string;
   sessions: ServerChatHistoryItem[];
+  activeCharacterId?: string | number | null;
+  activeCharacterName?: string | null;
   activeServerChatId?: string | null;
   onSelectSession: (chat: ServerChatHistoryItem) => void;
 };
@@ -110,6 +141,8 @@ type SessionListProps = {
 const CharacterSessionList = ({
   label,
   sessions,
+  activeCharacterId,
+  activeCharacterName,
   activeServerChatId,
   onSelectSession,
 }: SessionListProps) => {
@@ -139,6 +172,13 @@ const CharacterSessionList = ({
           Number.isFinite(session.message_count)
             ? Math.max(0, Math.trunc(session.message_count))
             : null;
+        const characterLabel = getSessionCharacterLabel(
+          session,
+          activeCharacterId,
+          activeCharacterName,
+          t,
+        );
+        const persistenceLabel = t("characterChatSessions.saved", "Saved");
 
         return (
           <li
@@ -160,6 +200,9 @@ const CharacterSessionList = ({
                   {title}
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
+                  {characterLabel ? (
+                    <span className="truncate">{characterLabel}</span>
+                  ) : null}
                   {updatedLabel ? (
                     <span className="inline-flex items-center gap-1">
                       <Clock className="h-3 w-3" aria-hidden="true" />
@@ -176,6 +219,7 @@ const CharacterSessionList = ({
                       )}
                     </span>
                   ) : null}
+                  <span>{persistenceLabel}</span>
                 </div>
               </div>
               <button
@@ -241,7 +285,10 @@ export const CharacterChatSessionsPanel = ({
     limit,
     filterMode: "character",
   });
-  const sessions = Array.isArray(data) ? data.slice(0, limit) : [];
+  const sessions = React.useMemo(
+    () => (Array.isArray(data) ? data.slice(0, limit) : []),
+    [data, limit],
+  );
   const { currentCharacterSessions, otherCharacterSessions } = React.useMemo(
     () => partitionCharacterSessions(sessions, activeCharacterId),
     [activeCharacterId, sessions],
@@ -257,6 +304,14 @@ export const CharacterChatSessionsPanel = ({
         "Recent character sessions",
       );
   const hasSessions = sessions.length > 0;
+  const lastSession = !activeServerChatId && hasSessions ? sessions[0] : null;
+  const lastSessionTitle =
+    typeof lastSession?.title === "string" &&
+    lastSession.title.trim().length > 0
+      ? lastSession.title.trim()
+      : lastSession
+        ? t("characterChatSessions.untitled", "Untitled character chat")
+        : null;
   const hardErrorWithoutData =
     sidebarRefreshState === "hard-error" && !hasUsableData;
   const sessionBadgeTone = hasSessions
@@ -302,6 +357,26 @@ export const CharacterChatSessionsPanel = ({
                 : t("characterChatSessions.emptyBadge", "None")}
           </span>
         </div>
+
+        {lastSession && lastSessionTitle ? (
+          <button
+            type="button"
+            onClick={() => {
+              selectServerChat(lastSession);
+            }}
+            aria-label={t(
+              "characterChatSessions.resumeLastAction",
+              "Resume last character chat: {{title}}",
+              { title: lastSessionTitle },
+            )}
+            className={cn(
+              cockpitRailStyles.action,
+              "mt-3 w-full justify-center border-primary/40 bg-primary/10 text-primary hover:bg-primary/15",
+            )}
+          >
+            {t("characterChatSessions.resumeLast", "Resume last character chat")}
+          </button>
+        ) : null}
 
         {isLoading && !hasUsableData ? (
           <div
@@ -352,6 +427,8 @@ export const CharacterChatSessionsPanel = ({
             <CharacterSessionList
               label={currentCharacterLabel}
               sessions={currentCharacterSessions}
+              activeCharacterId={activeCharacterId}
+              activeCharacterName={activeCharacterName}
               activeServerChatId={activeServerChatId}
               onSelectSession={selectServerChat}
             />
@@ -361,6 +438,8 @@ export const CharacterChatSessionsPanel = ({
                 "Other character sessions",
               )}
               sessions={otherCharacterSessions}
+              activeCharacterId={activeCharacterId}
+              activeCharacterName={activeCharacterName}
               activeServerChatId={activeServerChatId}
               onSelectSession={selectServerChat}
             />

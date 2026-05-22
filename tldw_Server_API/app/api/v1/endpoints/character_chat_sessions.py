@@ -991,8 +991,10 @@ def _convert_db_conversation_to_response(
         scope_type=conv_data.get("scope_type") or "global",
         workspace_id=conv_data.get("workspace_id"),
         character_id=character_id,
+        character_name=conv_data.get('character_name'),
         assistant_kind=assistant_kind,
         assistant_id=assistant_id,
+        assistant_name=conv_data.get('assistant_name'),
         persona_memory_mode=conv_data.get('persona_memory_mode'),
         title=conv_data.get('title'),
         rating=conv_data.get('rating'),
@@ -1010,6 +1012,67 @@ def _convert_db_conversation_to_response(
         forked_from_message_id=conv_data.get('forked_from_message_id'),
         settings=settings,
     )
+
+
+def _conversation_assistant_names(
+    db: CharactersRAGDB,
+    conv_data: Mapping[str, Any],
+    user_id: str,
+) -> tuple[str | None, str | None]:
+    """Resolve display names for a conversation's assistant identity."""
+    character_id = conv_data.get("character_id")
+    assistant_kind = conv_data.get("assistant_kind") or (
+        "character" if character_id is not None else None
+    )
+    assistant_id = conv_data.get("assistant_id")
+
+    if assistant_kind == "character" or character_id is not None:
+        raw_character_id = character_id if character_id is not None else assistant_id
+        try:
+            resolved_character_id = int(raw_character_id)
+        except (TypeError, ValueError):
+            return None, None
+
+        character = db.get_character_card_by_id(resolved_character_id)
+        if isinstance(character, dict):
+            name = character.get("name")
+            if isinstance(name, str) and name.strip():
+                display_name = name.strip()
+                return display_name, display_name
+        return None, None
+
+    if assistant_kind == "persona" and isinstance(assistant_id, str) and assistant_id.strip():
+        persona_profile = db.get_persona_profile(assistant_id.strip(), user_id=user_id)
+        if isinstance(persona_profile, dict):
+            name = persona_profile.get("name")
+            if isinstance(name, str) and name.strip():
+                return None, name.strip()
+
+    return None, None
+
+
+def _attach_conversation_assistant_names(
+    db: CharactersRAGDB,
+    conv_data: dict[str, Any],
+    user_id: str,
+) -> dict[str, Any]:
+    """Add best-effort assistant display names to a conversation response row."""
+    try:
+        character_name, assistant_name = _conversation_assistant_names(
+            db,
+            conv_data,
+            user_id,
+        )
+    except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Failed to resolve assistant display name for chat {}: {}", conv_data.get("id"), exc)
+        return conv_data
+
+    if character_name is not None:
+        conv_data["character_name"] = character_name
+    if assistant_name is not None:
+        conv_data["assistant_name"] = assistant_name
+    return conv_data
+
 
 def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse:
     """Convert database message to response model."""
@@ -3531,7 +3594,13 @@ async def create_chat_session(
             current_user.id,
         )
 
-        return _convert_db_conversation_to_response(created_conv)
+        return _convert_db_conversation_to_response(
+            _attach_conversation_assistant_names(
+                db,
+                created_conv,
+                str(current_user.id),
+            )
+        )
 
     except HTTPException:
         raise
@@ -3811,7 +3880,11 @@ async def get_chat_session(
             settings_payload = (settings_row or {}).get("settings") or {}
 
         return _convert_db_conversation_to_response(
-            conversation,
+            _attach_conversation_assistant_names(
+                db,
+                conversation,
+                str(current_user.id),
+            ),
             settings=settings_payload,
         )
 
@@ -5797,7 +5870,11 @@ async def list_chat_sessions(
                 settings_payload = (settings_row or {}).get("settings") or {}
             chats.append(
                 _convert_db_conversation_to_response(
-                    conv,
+                    _attach_conversation_assistant_names(
+                        db,
+                        conv,
+                        user_id_str,
+                    ),
                     settings=settings_payload,
                 )
             )
@@ -5882,7 +5959,13 @@ async def update_chat_session(
             messages = db.get_messages_for_conversation(chat_id, limit=1000)
             updated_conv['message_count'] = len(messages) if messages else 0
 
-        return _convert_db_conversation_to_response(updated_conv)
+        return _convert_db_conversation_to_response(
+            _attach_conversation_assistant_names(
+                db,
+                updated_conv,
+                str(current_user.id),
+            )
+        )
 
     except ConflictError as e:
         # Optimistic locking or state conflicts
@@ -6192,7 +6275,13 @@ async def restore_chat_session(
                 conversation['message_count'] = db.count_messages_for_conversation(chat_id)
             except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
                 conversation['message_count'] = 0
-            return _convert_db_conversation_to_response(conversation)
+            return _convert_db_conversation_to_response(
+                _attach_conversation_assistant_names(
+                    db,
+                    conversation,
+                    str(current_user.id),
+                )
+            )
 
         exp_ver = expected_version if expected_version is not None else conversation.get("version", 1)
         db.restore_conversation(chat_id, exp_ver)
@@ -6203,7 +6292,13 @@ async def restore_chat_session(
             restored['message_count'] = db.count_messages_for_conversation(chat_id)
         except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
             restored['message_count'] = 0
-        return _convert_db_conversation_to_response(restored)
+        return _convert_db_conversation_to_response(
+            _attach_conversation_assistant_names(
+                db,
+                restored,
+                str(current_user.id),
+            )
+        )
 
     except ConflictError as e:
         logger.warning(f"Conflict restoring chat session {chat_id}: {e}")

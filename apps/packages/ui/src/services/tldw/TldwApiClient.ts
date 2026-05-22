@@ -770,8 +770,10 @@ export interface ServerChatSummary {
   external_ref?: string | null
   bm25_norm?: number | null
   character_id?: string | number | null
+  character_name?: string | null
   assistant_kind?: "character" | "persona" | null
   assistant_id?: string | number | null
+  assistant_name?: string | null
   persona_memory_mode?: "read_only" | "read_write" | null
   parent_conversation_id?: string | null
   root_id?: string | null
@@ -4599,6 +4601,13 @@ export class TldwApiClientBase {
           ? Number.parseFloat(messageCountRaw)
           : null
     const character_id = input?.character_id ?? input?.characterId ?? null
+    const character_name =
+      typeof input?.character_name === "string" && input.character_name.trim().length > 0
+        ? input.character_name.trim()
+        : typeof input?.characterName === "string" &&
+            input.characterName.trim().length > 0
+          ? input.characterName.trim()
+          : null
     const assistant_kind =
       input?.assistant_kind ??
       input?.assistantKind ??
@@ -4609,6 +4618,13 @@ export class TldwApiClientBase {
       (assistant_kind === "character" && character_id != null
         ? String(character_id)
         : null)
+    const assistant_name =
+      typeof input?.assistant_name === "string" && input.assistant_name.trim().length > 0
+        ? input.assistant_name.trim()
+        : typeof input?.assistantName === "string" &&
+            input.assistantName.trim().length > 0
+          ? input.assistantName.trim()
+          : character_name
     const scope_type =
       input?.scope_type === "global" || input?.scopeType === "global"
         ? "global"
@@ -4643,6 +4659,7 @@ export class TldwApiClientBase {
             ? input?.relevance
             : null,
       character_id,
+      character_name,
       assistant_kind:
         assistant_kind === "character" || assistant_kind === "persona"
           ? assistant_kind
@@ -4651,6 +4668,7 @@ export class TldwApiClientBase {
         assistant_id == null || assistant_id === ""
           ? null
           : String(assistant_id),
+      assistant_name,
       persona_memory_mode:
         input?.persona_memory_mode === "read_only" ||
         input?.persona_memory_mode === "read_write"
@@ -7625,6 +7643,7 @@ import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class TldwApiClient extends TldwApiClientBase {}
 
 // Declaration merging: extend the class type with all domain methods
@@ -7635,6 +7654,7 @@ type TldwDomainMethodOverride =
   | "normalizeChatSummary"
 type TldwDomainMethods<T> = Omit<T, TldwDomainMethodOverride>
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, no-redeclare
 export interface TldwApiClient
   extends
     TldwDomainMethods<typeof adminMethods>,

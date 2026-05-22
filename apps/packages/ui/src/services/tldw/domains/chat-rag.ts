@@ -189,6 +189,13 @@ export const chatRagMethods = {
           ? Number.parseFloat(messageCountRaw)
           : null
     const character_id = input?.character_id ?? input?.characterId ?? null
+    const character_name =
+      typeof input?.character_name === "string" && input.character_name.trim().length > 0
+        ? input.character_name.trim()
+        : typeof input?.characterName === "string" &&
+            input.characterName.trim().length > 0
+          ? input.characterName.trim()
+          : null
     const assistant_kind =
       input?.assistant_kind ??
       input?.assistantKind ??
@@ -199,6 +206,13 @@ export const chatRagMethods = {
       (assistant_kind === "character" && character_id != null
         ? String(character_id)
         : null)
+    const assistant_name =
+      typeof input?.assistant_name === "string" && input.assistant_name.trim().length > 0
+        ? input.assistant_name.trim()
+        : typeof input?.assistantName === "string" &&
+            input.assistantName.trim().length > 0
+          ? input.assistantName.trim()
+          : character_name
     const scope_type =
       input?.scope_type === "global" || input?.scopeType === "global"
         ? "global"
@@ -233,6 +247,7 @@ export const chatRagMethods = {
             ? input?.relevance
             : null,
       character_id,
+      character_name,
       assistant_kind:
         assistant_kind === "character" || assistant_kind === "persona"
           ? assistant_kind
@@ -241,6 +256,7 @@ export const chatRagMethods = {
         assistant_id == null || assistant_id === ""
           ? null
           : String(assistant_id),
+      assistant_name,
       persona_memory_mode:
         input?.persona_memory_mode === "read_only" ||
         input?.persona_memory_mode === "read_write"

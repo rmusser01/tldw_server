@@ -34,6 +34,7 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             chars = r.json()
             assert isinstance(chars, list) and len(chars) >= 1
             character_id = chars[0]["id"]
+            character_name = chars[0]["name"]
 
             # 2) Create chat session
             create_payload = {"character_id": character_id, "title": "Test Chat"}
@@ -45,6 +46,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             assert chat["assistant_kind"] == "character"
             assert chat["assistant_id"] == str(character_id)
             assert chat["character_id"] == character_id
+            assert chat["character_name"] == character_name
+            assert chat["assistant_name"] == character_name
             assert chat["persona_memory_mode"] is None
 
             # 3) Update chat session title (optimistic lock)
@@ -58,6 +61,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             updated_chat = r.json()
             assert updated_chat["title"] == "Updated Test Chat"
             assert updated_chat["version"] == chat_version + 1
+            assert updated_chat["character_name"] == character_name
+            assert updated_chat["assistant_name"] == character_name
             chat_version = updated_chat["version"]
 
             # 3b) Chat settings read/write
@@ -94,6 +99,13 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             message_id = msg["id"]
             message_version = msg["version"]
 
+            r = await client.get("/api/v1/chats/", headers=headers)
+            assert r.status_code == 200
+            listed_chats = r.json()["chats"]
+            listed_chat = next(item for item in listed_chats if item["id"] == chat_id)
+            assert listed_chat["character_name"] == character_name
+            assert listed_chat["assistant_name"] == character_name
+
             # 5) Get messages and verify
             r = await client.get(f"/api/v1/chats/{chat_id}/messages", headers=headers)
             assert r.status_code == 200
@@ -125,6 +137,8 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             r = await client.get(f"/api/v1/chats/{chat_id}", headers=headers)
             assert r.status_code == 200
             current_chat = r.json()
+            assert current_chat["character_name"] == character_name
+            assert current_chat["assistant_name"] == character_name
             r = await client.delete(
                 f"/api/v1/chats/{chat_id}",
                 headers=headers,
