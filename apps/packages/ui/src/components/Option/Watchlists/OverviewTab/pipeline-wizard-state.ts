@@ -359,6 +359,7 @@ export const toBriefingPipelineDraft = (
     schedulePreset: schedule.schedule_expr ? "daily" : "none",
     scheduleExpr: schedule.schedule_expr,
     timezone: schedule.timezone,
+    createScheduledOutput: Boolean(schedule.schedule_expr),
     templateName: trim(draft.templateName),
     ...(draft.templateFormat ? { templateFormat: draft.templateFormat } : {}),
     includeAudio: Boolean(draft.audioEnabled),

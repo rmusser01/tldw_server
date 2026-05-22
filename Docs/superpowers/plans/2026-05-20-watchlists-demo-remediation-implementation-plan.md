@@ -1172,7 +1172,9 @@ Committed in PR #1921.
 - Test: `tldw_Server_API/tests/Watchlists/test_job_output_prefs_roundtrip.py`
 - Test: `tldw_Server_API/tests/Watchlists/test_newsletter_briefing_gaps.py`
 
-- [ ] **Step 1: Write scheduled output contract tests**
+Implementation note: completed in TASK-472. `OutputsTab.tsx` was already metadata-driven, so the implementation added/kept regression coverage there without changing the component source.
+
+- [x] **Step 1: Write scheduled output contract tests**
 
 In `pipeline-contract.test.ts`, add two cases:
 
@@ -1198,7 +1200,7 @@ expect(toPipelineJobCreatePayload({
 
 If the draft model does not yet have `createScheduledOutput`, add it in the same test as the explicit user choice.
 
-- [ ] **Step 2: Write job form summary tests**
+- [x] **Step 2: Write job form summary tests**
 
 In `JobFormModal.live-summary.test.tsx`, assert the save review distinguishes:
 
@@ -1207,7 +1209,7 @@ In `JobFormModal.live-summary.test.tsx`, assert the save review distinguishes:
 - delivery enabled versus in-app Reports only
 - audio enabled versus text digest only
 
-- [ ] **Step 3: Write Reports discoverability test**
+- [x] **Step 3: Write Reports discoverability test**
 
 In `OutputsTab.regenerate-modal.test.tsx`, assert regenerated digest/newsletter output shows:
 
@@ -1217,7 +1219,7 @@ In `OutputsTab.regenerate-modal.test.tsx`, assert regenerated digest/newsletter 
 - delivery status
 - audio status if audio requested
 
-- [ ] **Step 4: Run frontend tests and confirm failure**
+- [x] **Step 4: Run frontend tests and confirm failure**
 
 Run:
 
@@ -1233,7 +1235,7 @@ bunx vitest run \
 
 Expected: FAIL where scheduled output intent and report state are implicit or mislabeled.
 
-- [ ] **Step 5: Implement explicit scheduled output preference**
+- [x] **Step 5: Implement explicit scheduled output preference**
 
 In `pipeline-contract.ts`, set scheduled output only when requested:
 
@@ -1249,7 +1251,7 @@ if (draft.createScheduledOutput) {
 
 Keep one-off test output creation in `toPipelineOutputCreatePayload`; do not conflate it with scheduled `auto_output`.
 
-- [ ] **Step 6: Update job form copy and summaries**
+- [x] **Step 6: Update job form copy and summaries**
 
 In `JobFormModal.tsx` and `job-summaries.ts`, render explicit phrases:
 
@@ -1262,11 +1264,11 @@ In `JobFormModal.tsx` and `job-summaries.ts`, render explicit phrases:
 
 Keep raw cron, template selector, and existing advanced controls reachable.
 
-- [ ] **Step 7: Keep Reports state grounded in backend artifacts**
+- [x] **Step 7: Keep Reports state grounded in backend artifacts**
 
 In `OutputsTab.tsx`, show output state from actual output records and metadata. Do not show "newsletter sent" or "audio ready" unless the output metadata says delivery/audio succeeded.
 
-- [ ] **Step 8: Run backend output contract tests**
+- [x] **Step 8: Run backend output contract tests**
 
 Run:
 
@@ -1280,7 +1282,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 9: Run frontend output contract tests**
+- [x] **Step 9: Run frontend output contract tests**
 
 Run:
 
@@ -1296,7 +1298,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 Run:
 

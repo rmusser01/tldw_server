@@ -23,6 +23,7 @@ export interface BriefingPipelineDraft {
   scheduleCadence?: WatchlistCadenceDraft
   scheduleExpr?: string | null
   timezone?: string
+  createScheduledOutput?: boolean
   templateName: string
   templateFormat?: "md" | "html"
   templateVersion?: number
@@ -191,7 +192,7 @@ export const toPipelineJobCreatePayload = (
     draft.templateFormat === "html" || draft.templateFormat === "md"
       ? draft.templateFormat
       : undefined
-  const shouldAutoOutput = Boolean(schedule.schedule_expr)
+  const shouldAutoOutput = Boolean(draft.createScheduledOutput && schedule.schedule_expr)
   const normalizedAudioVoice = String(draft.audioVoice || "").trim() || undefined
   const templateName = normalizeWatchlistTemplateName(draft.templateName)
 

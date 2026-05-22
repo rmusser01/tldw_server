@@ -404,7 +404,7 @@ describe("JobFormModal live summary", () => {
     )
   }, 15_000)
 
-  it("enables scheduled auto-output when recurring delivery or audio is configured", async () => {
+  it("keeps recurring reports opt-in separately from delivery and audio settings", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
 
     await waitFor(() => {
@@ -422,6 +422,56 @@ describe("JobFormModal live summary", () => {
     fireEvent.click(screen.getByTestId("schedule-setter"))
     fireEvent.click(screen.getByText("Output & Delivery"))
     fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+
+    expect(screen.getByTestId("job-form-summary-output")).toHaveTextContent(
+      "Manual/test reports only"
+    )
+    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent(
+      "Reports tab only"
+    )
+    expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent(
+      "Audio briefing requested"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => {
+      expect(servicesMock.createWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const payload = servicesMock.createWatchlistJob.mock.calls[0][0]
+    expect(payload.output_prefs).toEqual(
+      expect.objectContaining({
+        generate_audio: true
+      })
+    )
+    expect(payload.output_prefs).not.toHaveProperty("auto_output")
+  }, 15_000)
+
+  it("enables scheduled report generation only when the recurring report switch is on", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText("e.g., Daily Tech News"), {
+      target: { value: "Scheduled Audio Brief" }
+    })
+    fireEvent.click(screen.getByTestId("scope-setter"))
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    const collapseHeaders = Array.from(document.querySelectorAll(".ant-collapse-header"))
+    fireEvent.click(collapseHeaders[1] as Element)
+    fireEvent.click(screen.getByTestId("schedule-setter"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.click(screen.getByTestId("job-form-create-scheduled-output-switch"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+
+    expect(screen.getByTestId("job-form-summary-output")).toHaveTextContent(
+      "Create a report after each scheduled run"
+    )
+
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
     await waitFor(() => {
@@ -992,8 +1042,8 @@ describe("JobFormModal live summary", () => {
       expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
     })
 
-    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent("No automatic delivery")
-    expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent("Disabled")
+    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent("Reports tab only")
+    expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent("Text report only")
 
     fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
     fireEvent.click(screen.getByText("Output & Delivery"))
@@ -1003,7 +1053,7 @@ describe("JobFormModal live summary", () => {
     })
 
     expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent(
-      "Enabled (alloy, 8 min target)"
+      "Audio briefing requested (alloy, 8 min target)"
     )
     fireEvent.click(screen.getByTestId("job-form-mode-basic"))
 

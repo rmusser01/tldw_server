@@ -171,8 +171,13 @@ describe("JobsTab scope/filter summaries", () => {
       schedule_expr: "0 9 * * *",
       timezone: "UTC",
       output_prefs: {
+        auto_output: { enabled: true, type: "briefing_markdown" },
         template: { default_name: "briefing_markdown" },
-        generate_audio: true
+        generate_audio: true,
+        deliveries: {
+          email: { enabled: true, recipients: ["digest@example.com"] },
+          chatbook: { enabled: true, title: "Daily Digest" }
+        }
       },
       created_at: "2026-02-18T00:00:00Z",
       updated_at: "2026-02-18T00:00:00Z",
@@ -229,7 +234,7 @@ describe("JobsTab scope/filter summaries", () => {
       expect(screen.getByText("Tags: tech")).toBeInTheDocument()
       expect(screen.getByText("Exclude author: spam-bot")).toBeInTheDocument()
       expect(screen.getByTestId("job-output-linkage-77")).toHaveTextContent(
-        "Output linkage: Template: briefing_markdown • Audio: enabled"
+        "Output linkage: Create a report after each scheduled run • Template: briefing_markdown • Deliver by email • Save to Chatbook • Audio briefing requested"
       )
     })
   })

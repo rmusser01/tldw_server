@@ -130,6 +130,7 @@ describe("watchlists pipeline wizard state", () => {
         scheduleExpr: "15 */5 * * *",
         timezone: "UTC",
         templateName: "newsletter_markdown",
+        createScheduledOutput: true,
         includeAudio: true,
         audioCast: {
           speaker_count: 2,
@@ -340,6 +341,23 @@ describe("watchlists pipeline wizard state", () => {
         sources: "AI Feed",
         cadence: "Manual only",
         audio: "Audio disabled"
+      })
+    )
+
+    expect(
+      toBriefingPipelineDraft({
+        ...createDefaultPipelineWizardDraft(),
+        sourceMode: "existing",
+        sourceIds: [7],
+        monitorName: "Manual Brief",
+        scheduleMode: "manual",
+        templateName: "briefing_md",
+        audioEnabled: false,
+        audioSpeakers: []
+      })
+    ).toEqual(
+      expect.objectContaining({
+        createScheduledOutput: false
       })
     )
   })
