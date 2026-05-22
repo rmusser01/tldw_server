@@ -440,8 +440,28 @@ describe("RunDetailDrawer stream lifecycle", () => {
       task_id: "audio-task-10",
       status: "completed",
       download_url: "/api/v1/watchlists/runs/10/audio/download",
+      script_artifact: {
+        title: "Briefing script",
+        uri: "file:///srv/tldw/watchlists/runs/10/script.md",
+        download_url: "/api/v1/watchlists/runs/10/audio/script/download"
+      },
+      speaker_artifacts: [
+        {
+          speaker_id: "host",
+          label: "Host",
+          uri: "file:///srv/tldw/watchlists/runs/10/host.mp3"
+        },
+        {
+          speaker_id: "analyst",
+          label: "Analyst",
+          uri: "file:///srv/tldw/watchlists/runs/10/analyst.mp3",
+          download_url: "/api/v1/watchlists/runs/10/audio/speakers/analyst/download"
+        }
+      ],
       final_artifact: {
         title: "Final mix",
+        uri: "file:///srv/tldw/watchlists/runs/10/final.mp3",
+        download_url: "/api/v1/watchlists/runs/10/audio/final/download",
         mime_type: "audio/mpeg"
       }
     })
@@ -453,6 +473,27 @@ describe("RunDetailDrawer stream lifecycle", () => {
     })
     const link = screen.getByRole("link", { name: "Download final audio" })
     expect(link).toHaveAttribute("href", "/api/v1/watchlists/runs/10/audio/download")
+    expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
+    expect(screen.getByText("Briefing script")).toBeInTheDocument()
+    expect(screen.getByText("Host")).toBeInTheDocument()
+    expect(screen.getByText("Analyst")).toBeInTheDocument()
+    expect(screen.getByText("Final mix")).toBeInTheDocument()
+    expect(screen.getByText("script.md")).toBeInTheDocument()
+    expect(screen.getByText("host.mp3")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Briefing script" })).toHaveAttribute(
+      "href",
+      "/api/v1/watchlists/runs/10/audio/script/download"
+    )
+    expect(screen.getByRole("link", { name: "Open Analyst" })).toHaveAttribute(
+      "href",
+      "/api/v1/watchlists/runs/10/audio/speakers/analyst/download"
+    )
+    expect(screen.getByRole("link", { name: "Open Final mix" })).toHaveAttribute(
+      "href",
+      "/api/v1/watchlists/runs/10/audio/final/download"
+    )
+    expect(screen.queryByText(/file:\/\//)).not.toBeInTheDocument()
+    expect(screen.queryByText(/srv\/tldw/)).not.toBeInTheDocument()
   })
 
   it("offers stage-specific retry and diagnostics controls without triggering a full rerun", async () => {

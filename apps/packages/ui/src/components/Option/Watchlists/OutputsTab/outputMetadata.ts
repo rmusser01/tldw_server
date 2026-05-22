@@ -69,6 +69,12 @@ export interface AudioStatusSummary {
   scriptArtifact?: AudioArtifactSummary
   speakerArtifacts: AudioArtifactSummary[]
   finalArtifact?: AudioArtifactSummary
+  audioRequestId?: string
+  workflowRunId?: string
+  schemaVersion?: number
+  syncedAt?: string
+  stale?: boolean
+  supersededBy?: string
 }
 
 export interface OutputMetadataLabels {
@@ -190,6 +196,13 @@ const asNonEmptyString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const asIdentifierString = (value: unknown): string | undefined => {
+  const fromString = asNonEmptyString(value)
+  if (fromString) return fromString
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  return undefined
 }
 
 const asKnownAudioStatus = (value: unknown): string | undefined => {
@@ -614,13 +627,22 @@ const getAudioMetadataRecord = (metadata: unknown): Record<string, unknown> | nu
   const flatTaskId = asNonEmptyString(record.audio_briefing_task_id)
   const flatError = asNonEmptyString(record.audio_briefing_error)
   const flatReason = asNonEmptyString(record.audio_briefing_reason)
-  if (record.audio_briefing_requested === true || flatStatus || flatTaskId || flatError || flatReason) {
+  const flatRequestId = asIdentifierString(record.audio_request_id)
+  if (
+    record.audio_briefing_requested === true ||
+    flatStatus ||
+    flatTaskId ||
+    flatError ||
+    flatReason ||
+    flatRequestId
+  ) {
     return {
       status: flatStatus,
       requested: record.audio_briefing_requested === true,
       task_id: flatTaskId,
       error: flatError,
-      fallback_reason: flatReason
+      fallback_reason: flatReason,
+      audio_request_id: flatRequestId
     }
   }
   return record
@@ -667,6 +689,22 @@ export const getAudioStatusSummary = (
   const queueName =
     asNonEmptyString(record?.queue_name) ||
     asNonEmptyString(record?.queueName)
+  const audioRequestId =
+    asIdentifierString(record?.audio_request_id) ||
+    asIdentifierString(record?.audioRequestId)
+  const workflowRunId =
+    asIdentifierString(record?.workflow_run_id) ||
+    asIdentifierString(record?.workflowRunId)
+  const schemaVersion =
+    asPositiveInteger(record?.schema_version) ||
+    asPositiveInteger(record?.schemaVersion)
+  const syncedAt =
+    asNonEmptyString(record?.synced_at) ||
+    asNonEmptyString(record?.syncedAt)
+  const stale = record?.stale === true
+  const supersededBy =
+    asIdentifierString(record?.superseded_by) ||
+    asIdentifierString(record?.supersededBy)
   const explicitlyRequested = record?.requested === true || record?.audio_briefing_requested === true
   const requested =
     record !== null &&
@@ -679,7 +717,9 @@ export const getAudioStatusSummary = (
       Boolean(finalArtifact) ||
       speakerArtifacts.length > 0 ||
       Boolean(fallbackReason) ||
-      Boolean(error)
+      Boolean(error) ||
+      Boolean(audioRequestId) ||
+      stale
     )
 
   return {
@@ -694,7 +734,13 @@ export const getAudioStatusSummary = (
     downloadUrl,
     scriptArtifact,
     speakerArtifacts,
-    finalArtifact
+    finalArtifact,
+    audioRequestId,
+    workflowRunId,
+    schemaVersion,
+    syncedAt,
+    stale,
+    supersededBy
   }
 }
 
@@ -715,6 +761,18 @@ export const getMergedOutputAudioStatusSummary = (
   if (!liveSummary?.requested) return metadataSummary
 
   const status = liveSummary.status !== "unknown" ? liveSummary.status : metadataSummary.status
+  const requestDiffers = Boolean(
+    liveSummary.audioRequestId &&
+      metadataSummary.audioRequestId &&
+      liveSummary.audioRequestId !== metadataSummary.audioRequestId
+  )
+  const liveHasArtifacts = Boolean(
+    liveSummary.downloadUrl ||
+      liveSummary.scriptArtifact ||
+      liveSummary.finalArtifact ||
+      liveSummary.speakerArtifacts.length > 0
+  )
+  const preferLiveArtifactState = requestDiffers || liveHasArtifacts
   return {
     requested: true,
     status,
@@ -724,13 +782,27 @@ export const getMergedOutputAudioStatusSummary = (
     error: liveSummary.error ?? metadataSummary.error,
     taskId: liveSummary.taskId ?? metadataSummary.taskId,
     queueName: liveSummary.queueName ?? metadataSummary.queueName,
-    downloadUrl: liveSummary.downloadUrl ?? metadataSummary.downloadUrl,
-    scriptArtifact: liveSummary.scriptArtifact ?? metadataSummary.scriptArtifact,
+    downloadUrl: preferLiveArtifactState
+      ? liveSummary.downloadUrl
+      : liveSummary.downloadUrl ?? metadataSummary.downloadUrl,
+    scriptArtifact: preferLiveArtifactState
+      ? liveSummary.scriptArtifact
+      : liveSummary.scriptArtifact ?? metadataSummary.scriptArtifact,
     speakerArtifacts:
-      liveSummary.speakerArtifacts.length > 0
+      preferLiveArtifactState || liveSummary.speakerArtifacts.length > 0
         ? liveSummary.speakerArtifacts
         : metadataSummary.speakerArtifacts,
-    finalArtifact: liveSummary.finalArtifact ?? metadataSummary.finalArtifact
+    finalArtifact: preferLiveArtifactState
+      ? liveSummary.finalArtifact
+      : liveSummary.finalArtifact ?? metadataSummary.finalArtifact,
+    audioRequestId: liveSummary.audioRequestId ?? metadataSummary.audioRequestId,
+    workflowRunId: liveSummary.workflowRunId ?? metadataSummary.workflowRunId,
+    schemaVersion: liveSummary.schemaVersion ?? metadataSummary.schemaVersion,
+    syncedAt: liveSummary.syncedAt ?? metadataSummary.syncedAt,
+    stale: requestDiffers ? liveSummary.stale ?? false : liveSummary.stale ?? metadataSummary.stale,
+    supersededBy: requestDiffers
+      ? liveSummary.supersededBy
+      : liveSummary.supersededBy ?? metadataSummary.supersededBy
   }
 }
 

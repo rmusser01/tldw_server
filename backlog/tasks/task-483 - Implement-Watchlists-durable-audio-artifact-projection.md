@@ -34,6 +34,15 @@ modified_files:
 - tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py
 - tldw_Server_API/tests/Watchlists/test_audio_output_delivery.py
 - tldw_Server_API/tests/Watchlists/test_watchlists_operator_recovery.py
+- apps/packages/ui/src/types/watchlists.ts
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/outputMetadata.ts
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx
+- apps/packages/ui/src/components/Option/Watchlists/RunsTab/RunDetailDrawer.tsx
+- apps/packages/ui/src/assets/locale/en/watchlists.json
+- apps/packages/ui/src/public/_locales/en/watchlists.json
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
+- apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx
+- apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
 - Docs/superpowers/plans/2026-05-22-watchlists-durable-audio-artifact-projection-implementation-plan.md
 - backlog/tasks/task-483 - Implement-Watchlists-durable-audio-artifact-projection.md
 ---
@@ -46,13 +55,13 @@ Implement the approved Watchlists durable audio artifact projection plan. Work i
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Workflows runs persist audio correlation metadata and expose it through `get_run`, `list_runs`, and idempotency lookup paths.
-- [ ] #2 Scheduler `workflow_run` propagates payload metadata into both run metadata and workflow definition metadata without mutating caller payloads.
-- [ ] #3 Watchlists audio triggers generate retry-safe `audio_request_id` values and persist them in run/output metadata.
-- [ ] #4 Workflow audio/script artifacts carry enough correlation and role metadata for projection.
-- [ ] #5 `/watchlists` run audio endpoint can repair and return durable script/speaker/final audio projections from canonical Workflows artifacts.
-- [ ] #6 Retry paths do not present stale audio artifacts as the active request.
-- [ ] #7 Frontend renders durable mirrored audio graph, stale state, and live overrides without raw file paths.
+- [x] #1 Workflows runs persist audio correlation metadata and expose it through `get_run`, `list_runs`, and idempotency lookup paths.
+- [x] #2 Scheduler `workflow_run` propagates payload metadata into both run metadata and workflow definition metadata without mutating caller payloads.
+- [x] #3 Watchlists audio triggers generate retry-safe `audio_request_id` values and persist them in run/output metadata.
+- [x] #4 Workflow audio/script artifacts carry enough correlation and role metadata for projection.
+- [x] #5 `/watchlists` run audio endpoint can repair and return durable script/speaker/final audio projections from canonical Workflows artifacts.
+- [x] #6 Retry paths do not present stale audio artifacts as the active request.
+- [x] #7 Frontend renders durable mirrored audio graph, stale state, and live overrides without raw file paths.
 - [ ] #8 Focused backend/frontend tests and Bandit/diff hygiene are recorded.
 <!-- AC:END -->
 
@@ -155,6 +164,20 @@ Task 6 verification:
 - `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_audio_artifact_projection.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py tldw_Server_API/tests/Watchlists/test_watchlists_pipeline.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py -q` passed, `75 passed, 1 skipped`.
 - `source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/watchlists.py tldw_Server_API/app/core/Watchlists/audio_artifact_projection.py -f json -o /tmp/bandit_watchlists_audio_projection_task6.json` passed with `results 0`.
 - `git diff --check` passed.
+
+Task 7 completed:
+- Extended frontend audio status summaries with durable request/workflow/schema/sync/stale/superseded fields.
+- Added request-aware live status merging so newer queued live requests do not inherit older mirrored final artifacts.
+- Rendered stale/superseded state in Output Preview and the full script/speaker/final artifact graph in Run Details.
+- Kept artifact display path-safe by using download URLs and filename-only display labels.
+- Added WebUI and extension locale keys for audio artifacts, stale/superseded, and artifact links.
+
+Task 7 verification:
+- Red run: `cd apps/packages/ui && bunx vitest run src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx` failed for missing stale label and missing Run Details artifact graph.
+- Green run: `cd apps/packages/ui && bunx vitest run src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx` passed, `43 passed`.
+- `git diff --check` passed.
+- `node -e "for (const file of ['apps/packages/ui/src/assets/locale/en/watchlists.json','apps/packages/ui/src/public/_locales/en/watchlists.json']) { JSON.parse(require('fs').readFileSync(file, 'utf8')); console.log(file + ' ok') }"` passed.
+- Bandit not applicable to Task 7 because the touched implementation scope is TypeScript/locale/docs only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

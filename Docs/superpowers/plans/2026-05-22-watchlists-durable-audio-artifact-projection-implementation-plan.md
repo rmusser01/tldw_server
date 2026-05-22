@@ -761,7 +761,7 @@ git commit -m "fix: prevent stale watchlists audio retry artifacts"
 - Test: `apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx`
 - Test: `apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx`
 
-- [ ] **Step 1: Write failing frontend metadata tests**
+- [x] **Step 1: Write failing frontend metadata tests**
 
 Add coverage for:
 
@@ -770,15 +770,18 @@ Add coverage for:
 - mirrored final artifact uses `download_url` and never displays raw `file://`
 - old mirrored final does not appear active when status is queued with new request ID
 
-- [ ] **Step 2: Run failing frontend metadata tests**
+- [x] **Step 2: Run failing frontend metadata tests**
 
 Run:
 
 ```bash
-bunx vitest run apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
+cd apps/packages/ui
+bunx vitest run src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts
 ```
 
-- [ ] **Step 3: Extend frontend types and normalizer**
+Observed red: stale/superseded and live-request override assertions failed before the normalizer and rendering changes.
+
+- [x] **Step 3: Extend frontend types and normalizer**
 
 In `types/watchlists.ts`, add optional fields to `WatchlistRunAudioStatus`:
 
@@ -787,10 +790,11 @@ In `types/watchlists.ts`, add optional fields to `WatchlistRunAudioStatus`:
 - `schema_version`
 - `synced_at`
 - `stale`
+- `superseded_by`
 
 In `outputMetadata.ts`, add these to `AudioStatusSummary` and merge logic. Live summaries should override mirrored summaries when the live `audio_request_id` differs or when live has artifacts.
 
-- [ ] **Step 4: Render full graph in Run Detail**
+- [x] **Step 4: Render full graph in Run Detail**
 
 Refactor small local rendering in `RunDetailDrawer.tsx` to show:
 
@@ -802,22 +806,25 @@ Refactor small local rendering in `RunDetailDrawer.tsx` to show:
 
 Reuse the same labels as Output Preview where practical. Do not create nested cards.
 
-- [ ] **Step 5: Add or align locale keys**
+- [x] **Step 5: Add or align locale keys**
 
 Add labels for stale/superseded audio and script/speaker/final artifact headings if missing.
 
-- [ ] **Step 6: Run frontend focused tests**
+- [x] **Step 6: Run frontend focused tests**
 
 Run:
 
 ```bash
+cd apps/packages/ui
 bunx vitest run \
-  apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts \
-  apps/packages/ui/src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx \
-  apps/packages/ui/src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
+  src/components/Option/Watchlists/OutputsTab/__tests__/outputMetadata.test.ts \
+  src/components/Option/Watchlists/OutputsTab/__tests__/OutputPreviewDrawer.audio.test.tsx \
+  src/components/Option/Watchlists/RunsTab/__tests__/RunDetailDrawer.stream-lifecycle.test.tsx
 ```
 
 Expected: pass.
+
+Observed green: 3 files, 43 tests passed. Also ran `git diff --check` and parsed both watchlists locale JSON files successfully.
 
 - [ ] **Step 7: Commit**
 

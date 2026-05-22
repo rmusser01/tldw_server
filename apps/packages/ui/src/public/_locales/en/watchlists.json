@@ -1709,6 +1709,45 @@
   "runs_detail_logsPath": {
     "message": "Logs stored at {{path}}"
   },
+  "runs_detail_audioStatusTitle": {
+    "message": "Audio briefing"
+  },
+  "runs_detail_audioStatusLoading": {
+    "message": "Loading..."
+  },
+  "runs_detail_audioStatusUnavailable": {
+    "message": "Unknown"
+  },
+  "runs_detail_audioTask": {
+    "message": "Task {{taskId}}"
+  },
+  "runs_detail_audioArtifactsLabel": {
+    "message": "Audio artifacts"
+  },
+  "runs_detail_audioStale": {
+    "message": "Stale"
+  },
+  "runs_detail_audioSupersededBy": {
+    "message": "Superseded by {{requestId}}"
+  },
+  "runs_detail_audioFallback": {
+    "message": "Fallback: {{reason}}"
+  },
+  "runs_detail_audioFinalAvailable": {
+    "message": "Final audio available"
+  },
+  "runs_detail_audioDownloadFinal": {
+    "message": "Download final audio"
+  },
+  "runs_detail_openAudioArtifact": {
+    "message": "Open"
+  },
+  "runs_detail_openAudioArtifactAria": {
+    "message": "Open {{label}}"
+  },
+  "runs_detail_retryAudio": {
+    "message": "Retry audio"
+  },
   "runs_detail_duration_lessThanSecond": {
     "message": "<1 second"
   },
@@ -1843,6 +1882,33 @@
   },
   "outputs_audioStatus_unknown": {
     "message": "Unknown"
+  },
+  "outputs_audioArtifactsLabel": {
+    "message": "Audio artifacts"
+  },
+  "outputs_audioStale": {
+    "message": "Stale"
+  },
+  "outputs_audioSupersededBy": {
+    "message": "Superseded by {{requestId}}"
+  },
+  "outputs_audioFallback": {
+    "message": "Fallback: {{reason}}"
+  },
+  "outputs_audioError": {
+    "message": "Error: {{error}}"
+  },
+  "outputs_audioTaskId": {
+    "message": "Task: {{taskId}}"
+  },
+  "outputs_audioQueueName": {
+    "message": "Queue: {{queue}}"
+  },
+  "outputs_openAudioArtifact": {
+    "message": "Open"
+  },
+  "outputs_openAudioArtifactAria": {
+    "message": "Open {{label}}"
   },
   "outputs_noContent": {
     "message": "No content available"
