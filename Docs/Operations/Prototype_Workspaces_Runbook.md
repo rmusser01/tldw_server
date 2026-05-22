@@ -65,7 +65,7 @@ Use these fields before escalating to database inspection.
 | Workspace | `canonical_preview_status`, `publish_validation_status` | Determine whether the shared canonical preview is healthy and whether the last promotion validation succeeded, failed, or became stale. |
 | Session | `runtime_status`, `preview_status`, `last_saved_snapshot_id`, `expires_at`, `revoked_at` | Identify active, bootstrapping, failed, expired, or revoked owner/collaborator branches. |
 | Snapshot | `preview_health` | Distinguish a saved candidate that exists from a candidate whose preview cannot boot. |
-| Promotion request | `status`, `reviewed_by_user_id`, `review_notes` | Confirm whether the owner rejected, approved, promoted, failed, or left a request pending. The `promotion_requests` table is the durable support source. |
+| Promotion request | `status`, `reviewed_by_user_id`, `review_notes` | Confirm whether the owner rejected, approved, promoted, failed, or left a request pending. The `prototype_promotion_requests` table is the durable support source. |
 | Job response/result | `job_id`, `job_type`, `status`, `idempotency_key`, `retryable` | Correlate UI operations with worker outcomes and decide whether a retry is safe. |
 | Structured error | `category`, `frontend_state`, `retryable` | Match user-visible failures to the frozen Risk Gate 4 matrix without parsing message text. |
 
@@ -131,7 +131,7 @@ Current gaps for Gate 8:
 ## Incident Checklist
 
 1. Identify whether the reporter is the owner, designated promoter, or external collaborator.
-2. Capture workspace id, session id, promotion request id, job_id, and approximate timestamp. Do not capture tokens, passwords, preview grants, or cookies.
+2. Capture `workspace_id`, `session_id`, `promotion_request_id`, `job_id`, and approximate timestamp. Do not capture tokens, passwords, preview grants, or cookies.
 3. Map the user-visible state to the contract matrix using `category`, `frontend_state`, and `retryable`.
 4. Check workspace, session, snapshot, promotion request, and job status fields listed above.
 5. Retry only retryable worker failures; otherwise ask the owner or collaborator to create a fresh link/session/branch as appropriate.

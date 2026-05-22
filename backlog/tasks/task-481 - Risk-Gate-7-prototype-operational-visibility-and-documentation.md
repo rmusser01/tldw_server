@@ -44,6 +44,7 @@ Implement GitHub issue #1460 under tracker #1440. Burn down operational support 
 - Verification: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_docs_contract.py -q` passed with 3 tests.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because this slice changed docs plus a docs-contract test only; no production Python code changed.
+- PR review follow-up: corrected the operator runbook's durable promotion table name to `prototype_promotion_requests`, added a helper docstring, and made audit breadcrumb field names exact snake_case values in the contract matrix. Re-ran the focused docs guard and `git diff --check`; both passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

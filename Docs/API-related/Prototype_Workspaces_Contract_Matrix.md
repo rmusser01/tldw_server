@@ -76,7 +76,7 @@ Risk Gate 7 does not change the frozen error/state contract. It records the fiel
 | Promotion request | `status`, `reviewed_by_user_id`, `review_notes` | Explain pending, rejected, approved, promoted, failed, stale, and conflict outcomes to owners and collaborators. |
 | Job response/result | `job_id`, `job_type`, `status`, `idempotency_key`, `retryable` | Correlate UI actions with Jobs worker outcomes and decide whether retry is safe. |
 | Structured error detail | `category`, `frontend_state`, `retryable` | Map user-visible states to backend conditions without parsing messages. |
-| Audit/support breadcrumb | workspace id, session id, shared actor id, share-link id, promotion request id, `job_id` | Correlate logs and audit records without recording raw tokens, passwords, grants, or cookies. |
+| Audit/support breadcrumb | `workspace_id`, `session_id`, `shared_actor_id`, `share_link_id`, `promotion_request_id`, `job_id` | Correlate logs and audit records without recording raw tokens, passwords, grants, or cookies. |
 
 Gate 8 handoff:
 

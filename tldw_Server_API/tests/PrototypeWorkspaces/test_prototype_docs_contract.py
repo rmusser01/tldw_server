@@ -7,6 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _read_doc(relative_path: str) -> str:
+    """Read a project documentation file as lowercase text for term guards."""
     return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8").lower()
 
 
@@ -21,6 +22,7 @@ def test_operator_runbook_documents_support_fields() -> None:
         "canonical_preview_status",
         "publish_validation_status",
         "promotion request",
+        "prototype_promotion_requests",
         "job_id",
         "job_type",
         "idempotency_key",
@@ -63,3 +65,5 @@ def test_api_and_contract_docs_link_gate_7_artifacts() -> None:
     assert "prototype_workspaces_runbook.md" in api_doc
     assert "prototype_workspaces.md" in api_doc
     assert "operational support fields" in contract_doc
+    assert "`workspace_id`, `session_id`, `shared_actor_id`" in contract_doc
+    assert "`share_link_id`, `promotion_request_id`, `job_id`" in contract_doc
