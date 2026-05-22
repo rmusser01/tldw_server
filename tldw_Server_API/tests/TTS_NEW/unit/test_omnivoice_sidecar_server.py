@@ -99,6 +99,13 @@ def test_synthesize_request_rejects_mode_field_conflicts():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("field_name", ["instruct", "reference_audio_path", "reference_text"])
+def test_synthesize_request_rejects_auto_mode_empty_forbidden_fields(field_name: str):
+    with pytest.raises(ValidationError, match=field_name):
+        OmniVoiceSynthesizeRequest(text="hi", mode="auto", generation={}, **{field_name: ""})
+
+
+@pytest.mark.unit
 def test_synthesize_request_rejects_auto_mode_reference_audio_path():
     with pytest.raises(ValidationError, match="mode=auto"):
         OmniVoiceSynthesizeRequest(
@@ -121,12 +128,38 @@ def test_synthesize_request_rejects_auto_mode_reference_text():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("field_name", ["reference_audio_path", "reference_text"])
+def test_synthesize_request_rejects_design_mode_empty_forbidden_fields(field_name: str):
+    with pytest.raises(ValidationError, match=field_name):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="design",
+            instruct="warm narrator",
+            generation={},
+            **{field_name: ""},
+        )
+
+
+@pytest.mark.unit
 def test_synthesize_request_rejects_design_mode_reference_text():
     with pytest.raises(ValidationError, match="reference_text"):
         OmniVoiceSynthesizeRequest(
             text="hi",
             mode="design",
             instruct="warm narrator",
+            reference_text="reference transcript",
+            generation={},
+        )
+
+
+@pytest.mark.unit
+def test_synthesize_request_rejects_clone_mode_empty_instruct():
+    with pytest.raises(ValidationError, match="instruct"):
+        OmniVoiceSynthesizeRequest(
+            text="hi",
+            mode="clone",
+            instruct="",
+            reference_audio_path="/managed/ref.wav",
             reference_text="reference transcript",
             generation={},
         )
@@ -143,6 +176,18 @@ def test_synthesize_request_rejects_mixed_design_and_clone_inputs():
             reference_text="reference transcript",
             generation={},
         )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("field_name", ["reference_audio_path", "reference_text"])
+def test_synthesize_request_clone_requires_non_empty_reference_fields(field_name: str):
+    kwargs = {
+        "reference_audio_path": "/managed/ref.wav",
+        "reference_text": "reference transcript",
+        field_name: "",
+    }
+    with pytest.raises(ValidationError, match=field_name):
+        OmniVoiceSynthesizeRequest(text="hi", mode="clone", generation={}, **kwargs)
 
 
 @pytest.mark.unit
