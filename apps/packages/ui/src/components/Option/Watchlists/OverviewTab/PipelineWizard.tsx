@@ -268,6 +268,12 @@ export const PipelineWizard: React.FC<PipelineWizardProps> = ({
         "Cron tokens can only include letters, numbers, *, /, -, ?, and comma."
       )
     }
+    if (advancedCronValidationError === "invalid_value") {
+      return t(
+        "watchlists:overview.pipelineSetup.validation.cronExpressionInvalidValue",
+        "Cron field values are outside supported ranges."
+      )
+    }
     if (advancedCronValidationError === "too_frequent") {
       return t(
         "watchlists:overview.pipelineSetup.validation.cronExpressionTooFrequent",

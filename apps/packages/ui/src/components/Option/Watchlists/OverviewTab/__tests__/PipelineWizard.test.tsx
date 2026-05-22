@@ -280,6 +280,15 @@ describe("PipelineWizard", () => {
     ).toBeInTheDocument()
 
     fireEvent.change(getDialogQueries().getByLabelText("Cron expression"), {
+      target: { value: "61 6 * * WED" }
+    })
+    fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))
+
+    expect(
+      await screen.findByText("Cron field values are outside supported ranges.")
+    ).toBeInTheDocument()
+
+    fireEvent.change(getDialogQueries().getByLabelText("Cron expression"), {
       target: { value: "*/1 * * * *" }
     })
     fireEvent.click(getDialogQueries().getByRole("button", { name: "Next" }))

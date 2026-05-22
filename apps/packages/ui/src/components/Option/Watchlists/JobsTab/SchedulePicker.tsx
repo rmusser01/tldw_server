@@ -104,6 +104,12 @@ export const SchedulePicker: React.FC<SchedulePickerProps> = ({
         "Cron tokens can only include letters, numbers, *, /, -, ?, and comma."
       )
     }
+    if (validationResult === "invalid_value") {
+      return t(
+        "watchlists:schedule.cronInvalidValueError",
+        "Cron field values are outside supported ranges."
+      )
+    }
     return null
   }
 

@@ -24,7 +24,11 @@ export const INTERVAL_HOURS_MIN = 1
 export const INTERVAL_HOURS_MAX = 23
 const CRON_FIELDS = 5
 export const CRON_TOKEN_PATTERN = /^[A-Z0-9*,/?-]+$/i
-export type CronFormatValidationResult = "field_count" | "invalid_token" | null
+export type CronFormatValidationResult =
+  | "field_count"
+  | "invalid_token"
+  | "invalid_value"
+  | null
 export type CronScheduleValidationResult =
   | Exclude<CronFormatValidationResult, null>
   | "too_frequent"
@@ -46,6 +50,31 @@ const WEEKDAY_MAP: Record<string, WeekdayToken> = {
   THU: "THU",
   FRI: "FRI",
   SAT: "SAT"
+}
+
+const WEEKDAY_VALUE_MAP: Record<string, number> = {
+  SUN: 0,
+  MON: 1,
+  TUE: 2,
+  WED: 3,
+  THU: 4,
+  FRI: 5,
+  SAT: 6
+}
+
+const MONTH_NAME_MAP: Record<string, number> = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  SEP: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12
 }
 
 const DEFAULT_PRESET_STATE: PresetScheduleState = {
@@ -98,7 +127,83 @@ export const validateCronFormat = (expression: string): CronFormatValidationResu
   const tokens = normalized ? normalized.split(/\s+/) : []
   if (tokens.length !== CRON_FIELDS) return "field_count"
   if (tokens.some((token) => !CRON_TOKEN_PATTERN.test(token))) return "invalid_token"
+  if (!tokens.every((token, index) => isCronFieldValueValid(token, index))) {
+    return "invalid_value"
+  }
   return null
+}
+
+const parseCronStepValue = (value: string, max: number): number | null => {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : null
+}
+
+const parseCronFieldAtom = (
+  value: string,
+  min: number,
+  max: number,
+  namedValues: Record<string, number> = {}
+): number | null => {
+  const upper = value.toUpperCase()
+  if (Object.prototype.hasOwnProperty.call(namedValues, upper)) {
+    return namedValues[upper]
+  }
+  if (!/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null
+  return parsed
+}
+
+const isCronFieldBaseValid = (
+  value: string,
+  min: number,
+  max: number,
+  namedValues: Record<string, number> = {}
+): boolean => {
+  if (value === "*" || value === "?") return true
+  const rangeParts = value.split("-")
+  if (rangeParts.length === 2) {
+    const [rangeStart, rangeEnd] = rangeParts
+    const start = parseCronFieldAtom(rangeStart, min, max, namedValues)
+    const end = parseCronFieldAtom(rangeEnd, min, max, namedValues)
+    return start !== null && end !== null && start <= end
+  }
+  if (rangeParts.length > 2) return false
+  return parseCronFieldAtom(value, min, max, namedValues) !== null
+}
+
+const isCronFieldPartValid = (
+  value: string,
+  min: number,
+  max: number,
+  namedValues: Record<string, number> = {}
+): boolean => {
+  if (!value) return false
+  const stepParts = value.split("/")
+  if (stepParts.length === 2) {
+    const [base, step] = stepParts
+    return (
+      parseCronStepValue(step, max) !== null &&
+      isCronFieldBaseValid(base, min, max, namedValues)
+    )
+  }
+  if (stepParts.length > 2) return false
+  return isCronFieldBaseValid(value, min, max, namedValues)
+}
+
+const isCronFieldValueValid = (value: string, fieldIndex: number): boolean => {
+  const fieldRules = [
+    { min: 0, max: 59 },
+    { min: 0, max: 23 },
+    { min: 1, max: 31 },
+    { min: 1, max: 12, names: MONTH_NAME_MAP },
+    { min: 0, max: 7, names: WEEKDAY_VALUE_MAP }
+  ] as const
+  const rules = fieldRules[fieldIndex]
+  const namedValues = "names" in rules ? rules.names : undefined
+  return value
+    .split(",")
+    .every((part) => isCronFieldPartValid(part, rules.min, rules.max, namedValues))
 }
 
 export const validateCronSchedule = (

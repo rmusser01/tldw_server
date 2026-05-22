@@ -92,6 +92,7 @@ describe("watchlists overview quick setup helpers", () => {
 
     expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 *" })).toEqual({})
     expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "15 6 * * WED;rm" })).toEqual({})
+    expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "61 6 * * WED" })).toEqual({})
     expect(resolveQuickSetupSchedule({ kind: "advanced", cron: "*/1 * * * *" })).toEqual({})
 
     timezoneSpy.mockRestore()
