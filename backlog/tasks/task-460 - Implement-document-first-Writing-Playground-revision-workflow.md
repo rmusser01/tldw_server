@@ -204,6 +204,35 @@ Review evidence:
 
 Bandit:
 - Touched files are TypeScript/TSX frontend code; final Bandit decision will be recorded at final verification.
+
+Task 8 completed.
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/index.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx
+- apps/tldw-frontend/extension/__tests__/writing-playground-route-parity.guard.test.ts
+- apps/extension/tests/e2e/writing-playground-mode-parity.spec.ts
+
+Commit:
+- 2a20b181c test: cover writing revision parity
+
+TDD evidence:
+- Initial red: route parity guard failed on missing writing-revision-pending-count in the shared WritingPlayground source.
+- Initial red: WritingPlayground.phase1-baseline.test.tsx failed on missing writing-status-word-count and writing-revision-pending-count.
+- Final green: cd apps/packages/ui && bunx vitest run src/components/Option/WritingPlayground/__tests__/writing-revision-utils.test.ts src/components/Option/WritingPlayground/__tests__/writing-revision-presets.test.ts src/components/Option/WritingPlayground/__tests__/writing-revision-prompt-utils.test.ts src/components/Option/WritingPlayground/__tests__/writing-session-payload-utils.test.ts src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx --maxWorkers=1 --no-file-parallelism passed with 8 test files / 84 tests.
+- Final green: cd apps/tldw-frontend && bunx vitest run extension/__tests__/writing-playground-route-parity.guard.test.ts --maxWorkers=1 --no-file-parallelism passed with 1 test.
+- Post-review green after i18n fallback fix: WritingPlayground.phase1-baseline.test.tsx passed with 19 tests, route parity guard passed with 1 test, and git diff --check passed.
+
+Extension smoke:
+- Attempted cd apps/extension && bunx playwright test tests/e2e/writing-playground-mode-parity.spec.ts.
+- The command entered WXT production build, emitted existing duplicate-import warnings for MediaNavigationFormat and estimateStorageCost, then stalled in wxt build. The stuck process was killed; command reported build:chrome:prod exited with code 1. Route parity and component coverage are the current extension evidence for Task 8.
+
+Review evidence:
+- Spec compliance review approved Task 8 with no findings.
+- Code quality review found no Critical or Important issues and one Minor i18n fallback consistency issue. Fixed by routing new status labels through t(...) with formatted fallbacks. Re-review approved with no Critical or Important issues.
+
+Bandit:
+- Touched files are TypeScript/TSX frontend code; final Bandit decision will be recorded at final verification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
