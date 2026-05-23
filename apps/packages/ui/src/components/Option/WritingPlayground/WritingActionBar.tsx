@@ -1,25 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react"
-import {
-  Button,
-  Checkbox,
-  Input,
-  Segmented,
-  Space,
-  Tag,
-  Typography,
-  type InputRef
-} from "antd"
-import type { TextAreaRef } from "antd/es/input/TextArea"
-import {
-  ArrowRight,
-  FileText,
-  ListTree,
-  Minimize2,
-  PenLine,
-  RefreshCw,
-  SlidersHorizontal
-} from "lucide-react"
-import { useTranslation } from "react-i18next"
+import React, { useMemo, useRef, useState } from "react"
+import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
 import { WRITING_REVISION_PRESETS, getWritingRevisionPreset } from "./writing-revision-presets"
 import type {
   WritingRevisionAction,
@@ -27,8 +7,6 @@ import type {
   WritingRevisionPresetId,
   WritingRevisionTarget
 } from "./writing-revision-types"
-import { READY_STATE_LABEL } from "@/design-system"
-import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 
@@ -44,9 +22,7 @@ export type WritingActionBarRequest = {
 export type WritingActionBarProps = {
   generationAvailable: boolean
   target: WritingRevisionTarget
-  selectedPresetId?: WritingRevisionPresetId
   isGenerating?: boolean
-  onPresetChange?: (presetId: WritingRevisionPresetId) => void
   onRequest: (request: WritingActionBarRequest) => void
 }
 
@@ -59,18 +35,14 @@ const TEXT_CHANGING_ACTIONS = new Set<WritingRevisionAction>([
   "custom"
 ])
 
-const ACTION_LABELS: Array<{
-  action: WritingRevisionAction
-  label: string
-  icon: React.ReactNode
-}> = [
-  { action: "continue", label: "Continue", icon: <ArrowRight size={14} /> },
-  { action: "rewrite", label: "Rewrite", icon: <RefreshCw size={14} /> },
-  { action: "expand", label: "Expand", icon: <FileText size={14} /> },
-  { action: "tighten", label: "Tighten", icon: <Minimize2 size={14} /> },
-  { action: "tone", label: "Tone", icon: <SlidersHorizontal size={14} /> },
-  { action: "outline", label: "Outline", icon: <ListTree size={14} /> },
-  { action: "custom", label: "Custom", icon: <PenLine size={14} /> }
+const ACTION_LABELS: Array<{ action: WritingRevisionAction; label: string }> = [
+  { action: "continue", label: "Continue" },
+  { action: "rewrite", label: "Rewrite" },
+  { action: "expand", label: "Expand" },
+  { action: "tighten", label: "Tighten" },
+  { action: "tone", label: "Tone" },
+  { action: "outline", label: "Outline" },
+  { action: "custom", label: "Custom" }
 ]
 
 const DEFAULT_INSTRUCTIONS: Record<WritingRevisionAction, string> = {
@@ -91,25 +63,13 @@ const getOperationForAction = (
   return "replace"
 }
 
-const getTargetIdentity = (target: WritingRevisionTarget): string =>
-  [
-    target.mode,
-    target.start,
-    target.end,
-    target.beforeText,
-    target.anchor.documentFingerprint
-  ].join("|")
-
 export function WritingActionBar({
   generationAvailable,
   target,
-  selectedPresetId,
   isGenerating = false,
-  onPresetChange,
   onRequest
 }: WritingActionBarProps) {
-  const { t } = useTranslation(["option"])
-  const [internalPresetId, setInternalPresetId] =
+  const [selectedPresetId, setSelectedPresetId] =
     useState<WritingRevisionPresetId>("polish_prose")
   const [activeInputAction, setActiveInputAction] =
     useState<WritingRevisionAction | null>(null)
@@ -117,37 +77,22 @@ export function WritingActionBar({
   const [toneDirection, setToneDirection] = useState("")
   const [confirmed, setConfirmed] = useState(false)
   const [confirmationWarning, setConfirmationWarning] = useState(false)
-  const customInputRef = useRef<TextAreaRef | null>(null)
-  const toneInputRef = useRef<InputRef | null>(null)
+  const customInputRef = useRef<{
+    resizableTextArea?: { textArea?: HTMLTextAreaElement | null }
+  } | null>(null)
+  const toneInputRef = useRef<{ input?: HTMLInputElement | null } | null>(null)
 
-  const activePresetId = selectedPresetId ?? internalPresetId
   const selectedPreset = useMemo(
-    () => getWritingRevisionPreset(activePresetId) ?? WRITING_REVISION_PRESETS[0],
-    [activePresetId]
+    () => getWritingRevisionPreset(selectedPresetId) ?? WRITING_REVISION_PRESETS[0],
+    [selectedPresetId]
   )
-  const targetIdentity = useMemo(() => getTargetIdentity(target), [target])
-
-  useEffect(() => {
-    setConfirmed(false)
-    setConfirmationWarning(false)
-  }, [targetIdentity])
 
   const disabled = !generationAvailable || isGenerating
-  const generationUnavailableLabel = t(
-    "option:writingPlayground.generationUnavailableShort",
-    "Generation unavailable"
-  )
-  const broadTargetConfirmationLabel = t(
-    "option:writingPlayground.revisionConfirmBroadTarget",
-    "Confirm before applying a broad text-changing request."
-  )
 
   const sendRequest = (action: WritingRevisionAction, explicitInstruction?: string) => {
     const operation = getOperationForAction(action)
     const requiresConfirmation =
-      target.requiresConfirmation &&
-      operation !== "insert" &&
-      TEXT_CHANGING_ACTIONS.has(action)
+      target.requiresConfirmation && TEXT_CHANGING_ACTIONS.has(action)
 
     if (requiresConfirmation && !confirmed) {
       setConfirmationWarning(true)
@@ -194,7 +139,7 @@ export function WritingActionBar({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Tag color={generationAvailable ? "green" : "default"}>
-          {generationAvailable ? READY_STATE_LABEL : generationUnavailableLabel}
+          {generationAvailable ? "Ready" : "Generation unavailable"}
         </Tag>
         <Text type="secondary" className="text-xs">
           Target:
@@ -206,12 +151,8 @@ export function WritingActionBar({
 
       <Segmented
         size="small"
-        value={activePresetId}
-        onChange={(value) => {
-          const nextPresetId = value as WritingRevisionPresetId
-          setInternalPresetId(nextPresetId)
-          onPresetChange?.(nextPresetId)
-        }}
+        value={selectedPresetId}
+        onChange={(value) => setSelectedPresetId(value as WritingRevisionPresetId)}
         options={WRITING_REVISION_PRESETS.map((preset) => ({
           label: preset.label,
           value: preset.id
@@ -231,24 +172,27 @@ export function WritingActionBar({
             Confirm whole-document text change
           </Checkbox>
           <Text type="secondary" className="text-xs">
-            {target.confirmationReason ?? broadTargetConfirmationLabel}
+            {target.confirmationReason ??
+              "Confirm before sending a broad text-changing request."}
           </Text>
         </div>
       ) : null}
 
       {confirmationWarning ? (
-        <DesignSystemAlert
-          variant="warning"
-          title={target.confirmationReason ?? broadTargetConfirmationLabel}
+        <Alert
+          type="warning"
+          title={
+            target.confirmationReason ??
+            "Confirm before sending a broad text-changing request."
+          }
         />
       ) : null}
 
       <Space wrap size={[6, 6]}>
-        {ACTION_LABELS.map(({ action, label, icon }) => (
+        {ACTION_LABELS.map(({ action, label }) => (
           <Button
             key={action}
             size="small"
-            icon={icon}
             disabled={disabled}
             loading={isGenerating}
             onClick={() => handleAction(action)}
