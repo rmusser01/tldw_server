@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
@@ -17,6 +18,14 @@ import {
 } from "./route-registry-ast-helpers"
 
 const testDir = path.dirname(fileURLToPath(import.meta.url))
+const optionRouteVisibilitySourcePath = path.resolve(
+  testDir,
+  "../option-route-visibility.ts"
+)
+const optionRouteVisibilitySource = readFileSync(
+  optionRouteVisibilitySourcePath,
+  "utf8"
+)
 const routeRegistry = readFirstExistingSource(
   [path.resolve(testDir, "../route-registry.tsx")],
   "shared route-registry.tsx"
@@ -26,7 +35,7 @@ const optionRegistryPaths = extractRoutePathsFromRouteObjects(
   routeRegistry.source,
   routeRegistry.path,
   { kind: "options" }
-).filter((routePath) => !routePath.includes(":") && !routePath.includes("*"))
+)
 
 const sorted = (values: string[]) => [...values].sort()
 
@@ -39,6 +48,11 @@ describe("hosted option route visibility", () => {
     expect(sorted(metadataVisiblePaths)).toEqual(
       sorted(Array.from(HOSTED_VISIBLE_OPTION_PATHS))
     )
+  })
+
+  it("keeps production hosted visibility independent from the full route metadata registry", () => {
+    expect(optionRouteVisibilitySource).not.toMatch(/route-metadata/)
+    expect(optionRouteVisibilitySource).not.toMatch(/ROUTE_METADATA/)
   })
 
   it("does not expose internal, redirect, or deprecated routes in hosted mode", () => {
@@ -69,7 +83,7 @@ describe("hosted option route visibility", () => {
 
       const metadata = getRouteMetadata(routePath)
 
-      return !metadata?.rationale.trim()
+      return !metadata?.rationale?.trim()
     })
 
     expect(hiddenRoutesWithoutReason).toEqual([])

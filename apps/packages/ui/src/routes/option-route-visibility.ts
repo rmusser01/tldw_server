@@ -1,10 +1,10 @@
-import { normalizeRoutePath, ROUTE_METADATA } from "./route-metadata"
+import {
+  HOSTED_VISIBLE_OPTION_PATHS,
+  HOSTED_VISIBLE_OPTION_PATHS_LIST
+} from "./route-hosted-visibility"
+import { normalizeRoutePath } from "./route-path-normalization"
 
-export const HOSTED_VISIBLE_OPTION_PATHS = new Set(
-  ROUTE_METADATA.filter(
-    (metadata) => metadata.hostedOptionVisibility === "visible"
-  ).map((metadata) => normalizeRoutePath(metadata.path))
-)
+export { HOSTED_VISIBLE_OPTION_PATHS, HOSTED_VISIBLE_OPTION_PATHS_LIST }
 
 export const isHostedVisibleOptionPath = (path: string) =>
   HOSTED_VISIBLE_OPTION_PATHS.has(normalizeRoutePath(path))

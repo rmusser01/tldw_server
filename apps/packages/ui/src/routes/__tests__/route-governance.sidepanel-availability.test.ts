@@ -10,6 +10,7 @@ import {
 import {
   extractRoutePathsFromRouteObjects,
   readFirstExistingSource,
+  readOptionalFirstExistingSource,
   uniqueSorted
 } from "./route-registry-ast-helpers"
 
@@ -20,24 +21,30 @@ const sharedSidepanelRegistry = readFirstExistingSource(
   "shared sidepanel-route-registry.tsx"
 )
 
-const extensionSidepanelRegistry = readFirstExistingSource(
+const extensionSidepanelRegistry = readOptionalFirstExistingSource(
   [
     path.resolve(
       testDir,
       "../../../../../tldw-frontend/extension/routes/sidepanel-route-registry.tsx"
+    ),
+    path.resolve(
+      testDir,
+      "../../../../../../apps/tldw-frontend/extension/routes/sidepanel-route-registry.tsx"
     )
-  ],
-  "extension sidepanel-route-registry.tsx"
+  ]
 )
 
-const extensionUnifiedRegistry = readFirstExistingSource(
+const extensionUnifiedRegistry = readOptionalFirstExistingSource(
   [
     path.resolve(
       testDir,
       "../../../../../tldw-frontend/extension/routes/route-registry.tsx"
+    ),
+    path.resolve(
+      testDir,
+      "../../../../../../apps/tldw-frontend/extension/routes/route-registry.tsx"
     )
-  ],
-  "extension route-registry.tsx"
+  ]
 )
 
 const extractSidepanelPaths = (source: string, fileName: string) =>
@@ -51,14 +58,18 @@ const sharedSidepanelPaths = extractSidepanelPaths(
 )
 
 const extensionSidepanelPaths = uniqueSorted([
-  ...extractSidepanelPaths(
-    extensionSidepanelRegistry.source,
-    extensionSidepanelRegistry.path
-  ),
-  ...extractSidepanelPaths(
-    extensionUnifiedRegistry.source,
-    extensionUnifiedRegistry.path
-  )
+  ...(extensionSidepanelRegistry
+    ? extractSidepanelPaths(
+        extensionSidepanelRegistry.source,
+        extensionSidepanelRegistry.path
+      )
+    : []),
+  ...(extensionUnifiedRegistry
+    ? extractSidepanelPaths(
+        extensionUnifiedRegistry.source,
+        extensionUnifiedRegistry.path
+      )
+    : [])
 ])
 
 const sidepanelRegistryPaths = uniqueSorted([
@@ -84,7 +95,9 @@ describe("route governance sidepanel availability", () => {
   it("marks every shared or extension sidepanel registry route as sidepanel-available metadata", () => {
     const missingMetadataAvailability = sidepanelRegistryPaths.filter(
       (routePath) =>
-        !getRouteMetadata(routePath)?.availability.includes("extension_sidepanel")
+        !getRouteMetadata(routePath)?.availability?.includes(
+          "extension_sidepanel"
+        )
     )
 
     expect(missingMetadataAvailability).toEqual([])
@@ -120,5 +133,21 @@ describe("route governance sidepanel availability", () => {
     })
 
     expect(exposedDebugRoutes).toEqual([])
+  })
+})
+
+const describeExtensionRegistries =
+  extensionSidepanelPaths.length > 0 ? describe : describe.skip
+
+describeExtensionRegistries("extension sidepanel registry availability", () => {
+  it("marks every extension sidepanel registry route as sidepanel-available metadata when extension sources exist", () => {
+    const missingMetadataAvailability = extensionSidepanelPaths.filter(
+      (routePath) =>
+        !getRouteMetadata(routePath)?.availability?.includes(
+          "extension_sidepanel"
+        )
+    )
+
+    expect(missingMetadataAvailability).toEqual([])
   })
 })

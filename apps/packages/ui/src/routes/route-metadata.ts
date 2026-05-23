@@ -1,3 +1,5 @@
+import { normalizeRoutePath } from "./route-path-normalization"
+
 export type RouteSurface =
   | "default_self_hosted"
   | "advanced_self_hosted"
@@ -1728,20 +1730,7 @@ export const ROUTE_METADATA: RouteMetadata[] = [
   ...ROUTE_REGISTRY_METADATA
 ]
 
-export const normalizeRoutePath = (path: string): string => {
-  const trimmed = path.trim()
-  if (!trimmed) {
-    return "/"
-  }
-
-  const withoutHash = trimmed.split("#", 1)[0]
-  const withoutQuery = withoutHash.split("?", 1)[0] || "/"
-  if (withoutQuery === "/") {
-    return withoutQuery
-  }
-
-  return withoutQuery.replace(/\/+$/, "")
-}
+export { normalizeRoutePath }
 
 const routeMetadataByPath = new Map<string, RouteMetadata>()
 const routeMetadataByAlias = new Map<string, RouteMetadata>()

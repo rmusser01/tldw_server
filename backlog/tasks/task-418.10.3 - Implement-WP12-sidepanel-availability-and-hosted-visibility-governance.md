@@ -22,7 +22,10 @@ modified_files:
 - apps/packages/ui/src/routes/__tests__/route-registry.sidepanel-flashcards.test.ts
 - apps/packages/ui/src/routes/__tests__/route-registry.persona.test.ts
 - apps/packages/ui/src/routes/__tests__/route-registry.companion.test.ts
+- apps/packages/ui/src/routes/__tests__/route-registry-ast-helpers.ts
 - apps/packages/ui/src/routes/option-route-visibility.ts
+- apps/packages/ui/src/routes/route-hosted-visibility.ts
+- apps/packages/ui/src/routes/route-path-normalization.ts
 - apps/packages/ui/src/routes/route-metadata.ts
 ---
 
@@ -49,7 +52,7 @@ Execute WP12 Task 3 from the WebUI route governance QA plan: add sidepanel avail
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented WP12 Task 3 sidepanel and hosted visibility governance. Added metadata-backed hosted option visibility, derived hosted visible paths from route metadata, added sidepanel registry union governance across shared and extension registries, and tightened existing chat, clipper, flashcards, persona, and companion sidepanel handoff tests with metadata availability assertions. Focused route governance Vitest suite passed after rebase onto `origin/dev` with 11 files and 40 tests. `git diff --check` passed. Broad `bunx tsc --noEmit` remains blocked by package-wide baseline TypeScript errors outside this slice; the default heap also OOMs without `NODE_OPTIONS=--max-old-space-size=8192`. Bandit is not applicable because this slice changed TypeScript and Backlog Markdown only.
+Implemented WP12 Task 3 sidepanel and hosted visibility governance. Added metadata-backed hosted option visibility, sidepanel registry union governance across shared and extension registries, and metadata assertions for chat, clipper, flashcards, persona, and companion sidepanel handoff tests. PR #1963 review follow-up moved the production hosted allowlist into lightweight route-hosted-visibility and route-path-normalization modules so option-route-visibility no longer imports the full route metadata registry, included dynamic option routes in hosted-hidden governance, added safer optional metadata checks, and made extension source lookups conditional when extension sources are absent. Focused route governance Vitest suite passed after review fixes with 42 tests. git diff --check passed. Broad bunx tsc --noEmit remains blocked by package-wide baseline TypeScript errors outside this slice; the default heap also OOMs before diagnostics. Bandit is not applicable because this slice changed TypeScript and Backlog Markdown only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
