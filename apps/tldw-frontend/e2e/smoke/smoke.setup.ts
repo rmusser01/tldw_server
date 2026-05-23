@@ -1,5 +1,4 @@
 import { test as base, expect, Page } from "@playwright/test"
-import { randomUUID } from "node:crypto"
 
 /**
  * Diagnostics data collected during page visits
@@ -81,6 +80,7 @@ export { expect }
 
 const DEFAULT_SMOKE_LOAD_TIMEOUT_MS = 30_000
 const MIN_SMOKE_LOAD_TIMEOUT_MS = 5_000
+const DEFAULT_SMOKE_API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 
 const resolveSmokeLoadTimeoutMs = (): number => {
   const raw = process.env.TLDW_SMOKE_LOAD_TIMEOUT_MS
@@ -107,7 +107,7 @@ const resolveSmokeApiKey = (): string => {
     return configured.trim()
   }
 
-  return `smoke-${randomUUID()}`
+  return DEFAULT_SMOKE_API_KEY
 }
 
 export const AUTH_CONFIG = {

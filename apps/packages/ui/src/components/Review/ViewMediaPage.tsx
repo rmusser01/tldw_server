@@ -1104,6 +1104,9 @@ const MediaPageContent: React.FC = () => {
       >
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="max-w-lg w-full">
+            <h1 className="mb-3 px-4 text-center text-base font-semibold text-text">
+              {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
+            </h1>
             <ResultsList
               results={displayResults}
               selectedId={null}
