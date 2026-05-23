@@ -214,7 +214,7 @@ export const AssistantSelect: React.FC<Props> = ({
           ? detail.returnFocusSelector.trim()
           : null
       selectionModeIntentRef.current =
-        detail?.applyAs === "overlay" ? "overlay" : selectionModePreference
+        detail?.applyAs ?? selectionModePreference
       setSearchText("")
       setOpen(true)
     }
