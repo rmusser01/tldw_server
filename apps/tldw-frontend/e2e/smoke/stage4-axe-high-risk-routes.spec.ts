@@ -5,7 +5,7 @@ import {
   getStage4HighRiskRouteGovernanceProblems,
   type Stage4HighRiskRoute,
 } from './stage4-axe-high-risk-routes.helpers';
-import { waitForAppShell } from '../utils/helpers';
+import { waitForAppShell, waitForVisualSettle } from '../utils/helpers';
 import { getRouteMetadata } from '../../../packages/ui/src/routes/route-metadata';
 
 const LOAD_TIMEOUT = 30_000;
@@ -163,6 +163,7 @@ async function analyzeA11yWithRetry(
     page.on('framenavigated', onFrameNavigated);
 
     try {
+      await waitForVisualSettle(page, LOAD_TIMEOUT);
       const results = await new AxeBuilder({ page })
         .withRules(STAGE4_A11Y_RULES)
         .disableRules(['color-contrast'])
@@ -299,6 +300,18 @@ test.describe('Stage 4 Axe high-risk routes', () => {
 
       const acceptablePaths = route.acceptablePaths ?? [route.path];
       const finalPath = new URL(page.url()).pathname;
+
+      if (route.mayRedirectWhenUnavailable && finalPath !== route.path) {
+        expect(
+          acceptablePaths,
+          `Route ${route.path} redirected to unexpected path ${finalPath}`
+        ).toContain(finalPath);
+        test.skip(
+          true,
+          `Route ${route.path} redirected to ${finalPath}; feature is unavailable in this runtime`
+        );
+      }
+
       const preScanDisposition = getRedirectDispositionForA11yScan({
         routePath: route.path,
         finalPath,
@@ -306,12 +319,6 @@ test.describe('Stage 4 Axe high-risk routes', () => {
       });
       if (preScanDisposition.shouldSkip) {
         test.skip(true, preScanDisposition.message);
-      }
-      if (route.mayRedirectWhenUnavailable && !acceptablePaths.includes(finalPath)) {
-        test.skip(
-          true,
-          `Route ${route.path} redirected to ${finalPath}; feature is unavailable in this runtime`
-        );
       }
       expect(
         acceptablePaths,

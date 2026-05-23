@@ -46,11 +46,19 @@ Implementation notes:
 - Removed an unused Stage 4 Axe helper while touching that file so focused lint stays clean.
 - Added package scripts e2e:smoke:route-governance and e2e:smoke:governance-gate.
 
+PR review fixes:
+- Added responsive route post-navigation guards that fail on route error boundaries or uncaught page errors before measuring overflow.
+- Raised responsive overflow tolerance from 1px to 4px to match the existing Stage 4 responsive landmark tolerance for sub-pixel/scrollbar variance.
+- Moved Stage 4 Axe redirect target validation before unavailable-route skip handling so unexpected redirects fail instead of being skipped.
+- Restored waitForVisualSettle before Axe analysis so scans happen after fonts and paint cycles settle.
+
 Verification:
 - RED: bunx playwright test e2e/smoke/route-responsive-governance.spec.ts --reporter=line --workers=1 failed with "No tests found" before the new spec existed.
-- PASS: bun run e2e:smoke:route-governance -> 18 passed.
-- PASS: bunx playwright test e2e/smoke/stage4-axe-high-risk-routes.spec.ts --reporter=line --workers=1 -> 17 passed, 1 skipped.
-- PASS: bunx eslint e2e/smoke/route-responsive-governance.spec.ts e2e/smoke/stage4-axe-high-risk-routes.spec.ts e2e/smoke/stage4-axe-high-risk-routes.helpers.ts -> 0 errors/warnings after removing unused helper.
+- PASS: bun run e2e:smoke:route-governance -> 18 passed after initial implementation.
+- PASS: bun run e2e:smoke:route-governance -> 18 passed after PR review fixes.
+- PASS: bun run e2e:smoke:stage4 -> 29 passed, 1 skipped after initial implementation.
+- PASS: bun run e2e:smoke:stage4 -> 29 passed, 1 skipped after PR review fixes.
+- PASS: bunx eslint e2e/smoke/route-responsive-governance.spec.ts e2e/smoke/stage4-axe-high-risk-routes.spec.ts e2e/smoke/stage4-axe-high-risk-routes.helpers.ts -> 0 errors/warnings.
 - PASS: git diff --check.
 - PASS: Bandit via /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python on apps/tldw-frontend/e2e/smoke -> 0 findings, 0 LOC scanned because touched scope is TS.
 - LIMITATION: bunx tsc --noEmit --pretty false still fails on repo-wide baseline errors outside this slice, including MediaReadAlongPopover, Watchlists quick setup/run detail, WorkspacePlayground StudioPane, keyboard shortcut config, persona live control, and admin-llamacpp E2E fixtures.
@@ -60,7 +68,7 @@ Verification:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented WP12 Task 5 responsive and accessibility route governance. Added route-responsive-governance.spec.ts for 390px page overflow checks and sidepanel-width checks, added metadata/rationale validation to Stage 4 high-risk Axe routes, wired e2e:smoke:route-governance and e2e:smoke:governance-gate package scripts, and updated the WP12 plan status. Verification passed for route-governance, full Stage 4, focused lint, git diff --check, and Bandit. Full TypeScript remains blocked by unrelated repo-wide baseline errors documented in implementation notes.
+Implemented WP12 Task 5 responsive and accessibility route governance and addressed PR review feedback. Added route-responsive-governance.spec.ts for 390px page overflow checks and sidepanel-width checks, added metadata/rationale validation to Stage 4 high-risk Axe routes, wired e2e:smoke:route-governance and e2e:smoke:governance-gate package scripts, and updated the WP12 plan status. PR review follow-up now fails responsive checks on route error boundaries/page errors, uses the existing 4px overflow tolerance, validates redirect targets before skip handling, and waits for visual settle before Axe analysis. Verification passed for route-governance, full Stage 4, focused lint, git diff --check, and Bandit. Full TypeScript remains blocked by unrelated repo-wide baseline errors documented in implementation notes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

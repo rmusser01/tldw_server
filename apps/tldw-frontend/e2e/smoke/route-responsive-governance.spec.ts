@@ -1,5 +1,12 @@
 import type { Page, Route } from '@playwright/test';
-import { test, expect, seedAuth, SMOKE_LOAD_TIMEOUT } from './smoke.setup';
+import {
+  test,
+  expect,
+  seedAuth,
+  getCriticalIssues,
+  SMOKE_LOAD_TIMEOUT,
+  type DiagnosticsData,
+} from './smoke.setup';
 import { stubNotificationsApi, waitForAppShell, waitForVisualSettle } from '../utils/helpers';
 import { PAGES } from './page-inventory';
 import {
@@ -28,7 +35,8 @@ const SIDEPANEL_ROUTE_PATHS = ['/chat', '/flashcards', '/companion', '/persona']
 
 const PAGE_LEVEL_VIEWPORT = { width: 390, height: 844 };
 const SIDEPANEL_VIEWPORT = { width: 360, height: 720 };
-const MAX_HORIZONTAL_OVERFLOW_PX = 1;
+// Matches the Stage 4 responsive suite tolerance for sub-pixel and scrollbar variance.
+const MAX_HORIZONTAL_OVERFLOW_PX = 4;
 
 type GovernanceRoute = {
   path: string;
@@ -235,6 +243,20 @@ async function visitGovernedRoute(
   await waitForVisualSettle(page, SMOKE_LOAD_TIMEOUT);
 }
 
+async function expectGovernedRouteRendered(
+  page: Page,
+  diagnostics: DiagnosticsData,
+  path: string
+): Promise<void> {
+  await expect(
+    page.locator('[data-testid="error-boundary"], [data-testid^="route-error-boundary-"]'),
+    `${path} rendered an error boundary instead of governed route content`
+  ).toHaveCount(0);
+
+  const issues = getCriticalIssues(diagnostics);
+  expect(issues.pageErrors, `Uncaught page errors while rendering ${path}`).toHaveLength(0);
+}
+
 async function getPageLevelHorizontalOverflow(page: Page): Promise<number> {
   return page.evaluate(() => {
     const documentElement = document.documentElement;
@@ -261,8 +283,12 @@ test.describe('responsive route governance', () => {
   });
 
   for (const route of responsiveRoutes) {
-    test(`${route.path} (${route.label}) has no page-level overflow at 390px`, async ({ page }) => {
+    test(`${route.path} (${route.label}) has no page-level overflow at 390px`, async ({
+      page,
+      diagnostics,
+    }) => {
       await visitGovernedRoute(page, route.path, PAGE_LEVEL_VIEWPORT);
+      await expectGovernedRouteRendered(page, diagnostics, route.path);
 
       const horizontalOverflow = await getPageLevelHorizontalOverflow(page);
       expect(
@@ -273,8 +299,12 @@ test.describe('responsive route governance', () => {
   }
 
   for (const route of sidepanelRoutes) {
-    test(`${route.path} (${route.label}) has no sidepanel-width overflow`, async ({ page }) => {
+    test(`${route.path} (${route.label}) has no sidepanel-width overflow`, async ({
+      page,
+      diagnostics,
+    }) => {
       await visitGovernedRoute(page, route.path, SIDEPANEL_VIEWPORT);
+      await expectGovernedRouteRendered(page, diagnostics, route.path);
 
       const horizontalOverflow = await getPageLevelHorizontalOverflow(page);
       expect(
