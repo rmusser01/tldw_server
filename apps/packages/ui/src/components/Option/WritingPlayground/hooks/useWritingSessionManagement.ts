@@ -31,7 +31,7 @@ import {
   getTemplateNameFromPayload,
   getThemeNameFromPayload,
   isVersionConflictError,
-  mergePayloadIntoSession,
+  mergePendingPayloadIntoSession,
   normalizeStringArrayValue,
   SAVE_DEBOUNCE_MS,
   type PendingSave,
@@ -689,17 +689,16 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   const applySessionPayloadPatch = React.useCallback(
     (patcher: (payload: WritingSessionPayload) => WritingSessionPayload) => {
       if (!activeSessionDetail) return
-      const basePayload =
-        pendingSaveMapRef.current[activeSessionDetail.id] ??
-        mergePayloadIntoSession(
-          activeSessionDetail.payload,
-          editorText,
-          settings,
-          selectedTemplateName,
-          selectedThemeName,
-          chatMode,
-          { promptRich: editorPromptRichRef.current }
-        )
+      const basePayload = mergePendingPayloadIntoSession(
+        activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        editorText,
+        settings,
+        selectedTemplateName,
+        selectedThemeName,
+        chatMode,
+        { promptRich: editorPromptRichRef.current }
+      )
       const nextPayload = patcher(basePayload)
       pendingSaveMapRef.current[activeSessionDetail.id] = nextPayload
       setIsDirty(true)
@@ -728,8 +727,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       setEditorText(nextValue)
       editorPromptRichRef.current = promptRich
       if (!activeSessionDetail) return selection
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         nextValue,
         settings,
         selectedTemplateName,
@@ -776,8 +776,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       if (typeof nextStopInput === "string") {
         setStopStringsInput(nextStopInput)
       }
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         nextSettings,
         selectedTemplateName,
@@ -825,8 +826,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextTemplateName: string | null) => {
       setSelectedTemplateName(nextTemplateName)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         settings,
         nextTemplateName,
@@ -866,8 +868,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextThemeName: string | null) => {
       setSelectedThemeName(nextThemeName)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         settings,
         selectedTemplateName,
@@ -907,8 +910,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextChatMode: boolean) => {
       setChatMode(nextChatMode)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         settings,
         selectedTemplateName,

@@ -411,8 +411,12 @@ const isWritingRevisionTarget = (
   isOneOf(value.mode, WRITING_REVISION_TARGET_MODES) &&
   typeof value.start === "number" &&
   Number.isFinite(value.start) &&
+  Number.isInteger(value.start) &&
+  value.start >= 0 &&
   typeof value.end === "number" &&
   Number.isFinite(value.end) &&
+  Number.isInteger(value.end) &&
+  value.end >= value.start &&
   typeof value.beforeText === "string" &&
   isWritingRevisionAnchor(value.anchor) &&
   typeof value.label === "string" &&
@@ -1178,6 +1182,26 @@ export const mergePayloadIntoSession = (
   }
   return next
 }
+
+export const mergePendingPayloadIntoSession = (
+  payload: Record<string, unknown> | null | undefined,
+  pendingPayload: Record<string, unknown> | null | undefined,
+  prompt: string,
+  settings: WritingSessionSettings,
+  templateName: string | null,
+  themeName: string | null,
+  chatMode: boolean,
+  options?: { promptRich?: JSONContent | null }
+): WritingSessionPayload =>
+  mergePayloadIntoSession(
+    isRecord(pendingPayload) ? pendingPayload : payload,
+    prompt,
+    settings,
+    templateName,
+    themeName,
+    chatMode,
+    options
+  )
 
 export const areSettingsEqual = (
   left: WritingSessionSettings,
