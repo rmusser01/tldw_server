@@ -4,7 +4,7 @@ title: Implement document-first Writing Playground revision workflow
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-05-23 02:16'
+updated_date: '2026-05-23 02:47'
 labels:
   - implementation
   - webui
@@ -101,6 +101,31 @@ Review evidence:
 
 Bandit:
 - Worker reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
+
+Task 4 completed.
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/hooks/utils.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingSessionManagement.ts
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-session-payload-utils.test.ts
+
+Commits:
+- b86252858 feat: persist writing revision state
+- c3c2339d fix: preserve pending writing revision payloads
+- a780eb11 fix: keep pending writing revision saves dirty
+- 16e9c6f6 fix: keep pending writing preset saves dirty
+
+TDD evidence:
+- Initial red: focused Vitest failed with missing revision helper failures.
+- Follow-up reds: malformed target offsets accepted, missing pending-aware helper, revision-only pending save considered clearable, and preset-id-only pending save considered clearable.
+- Final green: bunx vitest run apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-session-payload-utils.test.ts passed with 351 files / 1063 tests.
+
+Review evidence:
+- Spec compliance review approved with no issues.
+- Code quality review found stale pending payload overwrite, malformed target offset acceptance, revision-only dirty clearing, and preset-id-only dirty clearing. Fixes landed in c3c2339d, a780eb11, and 16e9c6f6. Final re-review found no Critical or Important issues.
+
+Bandit:
+- Workers reported touched-scope Bandit produced no findings but parse errors because files are TypeScript; final Bandit decision will be recorded at final verification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
