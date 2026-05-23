@@ -8,7 +8,8 @@ import {
   getPromptRichFromPayload,
   mergePendingPayloadIntoSession,
   mergeRevisionsIntoPayload,
-  mergePayloadIntoSession
+  mergePayloadIntoSession,
+  shouldClearPendingSessionSave
 } from "../hooks/utils"
 import type { WritingRevisionProposal } from "../writing-revision-types"
 
@@ -218,5 +219,29 @@ describe("writing session payload utils", () => {
 
     expect(payload.prompt).toBe("Typed draft")
     expect(payload.revisions?.items).toEqual([revision])
+  })
+
+  it("does not clear a revision-only pending payload when editor fields are clean", () => {
+    const activePayload = {
+      prompt: "Server draft",
+      settings: DEFAULT_SETTINGS,
+      template_name: null,
+      theme_name: null,
+      chat_mode: false
+    }
+    const pendingPayload = mergeRevisionsIntoPayload(activePayload, [buildRevision()])
+    const nextPayload = mergePendingPayloadIntoSession(
+      activePayload,
+      pendingPayload,
+      "Server draft",
+      DEFAULT_SETTINGS,
+      null,
+      null,
+      false
+    )
+
+    expect(
+      shouldClearPendingSessionSave(activePayload, nextPayload, false)
+    ).toBe(false)
   })
 })
