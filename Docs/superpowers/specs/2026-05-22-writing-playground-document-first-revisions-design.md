@@ -2,7 +2,7 @@
 
 Date: 2026-05-22
 Backlog: TASK-443
-Status: Draft for review
+Status: Approved for planning; design hardening review applied
 
 ## Purpose
 
@@ -190,6 +190,11 @@ The action bar should not expose all prompt engineering details. It should trans
 intent into a structured request while still honoring the existing model, template, context, and
 generation settings.
 
+Important boundary: the first implementation should distinguish text-changing actions from
+planning or advisory actions. Continue, Rewrite, Expand, Tighten, Tone, and Custom can create
+replacement or insertion proposals. Outline should default to a non-mutating advisory proposal
+unless the user explicitly asks to insert or replace text with the outline.
+
 ### Revision Queue
 
 Add a queue for AI proposals. It can live below the editor at first or inside a new inspector tab
@@ -199,17 +204,22 @@ current layout constraints.
 Each proposal should show:
 
 - action type
+- operation type
 - instruction
 - target summary
 - short rationale when available
 - before and after preview
 - diff view
-- status: pending, applied, rejected, conflict, or raw suggestion
+- status: pending, applied, rejected, conflict, raw suggestion, or advisory
 - actions: Apply, Reject, Copy, Regenerate
 
 Applied proposals should remain visible briefly enough to support user confidence and undo. The
 existing generation undo stack can remain the first undo mechanism if it can cover applied proposal
 changes safely.
+
+Advisory proposals should not show Apply unless the user converts them into an insertion or
+replacement request. This prevents Outline or critique-like actions from being treated as document
+patches by accident.
 
 ### Document-Aware Status
 
@@ -299,11 +309,17 @@ Expected model output:
 }
 ```
 
-`title` and `notes` are optional display fields. The proposal can be valid with only
-`replacement` and an optional `rationale`; missing display fields should not block the user from
-reviewing the proposed text. The first implementation can request JSON through prompt discipline
-and client validation. If the server later exposes structured output support for the selected
-provider, the adapter can use it behind the same client boundary.
+For text-changing proposals, `title` and `notes` are optional display fields. The proposal can be
+valid with only `replacement` and an optional `rationale`; missing display fields should not block
+the user from reviewing the proposed text. Advisory and raw-suggestion proposals may use `rawText`,
+`rationale`, `title`, and `notes` without a `replacement`. The first implementation can request
+JSON through prompt discipline and client validation. If the server later exposes structured output
+support for the selected provider, the adapter can use it behind the same client boundary.
+
+Proposal generation should not stream partial edits into the editor. For structured proposed-edit
+requests, default to non-streaming generation, or accumulate the stream invisibly and validate only
+after the complete response is available. Partial JSON or partial replacement text must never
+appear as an applyable proposal.
 
 ### Proposal Shape
 
@@ -314,6 +330,7 @@ type WritingRevisionProposal = {
   id: string
   sessionId: string
   action: "continue" | "rewrite" | "expand" | "tighten" | "tone" | "outline" | "custom"
+  operation: "insert" | "replace" | "advisory"
   instruction: string
   target: {
     mode: "selection" | "paragraph" | "cursor" | "document"
@@ -326,13 +343,14 @@ type WritingRevisionProposal = {
       suffix: string
     }
   }
-  replacementText: string
+  replacementText?: string
+  rawText?: string
   rationale?: string
   title?: string
   notes?: string[]
   regeneratedFromId?: string
   createdAt: string
-  status: "pending" | "applied" | "rejected" | "conflict" | "raw_suggestion"
+  status: "pending" | "applied" | "rejected" | "conflict" | "raw_suggestion" | "advisory"
 }
 ```
 
@@ -348,6 +366,10 @@ proposal must store an insertion anchor:
 The first implementation can compute the fingerprint client-side from the canonical plain text. It
 does not need a backend document-version API.
 
+Replacement and insertion proposals require `replacementText`. Advisory and raw-suggestion
+proposals can omit `replacementText` and instead use `rawText`, `rationale`, `title`, and `notes`
+for display-only review.
+
 ### Persistence
 
 Initial persistence should be session-payload based:
@@ -360,6 +382,19 @@ Initial persistence should be session-payload based:
 - Proposal history can be pruned by count or age in the client if payload size becomes an issue.
 
 This avoids a new backend revision-history API in the first slice while preserving refresh safety.
+
+The implementation must not assume the current dirty-state helper already tracks proposal-only
+changes. Today the Writing session save path primarily compares prompt, rich prompt, settings,
+template, theme, and chat-mode state. The revision feature needs one of these explicit save
+contracts:
+
+- extend the session dirty baseline and save helper to include the schema-versioned revisions
+  payload, or
+- add a narrow proposal-save helper that merges revisions with the latest pending editor payload and
+  uses the same expected-version conflict handling.
+
+Either way, proposal-only changes must persist, and proposal saves must not overwrite unsaved prompt
+or settings edits by merging against a stale `activeSessionDetail.payload`.
 
 ## Data Flow
 
@@ -377,10 +412,13 @@ This avoids a new backend revision-history API in the first slice while preservi
 7. The queue renders the proposal and diff.
 8. Apply checks that the current target still matches `beforeText`, or validates the insertion
    anchor for zero-length targets.
-9. If the target matches, apply replaces or inserts text and marks the proposal applied.
+9. If the target matches and the proposal operation is `replace` or `insert`, apply replaces or
+   inserts text and marks the proposal applied.
 10. If the target drifted, mark the proposal conflict and offer copy or manual apply.
-11. Reject marks the proposal rejected without changing the document.
-12. Regenerate creates a replacement proposal linked by `regeneratedFromId`, instruction, and
+11. If the proposal operation is `advisory`, do not mutate the document; allow copy or a follow-up
+    request that turns it into an insertion or replacement proposal.
+12. Reject marks the proposal rejected without changing the document.
+13. Regenerate creates a replacement proposal linked by `regeneratedFromId`, instruction, and
     target.
 
 ## Error Handling
@@ -439,7 +477,9 @@ Unit coverage:
 - range resolution for selected text, cursor insertion, current paragraph, and whole document
 - word-count and selected-word-count helpers
 - proposal response validation
+- non-streaming or complete-response validation for structured proposed edits
 - raw-suggestion fallback
+- advisory proposal behavior
 - exact-match apply
 - zero-length insertion anchor validation
 - drift conflict
@@ -453,8 +493,9 @@ Component coverage:
 
 - action bar renders disabled/enabled states correctly
 - action selection creates a pending proposal
-- revision queue renders pending, applied, rejected, conflict, and raw-suggestion states
+- revision queue renders pending, applied, rejected, conflict, raw-suggestion, and advisory states
 - Apply and Reject update UI state
+- advisory proposals do not render Apply until converted into a text-changing request
 - conflict state does not mutate editor text
 
 Integration and parity coverage:
@@ -495,6 +536,15 @@ Success criteria:
 - user can apply or reject it
 - target drift is detected
 - proposal state survives session refresh through payload persistence
+
+Stage 1 should be planned as small implementation commits rather than one large patch:
+
+1. revision types and pure utilities
+2. proposal validation and prompt-building utilities
+3. plain-text apply/conflict tests
+4. action bar and queue UI
+5. session-payload persistence integration
+6. WebUI/extension parity and responsive verification
 
 ### Stage 2: Rich Editor And Layout Hardening
 
