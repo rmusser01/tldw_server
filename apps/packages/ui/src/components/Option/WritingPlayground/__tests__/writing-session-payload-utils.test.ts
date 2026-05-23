@@ -6,10 +6,8 @@ import {
   getRevisionPresetIdFromPayload,
   getRevisionsFromPayload,
   getPromptRichFromPayload,
-  mergePendingPayloadIntoSession,
   mergeRevisionsIntoPayload,
-  mergePayloadIntoSession,
-  shouldClearPendingSessionSave
+  mergePayloadIntoSession
 } from "../hooks/utils"
 import type { WritingRevisionProposal } from "../writing-revision-types"
 
@@ -133,27 +131,6 @@ describe("writing session payload utils", () => {
     ).toEqual([revision])
   })
 
-  it("ignores revisions with malformed target offsets", () => {
-    const target = buildRevision().target
-    const malformedTargets = [
-      { ...target, start: -1, end: 11 },
-      { ...target, start: 0.5, end: 11 },
-      { ...target, start: 0, end: 10.5 },
-      { ...target, start: 11, end: 0 }
-    ]
-
-    for (const malformedTarget of malformedTargets) {
-      expect(
-        getRevisionsFromPayload({
-          revisions: {
-            schemaVersion: 1,
-            items: [buildRevision({ target: malformedTarget })]
-          }
-        })
-      ).toEqual([])
-    }
-  })
-
   it("preserves a known revision workflow preset id and rejects unknown ids", () => {
     const payload = mergePayloadIntoSession(
       { revision_preset_id: "preserve_voice" },
@@ -193,80 +170,5 @@ describe("writing session payload utils", () => {
     expect(payload.prompt).toBe("Existing draft")
     expect(payload).not.toHaveProperty("revisions")
     expect(getRevisionsFromPayload(payload)).toEqual([])
-  })
-
-  it("uses pending payload state when merging prompt edits into a session payload", () => {
-    const revision = buildRevision()
-    const activePayload = {
-      prompt: "Server draft",
-      settings: DEFAULT_SETTINGS,
-      template_name: null,
-      theme_name: null,
-      chat_mode: false
-    }
-    const pendingPayload = mergeRevisionsIntoPayload(activePayload, [revision])
-
-    const payload = mergePendingPayloadIntoSession(
-      activePayload,
-      pendingPayload,
-      "Typed draft",
-      DEFAULT_SETTINGS,
-      null,
-      null,
-      false,
-      { promptRich: null }
-    )
-
-    expect(payload.prompt).toBe("Typed draft")
-    expect(payload.revisions?.items).toEqual([revision])
-  })
-
-  it("does not clear a revision-only pending payload when editor fields are clean", () => {
-    const activePayload = {
-      prompt: "Server draft",
-      settings: DEFAULT_SETTINGS,
-      template_name: null,
-      theme_name: null,
-      chat_mode: false
-    }
-    const pendingPayload = mergeRevisionsIntoPayload(activePayload, [buildRevision()])
-    const nextPayload = mergePendingPayloadIntoSession(
-      activePayload,
-      pendingPayload,
-      "Server draft",
-      DEFAULT_SETTINGS,
-      null,
-      null,
-      false
-    )
-
-    expect(
-      shouldClearPendingSessionSave(activePayload, nextPayload, false)
-    ).toBe(false)
-  })
-
-  it("does not clear a preset-id-only pending payload unless the preset id matches", () => {
-    const activePayload = {
-      prompt: "Server draft",
-      settings: DEFAULT_SETTINGS,
-      template_name: null,
-      theme_name: null,
-      chat_mode: false
-    }
-    const pendingPresetPayload = {
-      ...activePayload,
-      revision_preset_id: "preserve_voice"
-    }
-    const savedPresetPayload = {
-      ...activePayload,
-      revision_preset_id: "preserve_voice"
-    }
-
-    expect(
-      shouldClearPendingSessionSave(activePayload, pendingPresetPayload, false)
-    ).toBe(false)
-    expect(
-      shouldClearPendingSessionSave(savedPresetPayload, pendingPresetPayload, false)
-    ).toBe(true)
   })
 })

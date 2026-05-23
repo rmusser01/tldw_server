@@ -690,16 +690,17 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   const applySessionPayloadPatch = React.useCallback(
     (patcher: (payload: WritingSessionPayload) => WritingSessionPayload) => {
       if (!activeSessionDetail) return
-      const basePayload = mergePendingPayloadIntoSession(
-        activeSessionDetail.payload,
-        pendingSaveMapRef.current[activeSessionDetail.id],
-        editorText,
-        settings,
-        selectedTemplateName,
-        selectedThemeName,
-        chatMode,
-        { promptRich: editorPromptRichRef.current }
-      )
+      const basePayload =
+        pendingSaveMapRef.current[activeSessionDetail.id] ??
+        mergePayloadIntoSession(
+          activeSessionDetail.payload,
+          editorText,
+          settings,
+          selectedTemplateName,
+          selectedThemeName,
+          chatMode,
+          { promptRich: editorPromptRichRef.current }
+        )
       const nextPayload = patcher(basePayload)
       pendingSaveMapRef.current[activeSessionDetail.id] = nextPayload
       setIsDirty(true)

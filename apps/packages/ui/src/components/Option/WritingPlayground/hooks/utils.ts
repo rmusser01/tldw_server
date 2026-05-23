@@ -411,12 +411,8 @@ const isWritingRevisionTarget = (
   isOneOf(value.mode, WRITING_REVISION_TARGET_MODES) &&
   typeof value.start === "number" &&
   Number.isFinite(value.start) &&
-  Number.isInteger(value.start) &&
-  value.start >= 0 &&
   typeof value.end === "number" &&
   Number.isFinite(value.end) &&
-  Number.isInteger(value.end) &&
-  value.end >= value.start &&
   typeof value.beforeText === "string" &&
   isWritingRevisionAnchor(value.anchor) &&
   typeof value.label === "string" &&
