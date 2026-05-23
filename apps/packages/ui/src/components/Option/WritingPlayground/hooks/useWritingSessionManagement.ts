@@ -31,9 +31,10 @@ import {
   getTemplateNameFromPayload,
   getThemeNameFromPayload,
   isVersionConflictError,
-  mergePayloadIntoSession,
+  mergePendingPayloadIntoSession,
   normalizeStringArrayValue,
   SAVE_DEBOUNCE_MS,
+  shouldClearPendingSessionSave,
   type PendingSave,
   type SessionUsageMap,
   type WritingSessionPayload,
@@ -686,6 +687,35 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   }, [])
 
   // --- Prompt/settings change helpers ---
+  const applySessionPayloadPatch = React.useCallback(
+    (patcher: (payload: WritingSessionPayload) => WritingSessionPayload) => {
+      if (!activeSessionDetail) return
+      const basePayload = mergePendingPayloadIntoSession(
+        activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        editorText,
+        settings,
+        selectedTemplateName,
+        selectedThemeName,
+        chatMode,
+        { promptRich: editorPromptRichRef.current }
+      )
+      const nextPayload = patcher(basePayload)
+      pendingSaveMapRef.current[activeSessionDetail.id] = nextPayload
+      setIsDirty(true)
+      scheduleSave(activeSessionDetail.id, nextPayload)
+    },
+    [
+      activeSessionDetail,
+      chatMode,
+      editorText,
+      scheduleSave,
+      selectedTemplateName,
+      selectedThemeName,
+      settings
+    ]
+  )
+
   const applyPromptValue = React.useCallback(
     (
       nextValue: string,
@@ -698,8 +728,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       setEditorText(nextValue)
       editorPromptRichRef.current = promptRich
       if (!activeSessionDetail) return selection
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         nextValue,
         settings,
         selectedTemplateName,
@@ -716,8 +747,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
       } else {
         scheduleSave(activeSessionDetail.id, nextPayload)
@@ -746,8 +782,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       if (typeof nextStopInput === "string") {
         setStopStringsInput(nextStopInput)
       }
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         nextSettings,
         selectedTemplateName,
@@ -764,8 +801,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -795,8 +837,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextTemplateName: string | null) => {
       setSelectedTemplateName(nextTemplateName)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         settings,
         nextTemplateName,
@@ -813,8 +856,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -836,8 +884,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextThemeName: string | null) => {
       setSelectedThemeName(nextThemeName)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         settings,
         selectedTemplateName,
@@ -854,8 +903,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         nextThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -877,8 +931,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextChatMode: boolean) => {
       setChatMode(nextChatMode)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         editorText,
         settings,
         selectedTemplateName,
@@ -895,8 +950,13 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         selectedThemeName,
         nextChatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -966,6 +1026,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     handleTemplateChange,
     handleThemeChange,
     handleChatModeChange,
+    applySessionPayloadPatch,
     scheduleSave,
     clearPendingSave,
     computeDirty,

@@ -1,8 +1,9 @@
 import React from "react"
 import type { JSONContent } from "@tiptap/react"
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { WritingTipTapEditor } from "../WritingTipTapEditor"
+import type { WritingEditorAdapter } from "../writing-editor-adapter"
 
 const FIRST_DOC: JSONContent = {
   type: "doc",
@@ -37,6 +38,53 @@ describe("WritingTipTapEditor external sync", () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain("Second draft")
+    })
+  })
+
+  it("maps selections to plain-text offsets after paragraph boundaries", async () => {
+    const adapterRef: { current: WritingEditorAdapter | null } = {
+      current: null
+    }
+    const selectionChanges: Array<{ start: number; end: number }> = []
+
+    render(
+      <WritingTipTapEditor
+        content={{
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Alpha" }]
+            },
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Beta" }]
+            }
+          ]
+        }}
+        onContentChange={vi.fn()}
+        onAdapterReady={(adapter) => {
+          adapterRef.current = adapter
+        }}
+        onSelectionChange={(selection) => {
+          selectionChanges.push(selection)
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(adapterRef.current).not.toBeNull()
+    })
+
+    act(() => {
+      adapterRef.current?.setSelection({ start: 6, end: 10 })
+    })
+
+    await waitFor(() => {
+      expect(adapterRef.current?.getSelectedText("Alpha\nBeta")).toBe("Beta")
+    })
+    await waitFor(() => {
+      expect(selectionChanges.at(-1)).toEqual({ start: 6, end: 10 })
     })
   })
 })
