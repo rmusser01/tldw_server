@@ -30,7 +30,8 @@ from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnve
 M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
 WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
 SOURCE_CACHE_DOMAINS = ["source_cache.entry"]
-SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS
+MEDIA_DOMAINS = ["media.item", "media.keyword", "media.keyword_link"]
+SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS + MEDIA_DOMAINS
 
 
 def _m1_envelope_payload(**overrides):
@@ -74,6 +75,9 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "workspaces.workspace": ["upsert", "tombstone"],
         "workspaces.source_ref": ["upsert", "tombstone"],
         "source_cache.entry": ["upsert", "tombstone"],
+        "media.item": ["upsert", "tombstone"],
+        "media.keyword": ["upsert", "tombstone"],
+        "media.keyword_link": ["upsert", "tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
@@ -118,6 +122,15 @@ def test_dataset_enroll_request_accepts_explicit_source_cache_domain():
 
     assert request.scope_type == "personal"
     assert request.domains == SOURCE_CACHE_DOMAINS
+
+
+def test_dataset_enroll_request_accepts_explicit_media_metadata_domains():
+    request = SyncDatasetEnrollRequest.model_validate(
+        {"domains": MEDIA_DOMAINS}
+    )
+
+    assert request.scope_type == "personal"
+    assert request.domains == MEDIA_DOMAINS
 
 
 def test_background_policy_lease_and_status_models_validate_m3_shapes():
@@ -231,11 +244,50 @@ def test_sync_envelope_accepts_source_cache_entry_domain():
     assert envelope.operation == "upsert"
 
 
+def test_sync_envelope_accepts_media_metadata_domains():
+    item = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            domain="media.item",
+            object_id="media-1",
+            stable_key="media.item:media-1",
+            payload={"media_id": "media-1", "media_type": "video", "title": "Lecture"},
+            payload_hash="sha256:media-item",
+        )
+    )
+    keyword = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            domain="media.keyword",
+            object_id="keyword-1",
+            stable_key="media.keyword:keyword-1",
+            payload={"keyword_id": "keyword-1", "name": "research"},
+            payload_hash="sha256:media-keyword",
+        )
+    )
+    link = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            domain="media.keyword_link",
+            object_id="media-1:keyword-1",
+            stable_key="media.keyword_link:media-1:keyword-1",
+            payload={"media_id": "media-1", "keyword_id": "keyword-1"},
+            payload_hash="sha256:media-keyword-link",
+        )
+    )
+
+    assert [item.domain, keyword.domain, link.domain] == MEDIA_DOMAINS
+
+
 def test_sync_envelope_rejects_legacy_source_cache_domain():
     with pytest.raises(ValidationError) as exc_info:
         SyncV2Envelope.model_validate(_m1_envelope_payload(domain="source_cache"))
 
     assert "source_cache" in str(exc_info.value)
+
+
+def test_sync_envelope_rejects_legacy_media_domain():
+    with pytest.raises(ValidationError) as exc_info:
+        SyncV2Envelope.model_validate(_m1_envelope_payload(domain="media"))
+
+    assert "media" in str(exc_info.value)
 
 
 def test_sync_envelope_rejects_client_private_as_m1_default():

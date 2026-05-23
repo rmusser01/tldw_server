@@ -5,6 +5,7 @@ from __future__ import annotations
 from .attachment_refs import AttachmentRefMaterializer
 from .base import MaterializationResult, SyncMaterializer
 from .chat import ChatConversationMaterializer, ChatMessageMaterializer
+from .media_metadata import MediaMetadataMaterializer
 from .notes import NotesMaterializer
 from .source_cache import SourceCacheMaterializer
 
@@ -13,6 +14,7 @@ __all__ = [
     "ChatConversationMaterializer",
     "ChatMessageMaterializer",
     "MaterializationResult",
+    "MediaMetadataMaterializer",
     "NotesMaterializer",
     "SourceCacheMaterializer",
     "SyncMaterializer",

@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
 )
 from tldw_Server_API.app.core.Sync.v2.domain_adapters._lineage import incoming_references_head
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.chat import ChatDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaMetadataAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.workspaces import WorkspacesDomainAdapter
@@ -42,7 +43,17 @@ def _dataset(*, domains: list[str] | None = None) -> SyncDataset:
         owner_user_id="user-1",
         scope_type="personal",
         encryption_policy="client_private_v1",
-        domains=domains or ["notes", "chat", "workspaces", "source_cache.entry", "media"],
+        domains=domains
+        or [
+            "notes",
+            "chat",
+            "workspaces",
+            "source_cache.entry",
+            "media.item",
+            "media.keyword",
+            "media.keyword_link",
+            "media",
+        ],
         workspace_id=None,
         metadata={},
         created_at="2026-05-10T00:00:00+00:00",
@@ -136,7 +147,10 @@ def _adapter_for_domain(domain: str):
         "chat": ChatDomainAdapter,
         "workspaces": WorkspacesDomainAdapter,
         "source_cache.entry": SourceCacheAdapter,
-    }[domain]()
+        "media.item": MediaMetadataAdapter,
+        "media.keyword": MediaMetadataAdapter,
+        "media.keyword_link": MediaMetadataAdapter,
+    }[domain](domain=domain)
 
 
 def _domain_payload(domain: str) -> dict[str, object]:
@@ -147,7 +161,35 @@ def _domain_payload(domain: str) -> dict[str, object]:
             "content_hash": "sha256:content-a",
             "provenance": {"kind": "url", "uri": "https://example.test/source"},
         }
+    if domain == "media.item":
+        return {"media_id": "media-1", "media_type": "video", "title": "Lecture"}
+    if domain == "media.keyword":
+        return {"keyword_id": "keyword-1", "name": "research"}
+    if domain == "media.keyword_link":
+        return {"media_id": "media-1", "keyword_id": "keyword-1"}
     return {"entity_kind": domain.rstrip("s")}
+
+
+def _domain_identity_kwargs(domain: str) -> dict[str, object]:
+    if domain == "media.item":
+        return {
+            "entity_id": "media-1",
+            "stable_key": "media.item:media-1",
+            "routing_metadata": {"entity_kind": "media_item"},
+        }
+    if domain == "media.keyword":
+        return {
+            "entity_id": "keyword-1",
+            "stable_key": "media.keyword:keyword-1",
+            "routing_metadata": {"entity_kind": "media_keyword"},
+        }
+    if domain == "media.keyword_link":
+        return {
+            "entity_id": "media-1:keyword-1",
+            "stable_key": "media.keyword_link:media-1:keyword-1",
+            "routing_metadata": {"entity_kind": "media_keyword_link"},
+        }
+    return {}
 
 
 def _ready_sync_settings() -> SyncV2Settings:
@@ -530,7 +572,18 @@ def test_lineage_m1_base_cursor_and_object_hash_reference_head():
     )
 
 
-@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache.entry"])
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "notes",
+        "chat",
+        "workspaces",
+        "source_cache.entry",
+        "media.item",
+        "media.keyword",
+        "media.keyword_link",
+    ],
+)
 def test_domain_adapters_accept_linear_tombstone_after_upsert(domain: str):
     prior = _stored(
         _envelope(
@@ -539,6 +592,7 @@ def test_domain_adapters_accept_linear_tombstone_after_upsert(domain: str):
             payload_clear=_domain_payload(domain),
             payload_hash=f"sha256:{domain}-update",
             entity_version=f"{domain}-v1",
+            **_domain_identity_kwargs(domain),
         )
     )
     incoming_payload = {**_domain_payload(domain), "deleted": True}
@@ -550,6 +604,7 @@ def test_domain_adapters_accept_linear_tombstone_after_upsert(domain: str):
         payload_hash=f"sha256:{domain}-tombstone",
         base_version=f"{domain}-v1",
         entity_version=f"{domain}-v2",
+        **_domain_identity_kwargs(domain),
     )
 
     outcome = _adapter_for_domain(domain).evaluate_envelope(
@@ -561,7 +616,18 @@ def test_domain_adapters_accept_linear_tombstone_after_upsert(domain: str):
     assert outcome == AdapterAccepted(client_envelope_id=f"{domain}-tombstone")
 
 
-@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces", "source_cache.entry"])
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "notes",
+        "chat",
+        "workspaces",
+        "source_cache.entry",
+        "media.item",
+        "media.keyword",
+        "media.keyword_link",
+    ],
+)
 def test_domain_adapters_conflict_stale_tombstone_after_upsert(domain: str):
     prior = _stored(
         _envelope(
@@ -570,6 +636,7 @@ def test_domain_adapters_conflict_stale_tombstone_after_upsert(domain: str):
             payload_clear=_domain_payload(domain),
             payload_hash=f"sha256:{domain}-update",
             entity_version=f"{domain}-v2",
+            **_domain_identity_kwargs(domain),
         )
     )
     incoming_payload = {**_domain_payload(domain), "deleted": True}
@@ -581,6 +648,7 @@ def test_domain_adapters_conflict_stale_tombstone_after_upsert(domain: str):
         payload_hash=f"sha256:{domain}-tombstone",
         base_version=f"{domain}-v1",
         entity_version=f"{domain}-v3",
+        **_domain_identity_kwargs(domain),
     )
 
     outcome = _adapter_for_domain(domain).evaluate_envelope(
@@ -853,6 +921,86 @@ def test_source_cache_adapter_rejects_missing_provenance_metadata():
     assert outcome.error_code == "missing_source_cache_provenance"
 
 
+def test_media_metadata_adapter_conflicts_divergent_stable_media_payload():
+    prior = _stored(
+        _envelope(
+            client_envelope_id="media-a",
+            domain="media.item",
+            entity_id="media-1",
+            stable_key="media.item:media-1",
+            payload_clear={"media_id": "media-1", "media_type": "video", "title": "Lecture"},
+            payload_hash="sha256:media-a",
+        )
+    )
+    incoming = _envelope(
+        client_envelope_id="media-b",
+        domain="media.item",
+        entity_id="media-1",
+        stable_key="media.item:media-1",
+        payload_clear={"media_id": "media-1", "media_type": "video", "title": "Other"},
+        payload_hash="sha256:media-b",
+    )
+
+    outcome = MediaMetadataAdapter(domain="media.item").evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.conflict_type == "media_metadata_hash_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("domain", "payload", "error_code"),
+    [
+        ("media.item", {"media_type": "video"}, "missing_media_item_metadata"),
+        ("media.keyword", {"name": "research"}, "missing_media_keyword_metadata"),
+        ("media.keyword_link", {"media_id": "media-1"}, "missing_media_keyword_link_metadata"),
+    ],
+)
+def test_media_metadata_adapter_rejects_missing_stable_identity(
+    domain: str,
+    payload: dict[str, object],
+    error_code: str,
+):
+    outcome = MediaMetadataAdapter(domain=domain).evaluate_envelope(
+        _envelope(
+            client_envelope_id=f"{domain}-missing-identity",
+            domain=domain,
+            entity_id="object-1",
+            stable_key=f"{domain}:object-1",
+            payload_clear=payload,
+            payload_hash=f"sha256:{domain}",
+        ),
+        dataset=_dataset(),
+        context=_context(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == error_code
+
+
+@pytest.mark.parametrize("domain", ["media.item", "media.keyword", "media.keyword_link"])
+def test_media_metadata_adapter_rejects_raw_blob_payloads(domain: str):
+    payload = {**_domain_payload(domain), "blob_ciphertext": "ciphertext:raw-media"}
+
+    outcome = MediaMetadataAdapter(domain=domain).evaluate_envelope(
+        _envelope(
+            client_envelope_id=f"{domain}-raw-blob",
+            domain=domain,
+            payload_clear=payload,
+            payload_hash=f"sha256:{domain}",
+            **_domain_identity_kwargs(domain),
+        ),
+        dataset=_dataset(),
+        context=_context(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "media_metadata_payload_not_metadata_only"
+
+
 def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
     registry = SyncAdapterRegistry([ChatDomainAdapter(domain="chat.message")])
     service = SyncV2Service(
@@ -927,6 +1075,8 @@ def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_dom
     for domain in WORKSPACE_SYNC_DOMAINS:
         assert isinstance(registry.get(domain), WorkspacesDomainAdapter)
     assert isinstance(registry.get("source_cache.entry"), SourceCacheAdapter)
+    for domain in ("media.item", "media.keyword", "media.keyword_link"):
+        assert isinstance(registry.get(domain), MediaMetadataAdapter)
     with pytest.raises(KeyError):
         registry.get("source_cache")
     with pytest.raises(KeyError):

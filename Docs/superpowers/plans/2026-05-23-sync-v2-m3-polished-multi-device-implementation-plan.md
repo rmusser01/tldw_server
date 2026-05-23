@@ -190,7 +190,7 @@
   Write failing adapter/materializer/restore tests, then implement the smallest
   projection path.
 
-- [ ] **Step 2: Promote media metadata domains**
+- [x] **Step 2: Promote media metadata domains**
 
   Add `media.item`, `media.keyword`, and `media.keyword_link` with metadata-only
   semantics and blob references through M2 attachment/blob paths.

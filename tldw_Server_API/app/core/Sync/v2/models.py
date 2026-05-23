@@ -13,6 +13,9 @@ SyncDomain = Literal[
     "workspaces.workspace",
     "workspaces.source_ref",
     "source_cache.entry",
+    "media.item",
+    "media.keyword",
+    "media.keyword_link",
 ]
 SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
@@ -70,15 +73,27 @@ SOURCE_CACHE_SYNC_DOMAINS: list[SyncDomain] = ["source_cache.entry"]
 SOURCE_CACHE_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     "source_cache.entry": ["upsert", "tombstone"],
 }
+MEDIA_SYNC_DOMAINS: list[SyncDomain] = [
+    "media.item",
+    "media.keyword",
+    "media.keyword_link",
+]
+MEDIA_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "media.item": ["upsert", "tombstone"],
+    "media.keyword": ["upsert", "tombstone"],
+    "media.keyword_link": ["upsert", "tombstone"],
+}
 SYNC_V2_SUPPORTED_DOMAINS: list[SyncDomain] = (
     list(M1_SYNC_DOMAINS)
     + list(WORKSPACE_SYNC_DOMAINS)
     + list(SOURCE_CACHE_SYNC_DOMAINS)
+    + list(MEDIA_SYNC_DOMAINS)
 )
 SYNC_V2_SUPPORTED_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
     **M1_SYNC_OPERATIONS,
     **WORKSPACE_SYNC_OPERATIONS,
     **SOURCE_CACHE_SYNC_OPERATIONS,
+    **MEDIA_SYNC_OPERATIONS,
 }
 DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 
@@ -836,6 +851,8 @@ __all__ = [
     "EncryptionPolicy",
     "M1_SYNC_DOMAINS",
     "M1_SYNC_OPERATIONS",
+    "MEDIA_SYNC_DOMAINS",
+    "MEDIA_SYNC_OPERATIONS",
     "SOURCE_CACHE_SYNC_DOMAINS",
     "SOURCE_CACHE_SYNC_OPERATIONS",
     "SYNC_V2_SUPPORTED_DOMAINS",

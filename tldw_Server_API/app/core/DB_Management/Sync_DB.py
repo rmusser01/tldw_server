@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
 from tldw_Server_API.app.core.Sync.v2.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
+    MEDIA_SYNC_DOMAINS,
     SOURCE_CACHE_SYNC_DOMAINS,
     SYNC_V2_SUPPORTED_OPERATIONS,
     WORKSPACE_SYNC_DOMAINS,
@@ -1701,11 +1702,11 @@ class SyncDatabase:
         if dataset.scope_type == "personal":
             if dataset.workspace_id is not None:
                 raise SyncStoreError("Personal sync datasets must not include workspace_id")
-            allowed_domains = set(M1_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS)
+            allowed_domains = set(M1_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS)
         elif dataset.scope_type == "workspace":
             if not dataset.workspace_id or not dataset.workspace_id.strip():
                 raise SyncStoreError("Workspace sync datasets require workspace_id")
-            allowed_domains = set(WORKSPACE_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS)
+            allowed_domains = set(WORKSPACE_SYNC_DOMAINS).union(SOURCE_CACHE_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS)
         else:
             raise SyncStoreError(f"Unsupported sync dataset scope: {dataset.scope_type}")
         invalid_domains = sorted(set(dataset.domains).difference(allowed_domains))

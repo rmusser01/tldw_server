@@ -16,16 +16,18 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, Syn
 
 from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
 from .blob_store import LocalSyncBlobStore
+from .domain_adapters.media import MediaMetadataAdapter
 from .domain_adapters.source_cache import SourceCacheAdapter
 from .domain_adapters.workspaces import WorkspacesDomainAdapter
 from .materializers import (
     AttachmentRefMaterializer,
     ChatConversationMaterializer,
     ChatMessageMaterializer,
+    MediaMetadataMaterializer,
     NotesMaterializer,
     SourceCacheMaterializer,
 )
-from .models import M1_SYNC_DOMAINS, SOURCE_CACHE_SYNC_DOMAINS, WORKSPACE_SYNC_DOMAINS
+from .models import M1_SYNC_DOMAINS, MEDIA_SYNC_DOMAINS, SOURCE_CACHE_SYNC_DOMAINS, WORKSPACE_SYNC_DOMAINS
 from .security import server_trusted_encryption_status_from_env
 from .service import SyncV2Service, SyncV2Settings
 from .store import SyncV2Store
@@ -46,6 +48,7 @@ def default_sync_v2_registry() -> SyncAdapterRegistry:
         ]
         + [WorkspacesDomainAdapter(domain=domain) for domain in WORKSPACE_SYNC_DOMAINS]
         + [SourceCacheAdapter(domain=domain) for domain in SOURCE_CACHE_SYNC_DOMAINS]
+        + [MediaMetadataAdapter(domain=domain) for domain in MEDIA_SYNC_DOMAINS]
     )
 
 
@@ -66,6 +69,9 @@ def sync_v2_service_for_user(user_id: str) -> SyncV2Service:
             "chat.message": ChatMessageMaterializer(_chacha_notes_db_for_user(user_id)),
             "notes.note": NotesMaterializer(_chacha_notes_db_for_user(user_id)),
             "source_cache.entry": SourceCacheMaterializer(),
+            "media.item": MediaMetadataMaterializer(domain="media.item"),
+            "media.keyword": MediaMetadataMaterializer(domain="media.keyword"),
+            "media.keyword_link": MediaMetadataMaterializer(domain="media.keyword_link"),
         },
         blob_store=_sync_v2_blob_store_for_user(user_id),
         settings=SyncV2Settings(

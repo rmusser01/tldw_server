@@ -193,6 +193,27 @@ def _source_cache_envelope(**overrides: Any) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _media_envelope(**overrides: Any) -> SyncEnvelopeCreate:
+    payload: dict[str, Any] = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-media-1",
+        "domain": "media.item",
+        "operation": "upsert",
+        "object_id": "media-1",
+        "device_id": "device-1",
+        "client_sequence": 50,
+        "object_revision": 1,
+        "payload": {"media_id": "media-1", "media_type": "video", "title": "Lecture"},
+        "payload_hash": "sha256:media-item-v1",
+        "payload_size_bytes": 128,
+        "created_at_client": "2026-05-23T18:05:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "stable_key": "media.item:media-1",
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
 def _push(service: SyncV2Service, *envelopes: SyncEnvelopeCreate) -> None:
     result = service.push(
         user_id="user-1",
@@ -408,6 +429,47 @@ def test_restore_preview_includes_source_cache_entries_and_local_conflicts(
         (item.domain, item.object_id, item.conflict_type)
         for item in divergent_inventory.object_conflicts
     ] == [("source_cache.entry", "source-1:sha256-source", "stable_id_conflict")]
+
+
+def test_restore_preview_includes_media_metadata_and_local_conflicts(
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=[*M1_SYNC_DOMAINS, "media.item", "media.keyword", "media.keyword_link"],
+    )
+    _push(sync_service, _media_envelope())
+
+    empty_inventory = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["media.item"],
+        local_inventory=[],
+    )
+    divergent_inventory = sync_service.restore_preview(
+        user_id="user-1",
+        dataset_ids=["dataset-1"],
+        domains=["media.item"],
+        local_inventory=[
+            {
+                "domain": "media.item",
+                "object_id": "media-1",
+                "object_revision": 1,
+                "object_hash": "sha256:local-media-item",
+                "deleted": False,
+            }
+        ],
+    )
+
+    assert empty_inventory.total_counts == {"media.item": 1}
+    assert [(item.domain, item.object_id, item.action) for item in empty_inventory.safe_applies] == [
+        ("media.item", "media-1", "apply")
+    ]
+    assert [
+        (item.domain, item.object_id, item.conflict_type)
+        for item in divergent_inventory.object_conflicts
+    ] == [("media.item", "media-1", "stable_id_conflict")]
 
 
 def test_restore_preview_endpoint_blocks_requested_cross_user_dataset(

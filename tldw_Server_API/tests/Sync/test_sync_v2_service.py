@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterRegistry,
 )
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaMetadataAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
@@ -221,6 +222,44 @@ def _source_cache_envelope(**overrides) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _media_envelope(domain: SyncDomain = "media.item", **overrides) -> SyncEnvelopeCreate:
+    object_id = {
+        "media.item": "media-1",
+        "media.keyword": "keyword-1",
+        "media.keyword_link": "media-1:keyword-1",
+    }[domain]
+    payload_by_domain = {
+        "media.item": {"media_id": "media-1", "media_type": "video", "title": "Lecture"},
+        "media.keyword": {"keyword_id": "keyword-1", "name": "research"},
+        "media.keyword_link": {"media_id": "media-1", "keyword_id": "keyword-1"},
+    }
+    sequence_by_domain = {
+        "media.item": 1,
+        "media.keyword": 2,
+        "media.keyword_link": 3,
+    }
+    payload = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": f"{domain}-env-1",
+        "domain": domain,
+        "operation": "upsert",
+        "object_id": object_id,
+        "device_id": "device-1",
+        "client_sequence": sequence_by_domain[domain],
+        "object_revision": 1,
+        "schema_version": 1,
+        "stable_key": f"{domain}:{object_id}",
+        "payload": payload_by_domain[domain],
+        "payload_hash": f"sha256:{domain}-v1",
+        "payload_size_bytes": 128,
+        "created_at_client": "2026-05-10T00:00:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "adapter_version": 1,
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
 def _register_devices(
     service: SyncV2Service,
     user_id: str,
@@ -311,6 +350,9 @@ def test_capabilities_returns_protocol_domains_limits_and_encryption_policies(
         "workspaces.workspace",
         "workspaces.source_ref",
         "source_cache.entry",
+        "media.item",
+        "media.keyword",
+        "media.keyword_link",
     ]
     assert capabilities.max_batch_size == 10
     assert capabilities.max_envelope_payload_bytes == 1024
@@ -734,6 +776,21 @@ def test_adapter_registry_accepts_source_cache_entry_without_legacy_source_cache
         registry.get(cast(SyncDomain, "source_cache"))
 
 
+def test_adapter_registry_accepts_media_metadata_without_legacy_media():
+    registry = SyncAdapterRegistry(
+        [
+            MediaMetadataAdapter(domain=cast(SyncDomain, "media.item")),
+            MediaMetadataAdapter(domain=cast(SyncDomain, "media.keyword")),
+            MediaMetadataAdapter(domain=cast(SyncDomain, "media.keyword_link")),
+        ]
+    )
+
+    for domain in ("media.item", "media.keyword", "media.keyword_link"):
+        assert registry.get(cast(SyncDomain, domain)).domain == domain
+    with pytest.raises(KeyError):
+        registry.get(cast(SyncDomain, "media"))
+
+
 def test_workspace_dataset_enrollment_requires_workspace_sync_permission(
     sync_store: SyncV2Store,
 ):
@@ -1045,6 +1102,109 @@ def test_source_cache_envelopes_materialize_and_repair_object_state(
         "dataset-1",
         cast(SyncDomain, "source_cache.entry"),
         "source-1:sha256-source",
+    )
+
+    assert tombstoned.rejected == []
+    assert tombstoned.conflicts == []
+    assert deleted_state is not None
+    assert deleted_state.deleted is True
+    assert deleted_state.object_revision == 2
+
+
+def test_media_metadata_envelopes_materialize_and_repair_object_state(
+    sync_store: SyncV2Store,
+):
+    from tldw_Server_API.app.core.Sync.v2.materializers.media_metadata import (
+        MediaMetadataMaterializer,
+    )
+
+    media_domains = [
+        cast(SyncDomain, "media.item"),
+        cast(SyncDomain, "media.keyword"),
+        cast(SyncDomain, "media.keyword_link"),
+    ]
+    registry = SyncAdapterRegistry(
+        [MediaMetadataAdapter(domain=domain) for domain in media_domains]
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        materializers={domain: MediaMetadataMaterializer(domain=domain) for domain in media_domains},
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        settings=SyncV2Settings(server_trusted_encryption=_ready_encryption()),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=media_domains,
+    )
+
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[_media_envelope(domain) for domain in media_domains],
+    )
+
+    assert pushed.rejected == []
+    assert pushed.conflicts == []
+    assert [item.apply_status for item in pushed.accepted] == ["applied", "applied", "applied"]
+    for domain in media_domains:
+        state = sync_store.get_object_state(
+            "dataset-1",
+            domain,
+            {
+                "media.item": "media-1",
+                "media.keyword": "keyword-1",
+                "media.keyword_link": "media-1:keyword-1",
+            }[domain],
+        )
+        assert state is not None
+        assert state.object_hash == f"sha256:{domain}-v1"
+        assert state.deleted is False
+
+    sync_store.mark_envelope_apply_status(
+        pushed.accepted[0].server_sequence,
+        apply_status="failed",
+        apply_error_code="projection_failed",
+        apply_error_message="retry media metadata projection",
+    )
+    repaired = service.repair(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domains=[cast(SyncDomain, "media.item")],
+        failed_only=True,
+    )
+
+    assert repaired.applied_count == 1
+    assert repaired.failed_count == 0
+
+    tombstoned = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _media_envelope(
+                cast(SyncDomain, "media.item"),
+                client_envelope_id="media-item-tombstone",
+                operation="tombstone",
+                client_sequence=4,
+                object_revision=2,
+                payload={"media_id": "media-1", "media_type": "video", "tombstone": True},
+                payload_hash="sha256:media-item-tombstone",
+                base_server_cursor=pushed.accepted[0].server_sequence,
+                base_object_revision=1,
+                base_object_hash="sha256:media.item-v1",
+            )
+        ],
+    )
+    deleted_state = sync_store.get_object_state(
+        "dataset-1",
+        cast(SyncDomain, "media.item"),
+        "media-1",
     )
 
     assert tombstoned.rejected == []

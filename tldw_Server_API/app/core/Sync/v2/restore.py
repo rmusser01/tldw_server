@@ -12,7 +12,15 @@ WHOLE_OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
     {"notes.note", "chat.conversation"}
 )
 OBJECT_RESTORE_DOMAINS: frozenset[SyncDomain] = frozenset(
-    {"notes.note", "chat.conversation", "chat.message", "source_cache.entry"}
+    {
+        "notes.note",
+        "chat.conversation",
+        "chat.message",
+        "source_cache.entry",
+        "media.item",
+        "media.keyword",
+        "media.keyword_link",
+    }
 )
 
 

@@ -833,6 +833,29 @@ def test_dataset_enrollment_supports_source_cache_in_personal_and_workspace_scop
     assert workspace.domains == ["workspaces.source_ref", "source_cache.entry"]
 
 
+def test_dataset_enrollment_supports_media_metadata_in_personal_and_workspace_scopes(
+    sync_store: SyncV2Store,
+):
+    media_domains = ["media.item", "media.keyword", "media.keyword_link"]
+    personal = sync_store.enroll_dataset(
+        _dataset(
+            dataset_id="personal-media-metadata",
+            domains=["notes.note", *media_domains],
+        )
+    )
+    workspace = sync_store.enroll_dataset(
+        _dataset(
+            dataset_id="workspace-media-metadata",
+            scope_type="workspace",
+            workspace_id="workspace-1",
+            domains=["workspaces.source_ref", *media_domains],
+        )
+    )
+
+    assert personal.domains == ["notes.note", *media_domains]
+    assert workspace.domains == ["workspaces.source_ref", *media_domains]
+
+
 def test_dataset_enrollment_rejects_scope_domain_mismatches(sync_store: SyncV2Store):
     with pytest.raises(SyncInvalidDomainError):
         sync_store.enroll_dataset(_dataset(domains=["workspaces.workspace"]))
