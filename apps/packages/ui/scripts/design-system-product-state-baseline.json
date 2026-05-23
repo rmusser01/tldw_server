@@ -2365,17 +2365,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx:Alert",
-    "path": "src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/Watchlists/OutputsTab/OutputsTab.tsx before the guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Option/Watchlists/RunsTab/RunsTab.tsx:Alert",
     "path": "src/components/Option/Watchlists/RunsTab/RunsTab.tsx",
     "rule": "antd-product-state-import",

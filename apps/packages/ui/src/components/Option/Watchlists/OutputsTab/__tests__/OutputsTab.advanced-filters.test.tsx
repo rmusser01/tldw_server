@@ -253,7 +253,9 @@ describe("OutputsTab advanced filters disclosure", () => {
 
     render(<OutputsTab />)
 
-    expect(screen.getByTestId("watchlists-outputs-delivery-issues-banner")).toHaveTextContent(
+    const deliveryIssuesBanner = screen.getByTestId("watchlists-outputs-delivery-issues-banner")
+    expect(deliveryIssuesBanner).toHaveAttribute("data-ds-component", "Alert")
+    expect(deliveryIssuesBanner).toHaveTextContent(
       "Delivery issues detected in 1 report."
     )
     expect(screen.getByTestId("outputs-table-rows")).toHaveTextContent("2")
