@@ -1,7 +1,7 @@
 ---
 id: TASK-418.10.5
 title: Implement WP12 responsive and accessibility route governance
-status: In Progress
+status: Done
 labels:
 - wp12
 - webui
