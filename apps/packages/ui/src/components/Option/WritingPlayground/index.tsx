@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -2115,7 +2114,7 @@ export const WritingPlayground = () => {
                           </div>
                         </div>
                         {logprobsUnavailableReason ? (
-                          <Alert type="info" showIcon message={logprobsUnavailableReason} />
+                          <DesignSystemAlert variant="info" title={logprobsUnavailableReason} />
                         ) : null}
                       </div>
                     </div>
@@ -2151,10 +2150,9 @@ export const WritingPlayground = () => {
                                   </span>
                                 ) : null}
                                 {!supportsAdvancedCompat ? (
-                                  <Alert
-                                    type="info"
-                                    showIcon
-                                    message={extraBodyCompat?.effective_reason || t("option:writingPlayground.advancedUnsupported", "Advanced sampler controls are disabled by runtime configuration.")}
+                                  <DesignSystemAlert
+                                    variant="info"
+                                    title={extraBodyCompat?.effective_reason || t("option:writingPlayground.advancedUnsupported", "Advanced sampler controls are disabled by runtime configuration.")}
                                   />
                                 ) : null}
                                 <div className="flex flex-wrap items-center gap-2">
@@ -2337,7 +2335,9 @@ export const WritingPlayground = () => {
                                         ))}
                                       </div>
                                     ) : null}
-                                    {logitBiasError ? (<Alert type="error" showIcon message={logitBiasError} />) : null}
+                                    {logitBiasError ? (
+                                      <DesignSystemAlert variant="error" title={logitBiasError} />
+                                    ) : null}
                                   </div>
                                 )}
                               </div>

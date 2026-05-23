@@ -2,6 +2,11 @@ import React from "react"
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { JSDOM } from "jsdom"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("@/design-system", () => ({
+  READY_STATE_LABEL: "Registry Ready"
+}))
+
 import { WritingActionBar } from "../WritingActionBar"
 import { WRITING_REVISION_PRESETS } from "../writing-revision-presets"
 import type {
@@ -90,6 +95,18 @@ const documentTarget: WritingRevisionTarget = {
 }
 
 describe("WritingActionBar", () => {
+  it("renders the available status label from the design-system registry", () => {
+    const view = render(
+      <WritingActionBar
+        generationAvailable
+        target={selectionTarget}
+        onRequest={vi.fn()}
+      />
+    )
+
+    expect(view.getByText("Registry Ready")).toBeTruthy()
+  })
+
   it("disables actions when generation is unavailable", () => {
     const onRequest = vi.fn()
 
@@ -199,7 +216,13 @@ describe("WritingActionBar", () => {
 
     fireEvent.click(view.getByRole("button", { name: /rewrite/i }))
     expect(onRequest).not.toHaveBeenCalled()
-    expect(view.getAllByText(/this will rewrite the full draft/i).length).toBe(2)
+    const warnings = view.getAllByText(/this will rewrite the full draft/i)
+    expect(warnings.length).toBe(2)
+    expect(
+      warnings.some((warning) =>
+        warning.closest('[data-ds-component="Alert"]')
+      )
+    ).toBe(true)
 
     fireEvent.click(
       view.getByLabelText(/confirm whole-document text change/i)

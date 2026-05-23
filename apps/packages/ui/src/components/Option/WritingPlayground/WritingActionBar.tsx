@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
+import { Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
 import {
   ArrowRight,
   FileText,
@@ -16,6 +16,8 @@ import type {
   WritingRevisionPresetId,
   WritingRevisionTarget
 } from "./writing-revision-types"
+import { READY_STATE_LABEL } from "@/design-system"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 
@@ -174,7 +176,7 @@ export function WritingActionBar({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Tag color={generationAvailable ? "green" : "default"}>
-          {generationAvailable ? "Ready" : "Generation unavailable"}
+          {generationAvailable ? READY_STATE_LABEL : "Generation unavailable"}
         </Tag>
         <Text type="secondary" className="text-xs">
           Target:
@@ -218,8 +220,8 @@ export function WritingActionBar({
       ) : null}
 
       {confirmationWarning ? (
-        <Alert
-          type="warning"
+        <DesignSystemAlert
+          variant="warning"
           title={
             target.confirmationReason ??
             "Confirm before sending a broad text-changing request."
