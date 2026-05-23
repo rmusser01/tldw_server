@@ -244,4 +244,29 @@ describe("writing session payload utils", () => {
       shouldClearPendingSessionSave(activePayload, nextPayload, false)
     ).toBe(false)
   })
+
+  it("does not clear a preset-id-only pending payload unless the preset id matches", () => {
+    const activePayload = {
+      prompt: "Server draft",
+      settings: DEFAULT_SETTINGS,
+      template_name: null,
+      theme_name: null,
+      chat_mode: false
+    }
+    const pendingPresetPayload = {
+      ...activePayload,
+      revision_preset_id: "preserve_voice"
+    }
+    const savedPresetPayload = {
+      ...activePayload,
+      revision_preset_id: "preserve_voice"
+    }
+
+    expect(
+      shouldClearPendingSessionSave(activePayload, pendingPresetPayload, false)
+    ).toBe(false)
+    expect(
+      shouldClearPendingSessionSave(savedPresetPayload, pendingPresetPayload, false)
+    ).toBe(true)
+  })
 })
