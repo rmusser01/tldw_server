@@ -18,7 +18,7 @@ const makeReplacementProposal = ({
   start: number
   end: number
   beforeText: string
-  replacementText: string
+  replacementText?: string
 }) => ({
   id: "revision-1",
   sessionId: "session-1",
@@ -38,7 +38,7 @@ const makeReplacementProposal = ({
     label: "current paragraph",
     requiresConfirmation: false
   },
-  replacementText,
+  ...(typeof replacementText === "string" ? { replacementText } : {}),
   createdAt: "2026-05-22T00:00:00.000Z",
   status: "pending" as const
 })
@@ -98,6 +98,17 @@ describe("writing revision utilities", () => {
       start: 0,
       end: 5,
       nextText: "Omega beta"
+    })
+  })
+
+  it("noops when a replacement proposal has no replacement text", () => {
+    const proposal = makeReplacementProposal({
+      start: 0,
+      end: 5,
+      beforeText: "Alpha"
+    })
+    expect(planRevisionApply("Alpha beta", proposal)).toMatchObject({
+      type: "noop"
     })
   })
 
