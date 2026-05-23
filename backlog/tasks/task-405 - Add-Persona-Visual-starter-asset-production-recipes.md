@@ -1,7 +1,8 @@
 ---
 id: TASK-405
 title: Add Persona Visual starter asset-production recipes
-status: In Progress
+status: Done
+updated_date: '2026-05-23'
 labels:
 - persona
 - visual-packs
@@ -54,6 +55,8 @@ Added immutable `PersonaVisualStarterProductionRecipe` metadata to bundled start
 Updated Persona starter response schemas and docs so the recipe contract is clear to API clients and future authored-asset generation/review flows. Review follow-up aligned the response schema with the catalog validation bounds for non-empty recipe text, bounded recipe item lists, bounded item text, and the required neutral identity consistency review check. Copy-to-draft behavior is unchanged.
 
 Verification: focused Persona Visual starter/API pytest passed 94 tests; py_compile passed for touched backend/schema modules; Bandit JSON report for touched backend/schema modules had zero results; git diff --check passed.
+
+Closeout 2026-05-23: PR #1762 is merged into `dev` at `ebe86408fd5ee7c7ba72971b5f89307b5a00f6e5`; no active PR or review blocker remains for this task. No additional code changes were made in this closeout.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
