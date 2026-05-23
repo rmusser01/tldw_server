@@ -9,7 +9,17 @@ from typing import Protocol
 from .models import SyncDataset, SyncDomain, SyncEnvelope, SyncEnvelopeCreate
 
 KNOWN_SYNC_DOMAINS: frozenset[str] = frozenset(
-    {"notes", "chat", "workspaces", "source_cache", "media"}
+    {
+        "notes.note",
+        "chat.conversation",
+        "chat.message",
+        "attachment.ref",
+        "notes",
+        "chat",
+        "workspaces",
+        "source_cache",
+        "media",
+    }
 )
 
 

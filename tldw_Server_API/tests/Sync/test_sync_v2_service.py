@@ -83,6 +83,26 @@ def _envelope(**overrides) -> SyncEnvelopeCreate:
     return SyncEnvelopeCreate(**payload)
 
 
+def _m1_note_envelope(**overrides) -> SyncEnvelopeCreate:
+    payload = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-1",
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-1",
+        "device_id": "device-1",
+        "client_sequence": 1,
+        "schema_version": 1,
+        "payload": {"title": "Research note"},
+        "payload_hash": "sha256:note-1",
+        "created_at_client": "2026-05-10T00:00:00+00:00",
+        "encryption_metadata": {"policy": "server_trusted_v1"},
+        "adapter_version": 1,
+    }
+    payload.update(overrides)
+    return SyncEnvelopeCreate(**payload)
+
+
 def _register_devices(
     service: SyncV2Service,
     user_id: str,
@@ -734,10 +754,279 @@ def test_resolve_conflict_stores_resolution_envelope(sync_store: SyncV2Store):
     )
 
     assert resolved.status == "resolved"
-    assert resolved.resolved_by_envelope_id == "env-resolution"
+    assert resolved.resolved_by_envelope_id == pulled.envelopes[0].envelope_id
+    assert resolved.server_cursor == pulled.envelopes[0].server_cursor
     assert resolved.resolution_action == "merge"
     assert [envelope.client_envelope_id for envelope in pulled.envelopes] == ["env-resolution"]
     assert pulled.envelopes[0].status == "accepted"
+
+
+def test_resolve_conflict_duplicate_rename_accepts_distinct_object_id(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes.note",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes.note",
+                    entity_id="note-original",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1", "device-2")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+        encryption_policy="server_trusted_v1",
+    )
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-conflict",
+                object_id="note-original",
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+    original_conflict_cursor = pushed.conflicts[0].server_sequence
+
+    resolved = service.resolve_conflict(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        conflict_id=pushed.conflicts[0].conflict_id,
+        action="duplicate_rename",
+        resolved_by_device_id="device-1",
+        resolution_envelope=_m1_note_envelope(
+            client_envelope_id="env-resolution-copy",
+            object_id="note-copy",
+            client_sequence=2,
+            payload={"title": "Research note copy"},
+            payload_hash="sha256:copy",
+        ),
+    )
+    pulled = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-2",
+        cursor="0",
+    )
+
+    assert resolved.status == "resolved"
+    assert resolved.resolution_action == "duplicate_rename"
+    assert [envelope.object_id for envelope in pulled.envelopes] == ["note-copy"]
+    assert pulled.envelopes[0].client_envelope_id == "env-resolution-copy"
+    assert resolved.resolved_by_envelope_id == pulled.envelopes[0].envelope_id
+    assert resolved.resolved_by_envelope_id.startswith("srv_env_")
+    assert resolved.resolved_by_envelope_id != "env-resolution-copy"
+    assert resolved.server_cursor == pulled.envelopes[0].server_cursor
+    assert resolved.server_cursor != original_conflict_cursor
+
+
+def test_resolve_conflict_duplicate_rename_requires_resolution_envelope(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes.note",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes.note",
+                    entity_id="note-original",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+        encryption_policy="server_trusted_v1",
+    )
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-conflict",
+                object_id="note-original",
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+    conflict_id = pushed.conflicts[0].conflict_id
+
+    with pytest.raises(SyncStoreError, match="requires a resolution envelope"):
+        service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=conflict_id,
+            action="duplicate_rename",
+            resolved_by_device_id="device-1",
+        )
+
+    assert sync_store.get_conflict(conflict_id).status == "unresolved"
+
+
+def test_resolve_conflict_dismiss_rejects_resolution_envelope_without_mutation(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes.note",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict": AdapterConflict(
+                    client_envelope_id="env-conflict",
+                    domain="notes.note",
+                    entity_id="note-original",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+        encryption_policy="server_trusted_v1",
+    )
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                client_envelope_id="env-conflict",
+                object_id="note-original",
+                payload_hash="sha256:original",
+            )
+        ],
+    )
+    conflict_id = pushed.conflicts[0].conflict_id
+
+    with pytest.raises(SyncStoreError, match="dismiss.*resolution envelope"):
+        service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            conflict_id=conflict_id,
+            action="dismiss",
+            resolved_by_device_id="device-1",
+            resolution_envelope=_m1_note_envelope(
+                client_envelope_id="env-skip-resolution",
+                object_id="note-original",
+                client_sequence=2,
+                payload={"title": "Should not be applied"},
+                payload_hash="sha256:skip-resolution",
+            ),
+        )
+
+    conflict = sync_store.get_conflict(conflict_id)
+    assert conflict.status == "unresolved"
+    assert conflict.resolved_by_envelope_id is None
+    stored_envelope_ids = {
+        envelope.client_envelope_id
+        for envelope in sync_store.list_envelopes_after("dataset-1", 0)
+    }
+    assert "env-skip-resolution" not in stored_envelope_ids
+
+
+def test_resolve_conflict_rejects_expected_dataset_mismatch_without_mutation(
+    sync_store: SyncV2Store,
+):
+    registry = SyncAdapterRegistry()
+    registry.register(
+        StaticSyncAdapter(
+            domain="notes.note",
+            supported_adapter_versions={1},
+            outcomes={
+                "env-conflict-b": AdapterConflict(
+                    client_envelope_id="env-conflict-b",
+                    domain="notes.note",
+                    entity_id="note-b",
+                    conflict_type="version_divergence",
+                )
+            },
+        )
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-a",
+        domains=["notes.note"],
+        encryption_policy="server_trusted_v1",
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-b",
+        domains=["notes.note"],
+        encryption_policy="server_trusted_v1",
+    )
+    pushed = service.push(
+        user_id="user-1",
+        dataset_id="dataset-b",
+        device_id="device-1",
+        envelopes=[
+            _m1_note_envelope(
+                dataset_id="dataset-b",
+                client_envelope_id="env-conflict-b",
+                object_id="note-b",
+                payload_hash="sha256:note-b",
+            )
+        ],
+    )
+    conflict_id = pushed.conflicts[0].conflict_id
+
+    with pytest.raises(SyncStoreError, match="not found or is not accessible"):
+        service.resolve_conflict(
+            user_id="user-1",
+            dataset_id="dataset-a",
+            conflict_id=conflict_id,
+            action="dismiss",
+        )
+
+    assert sync_store.get_conflict(conflict_id).status == "unresolved"
 
 
 def test_resolve_conflict_uses_direct_lookup_without_dataset_conflict_scan(

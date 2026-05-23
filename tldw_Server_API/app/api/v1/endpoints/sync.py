@@ -40,6 +40,9 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncAttachmentUploadResponse,
     SyncConflictRecord,
     SyncConflictResolveRequest,
+    SyncConflictResolveRejectedItem,
+    SyncConflictResolveResolvedItem,
+    SyncConflictResolveResponse,
     SyncDatasetEnrollRequest,
     SyncDatasetEnrollResponse,
     SyncDeviceRegisterRequest,
@@ -272,7 +275,17 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
 def _core_envelope_from_api(envelope: SyncV2Envelope) -> SyncEnvelopeCreate:
     payload = model_dump_compat(
         envelope,
-        exclude={"server_sequence", "server_timestamp", "encryption_policy"},
+        exclude={
+            "envelope_id",
+            "server_cursor",
+            "server_sequence",
+            "object_revision",
+            "received_at_server",
+            "server_timestamp",
+            "status",
+            "apply_status",
+            "encryption_policy",
+        },
     )
     return SyncEnvelopeCreate(**payload)
 
@@ -550,42 +563,71 @@ def list_sync_v2_conflicts(
 
 
 @router.post(
-    "/conflicts/{conflict_id}/resolve",
-    response_model=SyncConflictRecord,
-    summary="Resolve a Sync v2 conflict",
+    "/conflicts/resolve",
+    response_model=SyncConflictResolveResponse,
+    summary="Resolve Sync v2 conflicts",
 )
-def resolve_sync_v2_conflict(
-    conflict_id: str,
+def resolve_sync_v2_conflicts(
     request: SyncConflictResolveRequest,
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
-    try:
-        conflict = service.resolve_conflict(
-            user_id=_sync_user_id(user),
-            conflict_id=conflict_id,
-            action=request.action,
-            resolution_envelope=(
-                _core_envelope_from_api(request.resolution_envelope)
-                if request.resolution_envelope is not None
-                else None
-            ),
-            resolved_by_envelope_id=(
-                request.resolution_envelope.client_envelope_id
-                if request.resolution_envelope is not None
-                else None
-            ),
-            resolved_by_device_id=request.resolved_by_device_id,
-            notes=request.notes,
+    user_id = _sync_user_id(user)
+    resolved: list[SyncConflictResolveResolvedItem] = []
+    rejected: list[SyncConflictResolveRejectedItem] = []
+    server_cursors: list[int] = []
+    for resolution in request.resolutions:
+        resolution_envelope = (
+            _core_envelope_from_api(resolution.resolution_envelope)
+            if resolution.resolution_envelope is not None
+            else None
         )
-    except Exception as exc:
-        raise _safe_sync_v2_http_error(
-            exc,
-            user_id=_sync_user_id(user),
-            conflict_id=conflict_id,
-            resolved_by_device_id=request.resolved_by_device_id,
-        ) from exc
-    return _api_conflict_from_core(conflict)
+        service_action = "dismiss" if resolution.action == "skip" else resolution.action
+        try:
+            conflict = service.resolve_conflict(
+                user_id=user_id,
+                dataset_id=request.dataset_id,
+                conflict_id=resolution.conflict_id,
+                action=service_action,
+                resolution_envelope=resolution_envelope,
+                resolved_by_device_id=request.device_id,
+                notes=None,
+            )
+        except Exception as exc:
+            logger.bind(
+                error_type=type(exc).__name__,
+                user_id=user_id,
+                dataset_id=request.dataset_id,
+                device_id=request.device_id,
+                conflict_id=resolution.conflict_id,
+            ).warning("Sync v2 conflict resolution item failed")
+            rejected.append(
+                SyncConflictResolveRejectedItem(
+                    conflict_id=resolution.conflict_id,
+                    action=resolution.action,
+                    error_code="sync_conflict_resolution_failed",
+                    message="Conflict resolution could not be applied.",
+                    retryable=False,
+                )
+            )
+            continue
+        if conflict.server_cursor is not None:
+            server_cursors.append(conflict.server_cursor)
+        resolved.append(
+            SyncConflictResolveResolvedItem(
+                conflict_id=conflict.conflict_id,
+                action=resolution.action,
+                status=conflict.status,
+                envelope_id=conflict.resolved_by_envelope_id,
+                server_cursor=conflict.server_cursor,
+            )
+        )
+    return SyncConflictResolveResponse(
+        dataset_id=request.dataset_id,
+        server_cursor=max(server_cursors, default=None),
+        resolved=resolved,
+        rejected=rejected,
+    )
 
 
 @router.get(

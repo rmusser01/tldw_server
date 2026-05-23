@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 
 from .models import (
     ConflictStatus,
+    SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
     SyncConflict,
@@ -22,6 +23,7 @@ from .models import (
     SyncEnvelopeCreate,
     SyncKeyRecord,
     SyncKeyRecordCreate,
+    SyncObjectState,
     SyncRestoreManifestStats,
 )
 
@@ -51,6 +53,9 @@ class SyncV2Store:
 
     def list_devices_for_user(self, user_id: str) -> list[SyncDevice]:
         return self.db.list_devices_for_user(user_id)
+
+    def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
+        return self.db.get_or_create_default_personal_dataset(user_id)
 
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
         return self.db.insert_envelope(envelope)
@@ -88,6 +93,53 @@ class SyncV2Store:
             domain,
             entity_id=entity_id,
             stable_key=stable_key,
+            limit=limit,
+        )
+
+    def get_object_state(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> SyncObjectState | None:
+        return self.db.get_object_state(dataset_id, domain, object_id)
+
+    def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
+        return self.db.upsert_object_state(state)
+
+    def mark_envelope_apply_status(
+        self,
+        server_cursor: int,
+        *,
+        apply_status: SyncApplyStatus,
+        apply_error_code: str | None = None,
+        apply_error_message: str | None = None,
+    ) -> SyncEnvelope:
+        return self.db.mark_envelope_apply_status(
+            server_cursor,
+            apply_status=apply_status,
+            apply_error_code=apply_error_code,
+            apply_error_message=apply_error_message,
+        )
+
+    def list_failed_applies(
+        self,
+        dataset_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[SyncEnvelope]:
+        return self.db.list_failed_applies(dataset_id, limit=limit)
+
+    def list_accepted_envelopes_for_replay(
+        self,
+        dataset_id: str,
+        *,
+        since_cursor: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncEnvelope]:
+        return self.db.list_accepted_envelopes_for_replay(
+            dataset_id,
+            since_cursor=since_cursor,
             limit=limit,
         )
 
@@ -133,6 +185,8 @@ class SyncV2Store:
         self,
         conflict_id: str,
         *,
+        dataset_id: str | None = None,
+        server_cursor: int | None = None,
         status: ConflictStatus = "resolved",
         resolved_by_envelope_id: str | None = None,
         resolved_by_device_id: str | None = None,
@@ -141,6 +195,8 @@ class SyncV2Store:
     ) -> SyncConflict:
         return self.db.resolve_conflict(
             conflict_id,
+            dataset_id=dataset_id,
+            server_cursor=server_cursor,
             status=status,
             resolved_by_envelope_id=resolved_by_envelope_id,
             resolved_by_device_id=resolved_by_device_id,

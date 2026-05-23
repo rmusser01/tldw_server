@@ -1,107 +1,132 @@
 from __future__ import annotations
 
-"""Pydantic schemas for the Sync v2 protocol API."""
+"""Pydantic schemas for the Sync v2 M1 protocol API."""
 
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-SyncDomain = Literal["notes", "chat", "workspaces", "source_cache", "media"]
-SyncOperation = Literal["upsert", "delete", "link", "unlink", "resolve_conflict"]
+SyncDomain = Literal["notes.note", "chat.conversation", "chat.message", "attachment.ref"]
+SyncOperation = Literal["upsert", "append", "tombstone"]
 DatasetScopeType = Literal["personal", "workspace"]
-EncryptionPolicy = Literal["client_private_v1", "server_trusted", "shared_workspace_v1"]
+EncryptionPolicy = Literal["server_trusted_v1"]
 ConflictStatus = Literal["unresolved", "resolved", "dismissed"]
-ConflictResolutionAction = Literal["accept_local", "accept_remote", "merge", "dismiss"]
+ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 
-V1_SYNC_DOMAINS: list[SyncDomain] = ["notes", "chat", "workspaces", "source_cache", "media"]
-V1_SYNC_OPERATIONS: list[SyncOperation] = ["upsert", "delete", "link", "unlink", "resolve_conflict"]
-V1_ENCRYPTION_POLICIES: list[EncryptionPolicy] = [
-    "client_private_v1",
-    "server_trusted",
-    "shared_workspace_v1",
+M1_SYNC_DOMAINS: list[SyncDomain] = [
+    "notes.note",
+    "chat.conversation",
+    "chat.message",
+    "attachment.ref",
 ]
+M1_SYNC_OPERATIONS: dict[SyncDomain, list[SyncOperation]] = {
+    "notes.note": ["upsert", "tombstone"],
+    "chat.conversation": ["upsert", "tombstone"],
+    "chat.message": ["append", "tombstone"],
+    "attachment.ref": ["upsert", "tombstone"],
+}
+DEFAULT_M1_ENCRYPTION_POLICY: EncryptionPolicy = "server_trusted_v1"
 SYNC_V2_MAX_PUSH_ENVELOPES = 100
 
-_PRIVATE_CLEAR_PAYLOAD_ALLOWED_KEYS = {
-    "archive_status",
-    "archived",
+_WHOLE_OBJECT_DOMAINS = {"notes.note", "chat.conversation"}
+_ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "attachment_id",
-    "attachment_ids",
-    "availability",
+    "parent_domain",
+    "parent_object_id",
     "content_type",
-    "deleted",
-    "entity_kind",
-    "entity_type",
-    "link_type",
-    "media_id",
-    "order_key",
-    "parent_entity_id",
-    "parent_entity_kind",
-    "payload_hash",
-    "payload_size_bytes",
-    "position",
-    "record_type",
-    "relation_type",
-    "relationship",
     "size_bytes",
-    "soft_deleted",
-    "sort_key",
-    "source_id",
-    "stable_key",
-    "status",
-    "sync_status",
-    "tag_ids",
-    "target_entity_id",
-    "target_entity_kind",
-    "tombstone",
-    "workspace_id",
+    "payload_hash",
+    "availability",
 }
+
+
+def _default_encryption() -> dict[str, Any]:
+    return {
+        "policy": DEFAULT_M1_ENCRYPTION_POLICY,
+        "ready": True,
+        "attestation": {
+            "scope": "user_database_directory",
+            "covers": ["Sync_v2.db", "ChaChaNotes.db"],
+            "configured": True,
+        },
+    }
+
+
+def _default_blob_transfer() -> dict[str, bool]:
+    return {"supported": False}
 
 
 def _normalize_object_map(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
-    return value
+    if isinstance(value, dict):
+        return value
+    raise ValueError("value must be an object")
 
 
-def _find_disallowed_private_clear_payload_key(value: dict[str, Any]) -> str | None:
-    for key in value:
-        normalized_key = str(key).strip().lower().replace("-", "_")
-        if normalized_key not in _PRIVATE_CLEAR_PAYLOAD_ALLOWED_KEYS:
-            return f"payload_clear.{key}"
-    return None
+def _with_transition_aliases(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return data
+    normalized = dict(data)
+    if not normalized.get("object_id") and normalized.get("entity_id"):
+        normalized["object_id"] = normalized["entity_id"]
+    if normalized.get("server_cursor") is None and normalized.get("server_sequence") is not None:
+        normalized["server_cursor"] = normalized["server_sequence"]
+    if normalized.get("payload") is None and normalized.get("payload_clear") is not None:
+        normalized["payload"] = normalized["payload_clear"]
+    if (
+        normalized.get("created_at_client") is None
+        and normalized.get("client_timestamp") is not None
+    ):
+        normalized["created_at_client"] = normalized["client_timestamp"]
+    if (
+        normalized.get("received_at_server") is None
+        and normalized.get("server_timestamp") is not None
+    ):
+        normalized["received_at_server"] = normalized["server_timestamp"]
+    return normalized
 
 
 class SyncCapabilitiesResponse(BaseModel):
-    """Server-supported Sync v2 protocol capabilities."""
+    """Server-supported Sync v2 M1 protocol capabilities."""
 
-    protocol_version: int = Field(2, ge=2, description="Current Sync protocol version.")
-    min_supported_protocol_version: int = Field(2, ge=2, description="Oldest accepted Sync protocol version.")
-    supported_domains: list[SyncDomain] = Field(default_factory=lambda: list(V1_SYNC_DOMAINS))
-    supported_operations: list[SyncOperation] = Field(default_factory=lambda: list(V1_SYNC_OPERATIONS))
-    encryption_policies: list[EncryptionPolicy] = Field(default_factory=lambda: list(V1_ENCRYPTION_POLICIES))
-    max_batch_size: int = Field(100, ge=1, description="Maximum envelopes accepted by one push.")
+    protocol_version: str = "sync-v2-m1"
+    domains: list[SyncDomain] = Field(
+        default_factory=lambda: list(M1_SYNC_DOMAINS),
+        validation_alias=AliasChoices("domains", "supported_domains"),
+    )
+    operations: dict[SyncDomain, list[SyncOperation]] = Field(
+        default_factory=lambda: {domain: list(operations) for domain, operations in M1_SYNC_OPERATIONS.items()}
+    )
+    encryption: dict[str, Any] = Field(default_factory=_default_encryption)
+    blob_transfer: dict[str, bool] = Field(default_factory=_default_blob_transfer)
+    max_batch_size: int = Field(100, ge=1)
     max_envelope_payload_bytes: int = Field(262_144, ge=1)
     max_attachment_bytes: int = Field(1_048_576, ge=1)
     supports_restore_manifest: bool = True
     supports_conflicts: bool = True
-    supports_attachments: bool = True
+    supports_attachments: bool = False
     compatibility_flags: dict[str, bool] = Field(default_factory=dict)
     server_time: str | None = None
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "protocol_version": 2,
-                "min_supported_protocol_version": 2,
-                "supported_domains": ["notes", "chat", "workspaces", "source_cache", "media"],
-                "encryption_policies": ["client_private_v1", "server_trusted", "shared_workspace_v1"],
-                "max_batch_size": 100,
-                "supports_restore_manifest": True,
-            }
-        }
-    )
+    @field_validator("protocol_version", mode="before")
+    @classmethod
+    def _normalize_protocol_version(cls, value: Any) -> str:
+        if value in (None, 2, "2"):
+            return "sync-v2-m1"
+        return str(value)
+
+    @field_validator("domains", mode="before")
+    @classmethod
+    def _default_m1_domains(cls, value: Any) -> list[SyncDomain]:
+        if value in (None, []):
+            return list(M1_SYNC_DOMAINS)
+        if isinstance(value, list) and all(domain in M1_SYNC_DOMAINS for domain in value):
+            return value
+        return list(M1_SYNC_DOMAINS)
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class SyncDeviceRegisterRequest(BaseModel):
@@ -111,7 +136,7 @@ class SyncDeviceRegisterRequest(BaseModel):
     display_name: str = Field(..., description="Human-readable device name.")
     client_type: str = Field("chatbook", description="Client family, such as chatbook or webui.")
     client_version: str | None = None
-    supported_domains: list[SyncDomain] = Field(default_factory=list)
+    supported_domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
     capabilities: dict[str, Any] = Field(
         default_factory=dict,
         validation_alias=AliasChoices("capabilities", "client_capabilities"),
@@ -138,8 +163,8 @@ class SyncDatasetEnrollRequest(BaseModel):
     device_id: str | None = None
     scope_type: DatasetScopeType = "personal"
     workspace_id: str | None = None
-    domains: list[SyncDomain] = Field(default_factory=lambda: list(V1_SYNC_DOMAINS))
-    encryption_policy: EncryptionPolicy = "client_private_v1"
+    domains: list[SyncDomain] = Field(default_factory=lambda: list(M1_SYNC_DOMAINS))
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -199,29 +224,44 @@ class SyncRestoreManifestResponse(BaseModel):
 class SyncV2Envelope(BaseModel):
     """Protocol unit exchanged by Sync v2 clients and the server."""
 
+    envelope_id: str | None = None
     client_envelope_id: str
     dataset_id: str
-    domain: SyncDomain
-    entity_id: str
-    operation: SyncOperation
-    adapter_version: int = Field(..., ge=1)
     device_id: str | None = None
-    stable_key: str | None = None
-    client_timestamp: str | None = None
-    server_timestamp: str | None = None
-    server_sequence: int | None = Field(None, ge=0)
-    base_version: str | int | None = None
-    entity_version: str | int | None = None
+    client_profile_id: str | None = None
+    client_sequence: int | None = Field(None, ge=0)
+    base_server_cursor: int | None = Field(None, ge=0)
+    base_object_revision: int | None = Field(None, ge=0)
+    base_object_hash: str | None = None
+    server_cursor: int | None = Field(None, ge=0)
+    domain: SyncDomain
+    operation: SyncOperation
+    object_id: str = Field(..., min_length=1)
+    parent_id: str | None = None
+    schema_version: int = Field(1, ge=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    payload_hash: str = Field(..., min_length=1)
+    object_revision: int | None = Field(None, ge=0)
+    created_at_client: str | None = None
+    received_at_server: str | None = None
+    deleted: bool = False
+    encryption_metadata: dict[str, Any] = Field(
+        default_factory=lambda: {"policy": DEFAULT_M1_ENCRYPTION_POLICY}
+    )
+    payload_size_bytes: int | None = Field(None, ge=0)
+    payload_ciphertext: str | None = None
     dependencies: list[dict[str, Any]] = Field(default_factory=list)
     routing_metadata: dict[str, Any] = Field(default_factory=dict)
-    payload_ciphertext: str | None = None
-    payload_clear: dict[str, Any] = Field(default_factory=dict)
-    payload_hash: str
-    payload_size_bytes: int | None = Field(None, ge=0)
-    encryption_policy: EncryptionPolicy = "client_private_v1"
+    stable_key: str | None = None
     status: str | None = None
+    apply_status: str | None = None
 
-    @field_validator("routing_metadata", "payload_clear", mode="before")
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aliases(cls, data: Any) -> Any:
+        return _with_transition_aliases(data)
+
+    @field_validator("payload", "routing_metadata", "encryption_metadata", mode="before")
     @classmethod
     def _default_object_maps(cls, value: Any) -> dict[str, Any]:
         return _normalize_object_map(value)
@@ -234,33 +274,73 @@ class SyncV2Envelope(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _reject_clear_private_payload(self) -> "SyncV2Envelope":
-        if self.encryption_policy != "client_private_v1":
-            return self
+    def _validate_m1_contract(self) -> "SyncV2Envelope":
+        allowed_operations = M1_SYNC_OPERATIONS[self.domain]
+        if self.operation not in allowed_operations:
+            raise ValueError(f"{self.operation} is not supported for {self.domain}")
 
-        disallowed_key_path = _find_disallowed_private_clear_payload_key(self.payload_clear)
-        if disallowed_key_path:
-            raise ValueError(
-                f"{disallowed_key_path} is not allowed in clear client_private_v1 sync envelopes"
-            )
+        policy = self.encryption_metadata.get("policy", DEFAULT_M1_ENCRYPTION_POLICY)
+        if policy != DEFAULT_M1_ENCRYPTION_POLICY:
+            raise ValueError(f"{policy} is not accepted by the Sync v2 M1 envelope contract")
+
+        base_values = (
+            self.base_server_cursor,
+            self.base_object_revision,
+            self.base_object_hash,
+        )
+        has_any_base = any(value is not None for value in base_values)
+        has_all_base = all(value is not None for value in base_values)
+        if not self.payload_hash.strip():
+            raise ValueError("payload_hash is required by the Sync v2 M1 envelope contract")
+        if has_any_base and not has_all_base:
+            raise ValueError("base metadata must be supplied as a complete set")
+        if self.domain in _WHOLE_OBJECT_DOMAINS:
+            if self.operation == "tombstone" and not has_all_base:
+                raise ValueError(f"{self.domain} tombstone envelopes require base metadata")
+            if (
+                self.operation == "upsert"
+                and self.object_revision is not None
+                and self.object_revision > 1
+                and not has_all_base
+            ):
+                raise ValueError(f"{self.domain} update envelopes require base metadata")
+
+        if self.domain == "chat.message" and (
+            self.operation == "append"
+            and (not self.object_id.strip() or not self.payload_hash.strip())
+        ):
+            raise ValueError("chat.message append envelopes require object_id and payload_hash")
+
+        if self.domain == "attachment.ref":
+            missing = _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS.difference(self.payload)
+            if missing:
+                raise ValueError(
+                    "attachment.ref envelopes require payload metadata fields: "
+                    + ", ".join(sorted(missing))
+                )
         return self
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "client_envelope_id": "env-1",
-                "dataset_id": "dataset-1",
-                "domain": "notes",
-                "entity_id": "note-1",
-                "operation": "upsert",
-                "adapter_version": 1,
-                "routing_metadata": {"entity_kind": "note"},
-                "payload_ciphertext": "base64-or-jwe-opaque-payload",
-                "payload_clear": {"status": "active"},
-                "payload_hash": "sha256:...",
-            }
-        }
-    )
+    @property
+    def server_sequence(self) -> int | None:
+        return self.server_cursor
+
+    @property
+    def entity_id(self) -> str:
+        return self.object_id
+
+    @property
+    def payload_clear(self) -> dict[str, Any]:
+        return self.payload
+
+    @property
+    def client_timestamp(self) -> str | None:
+        return self.created_at_client
+
+    @property
+    def server_timestamp(self) -> str | None:
+        return self.received_at_server
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class SyncPushRequest(BaseModel):
@@ -289,9 +369,19 @@ class SyncPushAcceptedEnvelope(BaseModel):
     """Accepted push outcome for one client envelope."""
 
     client_envelope_id: str
-    server_sequence: int = Field(..., ge=0)
+    server_cursor: int = Field(..., ge=0, validation_alias=AliasChoices("server_cursor", "server_sequence"))
     domain: SyncDomain | None = None
-    entity_id: str | None = None
+    object_id: str | None = Field(None, validation_alias=AliasChoices("object_id", "entity_id"))
+
+    @property
+    def server_sequence(self) -> int:
+        return self.server_cursor
+
+    @property
+    def entity_id(self) -> str | None:
+        return self.object_id
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class SyncPushRejectedEnvelope(BaseModel):
@@ -309,9 +399,23 @@ class SyncPushConflictEnvelope(BaseModel):
     conflict_id: str
     client_envelope_id: str
     domain: SyncDomain
-    entity_id: str
-    server_sequence: int | None = Field(None, ge=0)
+    object_id: str = Field(..., validation_alias=AliasChoices("object_id", "entity_id"))
+    server_cursor: int | None = Field(
+        None,
+        ge=0,
+        validation_alias=AliasChoices("server_cursor", "server_sequence"),
+    )
     message: str | None = None
+
+    @property
+    def entity_id(self) -> str:
+        return self.object_id
+
+    @property
+    def server_sequence(self) -> int | None:
+        return self.server_cursor
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class SyncPushResponse(BaseModel):
@@ -325,7 +429,7 @@ class SyncPushResponse(BaseModel):
 
 
 class SyncPullResponse(BaseModel):
-    """Stable sequence-ordered envelopes returned by pull."""
+    """Stable cursor-ordered envelopes returned by pull."""
 
     dataset_id: str
     envelopes: list[SyncV2Envelope] = Field(default_factory=list)
@@ -334,18 +438,24 @@ class SyncPullResponse(BaseModel):
 
 
 class SyncAttachmentUploadRequest(BaseModel):
-    """Request metadata for uploading a small encrypted sync attachment."""
+    """Request metadata for uploading a future encrypted sync attachment."""
 
     dataset_id: str
     domain: SyncDomain
-    entity_id: str
+    object_id: str = Field(..., validation_alias=AliasChoices("object_id", "entity_id"))
     attachment_id: str
     content_type: str
     size_bytes: int = Field(..., ge=0)
     payload_ciphertext: str
     payload_hash: str
-    encryption_policy: EncryptionPolicy = "client_private_v1"
+    encryption_policy: EncryptionPolicy = DEFAULT_M1_ENCRYPTION_POLICY
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def entity_id(self) -> str:
+        return self.object_id
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
 class SyncAttachmentUploadResponse(BaseModel):
@@ -366,27 +476,101 @@ class SyncConflictRecord(BaseModel):
     conflict_id: str
     dataset_id: str
     domain: SyncDomain
-    entity_id: str
+    object_id: str = Field(..., validation_alias=AliasChoices("object_id", "entity_id"))
     conflict_type: str
     status: ConflictStatus = "unresolved"
     base_envelope_id: str | None = None
     local_envelope_id: str | None = None
     remote_envelope_id: str | None = None
-    server_sequence: int | None = Field(None, ge=0)
+    server_cursor: int | None = Field(
+        None,
+        ge=0,
+        validation_alias=AliasChoices("server_cursor", "server_sequence"),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     resolved_by_envelope_id: str | None = None
     created_at: str | None = None
     resolved_at: str | None = None
 
+    @property
+    def entity_id(self) -> str:
+        return self.object_id
 
-class SyncConflictResolveRequest(BaseModel):
-    """Request to resolve a conflict by action or replacement envelope."""
+    @property
+    def server_sequence(self) -> int | None:
+        return self.server_cursor
 
-    conflict_id: str | None = None
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SyncConflictResolution(BaseModel):
+    """One explicit M1 conflict-resolution decision."""
+
+    conflict_id: str = Field(..., min_length=1)
     action: ConflictResolutionAction
     resolution_envelope: SyncV2Envelope | None = None
-    resolved_by_device_id: str | None = None
-    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_resolution_envelope(self) -> "SyncConflictResolution":
+        if self.action == "duplicate_rename" and self.resolution_envelope is None:
+            raise ValueError("duplicate_rename requires a resolution_envelope")
+        if self.action == "skip" and self.resolution_envelope is not None:
+            raise ValueError("skip must not include a resolution_envelope")
+        return self
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncConflictResolveRequest(BaseModel):
+    """Request to resolve one or more M1 conflicts."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str = Field(..., min_length=1)
+    resolutions: list[SyncConflictResolution] = Field(default_factory=list, min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SyncConflictResolveResolvedItem(BaseModel):
+    """Successful M1 conflict-resolution outcome for one conflict."""
+
+    conflict_id: str
+    action: ConflictResolutionAction
+    status: ConflictStatus
+    envelope_id: str | None = Field(
+        None,
+        validation_alias=AliasChoices("envelope_id", "resolved_by_envelope_id"),
+    )
+    server_cursor: int | None = Field(
+        None,
+        ge=0,
+        validation_alias=AliasChoices("server_cursor", "server_sequence"),
+    )
+
+    @property
+    def server_sequence(self) -> int | None:
+        return self.server_cursor
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class SyncConflictResolveRejectedItem(BaseModel):
+    """Rejected M1 conflict-resolution outcome for one conflict."""
+
+    conflict_id: str
+    action: ConflictResolutionAction
+    error_code: str
+    message: str
+    retryable: bool = False
+
+
+class SyncConflictResolveResponse(BaseModel):
+    """Batch M1 conflict-resolution response."""
+
+    dataset_id: str
+    server_cursor: int | None = Field(None, ge=0)
+    resolved: list[SyncConflictResolveResolvedItem] = Field(default_factory=list)
+    rejected: list[SyncConflictResolveRejectedItem] = Field(default_factory=list)
 
 
 class SyncKeyRecoveryBundleRequest(BaseModel):
@@ -426,14 +610,21 @@ class SyncKeyRecoveryBundleListResponse(BaseModel):
 __all__ = [
     "ConflictResolutionAction",
     "ConflictStatus",
+    "DEFAULT_M1_ENCRYPTION_POLICY",
     "DatasetScopeType",
     "EncryptionPolicy",
+    "M1_SYNC_DOMAINS",
+    "M1_SYNC_OPERATIONS",
     "SYNC_V2_MAX_PUSH_ENVELOPES",
     "SyncAttachmentUploadRequest",
     "SyncAttachmentUploadResponse",
     "SyncCapabilitiesResponse",
     "SyncConflictRecord",
+    "SyncConflictResolution",
     "SyncConflictResolveRequest",
+    "SyncConflictResolveResolvedItem",
+    "SyncConflictResolveRejectedItem",
+    "SyncConflictResolveResponse",
     "SyncDatasetEnrollRequest",
     "SyncDatasetEnrollResponse",
     "SyncDeviceRegisterRequest",

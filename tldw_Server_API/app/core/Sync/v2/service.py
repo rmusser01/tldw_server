@@ -587,6 +587,7 @@ class SyncV2Service:
         *,
         user_id: str,
         conflict_id: str,
+        dataset_id: str | None = None,
         action: str,
         resolution_envelope: SyncEnvelopeCreate | None = None,
         resolved_by_envelope_id: str | None = None,
@@ -596,11 +597,18 @@ class SyncV2Service:
         conflict = self.store.get_conflict(conflict_id)
         if conflict is None:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
+        if dataset_id is not None and conflict.dataset_id != dataset_id:
+            raise SyncStoreError("Sync conflict was not found or is not accessible")
         dataset = self.store.get_dataset(conflict.dataset_id, owner_user_id=user_id)
         if dataset is None:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if resolved_by_device_id is not None:
             self._require_registered_device(user_id, resolved_by_device_id)
+        resolution_server_cursor: int | None = None
+        if action == "duplicate_rename" and resolution_envelope is None:
+            raise SyncStoreError("Sync duplicate_rename requires a resolution envelope")
+        if action == "dismiss" and resolution_envelope is not None:
+            raise SyncStoreError("Sync dismiss must not include a resolution envelope")
         if resolution_envelope is not None:
             resolution_device_id = resolved_by_device_id or resolution_envelope.device_id
             self._require_registered_device(user_id, resolution_device_id or "")
@@ -608,12 +616,18 @@ class SyncV2Service:
                 raise SyncStoreError(
                     "Sync resolution envelope dataset_id must match the conflict dataset"
                 )
-            if (
-                resolution_envelope.domain != conflict.domain
-                or resolution_envelope.entity_id != conflict.entity_id
-            ):
+            if resolution_envelope.domain != conflict.domain:
                 raise SyncStoreError(
-                    "Sync resolution envelope must target the conflict domain and entity"
+                    "Sync resolution envelope must target the conflict domain"
+                )
+            if action == "duplicate_rename":
+                if resolution_envelope.entity_id == conflict.entity_id:
+                    raise SyncStoreError(
+                        "Sync duplicate_rename resolution envelope must use a distinct object_id"
+                    )
+            elif resolution_envelope.entity_id != conflict.entity_id:
+                raise SyncStoreError(
+                    "Sync resolution envelope must target the conflict entity"
                 )
             if (
                 resolved_by_device_id is not None
@@ -642,10 +656,13 @@ class SyncV2Service:
                     status="accepted",
                 )
             )
-            resolved_by_envelope_id = inserted.client_envelope_id
+            resolved_by_envelope_id = inserted.envelope_id
+            resolution_server_cursor = inserted.server_cursor
             resolved_by_device_id = resolution_device_id
         return self.store.resolve_conflict(
             conflict_id,
+            dataset_id=dataset.dataset_id,
+            server_cursor=resolution_server_cursor,
             status="dismissed" if action == "dismiss" else "resolved",
             resolved_by_envelope_id=resolved_by_envelope_id,
             resolved_by_device_id=resolved_by_device_id,
