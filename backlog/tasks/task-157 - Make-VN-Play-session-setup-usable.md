@@ -1,10 +1,10 @@
 ---
 id: TASK-157
 title: Make VN Play session setup usable
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 05:15'
-updated_date: '2026-05-09 06:03'
+updated_date: '2026-05-23 12:38'
 labels:
   - vn-play
   - frontend
@@ -63,6 +63,8 @@ Verification recorded:
 - Bandit: not applicable; touched production code is frontend TypeScript/React only.
 
 PR #1409 review follow-up: verified unresolved review threads, then added regressions and fixes for paginated character loading via /characters/query, bounded VN asset readiness request fan-out, rendering selectors before readiness completes, and duplicate readiness-warning React keys. Verification: red run failed 5 expected tests before fixes; final focused vitest passed 5 files / 26 tests; touched-file ESLint exited 0; git diff --check exited 0; VN Play smoke passed 1 test outside the sandbox after port binding was denied inside the sandbox. Bandit remains not applicable because touched production code is frontend TypeScript/React only.
+
+Closeout review 2026-05-23: confirmed PR #1409 merged into `dev` at merge commit `ad27e6af6fa4511e7d2e27bc96595912fa4db049`. Current `origin/dev` still contains the selector-driven VN Play setup ownership in `NewSessionDialog.tsx`, `lib/api/characters.ts`, `types/characters.ts`, focused `VNPlayWorkspace` coverage, and the selector-based VN Play smoke test. Backlog MCP resolves `TASK-157` to a different duplicate task, so this closeout used the exact VN Play task path.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
