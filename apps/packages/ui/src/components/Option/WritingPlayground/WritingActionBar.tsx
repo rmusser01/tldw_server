@@ -1,5 +1,14 @@
 import React, { useMemo, useRef, useState } from "react"
 import { Alert, Button, Checkbox, Input, Segmented, Space, Tag, Typography } from "antd"
+import {
+  ArrowRight,
+  FileText,
+  ListTree,
+  Minimize2,
+  PenLine,
+  RefreshCw,
+  SlidersHorizontal
+} from "lucide-react"
 import { WRITING_REVISION_PRESETS, getWritingRevisionPreset } from "./writing-revision-presets"
 import type {
   WritingRevisionAction,
@@ -35,14 +44,18 @@ const TEXT_CHANGING_ACTIONS = new Set<WritingRevisionAction>([
   "custom"
 ])
 
-const ACTION_LABELS: Array<{ action: WritingRevisionAction; label: string }> = [
-  { action: "continue", label: "Continue" },
-  { action: "rewrite", label: "Rewrite" },
-  { action: "expand", label: "Expand" },
-  { action: "tighten", label: "Tighten" },
-  { action: "tone", label: "Tone" },
-  { action: "outline", label: "Outline" },
-  { action: "custom", label: "Custom" }
+const ACTION_LABELS: Array<{
+  action: WritingRevisionAction
+  label: string
+  icon: React.ReactNode
+}> = [
+  { action: "continue", label: "Continue", icon: <ArrowRight size={14} /> },
+  { action: "rewrite", label: "Rewrite", icon: <RefreshCw size={14} /> },
+  { action: "expand", label: "Expand", icon: <FileText size={14} /> },
+  { action: "tighten", label: "Tighten", icon: <Minimize2 size={14} /> },
+  { action: "tone", label: "Tone", icon: <SlidersHorizontal size={14} /> },
+  { action: "outline", label: "Outline", icon: <ListTree size={14} /> },
+  { action: "custom", label: "Custom", icon: <PenLine size={14} /> }
 ]
 
 const DEFAULT_INSTRUCTIONS: Record<WritingRevisionAction, string> = {
@@ -189,10 +202,11 @@ export function WritingActionBar({
       ) : null}
 
       <Space wrap size={[6, 6]}>
-        {ACTION_LABELS.map(({ action, label }) => (
+        {ACTION_LABELS.map(({ action, label, icon }) => (
           <Button
             key={action}
             size="small"
+            icon={icon}
             disabled={disabled}
             loading={isGenerating}
             onClick={() => handleAction(action)}
