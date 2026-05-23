@@ -14,6 +14,7 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
+import { captureAllApiCalls, type CapturedApiCall } from '../utils/api-assertions';
 import { waitForStreamComplete } from '../utils/journey-helpers';
 
 const serverUrl = (
@@ -42,12 +43,35 @@ type RealChatModelSelection = {
   key: string;
 };
 
+type DisposableCharacter = {
+  id: string;
+  name: string;
+  firstMessage: string;
+  version: number;
+};
+
+type DisposablePersona = {
+  id: string;
+  name: string;
+  version: number;
+};
+
+type DisposablePlainChat = {
+  id: string;
+  title: string;
+  version: number;
+  userMessage: string;
+  assistantMessage: string;
+};
+
 const apiHeaders = () => ({
   'x-api-key': apiKey,
 });
 
 const truncateForDiagnostics = (value: string, maxLength = 800): string =>
   value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const parseApiJsonResponse = async <T>(
   response: APIResponse,
@@ -85,6 +109,25 @@ const apiGet = async <T>(
   return { status: response.status(), body };
 };
 
+const apiGetWithRetry = async <T>(
+  request: APIRequestContext,
+  path: string,
+  options?: { attempts?: number; retryDelayMs?: number }
+): Promise<{ status: number; body: T }> => {
+  const attempts = Math.max(1, options?.attempts ?? 3);
+  const retryDelayMs = options?.retryDelayMs ?? 1_500;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const response = await apiGet<T>(request, path);
+    if (response.status !== 429 || attempt === attempts) {
+      return response;
+    }
+    await sleep(retryDelayMs * attempt);
+  }
+
+  throw new Error(`Unreachable retry loop for GET ${path}`);
+};
+
 const apiPost = async <T>(
   request: APIRequestContext,
   path: string,
@@ -108,6 +151,26 @@ const apiDelete = async (request: APIRequestContext, path: string): Promise<{ st
     timeout: 30_000,
   });
   return { status: response.status() };
+};
+
+const apiPostWithRetry = async <T>(
+  request: APIRequestContext,
+  path: string,
+  body: Record<string, unknown>,
+  options?: { attempts?: number; retryDelayMs?: number }
+): Promise<{ status: number; body: T | null }> => {
+  const attempts = Math.max(1, options?.attempts ?? 3);
+  const retryDelayMs = options?.retryDelayMs ?? 1_500;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const response = await apiPost<T>(request, path, body);
+    if (response.status !== 429 || attempt === attempts) {
+      return response;
+    }
+    await sleep(retryDelayMs * attempt);
+  }
+
+  throw new Error(`Unreachable retry loop for POST ${path}`);
 };
 
 const extractModels = (payload: any): any[] => {
@@ -215,16 +278,68 @@ const getConfiguredChatModelSelection = async (
 
 const seedRealServerConfig = async (
   page: Page,
-  options: { selectedModel?: RealChatModelSelection } = {}
+  options: {
+    selectedModel?: RealChatModelSelection;
+    persistedServerChatId?: string | null;
+  } = {}
 ) => {
   await page.addInitScript(
-    ({ configuredServerUrl, configuredApiKey, configuredSelectedModel }) => {
+    ({
+      configuredServerUrl,
+      configuredApiKey,
+      configuredSelectedModel,
+      configuredPersistedServerChatId,
+    }) => {
+      const fnv1a36 = (value: string) => {
+        let hash = 2166136261;
+        for (let i = 0; i < value.length; i += 1) {
+          hash ^= value.charCodeAt(i);
+          hash +=
+            (hash << 1) +
+            (hash << 4) +
+            (hash << 7) +
+            (hash << 8) +
+            (hash << 24);
+        }
+        return (hash >>> 0).toString(36);
+      };
+      const normalizeServerIdentity = (rawServerUrl: string) => {
+        const raw = String(rawServerUrl || '').trim();
+        if (!raw) return '';
+        try {
+          const parsed = new URL(raw);
+          const protocol = parsed.protocol.toLowerCase();
+          const hostname = parsed.hostname.toLowerCase();
+          const includePort = Boolean(
+            parsed.port &&
+              !(
+                (protocol === 'http:' && parsed.port === '80') ||
+                (protocol === 'https:' && parsed.port === '443')
+              )
+          );
+          const port = includePort ? `:${parsed.port}` : '';
+          const pathname = parsed.pathname.replace(/\/+$/, '');
+          return `${protocol}//${hostname}${port}${pathname}`;
+        } catch {
+          return raw.replace(/\/+$/, '').toLowerCase();
+        }
+      };
+      const serverFingerprint = (() => {
+        const normalized = normalizeServerIdentity(configuredServerUrl);
+        return normalized ? `server:${fnv1a36(normalized)}` : 'server:unknown';
+      })();
+      const apiKeyScope = String(configuredApiKey || '').trim()
+        ? `key:${fnv1a36(String(configuredApiKey).trim())}`
+        : 'key:none';
+      const persistedScopeKey = `${serverFingerprint}:auth:single-user:org:none:user:single-user:${apiKeyScope}`;
       const config = {
         serverUrl: configuredServerUrl,
         authMode: 'single-user',
         apiKey: configuredApiKey,
         requestTimeoutMs: 60_000,
         chatRequestTimeoutMs: 120_000,
+        chatStartupTimeoutMs: 60_000,
+        chatStreamIdleTimeoutMs: 120_000,
       };
 
       localStorage.setItem('tldwConfig', JSON.stringify(config));
@@ -237,6 +352,30 @@ const seedRealServerConfig = async (
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
       localStorage.setItem('playgroundComposerOptionsExpanded', 'true');
+      if (configuredPersistedServerChatId) {
+        localStorage.setItem(
+          'tldw-playground-session',
+          JSON.stringify({
+            state: {
+              historyId: null,
+              serverChatId: configuredPersistedServerChatId,
+              scopeKey: persistedScopeKey,
+              chatMode: 'normal',
+              webSearch: false,
+              compareMode: false,
+              compareSelectedModels: [],
+              ragMediaIds: null,
+              ragSearchMode: 'hybrid',
+              ragTopK: null,
+              ragEnableGeneration: true,
+              ragEnableCitations: true,
+              queuedMessages: [],
+              lastUpdated: Date.now(),
+            },
+            version: 0,
+          })
+        );
+      }
 
       if (configuredSelectedModel?.key) {
         localStorage.setItem('selectedModel', configuredSelectedModel.key);
@@ -255,6 +394,7 @@ const seedRealServerConfig = async (
       configuredServerUrl: serverUrl,
       configuredApiKey: apiKey,
       configuredSelectedModel: options.selectedModel || null,
+      configuredPersistedServerChatId: options.persistedServerChatId ?? null,
     }
   );
 };
@@ -522,6 +662,7 @@ const waitForChatCompletionAttempt = (page: Page, timeout = 15_000) => {
       if (url.origin !== backendOrigin && url.origin !== pageOrigin) return false;
       return (
         (url.pathname === '/api/v1/chat/completions' ||
+          /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) ||
           /^\/api\/v1\/chats\/[^/]+\/completions$/.test(url.pathname)) &&
         response.request().method() === 'POST'
       );
@@ -633,6 +774,495 @@ const selectConfiguredCockpitModel = async (
   await option.click();
 
   return modelKey;
+};
+
+const getCharacterControlRail = (page: Page): Locator =>
+  page.getByTestId('character-control-rail');
+
+const openDesktopChatCockpit = async (
+  page: Page,
+  selection: RealChatModelSelection,
+  options: { persistedServerChatId?: string | null } = {}
+) => {
+  await seedRealServerConfig(page, {
+    selectedModel: selection,
+    persistedServerChatId: options.persistedServerChatId ?? null,
+  });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+    timeout: 60_000,
+  });
+  await assertNoBlockingServerDialog(page);
+  await assertCoreComposerControls(page);
+  await expect(getCharacterControlRail(page)).toBeVisible();
+};
+
+const createDisposableCharacter = async (
+  request: APIRequestContext,
+  name: string
+): Promise<DisposableCharacter> => {
+  const firstMessage = 'Ready for overlay continuity proof.';
+  const created = await apiPostWithRetry<any>(request, '/api/v1/characters', {
+    name,
+    system_prompt: `You are ${name}, a concise overlay test assistant.`,
+    first_message: firstMessage,
+    creator: 'tldw e2e',
+    tags: ['e2e', 'overlay-rail'],
+  }, {
+    attempts: 6,
+    retryDelayMs: 2_000,
+  });
+
+  expect(created.status).toBe(201);
+  expect(created.body?.id).toBeTruthy();
+
+  return {
+    id: String(created.body.id),
+    firstMessage,
+    name,
+    version: Number(created.body.version ?? 1),
+  };
+};
+
+const createDisposablePersona = async (
+  request: APIRequestContext,
+  personaId: string,
+  name: string
+): Promise<DisposablePersona> => {
+  const created = await apiPostWithRetry<any>(request, '/api/v1/persona/profiles', {
+    id: personaId,
+    name,
+    mode: 'session_scoped',
+    system_prompt: `You are ${name}, a concise overlay test persona.`,
+    is_active: true,
+    use_persona_state_context_default: true,
+  }, {
+    attempts: 6,
+    retryDelayMs: 2_000,
+  });
+
+  expect(created.status).toBe(201);
+  expect(created.body?.id).toBeTruthy();
+
+  await expect
+    .poll(
+      async () => {
+        const catalog = await apiGetWithRetry<any>(request, '/api/v1/persona/catalog');
+        return extractPersonaProfiles(catalog.body).some((item) => {
+          const candidateId =
+            typeof item?.id === 'string' || typeof item?.id === 'number'
+              ? String(item.id)
+              : '';
+          return candidateId === String(created.body?.id ?? personaId);
+        });
+      },
+      {
+        timeout: 30_000,
+        message: `Timed out waiting for persona ${personaId} to appear in the persona catalog`,
+      }
+    )
+    .toBe(true);
+
+  return {
+    id: String(created.body.id),
+    name,
+    version: Number(created.body.version ?? 1),
+  };
+};
+
+const cleanupDisposableCharacter = async (
+  request: APIRequestContext,
+  character: DisposableCharacter | null
+) => {
+  if (!character) return;
+  await apiDelete(
+    request,
+    `/api/v1/characters/${encodeURIComponent(character.id)}?expected_version=${encodeURIComponent(
+      String(character.version)
+    )}`
+  ).catch(() => ({ status: 0 }));
+};
+
+const cleanupDisposablePersona = async (
+  request: APIRequestContext,
+  persona: DisposablePersona | null
+) => {
+  if (!persona) return;
+  await apiDelete(
+    request,
+    `/api/v1/persona/profiles/${encodeURIComponent(persona.id)}?expected_version=${encodeURIComponent(
+      String(persona.version)
+    )}`
+  ).catch(() => ({ status: 0 }));
+};
+
+const createDisposablePlainChat = async (
+  request: APIRequestContext,
+  title: string,
+  userMessage: string,
+  assistantMessage: string
+): Promise<DisposablePlainChat> => {
+  const created = await apiPostWithRetry<any>(request, '/api/v1/chats/', {
+    title,
+    state: 'in-progress',
+    source: 'webui',
+  }, {
+    attempts: 6,
+    retryDelayMs: 2_000,
+  });
+
+  expect(created.status).toBe(201);
+  expect(created.body?.id).toBeTruthy();
+
+  const chatId = String(created.body?.id);
+  await apiPostWithRetry<any>(request, `/api/v1/chats/${encodeURIComponent(chatId)}/messages`, {
+    role: 'user',
+    content: userMessage,
+  });
+  await apiPostWithRetry<any>(request, `/api/v1/chats/${encodeURIComponent(chatId)}/messages`, {
+    role: 'assistant',
+    content: assistantMessage,
+  });
+
+  return {
+    id: chatId,
+    title,
+    version: Number(created.body?.version ?? 1),
+    userMessage,
+    assistantMessage,
+  };
+};
+
+const cleanupDisposablePlainChat = async (
+  request: APIRequestContext,
+  chat: DisposablePlainChat | null
+) => {
+  if (!chat) return;
+  const details = await getChatDetails(request, chat.id).catch(() => null);
+  const expectedVersion =
+    details?.status === 200 && typeof details.body?.version === 'number'
+      ? details.body.version
+      : chat.version;
+  const expectedVersionQuery =
+    typeof expectedVersion === 'number'
+      ? `?expected_version=${encodeURIComponent(String(expectedVersion))}&hard_delete=true`
+      : '?hard_delete=true';
+  await apiDelete(
+    request,
+    `/api/v1/chats/${encodeURIComponent(chat.id)}${expectedVersionQuery}`
+  ).catch(() => ({ status: 0 }));
+};
+
+const selectAssistantFromRail = async (
+  page: Page,
+  options: {
+    triggerLabel:
+      | 'Apply overlay'
+      | 'Change overlay'
+      | 'Start tracked character chat'
+      | 'Start tracked persona chat';
+    tab: 'Characters' | 'Personas';
+    assistantName: string;
+  }
+) => {
+  const rail = getCharacterControlRail(page);
+  await rail.getByRole('button', { name: options.triggerLabel }).click();
+  const panel = page.getByTestId('assistant-select-panel');
+  await expect(panel).toBeVisible();
+  await page.getByRole('tab', { name: options.tab }).click();
+  await expect(page.getByRole('tab', { name: options.tab })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
+  const assistantButton = page.getByRole('button', {
+    name: options.assistantName,
+    exact: true,
+  });
+  const retryButton = page.getByRole('button', {
+    name: options.tab === 'Personas' ? 'Retry personas' : 'Retry characters',
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await assistantButton.isVisible().catch(() => false)) {
+      break;
+    }
+    if (await retryButton.isVisible().catch(() => false)) {
+      await retryButton.click();
+    }
+    await page.waitForTimeout(1_000);
+  }
+  await expect(assistantButton).toBeVisible({ timeout: 30_000 });
+  await assistantButton.click();
+  await expect(panel).toBeHidden({ timeout: 10_000 });
+};
+
+const findChatCreateCall = (calls: CapturedApiCall[]): CapturedApiCall | undefined =>
+  [...calls].reverse().find((call) => {
+    const url = new URL(call.url);
+    return call.method === 'POST' && /^\/api\/v1\/chats\/?$/.test(url.pathname);
+  });
+
+const extractConversationChatIdFromCall = (call: CapturedApiCall | undefined): string | null => {
+  if (!call) return null;
+  const url = new URL(call.url);
+  const match = url.pathname.match(/^\/api\/v1\/chats\/([^/]+)\/(?:complete-v2|completions)$/);
+  if (match?.[1]) {
+    return match[1];
+  }
+
+  const requestBody =
+    call.requestBody && typeof call.requestBody === 'object'
+      ? (call.requestBody as Record<string, unknown>)
+      : null;
+  const conversationId =
+    requestBody?.conversation_id ?? requestBody?.conversationId ?? requestBody?.chat_id;
+  return typeof conversationId === 'string' && conversationId.trim().length > 0
+    ? conversationId.trim()
+    : typeof conversationId === 'number'
+      ? String(conversationId)
+      : null;
+};
+
+const extractConversationChatIdFromResponse = (response: Response | null): string | null => {
+  if (!response) return null;
+  const url = new URL(response.url());
+  const match = url.pathname.match(/^\/api\/v1\/chats\/([^/]+)\/(?:complete-v2|completions)$/);
+  return match?.[1] ? match[1] : null;
+};
+
+const extractCreatedChatIdFromCreateCall = (call: CapturedApiCall | undefined): string | null => {
+  if (!call) return null;
+  const responseBody =
+    call.responseBody && typeof call.responseBody === 'object'
+      ? (call.responseBody as Record<string, unknown>)
+      : null;
+  const responseId = responseBody?.id;
+  if (typeof responseId === 'string' && responseId.trim().length > 0) {
+    return responseId.trim();
+  }
+  if (typeof responseId === 'number' && Number.isFinite(responseId)) {
+    return String(responseId);
+  }
+  return null;
+};
+
+const findConversationTurnCall = (calls: CapturedApiCall[]): CapturedApiCall | undefined =>
+  [...calls].reverse().find((call) => {
+    const url = new URL(call.url);
+    return (
+      call.method === 'POST' &&
+      (url.pathname === '/api/v1/chat/completions' ||
+        /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) ||
+        /^\/api\/v1\/chats\/[^/]+\/completions$/.test(url.pathname))
+    );
+  });
+
+const sendChatTurnAndCapture = async (
+  page: Page,
+  prompt: string,
+  options: {
+    stopStreamingAfterRequest?: boolean;
+    stopTimeoutMs?: number;
+    settleAfterStopMs?: number;
+  } = {}
+): Promise<{
+  response: Response | null;
+  calls: CapturedApiCall[];
+}> => {
+  const capture = captureAllApiCalls(page);
+  const completionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+
+  await page.getByTestId('chat-input').fill(prompt);
+  await page.getByRole('button', { name: /send message/i }).click();
+
+  const response = await completionAttempt;
+  if (options.stopStreamingAfterRequest) {
+    const stopStreaming = page.getByRole('button', { name: /stop streaming response/i });
+    const stopTimeoutMs = options.stopTimeoutMs ?? 30_000;
+    const stopStreamingVisible = await stopStreaming
+      .waitFor({ state: 'visible', timeout: stopTimeoutMs })
+      .then(() => true)
+      .catch(() => false);
+    if (stopStreamingVisible) {
+      await stopStreaming.click().catch(() => undefined);
+    }
+    const settleAfterStopMs = options.settleAfterStopMs ?? 1_000;
+    if (settleAfterStopMs > 0) {
+      await page.waitForTimeout(settleAfterStopMs);
+    }
+  }
+  const calls = await capture.stop();
+  try {
+    if (!options.stopStreamingAfterRequest) {
+      await assertChatCompletionRenderedOrRecoverable(page, response);
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
+    }
+  } catch (error) {
+    console.log(
+      '[sendChatTurnAndCapture:failure]',
+      JSON.stringify(
+        calls.map((call) => ({
+          method: call.method,
+          url: call.url,
+          status: call.status,
+          requestBody: call.requestBody,
+          responseBody: call.responseBody
+        })),
+        null,
+        2
+      )
+    );
+    throw error;
+  }
+
+  return {
+    response,
+    calls,
+  };
+};
+
+const waitForSuccessfulChatMessagesLoad = (
+  page: Page,
+  chatId: string,
+  timeout = 60_000
+) => {
+  const backendOrigin = new URL(serverUrl).origin;
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === 'GET' &&
+        url.origin === backendOrigin &&
+        url.pathname === `/api/v1/chats/${encodeURIComponent(chatId)}/messages` &&
+        response.status() === 200
+      );
+    },
+    { timeout }
+  );
+};
+
+const clearOverlayWithRetry = async (page: Page, options: {
+  chatId: string;
+  expectedOverlayName: string;
+  maxAttempts?: number;
+}) => {
+  const backendOrigin = new URL(serverUrl).origin;
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const rail = getCharacterControlRail(page);
+    await expect(rail.getByRole('button', { name: 'Clear overlay' })).toBeVisible();
+    await page.waitForTimeout(3_000);
+
+    const clearOverlayResponsePromise = page.waitForResponse(
+      (response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === 'PUT' &&
+          url.origin === backendOrigin &&
+          url.pathname === `/api/v1/chats/${encodeURIComponent(options.chatId)}/settings`
+        );
+      },
+      { timeout: 30_000 }
+    );
+
+    await rail.getByRole('button', { name: 'Clear overlay' }).click();
+    const clearOverlayResponse = await clearOverlayResponsePromise;
+    expect(clearOverlayResponse.request().postDataJSON()).toMatchObject({
+      settings: {
+        assistantOverlay: null,
+      },
+    });
+
+    const clearPayload = (await clearOverlayResponse.json().catch(() => null)) as
+      | { settings?: { assistantOverlay?: unknown } }
+      | null;
+
+    if (
+      clearOverlayResponse.status() === 200 &&
+      (clearPayload?.settings?.assistantOverlay ?? null) === null
+    ) {
+      await expect(rail).toContainText('Plain chat');
+      await expect(rail.getByRole('button', { name: 'Apply overlay' })).toBeVisible();
+      return;
+    }
+
+    if (clearOverlayResponse.status() !== 429 || attempt === maxAttempts) {
+      expect(clearOverlayResponse.status()).toBe(200);
+      expect(clearPayload?.settings?.assistantOverlay ?? null).toBeNull();
+      return;
+    }
+
+    const retryAfterHeader = clearOverlayResponse.headers()['retry-after'];
+    const retryAfterSeconds = Number.parseInt(retryAfterHeader ?? '', 10);
+    const backoffMs =
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1_000
+        : 5_000 * attempt;
+    await page.waitForTimeout(backoffMs);
+    const reloadMessagesPromise = waitForSuccessfulChatMessagesLoad(page, options.chatId);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await reloadMessagesPromise;
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+      timeout: 60_000,
+    });
+    await assertNoBlockingServerDialog(page);
+    await assertCoreComposerControls(page);
+    await expect(rail).toContainText('Overlay personality');
+    await expect(rail).toContainText(options.expectedOverlayName);
+  }
+};
+
+const getChatDetails = async (
+  request: APIRequestContext,
+  chatId: string
+): Promise<{ status: number; body: any }> =>
+  apiGetWithRetry<any>(request, `/api/v1/chats/${encodeURIComponent(chatId)}`);
+
+type PlaygroundSessionSnapshot = {
+  historyId?: string | null;
+  serverChatId?: string | null;
+} | null;
+
+const readPlaygroundSessionSnapshot = async (
+  page: Page
+): Promise<PlaygroundSessionSnapshot> =>
+  page.evaluate(() => {
+    const raw = window.localStorage.getItem('tldw-playground-session');
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as
+        | { state?: { historyId?: string | null; serverChatId?: string | null } | null }
+        | { historyId?: string | null; serverChatId?: string | null }
+        | null;
+      if (parsed && typeof parsed === 'object' && 'state' in parsed) {
+        return parsed.state ?? null;
+      }
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+
+const waitForPersistedServerChatId = async (page: Page): Promise<string> => {
+  await expect
+    .poll(
+      async () => {
+        const snapshot = await readPlaygroundSessionSnapshot(page);
+        return snapshot?.serverChatId ?? null;
+      },
+      {
+        timeout: 15_000,
+      }
+    )
+    .toBeTruthy();
+
+  const snapshot = await readPlaygroundSessionSnapshot(page);
+  if (!snapshot?.serverChatId) {
+    throw new Error('Expected playground session to persist a serverChatId');
+  }
+  return snapshot.serverChatId;
 };
 
 const getTemperatureInput = async (modelSettingsDialog: Locator): Promise<Locator> => {
@@ -1100,7 +1730,9 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     try {
+      const firstReloadMessagesPromise = waitForSuccessfulChatMessagesLoad(page, plainChat.id);
       await page.reload({ waitUntil: 'domcontentloaded' });
+      await firstReloadMessagesPromise;
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
         timeout: 60_000,
       });
@@ -1738,6 +2370,239 @@ test.describe('/chat cockpit real-server parity', () => {
           `/api/v1/persona/profiles/${encodeURIComponent(cleanupPersonaId)}${expectedVersionQuery}`
         ).catch(() => ({ status: 0 }));
       }
+    }
+  });
+
+  test('keeps the same conversation while overlay changes and clears through the character control rail', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
+
+    const timestamp = Date.now();
+    let character: DisposableCharacter | null = null;
+    let persona: DisposablePersona | null = null;
+    let plainChat: DisposablePlainChat | null = null;
+
+    try {
+      character = await createDisposableCharacter(
+        request,
+        `Overlay Character ${timestamp}`
+      );
+      persona = await createDisposablePersona(
+        request,
+        `overlay_persona_${timestamp}`,
+        `Overlay Persona ${timestamp}`
+      );
+      plainChat = await createDisposablePlainChat(
+        request,
+        `Overlay continuity ${timestamp}`,
+        `Overlay continuity user seed ${timestamp}`,
+        `Overlay continuity assistant seed ${timestamp}`
+      );
+
+      await openDesktopChatCockpit(page, chatModelSelection, {
+        persistedServerChatId: plainChat.id,
+      });
+      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
+
+      const rail = getCharacterControlRail(page);
+      await expect(rail).toContainText('Plain chat');
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
+        plainChat.userMessage
+      );
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
+        plainChat.assistantMessage
+      );
+
+      await selectAssistantFromRail(page, {
+        triggerLabel: 'Apply overlay',
+        tab: 'Characters',
+        assistantName: character.name,
+      });
+      await expect(rail).toContainText('Overlay personality');
+      await expect(rail).toContainText(character.name);
+      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
+
+      await selectAssistantFromRail(page, {
+        triggerLabel: 'Change overlay',
+        tab: 'Personas',
+        assistantName: persona.name,
+      });
+      await expect(rail).toContainText('Overlay personality');
+      await expect(rail).toContainText(persona.name);
+      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
+
+      const firstReloadMessagesPromise = waitForSuccessfulChatMessagesLoad(page, plainChat.id);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await firstReloadMessagesPromise;
+      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+        timeout: 60_000,
+      });
+      await assertNoBlockingServerDialog(page);
+      await assertCoreComposerControls(page);
+
+      const reloadedRail = getCharacterControlRail(page);
+      await expect(reloadedRail).toContainText('Overlay personality');
+      await expect(reloadedRail).toContainText(persona.name);
+      await expect(reloadedRail.getByRole('button', { name: 'Clear overlay' })).toBeVisible();
+      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
+      await clearOverlayWithRetry(page, {
+        chatId: plainChat.id,
+        expectedOverlayName: persona.name,
+      });
+      expect(await waitForPersistedServerChatId(page)).toBe(plainChat.id);
+    } finally {
+      await cleanupDisposablePlainChat(request, plainChat);
+      await cleanupDisposableCharacter(request, character);
+      await cleanupDisposablePersona(request, persona);
+    }
+  });
+
+  test('starts a tracked character chat from the character control rail and restores tracked mode after reload', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(150_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
+
+    const timestamp = Date.now();
+    let character: DisposableCharacter | null = null;
+
+    try {
+      character = await createDisposableCharacter(
+        request,
+        `Tracked Character ${timestamp}`
+      );
+
+      await openDesktopChatCockpit(page, chatModelSelection);
+
+      const trackedStartCapture = captureAllApiCalls(page);
+      await selectAssistantFromRail(page, {
+        triggerLabel: 'Start tracked character chat',
+        tab: 'Characters',
+        assistantName: character.name,
+      });
+      const trackedStartCalls = await trackedStartCapture.stop();
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
+        character.firstMessage
+      );
+      const createCall = findChatCreateCall(trackedStartCalls);
+      expect(createCall).toBeDefined();
+      const trackedCharacterId = (createCall?.requestBody as Record<string, unknown> | null)
+        ?.character_id;
+      expect(String(trackedCharacterId ?? "")).toBe(character.id);
+
+      const chatId =
+        extractCreatedChatIdFromCreateCall(createCall) ??
+        (await waitForPersistedServerChatId(page));
+
+      const chatDetails = await getChatDetails(request, chatId);
+      expect(chatDetails.status).toBe(200);
+      expect(chatDetails.body).toMatchObject({
+        id: chatId,
+        character_id: Number(character.id),
+        assistant_kind: 'character',
+      });
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+        timeout: 60_000,
+      });
+      await assertNoBlockingServerDialog(page);
+      await assertCoreComposerControls(page);
+
+      const rail = getCharacterControlRail(page);
+      await expect(rail).toContainText('Tracked character chat', {
+        timeout: 60_000,
+      });
+      await expect(rail).toContainText(character.name);
+      await expect(rail.getByRole('button', { name: 'Apply overlay' })).toHaveCount(0);
+      await expect(rail.getByRole('button', { name: 'Change overlay' })).toHaveCount(0);
+      await expect(rail.getByRole('button', { name: 'Clear overlay' })).toHaveCount(0);
+    } finally {
+      await cleanupDisposableCharacter(request, character);
+    }
+  });
+
+  test('starts a tracked persona chat from the character control rail and restores tracked mode after reload', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(150_000);
+
+    const health = await apiGet<any>(request, '/api/v1/health');
+    assertHealthResponse(health);
+    const chatModelSelection = await getConfiguredChatModelSelection(request);
+
+    const timestamp = Date.now();
+    let persona: DisposablePersona | null = null;
+
+    try {
+      persona = await createDisposablePersona(
+        request,
+        `tracked_persona_${timestamp}`,
+        `Tracked Persona ${timestamp}`
+      );
+
+      await openDesktopChatCockpit(page, chatModelSelection);
+
+      await selectAssistantFromRail(page, {
+        triggerLabel: 'Start tracked persona chat',
+        tab: 'Personas',
+        assistantName: persona.name,
+      });
+
+      const prompt = `Tracked persona proof ${timestamp}`;
+      const turn = await sendChatTurnAndCapture(page, prompt, {
+        stopStreamingAfterRequest: true,
+      });
+      const createCall = findChatCreateCall(turn.calls);
+
+      expect(createCall).toBeDefined();
+      expect(createCall?.requestBody).toMatchObject({
+        assistant_kind: 'persona',
+        assistant_id: persona.id,
+      });
+
+      const chatId =
+        extractCreatedChatIdFromCreateCall(createCall) ??
+        extractConversationChatIdFromResponse(turn.response) ??
+        extractConversationChatIdFromCall(findConversationTurnCall(turn.calls)) ??
+        (await waitForPersistedServerChatId(page));
+
+      const chatDetails = await getChatDetails(request, chatId);
+      expect(chatDetails.status).toBe(200);
+      expect(chatDetails.body).toMatchObject({
+        id: chatId,
+        assistant_kind: 'persona',
+        assistant_id: persona.id,
+      });
+
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
+        timeout: 60_000,
+      });
+      await assertNoBlockingServerDialog(page);
+      await assertCoreComposerControls(page);
+
+      const rail = getCharacterControlRail(page);
+      await expect(rail).toContainText('Tracked persona chat', {
+        timeout: 60_000,
+      });
+      await expect(rail).toContainText(persona.name);
+      await expect(rail.getByRole('button', { name: 'Apply overlay' })).toHaveCount(0);
+      await expect(rail.getByRole('button', { name: 'Change overlay' })).toHaveCount(0);
+      await expect(rail.getByRole('button', { name: 'Clear overlay' })).toHaveCount(0);
+    } finally {
+      await cleanupDisposablePersona(request, persona);
     }
   });
 

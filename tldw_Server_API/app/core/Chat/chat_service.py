@@ -4477,6 +4477,17 @@ async def execute_streaming_call(
             chunk_seq = 0
 
             stream_holdback = ""
+            if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
+                metadata_payload = {
+                    "event": "tldw_metadata",
+                    "conversation_id": final_conversation_id,
+                    "tldw_conversation_id": final_conversation_id,
+                }
+                if system_message_id:
+                    metadata_payload["tldw_system_message_id"] = system_message_id
+                if normalized_continuation_metadata:
+                    metadata_payload["tldw_continuation"] = normalized_continuation_metadata
+                yield f"data: {json.dumps(metadata_payload)}\n\n"
             try:
                 stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
             except _CHAT_NONCRITICAL_EXCEPTIONS:

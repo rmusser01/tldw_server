@@ -212,6 +212,70 @@ describe("useSelectedAssistant", () => {
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
   })
 
+  it("does not mirror overlay character selections into legacy character storage", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+    expect(mocks.characterSync.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+  })
+
+  it("preserves overlay mode when a same-id assistant update omits metadata", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        avatar_url: "https://example.com/overlay.png"
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        avatar_url: "https://example.com/overlay.png",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+  })
+
   it("clears legacy character mirrors before broadcasting a null assistant", async () => {
     mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
       kind: "character",
@@ -446,6 +510,54 @@ describe("useSelectedAssistant", () => {
         name: "Guide",
         greeting: "Ready when you are",
         alternateGreetings: ["Let's begin"]
+      })
+    })
+  })
+
+  it("preserves overlay selection mode when useSelectedCharacter updates the active character", async () => {
+    const { result } = renderHook(() => {
+      const assistantState = useSelectedAssistant()
+      const characterState = useSelectedCharacter<Character | null>(null)
+      return { assistantState, characterState }
+    })
+
+    await act(async () => {
+      await result.current.assistantState[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await act(async () => {
+      await result.current.characterState[1]({
+        id: "char-overlay",
+        name: "Overlay Guide",
+        avatar_url: "https://example.com/overlay.png"
+      } as Character)
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        avatar_url: "https://example.com/overlay.png",
+        metadata: {
+          selectionMode: "overlay"
+        }
       })
     })
   })

@@ -274,10 +274,24 @@ describe("resolveServerChatAssistantIdentity", () => {
     })
   })
 
-  it("backfills character-backed assistant identity from legacy character_id", () => {
+  it("treats chats with only character_id and no tracked source as plain", () => {
     expect(
       resolveServerChatAssistantIdentity({
         character_id: 42
+      } as any)
+    ).toEqual({
+      assistantKind: null,
+      assistantId: null,
+      characterId: null,
+      personaMemoryMode: null
+    })
+  })
+
+  it("backfills character identity from legacy tracked chat sources", () => {
+    expect(
+      resolveServerChatAssistantIdentity({
+        character_id: 42,
+        source: "webui-character-chat"
       } as any)
     ).toEqual({
       assistantKind: "character",

@@ -1,4 +1,9 @@
-import type { AssistantSelection, AssistantKind } from "@/types/assistant-selection"
+import {
+  type AssistantSelection,
+  type AssistantKind,
+  getAssistantSelectionMode,
+  normalizeAssistantSelection
+} from "@/types/assistant-selection"
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 
 type TrackedAssistantMetadata = {
@@ -24,6 +29,28 @@ export type EffectiveAssistantState = {
   avatarUrl: string | null
   systemPromptSnapshot: string | null
   source: "tracked" | "overlay" | "none"
+}
+
+export const effectiveAssistantStateToSelection = (
+  state: EffectiveAssistantState
+): AssistantSelection | null => {
+  if (!state.kind || !state.id || state.source === "none") {
+    return null
+  }
+
+  return normalizeAssistantSelection({
+    kind: state.kind,
+    id: state.id,
+    name:
+      state.displayName ??
+      (state.kind === "persona" ? "Persona" : "Assistant"),
+    avatar_url: state.avatarUrl,
+    system_prompt: state.systemPromptSnapshot,
+    metadata:
+      state.source === "overlay"
+        ? { selectionMode: "overlay" }
+        : { selectionMode: "tracked" }
+  })
 }
 
 const normalizeId = (value: unknown): string | null => {
@@ -135,6 +162,18 @@ export const resolveEffectiveAssistantState = ({
         normalizeText(overlay.system_prompt_snapshot) ??
         normalizeText(matchedDraft?.system_prompt) ??
         null,
+      source: "overlay"
+    }
+  }
+
+  if (draftSelection && getAssistantSelectionMode(draftSelection) === "overlay") {
+    return {
+      mode: "overlay",
+      kind: draftSelection.kind,
+      id: draftSelection.id,
+      displayName: normalizeText(draftSelection.name) ?? null,
+      avatarUrl: normalizeText(draftSelection.avatar_url) ?? null,
+      systemPromptSnapshot: normalizeText(draftSelection.system_prompt) ?? null,
       source: "overlay"
     }
   }

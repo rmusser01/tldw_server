@@ -29,7 +29,8 @@ const state = vi.hoisted(() => ({
     serverChatId: "chat-1",
     serverChatAssistantKind: null,
     serverChatAssistantId: null,
-    serverChatCharacterId: null
+    serverChatCharacterId: null,
+    serverChatLoadState: "loaded"
   },
   history: [
     {
@@ -116,7 +117,8 @@ describe("CharacterControlRail", () => {
       serverChatId: "chat-1",
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
-      serverChatCharacterId: null
+      serverChatCharacterId: null,
+      serverChatLoadState: "loaded"
     }
     state.history = [
       {
@@ -132,6 +134,14 @@ describe("CharacterControlRail", () => {
         assistant_kind: null,
         character_id: null,
         created_at: "2026-05-21T12:00:00.000Z"
+      },
+      {
+        id: "default-assistant-chat-1",
+        title: "Default assistant chat",
+        assistant_kind: null,
+        character_id: "7",
+        source: "webui-chat",
+        created_at: "2026-05-20T12:00:00.000Z"
       }
     ]
   })
@@ -144,6 +154,7 @@ describe("CharacterControlRail", () => {
     expect(screen.getByRole("heading", { name: "Tracked sessions" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Captain Mira" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Plain chat" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Default assistant chat" })).toBeNull()
   })
 
   it("opens the assistant picker with explicit overlay intent", async () => {
@@ -207,7 +218,8 @@ describe("CharacterControlRail", () => {
       serverChatId: "chat-1",
       serverChatAssistantKind: "character",
       serverChatAssistantId: null,
-      serverChatCharacterId: "char-7"
+      serverChatCharacterId: "char-7",
+      serverChatLoadState: "loaded"
     }
 
     render(<CharacterControlRail />)
@@ -216,5 +228,33 @@ describe("CharacterControlRail", () => {
     expect(screen.queryByRole("button", { name: "Apply overlay" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Change overlay" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Clear overlay" })).toBeNull()
+  })
+
+  it("falls back to tracked draft identity while server chat metadata reload is failed", () => {
+    state.settings = null
+    state.selectedAssistant = {
+      kind: "persona",
+      id: "persona-9",
+      name: "Tracked Persona",
+      avatar_url: null,
+      system_prompt: "Stay in character",
+      metadata: {
+        selectionMode: "tracked"
+      }
+    }
+    state.option = {
+      historyId: "history-1",
+      serverChatId: "chat-9",
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatCharacterId: null,
+      serverChatLoadState: "failed"
+    }
+
+    render(<CharacterControlRail />)
+
+    expect(screen.getByText("Tracked persona chat")).toBeInTheDocument()
+    expect(screen.getByText("Tracked Persona")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Apply overlay" })).toBeNull()
   })
 })

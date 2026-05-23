@@ -984,9 +984,9 @@ def _convert_db_conversation_to_response(
 ) -> ChatSessionResponse:
     """Convert database conversation to response model."""
     character_id = conv_data.get('character_id')
-    assistant_kind = conv_data.get('assistant_kind') or ("character" if character_id is not None else None)
+    assistant_kind = conv_data.get('assistant_kind')
     assistant_id = conv_data.get('assistant_id')
-    if assistant_id is None and character_id is not None:
+    if assistant_id is None and assistant_kind == "character" and character_id is not None:
         assistant_id = str(character_id)
     return ChatSessionResponse(
         id=conv_data.get('id', ''),
@@ -3569,7 +3569,7 @@ async def create_chat_session(
     alternate_index: Optional[int] = Query(None, ge=0, description="Index for alternate greeting when greeting_strategy=alternate_index"),
 ):
     """
-    Create a new chat session with a character or persona assistant identity.
+    Create a new chat session, optionally with a tracked character or persona identity.
 
     Args:
         session_data: Chat session creation data
@@ -3626,7 +3626,7 @@ async def create_chat_session(
                     detail=f"Persona with ID {session_data.assistant_id} not found",
                 )
             assistant_display_name = persona_profile.get("name") or assistant_display_name
-        else:
+        elif session_data.assistant_kind == "character":
             character = db.get_character_card_by_id(session_data.character_id)
             if not character:
                 raise HTTPException(
@@ -3672,7 +3672,11 @@ async def create_chat_session(
         # Generate chat ID and title
         chat_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        title = session_data.title or f"{assistant_display_name} Chat ({timestamp})"
+        title = session_data.title or (
+            f"{assistant_display_name} Chat ({timestamp})"
+            if session_data.assistant_kind in {"character", "persona"}
+            else f"Chat ({timestamp})"
+        )
 
         # Create conversation data
         conv_data = {

@@ -3,6 +3,7 @@ import { Button, Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePersistenceMode } from "@/hooks/playground"
 import type { Character } from "@/types/character"
+import type { AssistantSelectionMode } from "@/types/assistant-selection"
 import {
   WEBUI_CHARACTER_CHAT_SOURCE,
   WEBUI_CHAT_SOURCE,
@@ -28,6 +29,8 @@ export interface UsePlaygroundPersistenceDeps {
   history: Array<{ role: string; content?: string; image?: string }>
   clearChat: () => void
   selectedCharacter: Character | null
+  selectedAssistantMode: AssistantSelectionMode | null
+  assistantOverlayActive: boolean
   serverPersistenceHintSeen: boolean
   setServerPersistenceHintSeen: (value: boolean) => void
   invalidateServerChatHistory: () => void
@@ -61,6 +64,8 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     history,
     clearChat,
     selectedCharacter,
+    selectedAssistantMode,
+    assistantOverlayActive,
     serverPersistenceHintSeen,
     setServerPersistenceHintSeen,
     invalidateServerChatHistory,
@@ -74,6 +79,8 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   const serverSaveInFlightRef = React.useRef(false)
   const historyRef = React.useRef(history)
   const selectedCharacterRef = React.useRef(selectedCharacter)
+  const selectedAssistantModeRef = React.useRef(selectedAssistantMode)
+  const assistantOverlayActiveRef = React.useRef(assistantOverlayActive)
   const serverChatStateRef = React.useRef(serverChatState)
   const serverChatSourceRef = React.useRef(serverChatSource)
   const serverPersistenceHintSeenRef = React.useRef(serverPersistenceHintSeen)
@@ -85,6 +92,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   React.useEffect(() => {
     selectedCharacterRef.current = selectedCharacter
   }, [selectedCharacter])
+
+  React.useEffect(() => {
+    selectedAssistantModeRef.current = selectedAssistantMode
+  }, [selectedAssistantMode])
+
+  React.useEffect(() => {
+    assistantOverlayActiveRef.current = assistantOverlayActive
+  }, [assistantOverlayActive])
 
   React.useEffect(() => {
     serverChatStateRef.current = serverChatState
@@ -219,9 +234,15 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       }
       await tldwClient.initialize()
       const firstUser = snapshot.find((m) => m.role === "user")
-      let characterId: string | number | null =
-        (selectedCharacterRef.current as any)?.id ?? null
+      const isOverlaySelection =
+        assistantOverlayActiveRef.current ||
+        selectedAssistantModeRef.current === "overlay"
+      const shouldPersistTrackedCharacter = !isOverlaySelection
+      let characterId: string | number | null = shouldPersistTrackedCharacter
+        ? ((selectedCharacterRef.current as any)?.id ?? null)
+        : null
       const selectedCharacterName =
+        shouldPersistTrackedCharacter &&
         typeof selectedCharacterRef.current?.name === "string"
           ? selectedCharacterRef.current.name.trim()
           : ""
@@ -265,7 +286,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
                 : titleSource
             })()
 
-      if (!characterId) {
+      if (!characterId && !isOverlaySelection) {
         const DEFAULT_NAME = "Helpful AI Assistant"
         const normalizeName = (value: unknown) =>
           String(value || "").trim().toLowerCase()
@@ -310,7 +331,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         }
       }
 
-      if (characterId == null) {
+      if (characterId == null && !isOverlaySelection) {
         notificationApi.error({
           key: "playground-server-character-required",
           message: t("error"),
@@ -340,16 +361,17 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         return
       }
 
-      const created = await tldwClient.createChat({
+      const createPayload = {
         title,
-        character_id: characterId,
+        ...(characterId != null ? { character_id: characterId } : {}),
         state: serverChatStateRef.current || "in-progress",
         source:
           explicitSource ||
           (isCharacterPersistence
             ? WEBUI_CHARACTER_CHAT_SOURCE
             : WEBUI_CHAT_SOURCE)
-      })
+      }
+      const created = await tldwClient.createChat(createPayload)
       const rawId = (created as any)?.id ?? (created as any)?.chat_id ?? created
       const cid = rawId != null ? String(rawId) : ""
       if (!cid) {

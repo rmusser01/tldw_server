@@ -453,11 +453,18 @@ export const AssistantSelect: React.FC<Props> = ({
       setSearchText("")
       setSelectionMode(selectionModePreference)
       restoreReturnFocus()
-      await setSelectedAssistant(entry)
+      const nextEntry: AssistantSelection = {
+        ...entry,
+        metadata: {
+          ...(entry.metadata ?? {}),
+          selectionMode
+        }
+      }
+      await setSelectedAssistant(nextEntry)
       if (selectionMode === "overlay") {
-        let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(entry)
+        let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(nextEntry)
         try {
-          overlaySnapshot = await resolveAssistantOverlaySnapshot(entry)
+          overlaySnapshot = await resolveAssistantOverlaySnapshot(nextEntry)
         } catch (error) {
           console.warn(
             "[AssistantSelect] Failed to resolve overlay snapshot; using summary fallback",

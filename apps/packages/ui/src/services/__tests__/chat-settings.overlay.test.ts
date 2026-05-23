@@ -38,7 +38,8 @@ import {
   applyChatSettingsPatch,
   getChatSettingsStorageKey,
   normalizeChatSettingsRecord,
-  resolveChatSettingsKey
+  resolveChatSettingsKey,
+  syncChatSettingsForServerChat
 } from "@/services/chat-settings"
 
 const buildOverlay = (overrides: Record<string, unknown> = {}) => ({
@@ -165,6 +166,62 @@ describe("chat settings assistant overlay", () => {
       )
     ).toMatchObject({
       assistantOverlay: expect.objectContaining({ id: "persona-local" })
+    })
+  })
+
+  it("reconciles scratch assistantOverlay into server chat settings when a server chat id appears", async () => {
+    storageState.getChatSettings.mockRejectedValueOnce(new Error("404 not found"))
+    storageState.updateChatSettings.mockResolvedValueOnce({
+      settings: {
+        schemaVersion: 2,
+        updatedAt: "2026-05-22T18:05:00.000Z",
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-17"
+    })
+
+    expect(storageState.updateChatSettings).toHaveBeenCalledWith(
+      "server-chat-17",
+      expect.objectContaining({
+        assistantOverlay: expect.objectContaining({
+          id: "persona-scratch"
+        })
+      })
+    )
+    expect(synced?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-scratch"
+      })
+    )
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-17"
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-scratch"
+      })
     })
   })
 

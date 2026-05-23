@@ -88,6 +88,7 @@ import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
+  getAssistantSelectionMode,
   isPersonaAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection,
@@ -443,6 +444,13 @@ export const useMessage = () => {
       id: string,
       options?: { preserveServerChatId?: boolean },
     ) => void,
+    {
+      onServerConversationLinked: (conversationId) => {
+        setServerChatId(conversationId);
+        setServerChatMetaLoaded(false);
+        invalidateServerChatHistory();
+      },
+    }
   );
   const saveMessageOnError = createSaveMessageOnError(
     temporaryChat,
@@ -2503,6 +2511,7 @@ export const useMessage = () => {
             effectiveMode: effectiveAssistantState.mode,
             hasEffectiveAssistant: Boolean(effectiveSelectedAssistant),
             draftAssistantKind: selectedAssistant?.kind ?? null,
+            draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
           });
           const trackedCharacterForSend =
             sendMode === "tracked_character"

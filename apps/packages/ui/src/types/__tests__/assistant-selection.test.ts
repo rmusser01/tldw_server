@@ -5,6 +5,7 @@ import {
   characterToAssistantSelection,
   isPersonaAssistantSelection,
   normalizeAssistantSelection,
+  preserveAssistantSelectionMode,
   personaToAssistantSelection
 } from "../assistant-selection"
 
@@ -83,5 +84,67 @@ describe("normalizeAssistantSelection", () => {
         character_id: 7
       })
     )
+  })
+})
+
+describe("preserveAssistantSelectionMode", () => {
+  it("preserves overlay mode for same-id hydration payloads that omit metadata", () => {
+    expect(
+      preserveAssistantSelectionMode(
+        {
+          id: "char-1",
+          name: "Overlay Character"
+        },
+        {
+          id: "char-1",
+          name: "Overlay Character",
+          metadata: { selectionMode: "overlay" }
+        }
+      )
+    ).toEqual({
+      id: "char-1",
+      name: "Overlay Character",
+      metadata: { selectionMode: "overlay" }
+    })
+  })
+
+  it("keeps the next selection mode when the replacement already declares one", () => {
+    expect(
+      preserveAssistantSelectionMode(
+        {
+          id: "char-1",
+          name: "Tracked Character",
+          metadata: { selectionMode: "tracked", foo: "bar" }
+        },
+        {
+          id: "char-1",
+          name: "Overlay Character",
+          metadata: { selectionMode: "overlay" }
+        }
+      )
+    ).toEqual({
+      id: "char-1",
+      name: "Tracked Character",
+      metadata: { selectionMode: "tracked", foo: "bar" }
+    })
+  })
+
+  it("does not carry selection mode across different ids", () => {
+    expect(
+      preserveAssistantSelectionMode(
+        {
+          id: "char-2",
+          name: "Replacement Character"
+        },
+        {
+          id: "char-1",
+          name: "Overlay Character",
+          metadata: { selectionMode: "overlay" }
+        }
+      )
+    ).toEqual({
+      id: "char-2",
+      name: "Replacement Character"
+    })
   })
 })

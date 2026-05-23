@@ -234,6 +234,25 @@ def test_convert_db_conversation_to_response_defaults_settings_none():
 
 
 @pytest.mark.unit
+def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_from_character_id():
+    conv = {
+        "id": "chat-3",
+        "character_id": 11,
+        "assistant_kind": None,
+        "assistant_id": None,
+        "created_at": datetime.now(timezone.utc),
+        "last_modified": datetime.now(timezone.utc),
+        "version": 1,
+    }
+
+    response = sessions._convert_db_conversation_to_response(conv)
+
+    assert response.character_id == 11
+    assert response.assistant_kind is None
+    assert response.assistant_id is None
+
+
+@pytest.mark.unit
 def test_openapi_exposes_include_settings_query_params():
     app = FastAPI()
     app.include_router(sessions.router, prefix="/api/v1/chats")

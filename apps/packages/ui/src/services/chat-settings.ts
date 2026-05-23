@@ -645,10 +645,15 @@ export const syncChatSettingsForServerChat = async (params: {
 
   const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
   const localKey = resolveChatSettingsKey({ historyId, serverChatId: null })
+  const scratchKey = resolveChatSettingsKey({ historyId: null, serverChatId: null })
 
   const localForServer = await getChatSettingsForKey(serverKey)
   const localFromHistory = historyId ? await getChatSettingsForKey(localKey) : null
-  const localSettings = localForServer || localFromHistory
+  const localFromScratch =
+    !localForServer && !localFromHistory
+      ? await getChatSettingsForKey(scratchKey)
+      : null
+  const localSettings = localForServer || localFromHistory || localFromScratch
 
   await tldwClient.initialize().catch(() => null)
 

@@ -5,15 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useChatActions } from "../useChatActions"
 
-const {
-  createChatMock,
-  normalChatModeMock,
-  streamCharacterChatCompletionMock
-} = vi.hoisted(() => ({
-  createChatMock: vi.fn(),
-  normalChatModeMock: vi.fn(),
-  streamCharacterChatCompletionMock: vi.fn()
-}))
+const { createChatMock, normalChatModeMock, streamCharacterChatCompletionMock } =
+  vi.hoisted(() => ({
+    createChatMock: vi.fn(),
+    normalChatModeMock: vi.fn(),
+    streamCharacterChatCompletionMock: vi.fn()
+  }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
   normalChatMode: normalChatModeMock
@@ -40,12 +37,12 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
   createSaveMessageOnSuccess: vi.fn(
     () =>
       async (_payload?: unknown): Promise<string | null> =>
-        "history-persona"
+        "history-overlay"
   ),
   createSaveMessageOnError: vi.fn(
     () =>
       async (_payload?: unknown): Promise<string | null> =>
-        "history-persona"
+        "history-overlay"
   )
 }))
 
@@ -140,7 +137,7 @@ const createHookOptions = () => ({
   setMessages: vi.fn(),
   history: [],
   setHistory: vi.fn(),
-  historyId: "history-persona",
+  historyId: "history-overlay",
   setHistoryId: vi.fn(),
   temporaryChat: false,
   selectedModel: "deepseek-chat",
@@ -190,7 +187,7 @@ const createHookOptions = () => ({
   setServerChatClusterId: vi.fn(),
   setServerChatSource: vi.fn(),
   setServerChatExternalRef: vi.fn(),
-  ensureServerChatHistoryId: vi.fn(async () => "history-persona"),
+  ensureServerChatHistoryId: vi.fn(async () => "history-overlay"),
   contextFiles: [],
   setContextFiles: vi.fn(),
   documentContext: null,
@@ -207,13 +204,18 @@ const createHookOptions = () => ({
   setSelectedQuickPrompt: vi.fn(),
   setSelectedSystemPrompt: vi.fn(),
   invalidateServerChatHistory: vi.fn(),
-  selectedCharacter: null,
+  selectedCharacter: {
+    id: "char-overlay",
+    name: "Overlay Guide",
+    system_prompt: "Overlay guide prompt"
+  },
   selectedAssistant: {
-    kind: "persona" as const,
-    id: "garden-helper",
-    name: "Garden Helper",
+    kind: "character" as const,
+    id: "char-overlay",
+    name: "Overlay Guide",
+    system_prompt: "Overlay guide prompt",
     metadata: {
-      selectionMode: "tracked"
+      selectionMode: "overlay"
     }
   },
   messageSteeringMode: "none" as const,
@@ -221,176 +223,44 @@ const createHookOptions = () => ({
   clearMessageSteering: vi.fn()
 })
 
-describe("useChatActions persona integration", () => {
+describe("useChatActions overlay integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    createChatMock.mockResolvedValue({
-      id: "persona-chat-1",
-      title: "Persona chat",
-      assistant_kind: "persona",
-      assistant_id: "garden-helper",
-      persona_memory_mode: "read_only"
-    })
     normalChatModeMock.mockResolvedValue(undefined)
+    streamCharacterChatCompletionMock.mockImplementation(async function* () {
+      yield {
+        choices: [
+          {
+            delta: {
+              content: "Tracked reply"
+            }
+          }
+        ]
+      }
+    })
   })
 
-  it("creates a persona-backed chat with assistant_kind=persona", async () => {
+  it("routes overlay character selections through normal chat mode without creating tracked chats", async () => {
     const options = createHookOptions()
     const { result } = renderHook(() => useChatActions(options as any))
 
     await act(async () => {
       await result.current.onSubmit({
-        message: "Hello persona",
+        message: "Overlay hello",
         image: ""
       })
     })
 
-    expect(createChatMock).toHaveBeenCalledWith({
-      assistant_kind: "persona",
-      assistant_id: "garden-helper",
-      persona_memory_mode: "read_only",
-      state: "in-progress",
-      topic_label: undefined,
-      cluster_id: undefined,
-      source: undefined,
-      external_ref: undefined
-    })
-    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
-    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
-    expect(options.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")
-    expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(
-      "read_only"
-    )
-    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(true)
-    expect(normalChatModeMock).toHaveBeenCalledWith(
-      "Hello persona",
-      "",
-      false,
-      [],
-      [],
-      expect.any(AbortSignal),
-      expect.objectContaining({
-        assistantIdentity: {
-          name: "Garden Helper",
-          avatarUrl: undefined
-        },
-        historyId: "history-persona",
-        serverChatId: "persona-chat-1"
-      })
-    )
-  })
-
-  it("does not forward stale character state into the first persona send", async () => {
-    const options = {
-      ...createHookOptions(),
-      serverChatId: "character-chat-1",
-      serverChatTitle: "Old character chat",
-      serverChatCharacterId: 42,
-      serverChatAssistantKind: "character" as const,
-      serverChatAssistantId: "42",
-      serverChatPersonaMemoryMode: "read_write" as const,
-      serverChatMetaLoaded: true,
-      serverChatState: "resolved" as const,
-      serverChatTopic: "Old topic",
-      serverChatClusterId: "old-cluster",
-      serverChatSource: "old-source",
-      serverChatExternalRef: "old-ref"
-    }
-    const { result } = renderHook(() => useChatActions(options as any))
-
-    await act(async () => {
-      await result.current.onSubmit({
-        message: "Hello persona",
-        image: ""
-      })
-    })
-
-    expect(options.setServerChatId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
-    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
-    expect(options.setServerChatTitle).toHaveBeenCalledWith(null)
-    expect(options.setServerChatState).toHaveBeenCalledWith("in-progress")
-    expect(options.setServerChatVersion).toHaveBeenCalledWith(null)
-    expect(options.setServerChatTopic).toHaveBeenCalledWith(null)
-    expect(options.setServerChatClusterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatSource).toHaveBeenCalledWith(null)
-    expect(options.setServerChatExternalRef).toHaveBeenCalledWith(null)
-    expect(createChatMock).toHaveBeenCalledWith({
-      assistant_kind: "persona",
-      assistant_id: "garden-helper",
-      persona_memory_mode: "read_only",
-      state: "in-progress",
-      topic_label: undefined,
-      cluster_id: undefined,
-      source: undefined,
-      external_ref: undefined
-    })
-    expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
-    expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
-      "garden-helper"
-    )
-    expect(normalChatModeMock).toHaveBeenCalledWith(
-      "Hello persona",
-      "",
-      false,
-      [],
-      [],
-      expect.any(AbortSignal),
-      expect.objectContaining({
-        assistantIdentity: {
-          name: "Garden Helper",
-          avatarUrl: undefined
-        },
-        serverChatId: "persona-chat-1"
-      })
-    )
-  })
-
-  it("keeps persona routing ahead of character fallback when persona chats carry a character id", async () => {
-    const options = {
-      ...createHookOptions(),
-      serverChatId: "persona-chat-existing",
-      serverChatAssistantKind: "persona" as const,
-      serverChatAssistantId: "garden-helper",
-      serverChatCharacterId: "char-shadow",
-      selectedCharacter: {
-        id: "char-stale",
-        name: "Stale Character",
-        system_prompt: "Stale prompt"
-      }
-    }
-    const { result } = renderHook(() => useChatActions(options as any))
-
-    await act(async () => {
-      await result.current.onSubmit({
-        message: "Stay persona",
-        image: ""
-      })
-    })
-
+    expect(createChatMock).not.toHaveBeenCalled()
     expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
-    expect(createChatMock).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        character_id: expect.anything()
-      })
-    )
-    expect(normalChatModeMock).toHaveBeenCalledWith(
-      "Stay persona",
-      "",
-      false,
-      [],
-      [],
-      expect.any(AbortSignal),
+    expect(normalChatModeMock).toHaveBeenCalledTimes(1)
+    expect(normalChatModeMock.mock.calls[0]?.[6]).toEqual(
       expect.objectContaining({
         assistantIdentity: {
-          name: "Garden Helper",
+          name: "Overlay Guide",
           avatarUrl: undefined
         },
-        serverChatId: "persona-chat-existing"
+        overlaySystemPrompt: "Overlay guide prompt"
       })
     )
   })

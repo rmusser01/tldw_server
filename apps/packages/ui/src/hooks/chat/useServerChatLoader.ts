@@ -17,6 +17,10 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { updatePageTitle } from "@/utils/update-page-title"
 import {
+  effectiveAssistantStateToSelection,
+  resolveEffectiveAssistantState
+} from "@/hooks/chat/effective-assistant-state"
+import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   parseImageGenerationEventMirrorContent
 } from "@/utils/image-generation-chat"
@@ -24,6 +28,7 @@ import {
   characterToAssistantSelection,
   personaToAssistantSelection
 } from "@/types/assistant-selection"
+import { isTrackedCharacterChatSource } from "@/utils/character-chat-session"
 
 type NotificationApi = {
   error: (payload: { message: string; description?: string }) => void
@@ -271,6 +276,8 @@ export const resolveServerChatAssistantIdentity = (
     candidate?.assistant_kind === "character" || candidate?.assistant_kind === "persona"
       ? candidate.assistant_kind
       : null
+  const source =
+    typeof candidate?.source === "string" ? candidate.source.trim() : null
   const assistantId = resolveAssistantId(candidate?.assistant_id)
   const rawCharacterId =
     candidate?.character_id ??
@@ -306,7 +313,7 @@ export const resolveServerChatAssistantIdentity = (
     }
   }
 
-  if (characterId != null) {
+  if (characterId != null && isTrackedCharacterChatSource(source)) {
     return {
       assistantKind: "character",
       assistantId: String(characterId),
@@ -772,6 +779,18 @@ export const useServerChatLoader = ({
           }
 
           const deferredAssistantPresentationPromise = (async () => {
+            let syncedSettings = null
+            if (assistantKind == null && characterId == null) {
+              try {
+                syncedSettings = await syncChatSettingsForServerChat({
+                  historyId: null,
+                  serverChatId
+                })
+              } catch {
+                syncedSettings = null
+              }
+            }
+
             if (assistantKind === "persona" && assistantId) {
               try {
                 const persona = await tldwClient.getPersonaProfile(assistantId)
@@ -851,6 +870,23 @@ export const useServerChatLoader = ({
 
             if (!canCommitCurrentLoad()) {
               return null
+            }
+            const effectiveAssistantState = resolveEffectiveAssistantState({
+              tracked: {
+                assistantKind,
+                assistantId,
+                characterId
+              },
+              settings: syncedSettings
+            })
+            const selection =
+              effectiveAssistantStateToSelection(effectiveAssistantState)
+            if (selection) {
+              await setSelectedAssistant(selection)
+              return {
+                assistantName: selection.name,
+                assistantAvatarUrl: selection.avatar_url ?? null
+              }
             }
             await setSelectedAssistant(null)
             return null

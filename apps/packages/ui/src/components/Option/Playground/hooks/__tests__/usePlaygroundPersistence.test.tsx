@@ -54,6 +54,8 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
   history: [{ role: "user", content: "Hello" }],
   clearChat: vi.fn(),
   selectedCharacter: null,
+  selectedAssistantMode: null,
+  assistantOverlayActive: false,
   serverPersistenceHintSeen: false,
   setServerPersistenceHintSeen: vi.fn(),
   invalidateServerChatHistory: vi.fn(),
@@ -192,5 +194,69 @@ describe("usePlaygroundPersistence", () => {
         })
       )
     })
+  })
+
+  it("does not persist overlay character selections as tracked server chats", async () => {
+    const { result } = renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          history: [{ role: "user", content: "Hello from overlay" }],
+          selectedCharacter: {
+            id: "overlay-char",
+            name: "Overlay Character"
+          },
+          selectedAssistantMode: "overlay",
+          assistantOverlayActive: true
+        })
+      }
+    )
+
+    await result.current.handleSaveChatToServer()
+
+    await waitFor(() => {
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          character_id: "overlay-char"
+        })
+      )
+    })
+    expect(mocks.createChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "webui-chat"
+      })
+    )
+  })
+
+  it("treats a pending local overlay snapshot as overlay even if the selected assistant mode is not hydrated yet", async () => {
+    const { result } = renderHook(
+      (deps: ReturnType<typeof buildDeps>) => usePlaygroundPersistence(deps),
+      {
+        initialProps: buildDeps({
+          history: [{ role: "user", content: "Hello from pending overlay" }],
+          selectedCharacter: {
+            id: "overlay-char",
+            name: "Overlay Character"
+          },
+          selectedAssistantMode: null,
+          assistantOverlayActive: true
+        })
+      }
+    )
+
+    await result.current.handleSaveChatToServer()
+
+    await waitFor(() => {
+      expect(mocks.createChat).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          character_id: "overlay-char"
+        })
+      )
+    })
+    expect(mocks.createChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "webui-chat"
+      })
+    )
   })
 })

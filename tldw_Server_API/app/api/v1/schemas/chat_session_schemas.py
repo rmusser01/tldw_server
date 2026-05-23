@@ -178,6 +178,18 @@ class ChatSessionCreate(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_assistant_identity(self) -> "ChatSessionCreate":
+        has_any_tracked_identity = any(
+            value is not None
+            for value in (
+                self.character_id,
+                self.assistant_kind,
+                self.assistant_id,
+                self.persona_memory_mode,
+            )
+        )
+        if not has_any_tracked_identity:
+            return self
+
         if self.assistant_kind is None:
             self.assistant_kind = "character" if self.character_id is not None else None
         if self.assistant_kind is None:

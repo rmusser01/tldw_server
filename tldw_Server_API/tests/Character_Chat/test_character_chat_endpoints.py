@@ -311,6 +311,50 @@ async def test_create_persona_backed_chat_session():
 
 
 @pytest.mark.asyncio
+async def test_create_plain_chat_session_without_tracked_identity():
+    tmpdir = tempfile.mkdtemp(prefix="chacha_plain_chat_")
+    os.environ["USER_DB_BASE_DIR"] = tmpdir
+
+    try:
+        from tldw_Server_API.app.main import app
+
+        settings = get_settings()
+        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            create_resp = await client.post(
+                "/api/v1/chats/",
+                headers=headers,
+                json={
+                    "title": "Plain overlay-compatible chat",
+                    "source": "webui-chat",
+                },
+            )
+            assert create_resp.status_code == 201, create_resp.text
+            body = create_resp.json()
+            assert body["assistant_kind"] is None
+            assert body["assistant_id"] is None
+            assert body["character_id"] is None
+            assert body["persona_memory_mode"] is None
+            assert body["title"] == "Plain overlay-compatible chat"
+
+            detail_resp = await client.get(f"/api/v1/chats/{body['id']}", headers=headers)
+            assert detail_resp.status_code == 200, detail_resp.text
+            detail = detail_resp.json()
+            assert detail["assistant_kind"] is None
+            assert detail["assistant_id"] is None
+            assert detail["character_id"] is None
+            assert detail["persona_memory_mode"] is None
+            assert detail["title"] == "Plain overlay-compatible chat"
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            _ = None
+
+
+@pytest.mark.asyncio
 async def test_message_placeholders_and_length_guard(monkeypatch):
     tmpdir = tempfile.mkdtemp(prefix="chacha_placeholders_")
     os.environ["USER_DB_BASE_DIR"] = tmpdir
