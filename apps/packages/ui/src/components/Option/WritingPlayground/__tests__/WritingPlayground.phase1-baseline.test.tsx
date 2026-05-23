@@ -1,5 +1,6 @@
 import React from "react"
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -15,7 +16,7 @@ const mockState = vi.hoisted(() => ({
   resolveApiProviderForModel: vi.fn(async () => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
-  sendResponses: [] as string[]
+  sendResponses: [] as Array<string | Promise<string>>
 }))
 
 vi.mock("@tanstack/react-query", () => {
@@ -105,7 +106,7 @@ vi.mock("@/services/tldw/TldwChat", () => ({
     }
     async sendMessage(messages: unknown[], options: Record<string, unknown>) {
       mockState.sendCalls.push({ messages, options })
-      return mockState.sendResponses.shift() ?? "mocked completion"
+      return await (mockState.sendResponses.shift() ?? "mocked completion")
     }
   }
 }))
@@ -139,6 +140,7 @@ vi.mock("../WritingTipTapEditor", () => ({
   WritingTipTapEditor: ({
     content,
     onAdapterReady,
+    onSelectionChange,
     onContentChange,
     placeholder
   }: {
@@ -157,6 +159,7 @@ vi.mock("../WritingTipTapEditor", () => ({
       getSelectedText: (currentValue: string) => string
       focus: () => void
     }) => void
+    onSelectionChange?: (selection: { start: number; end: number }) => void
     onContentChange: (json: Record<string, unknown>, plain: string) => void
     placeholder?: string
   }) => {
@@ -197,6 +200,10 @@ vi.mock("../WritingTipTapEditor", () => ({
         onSelect={(event) => {
           const node = event.currentTarget
           setSelection({
+            start: node.selectionStart,
+            end: node.selectionEnd
+          })
+          onSelectionChange?.({
             start: node.selectionStart,
             end: node.selectionEnd
           })
@@ -503,6 +510,164 @@ describe("WritingPlayground phase1 baseline", () => {
     })
   })
 
+  it("refreshes the action-bar target when text is selected after a broad target renders", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement("Specific rewrite."))
+    seedWritingSession({
+      prompt: `${"Long paragraph ".repeat(180)}target phrase.`
+    })
+
+    render(<WritingPlayground />)
+    expect(
+      screen.getByLabelText(/confirm whole-document text change/i)
+    ).toBeInTheDocument()
+
+    selectEditorText(getEditor(), "target phrase.")
+
+    await waitFor(() => {
+      expect(
+        screen.queryByLabelText(/confirm whole-document text change/i)
+      ).toBeNull()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Specific rewrite.")).toBeInTheDocument()
+    })
+    expect(latestRevisionPrompt()).toContain("Target summary: selection")
+  })
+
+  it("refreshes the rich-editor action-bar target when rich text is selected", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement("Rich specific rewrite."))
+    useWritingPlaygroundStore.setState({ editorMode: "tiptap" })
+    seedWritingSession({
+      prompt: `${"Long paragraph ".repeat(180)}target phrase.`
+    })
+
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByRole("radio", { name: "Rich" }))
+    const richEditor = await screen.findByLabelText("Mock rich editor") as HTMLTextAreaElement
+    expect(
+      screen.getByLabelText(/confirm whole-document text change/i)
+    ).toBeInTheDocument()
+
+    selectEditorText(richEditor, "target phrase.")
+
+    await waitFor(() => {
+      expect(
+        screen.queryByLabelText(/confirm whole-document text change/i)
+      ).toBeNull()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Rich specific rewrite.")).toBeInTheDocument()
+    })
+    expect(latestRevisionPrompt()).toContain("Target summary: selection")
+  })
+
+  it("keeps the topbar Generate control non-cancelable during revision proposal requests", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    let resolveResponse: (value: string) => void = () => {}
+    mockState.sendResponses.push(
+      new Promise<string>((resolve) => {
+        resolveResponse = resolve
+      })
+    )
+    seedWritingSession({
+      prompt: "Rewrite this line.",
+      settings: { token_streaming: true }
+    })
+
+    render(<WritingPlayground />)
+    selectEditorText(getEditor(), "Rewrite this line.")
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+    const generateButton = screen.getByTestId("writing-topbar-generate")
+    expect(generateButton).toHaveTextContent("Generate")
+    expect(generateButton).toBeDisabled()
+
+    await act(async () => {
+      resolveResponse(structuredReplacement("Resolved rewrite."))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Resolved rewrite.")).toBeInTheDocument()
+    })
+  })
+
+  it("blocks session switching while a revision proposal request is pending", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    let resolveResponse: (value: string) => void = () => {}
+    mockState.sendResponses.push(
+      new Promise<string>((resolve) => {
+        resolveResponse = resolve
+      })
+    )
+    seedWritingSession({ prompt: "Rewrite this line." })
+    mockState.queryData.set("writing-sessions", {
+      sessions: [
+        {
+          id: "session-auto",
+          name: "Auto Session",
+          last_modified: "2026-03-16T12:00:00Z",
+          version: 1
+        },
+        {
+          id: "session-other",
+          name: "Other Session",
+          last_modified: "2026-03-16T12:05:00Z",
+          version: 1
+        }
+      ],
+      total: 2,
+      limit: 200,
+      offset: 0
+    })
+    mockState.queryData.set("writing-session:session-other", {
+      id: "session-other",
+      name: "Other Session",
+      payload: {
+        prompt: "Other draft.",
+        settings: {},
+        template_name: null,
+        theme_name: null,
+        chat_mode: false
+      },
+      schema_version: 1,
+      version_parent_id: null,
+      created_at: "2026-03-16T12:00:00Z",
+      last_modified: "2026-03-16T12:05:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 1
+    })
+
+    render(<WritingPlayground />)
+    selectEditorText(getEditor(), "Rewrite this line.")
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Other Session/i }))
+
+    expect(useWritingPlaygroundStore.getState().activeSessionId).toBe(
+      "session-auto"
+    )
+    expect(getEditor()).toHaveValue("Rewrite this line.")
+
+    await act(async () => {
+      resolveResponse(structuredReplacement("Resolved rewrite."))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Resolved rewrite.")).toBeInTheDocument()
+    })
+  })
+
   it("shows malformed model output as a raw suggestion without Apply", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push("not structured json")
@@ -708,7 +873,13 @@ describe("WritingPlayground phase1 baseline", () => {
     })
 
     render(<WritingPlayground />)
-    fireEvent.click(screen.getByLabelText(/confirm whole-document text change/i))
+    const editor = getEditor()
+    editor.focus()
+    editor.setSelectionRange(0, 0)
+    fireEvent.select(editor)
+    fireEvent.click(
+      await screen.findByLabelText(/confirm whole-document text change/i)
+    )
     fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
 
     await waitFor(() => {

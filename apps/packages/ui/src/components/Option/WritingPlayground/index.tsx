@@ -257,6 +257,7 @@ export const WritingPlayground = () => {
   const [useRegex, setUseRegex] = React.useState(false)
   const [activeMatchIndex, setActiveMatchIndex] = React.useState(0)
   const [isGenerating, setIsGenerating] = React.useState(false)
+  const [isRevisionGenerating, setIsRevisionGenerating] = React.useState(false)
   const [canUndoGeneration, setCanUndoGeneration] = React.useState(false)
   const [canRedoGeneration, setCanRedoGeneration] = React.useState(false)
   const [isSpeaking, setIsSpeaking] = React.useState(false)
@@ -279,6 +280,8 @@ export const WritingPlayground = () => {
     React.useState<WritingRevisionPresetId>(
       WRITING_REVISION_PRESETS[0]?.id ?? "polish_prose"
     )
+  const [revisionSelection, setRevisionSelection] =
+    React.useState<WritingEditorSelection | null>(null)
 
   // --- Refs (local only) ---
   const generationServiceRef = React.useRef(new TldwChatService())
@@ -312,6 +315,7 @@ export const WritingPlayground = () => {
   const hasServerDefaultsCatalog = Boolean(writingCaps?.server?.defaults_catalog)
   const hasSnapshots = Boolean(writingCaps?.server?.snapshots)
   const hasChat = capabilities?.hasChat !== false
+  const isWritingRequestBusy = isGenerating || isRevisionGenerating
 
   // =====================================================================
   // Hook 1: Session Management
@@ -320,7 +324,7 @@ export const WritingPlayground = () => {
     isOnline, hasWriting, activeSessionId, activeSessionName,
     setActiveSessionId, setActiveSessionName, sessionUsageMap, setSessionUsageMap,
     selectedModel, setSelectedModel, apiProviderOverride, setApiProvider,
-    isGenerating, t
+    isGenerating: isWritingRequestBusy, t
   })
   const {
     sessions, sessionsLoading, sessionsFetching, sessionsError,
@@ -376,12 +380,28 @@ export const WritingPlayground = () => {
     [textareaEditorAdapter]
   )
 
+  const updateRevisionSelection = React.useCallback(
+    (selection: WritingEditorSelection | null) => {
+      setRevisionSelection((current) => {
+        if (
+          current?.start === selection?.start &&
+          current?.end === selection?.end
+        ) {
+          return current
+        }
+        return selection
+      })
+    },
+    []
+  )
+
   const setActiveEditorAdapter = React.useCallback(
     (adapter: WritingEditorAdapter | null) => {
       activeEditorAdapterRef.current = adapter
       applyPendingEditorSelection(adapter)
+      updateRevisionSelection(adapter?.getSelection() ?? null)
     },
-    [applyPendingEditorSelection]
+    [applyPendingEditorSelection, updateRevisionSelection]
   )
 
   // Sync TipTap content when editorText changes from an external source (e.g. session load, undo/redo, generate)
@@ -416,7 +436,8 @@ export const WritingPlayground = () => {
     applyPendingEditorSelection(activeEditorAdapterRef.current)
   }, [applyPendingEditorSelection, editorMode, editorView])
 
-  const settingsDisabled = isGenerating || !activeSessionDetail
+  const settingsDisabled =
+    isGenerating || isRevisionGenerating || !activeSessionDetail
 
   React.useEffect(() => {
     const persistedPresetId = getRevisionPresetIdFromPayload(
@@ -426,6 +447,10 @@ export const WritingPlayground = () => {
       persistedPresetId ?? WRITING_REVISION_PRESETS[0]?.id ?? "polish_prose"
     )
   }, [activeSessionDetail?.id, activeSessionDetail?.payload])
+
+  React.useEffect(() => {
+    setRevisionSelection(null)
+  }, [activeSessionDetail?.id, editorMode])
 
   // =====================================================================
   // Hook 2: Template Library
@@ -657,7 +682,7 @@ export const WritingPlayground = () => {
   // =====================================================================
   const handleGenerate = React.useCallback(
     async (overrideText?: string) => {
-    if (isGenerating) return
+    if (isGenerating || isRevisionGenerating) return
     if (!activeSessionDetail) {
       message.info(
         t("option:writingPlayground.selectSession", "Select a session to begin.")
@@ -856,6 +881,7 @@ export const WritingPlayground = () => {
       effectiveTemplate,
       hasChat,
       isGenerating,
+      isRevisionGenerating,
       isOnline,
       selectedModel,
       settings,
@@ -1040,6 +1066,12 @@ export const WritingPlayground = () => {
     },
     [applyPendingEditorSelection, editorView, getCurrentEditorAdapter]
   )
+
+  const refreshRevisionSelection = React.useCallback(() => {
+    const selection = getCurrentEditorAdapter()?.getSelection() ?? null
+    updateRevisionSelection(selection)
+    return selection
+  }, [getCurrentEditorAdapter, updateRevisionSelection])
 
   const syncScroll = React.useCallback((source: "editor" | "preview") => {
     if (editorView !== "split") return
@@ -1383,7 +1415,7 @@ export const WritingPlayground = () => {
 
   const resolveFreshRevisionTarget = React.useCallback(
     (request: WritingActionBarRequest): WritingRevisionTarget | null => {
-      const adapterSelection = getCurrentEditorAdapter()?.getSelection()
+      const adapterSelection = refreshRevisionSelection()
       const freshTarget = resolveRevisionTarget({
         text: editorText,
         action: request.action,
@@ -1414,17 +1446,17 @@ export const WritingPlayground = () => {
       )
       return null
     },
-    [editorText, getCurrentEditorAdapter, t]
+    [editorText, refreshRevisionSelection, t]
   )
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating) return
+      if (isGenerating || isRevisionGenerating) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
       persistRevisionPreset(request.presetId)
-      setIsGenerating(true)
+      setIsRevisionGenerating(true)
       try {
         const proposal = await createRevisionProposal({
           action: request.action,
@@ -1446,12 +1478,13 @@ export const WritingPlayground = () => {
           t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
         )
       } finally {
-        setIsGenerating(false)
+        setIsRevisionGenerating(false)
       }
     },
     [
       createRevisionProposal,
       isGenerating,
+      isRevisionGenerating,
       persistRevisionPreset,
       resolveFreshRevisionTarget,
       revisionState,
@@ -1461,8 +1494,8 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating) return
-      setIsGenerating(true)
+      if (isGenerating || isRevisionGenerating) return
+      setIsRevisionGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
           const preset =
@@ -1499,12 +1532,13 @@ export const WritingPlayground = () => {
           t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
         )
       } finally {
-        setIsGenerating(false)
+        setIsRevisionGenerating(false)
       }
     },
     [
       createRevisionProposal,
       isGenerating,
+      isRevisionGenerating,
       revisionState,
       selectedRevisionPresetId,
       t
@@ -1517,10 +1551,10 @@ export const WritingPlayground = () => {
         text: editorText,
         action: "rewrite",
         operation: "replace",
-        selection: getCurrentEditorAdapter()?.getSelection(),
-        cursor: getCurrentEditorAdapter()?.getSelection()?.end ?? editorText.length
+        selection: revisionSelection,
+        cursor: revisionSelection?.end ?? 0
       }),
-    [editorText, getCurrentEditorAdapter]
+    [editorText, revisionSelection]
   )
 
   const handleCopyRevision = React.useCallback(
@@ -1601,6 +1635,7 @@ export const WritingPlayground = () => {
     handleCancelGeneration,
     handleGenerate,
     isGenerating,
+    isRevisionGenerating,
     settings.token_streaming
   ])
 
@@ -1826,9 +1861,12 @@ export const WritingPlayground = () => {
     Boolean(activeSessionDetail) &&
     Boolean(selectedModel) &&
     hasChat &&
-    !isGenerating
+    !isGenerating &&
+    !isRevisionGenerating
   const generateDisabledReason = React.useMemo(() => {
     if (isGenerating) return null
+    if (isRevisionGenerating)
+      return t("option:writingPlayground.disabledRevisionBusy", "Revision request in progress")
     if (!activeSessionDetail)
       return t("option:writingPlayground.disabledNoSession", "Select a session first")
     if (!selectedModel)
@@ -1838,7 +1876,15 @@ export const WritingPlayground = () => {
     if (!hasChat)
       return t("option:writingPlayground.disabledNoChat", "Chat completions unavailable")
     return null
-  }, [activeSessionDetail, hasChat, isGenerating, isOnline, selectedModel, t])
+  }, [
+    activeSessionDetail,
+    hasChat,
+    isGenerating,
+    isOnline,
+    isRevisionGenerating,
+    selectedModel,
+    t
+  ])
 
   const saveStatusLabel = React.useMemo(() => {
     if (!activeSessionId) return null
@@ -2674,7 +2720,7 @@ export const WritingPlayground = () => {
                 icon={isGenerating ? <Square className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
                 onClick={() => { if (isGenerating && settings.token_streaming) { handleCancelGeneration() } else { void handleGenerate() } }}
                 loading={isGenerating && !settings.token_streaming}
-                disabled={isGenerating ? !settings.token_streaming : !canGenerate}
+                disabled={isGenerating ? !settings.token_streaming : !canGenerate || isRevisionGenerating}
                 data-testid="writing-topbar-generate">
                 {isGenerating ? t("option:writingPlayground.stopAction", "Stop") : t("option:writingPlayground.generateAction", "Generate")}
               </Button>
@@ -2749,10 +2795,10 @@ export const WritingPlayground = () => {
                       <Button size="small" icon={searchOpen ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />} onClick={() => setSearchOpen((open) => !open)} title={searchOpen ? t("option:writingPlayground.searchClose", "Close search") : t("option:writingPlayground.searchToggle", "Find")} />
                     </div>
                     <WritingActionBar
-                      generationAvailable={canGenerate}
+                      generationAvailable={canGenerate && !isRevisionGenerating}
                       target={displayedRevisionTarget}
                       selectedPresetId={selectedRevisionPresetId}
-                      isGenerating={isGenerating}
+                      isGenerating={isRevisionGenerating}
                       onPresetChange={persistRevisionPreset}
                       onRequest={(request) => {
                         void handleRevisionRequest(request)
@@ -2798,6 +2844,7 @@ export const WritingPlayground = () => {
                           onAdapterReady={(adapter) => {
                             setActiveEditorAdapter(adapter)
                           }}
+                          onSelectionChange={updateRevisionSelection}
                           editable={!isGenerating}
                           placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
                           className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
@@ -2806,7 +2853,7 @@ export const WritingPlayground = () => {
                     ) : (
                       <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                         <div className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
-                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
                         </div>
                       </Dropdown>
                     )
@@ -2831,6 +2878,7 @@ export const WritingPlayground = () => {
                                 onAdapterReady={(adapter) => {
                                   setActiveEditorAdapter(adapter)
                                 }}
+                                onSelectionChange={updateRevisionSelection}
                                 editable={!isGenerating}
                                 placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
                                 className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
@@ -2839,7 +2887,7 @@ export const WritingPlayground = () => {
                           ) : (
                             <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                               <div>
-                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
                               </div>
                             </Dropdown>
                           )}
