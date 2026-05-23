@@ -235,7 +235,7 @@ export const planRevisionApply = (
   const replacementText = proposal.replacementText
   if (typeof replacementText !== "string") {
     return {
-      type: "conflict",
+      type: "noop",
       reason: "Text-changing revisions require replacement text."
     }
   }
