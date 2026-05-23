@@ -10,12 +10,14 @@ import {
 } from "@/hooks/useServerChatHistory"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { useStoreMessageOption } from "@/store/option"
+import { getAssistantSelectionMode } from "@/types/assistant-selection"
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
+import { isTrackedCharacterChatSource } from "@/utils/character-chat-session"
 
 const isTrackedSession = (item: ServerChatHistoryItem): boolean =>
   item.assistant_kind === "character" ||
   item.assistant_kind === "persona" ||
-  item.character_id != null
+  (item.character_id != null && isTrackedCharacterChatSource(item.source))
 
 const resolveModeLabel = (
   mode: ReturnType<typeof resolveEffectiveAssistantState>["mode"]
@@ -39,6 +41,9 @@ export const CharacterControlRail = () => {
   const serverChatCharacterId = useStoreMessageOption(
     (state) => state.serverChatCharacterId
   )
+  const serverChatLoadState = useStoreMessageOption(
+    (state) => state.serverChatLoadState
+  )
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const { settings, updateSettings } = useChatSettingsRecord({
     historyId,
@@ -51,8 +56,8 @@ export const CharacterControlRail = () => {
   })
 
   const effectiveAssistantState = React.useMemo(
-    () =>
-      resolveEffectiveAssistantState({
+    () => {
+      const resolved = resolveEffectiveAssistantState({
         tracked: {
           assistantKind: serverChatAssistantKind,
           assistantId: serverChatAssistantId,
@@ -60,12 +65,42 @@ export const CharacterControlRail = () => {
         },
         settings: settings ?? null,
         draftSelection: selectedAssistant
-      }),
+      })
+
+      if (resolved.mode !== "plain") {
+        return resolved
+      }
+
+      if (
+        serverChatId &&
+        (serverChatLoadState === "loading" ||
+          serverChatLoadState === "failed") &&
+        selectedAssistant &&
+        getAssistantSelectionMode(selectedAssistant) === "tracked"
+      ) {
+        return {
+          mode:
+            selectedAssistant.kind === "persona"
+              ? "tracked_persona"
+              : "tracked_character",
+          kind: selectedAssistant.kind,
+          id: selectedAssistant.id,
+          displayName: selectedAssistant.name ?? null,
+          avatarUrl: selectedAssistant.avatar_url ?? null,
+          systemPromptSnapshot: selectedAssistant.system_prompt ?? null,
+          source: "tracked" as const
+        }
+      }
+
+      return resolved
+    },
     [
       selectedAssistant,
+      serverChatId,
       serverChatAssistantId,
       serverChatAssistantKind,
       serverChatCharacterId,
+      serverChatLoadState,
       settings
     ]
   )

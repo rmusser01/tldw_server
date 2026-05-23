@@ -38,7 +38,8 @@ import {
   applyChatSettingsPatch,
   getChatSettingsStorageKey,
   normalizeChatSettingsRecord,
-  resolveChatSettingsKey
+  resolveChatSettingsKey,
+  syncChatSettingsForServerChat
 } from "@/services/chat-settings"
 
 const buildOverlay = (overrides: Record<string, unknown> = {}) => ({
@@ -166,6 +167,194 @@ describe("chat settings assistant overlay", () => {
     ).toMatchObject({
       assistantOverlay: expect.objectContaining({ id: "persona-local" })
     })
+  })
+
+  it("reconciles scratch assistantOverlay into server chat settings when a server chat id appears", async () => {
+    storageState.getChatSettings.mockRejectedValue(new Error("404 not found"))
+    storageState.updateChatSettings.mockResolvedValueOnce({
+      settings: {
+        schemaVersion: 2,
+        updatedAt: "2026-05-22T18:05:00.000Z",
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    const syncedWithoutExplicitFallback = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-17"
+    })
+
+    expect(syncedWithoutExplicitFallback).toBeNull()
+    expect(storageState.updateChatSettings).not.toHaveBeenCalled()
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-17",
+      allowScratchFallback: true
+    })
+
+    expect(storageState.updateChatSettings).toHaveBeenCalledWith(
+      "server-chat-17",
+      expect.objectContaining({
+        assistantOverlay: expect.objectContaining({
+          id: "persona-scratch"
+        })
+      })
+    )
+    expect(synced?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-scratch"
+      })
+    )
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-17"
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-scratch"
+      })
+    })
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: null
+          })
+        )
+      )
+    ).toBeUndefined()
+  })
+
+  it("does not seed server chat settings from scratch fallback unless explicitly allowed", async () => {
+    storageState.getChatSettings.mockRejectedValue(new Error("404 not found"))
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-unscoped"
+        })
+      }
+    })
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-unscoped"
+    })
+
+    expect(synced).toBeNull()
+    expect(storageState.updateChatSettings).not.toHaveBeenCalled()
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-unscoped"
+          })
+        )
+      )
+    ).toBeUndefined()
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: null
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-unscoped"
+      })
+    })
+  })
+
+  it("reconciles scratch assistantOverlay into server chat settings only when explicitly allowed", async () => {
+    storageState.getChatSettings.mockRejectedValue(new Error("404 not found"))
+    storageState.updateChatSettings.mockResolvedValueOnce({
+      settings: {
+        schemaVersion: 2,
+        updatedAt: "2026-05-22T18:05:00.000Z",
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    await applyChatSettingsPatch({
+      historyId: null,
+      serverChatId: null,
+      patch: {
+        assistantOverlay: buildOverlay({
+          id: "persona-scratch"
+        })
+      }
+    })
+
+    const synced = await syncChatSettingsForServerChat({
+      historyId: null,
+      serverChatId: "server-chat-18",
+      allowScratchFallback: true
+    })
+
+    expect(storageState.updateChatSettings).toHaveBeenCalledWith(
+      "server-chat-18",
+      expect.objectContaining({
+        assistantOverlay: expect.objectContaining({
+          id: "persona-scratch"
+        })
+      })
+    )
+    expect(synced?.assistantOverlay).toEqual(
+      expect.objectContaining({
+        id: "persona-scratch"
+      })
+    )
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: "server-chat-18"
+          })
+        )
+      )
+    ).toMatchObject({
+      assistantOverlay: expect.objectContaining({
+        id: "persona-scratch"
+      })
+    })
+    expect(
+      storageState.store.get(
+        getChatSettingsStorageKey(
+          resolveChatSettingsKey({
+            historyId: null,
+            serverChatId: null
+          })
+        )
+      )
+    ).toBeUndefined()
   })
 
   it("merges a partial local overlay patch into the existing valid overlay", async () => {

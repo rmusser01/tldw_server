@@ -14,6 +14,7 @@ import { isFirefoxTarget } from "@/config/platform";
 import { getDesignSystemState } from "@/design-system";
 import { getAllPrompts } from "@/db/dexie/helpers";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
   type CollapsedRange,
   useActionBarVisibility,
@@ -40,7 +41,6 @@ import { useMcpTools } from "@/hooks/useMcpTools";
 import { useMobile } from "@/hooks/useMediaQuery";
 // isMac moved to PlaygroundSendControl
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter";
 import { useServerCapabilities } from "@/hooks/useServerCapabilities";
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus";
 import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages";
@@ -91,6 +91,11 @@ import { useUiModeStore } from "@/store/ui-mode";
 import { createDefaultActorSettings } from "@/types/actor";
 import type { Character } from "@/types/character";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
+import {
+  assistantSelectionToCharacter,
+  characterToAssistantSelection,
+  getAssistantSelectionMode,
+} from "@/types/assistant-selection";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
 import {
@@ -548,6 +553,10 @@ export const PlaygroundForm = ({
     serverChatSource,
     setServerChatSource,
     setServerChatVersion,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
     replyTarget,
     clearReplyTarget,
     ragPinnedResults,
@@ -966,9 +975,38 @@ export const PlaygroundForm = ({
   );
   const [sttSegEmbeddingsProvider] = useStorage("sttSegEmbeddingsProvider", "");
   const [sttSegEmbeddingsModel] = useStorage("sttSegEmbeddingsModel", "");
-  const [selectedCharacter, setSelectedCharacter] =
-    useSelectedCharacter<Character | null>(null);
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
+  const selectedAssistantMode = React.useMemo(
+    () => getAssistantSelectionMode(selectedAssistant),
+    [selectedAssistant]
+  );
+  const selectedCharacter = React.useMemo(
+    () => assistantSelectionToCharacter<Character>(selectedAssistant),
+    [selectedAssistant]
+  );
+  const setSelectedCharacter = React.useCallback(
+    async (next: Character | null) => {
+      const nextSelection = characterToAssistantSelection(
+        next as (Character & Record<string, unknown>) | null
+      );
+      if (nextSelection && selectedAssistantMode) {
+        nextSelection.metadata = {
+          ...(nextSelection.metadata ?? {}),
+          selectionMode: selectedAssistantMode,
+        };
+      }
+      await setSelectedAssistant(nextSelection);
+    },
+    [selectedAssistantMode, setSelectedAssistant]
+  );
+  const pendingAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        settings: chatSettings ?? null,
+        draftSelection: selectedAssistant
+      }),
+    [chatSettings, selectedAssistant]
+  );
   const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
     {
       key: DEFAULT_CHARACTER_STORAGE_KEY,
@@ -3051,14 +3089,21 @@ export const PlaygroundForm = ({
     setTemporaryChat,
     serverChatId,
     setServerChatId,
+    historyId,
     serverChatState,
     setServerChatState,
     serverChatSource,
     setServerChatSource,
     setServerChatVersion,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
     history,
     clearChat,
     selectedCharacter,
+    selectedAssistantMode,
+    assistantOverlayActive: pendingAssistantState.mode === "overlay",
     serverPersistenceHintSeen,
     setServerPersistenceHintSeen,
     invalidateServerChatHistory,

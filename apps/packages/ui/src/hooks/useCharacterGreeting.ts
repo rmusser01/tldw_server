@@ -12,6 +12,7 @@ import {
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import type { AssistantSelectionMode } from "@/types/assistant-selection"
 import {
   SELECTED_CHARACTER_STORAGE_KEY,
   selectedCharacterStorage,
@@ -21,6 +22,7 @@ import {
 type UseCharacterGreetingOptions = {
   playgroundReady: boolean
   selectedCharacter: Character | null
+  selectedCharacterMode: AssistantSelectionMode | null
   serverChatId: string | number | null
   historyId: string | null
   messagesLength: number
@@ -36,6 +38,7 @@ type UseCharacterGreetingOptions = {
 export const useCharacterGreeting = ({
   playgroundReady,
   selectedCharacter,
+  selectedCharacterMode,
   serverChatId,
   historyId,
   messagesLength,
@@ -99,6 +102,7 @@ export const useCharacterGreeting = ({
   React.useEffect(() => {
     if (!playgroundReady) return
     if (serverChatId != null) return
+    if (selectedCharacterMode === "overlay") return
     let cancelled = false
     const syncSelection = async () => {
       try {
@@ -122,7 +126,13 @@ export const useCharacterGreeting = ({
     return () => {
       cancelled = true
     }
-  }, [playgroundReady, selectedCharacter?.id, serverChatId, setSelectedCharacter])
+  }, [
+    playgroundReady,
+    selectedCharacter?.id,
+    selectedCharacterMode,
+    serverChatId,
+    setSelectedCharacter
+  ])
 
   React.useEffect(() => {
     const isEmpty = messagesLength === 0
@@ -142,6 +152,12 @@ export const useCharacterGreeting = ({
   React.useEffect(() => {
     if (!playgroundReady) return
     if (serverChatId != null) {
+      selectedCharacterIdRef.current = null
+      greetingFetchRef.current = null
+      greetingTemplateRef.current = null
+      return
+    }
+    if (selectedCharacterMode === "overlay") {
       selectedCharacterIdRef.current = null
       greetingFetchRef.current = null
       greetingTemplateRef.current = null
@@ -439,6 +455,7 @@ export const useCharacterGreeting = ({
   }, [
     playgroundReady,
     selectedCharacter,
+    selectedCharacterMode,
     serverChatId,
     historyId,
     setHistory,

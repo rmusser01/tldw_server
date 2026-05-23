@@ -131,6 +131,7 @@ import {
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
+import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { CharacterControlRail } from "./CharacterControlRail";
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
@@ -491,14 +492,24 @@ export const Playground = () => {
     });
   const normalizedChatWorkflowMode =
     normalizeChatWorkflowMode(chatWorkflowMode);
+  const selectedAssistantMode = React.useMemo(
+    () => getAssistantSelectionMode(selectedAssistant),
+    [selectedAssistant],
+  );
+  const hasTrackedCharacterSelection =
+    selectedAssistant?.kind === "character"
+      ? selectedAssistantMode !== "overlay"
+      : selectedAssistant
+        ? false
+        : Boolean(selectedCharacter?.id) && selectedAssistantMode !== "overlay";
   const characterWorkflowActive =
     routeRequestsCharacterMode ||
     characterModeIntentActive ||
     normalizedChatWorkflowMode === "character" ||
-    selectedAssistant?.kind === "character" ||
-    Boolean(selectedCharacter?.id);
+    hasTrackedCharacterSelection;
   const activeCharacterModeLabel =
-    selectedAssistant?.kind === "character"
+    selectedAssistant?.kind === "character" &&
+    selectedAssistantMode !== "overlay"
       ? selectedAssistant.name
       : selectedAssistant
         ? null
@@ -921,11 +932,11 @@ export const Playground = () => {
   );
 
   React.useEffect(() => {
-    if (!playgroundReady || !serverChatId || !stableHistoryId) {
+    if (!playgroundReady || !serverChatId) {
       return;
     }
     let cancelled = false;
-    const threadKey = `${serverChatId}::${stableHistoryId}`;
+    const threadKey = `${serverChatId}::${stableHistoryId ?? ""}`;
 
     const restorePersistedAttachment = async () => {
       try {
@@ -1298,6 +1309,7 @@ export const Playground = () => {
   useCharacterGreeting({
     playgroundReady,
     selectedCharacter,
+    selectedCharacterMode: selectedAssistantMode,
     serverChatId,
     historyId,
     messagesLength: messages.length,

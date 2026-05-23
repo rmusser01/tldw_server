@@ -6,6 +6,8 @@ type LogE2EDebug = (
   payload: Record<string, unknown>,
 ) => void;
 
+const noopLogE2EDebug: LogE2EDebug = () => {};
+
 /**
  * Syncs selectedSystemPrompt and selectedQuickPrompt between
  * Zustand store and browser storage with ref-based dedup.
@@ -15,13 +17,13 @@ export const usePromptPersistence = ({
   setSelectedSystemPrompt,
   selectedQuickPrompt,
   setSelectedQuickPrompt,
-  logE2EDebug,
+  logE2EDebug = noopLogE2EDebug,
 }: {
   selectedSystemPrompt: string | null;
   setSelectedSystemPrompt: (prompt: string) => void;
   selectedQuickPrompt: string | null;
   setSelectedQuickPrompt: (prompt: string | null) => void;
-  logE2EDebug: LogE2EDebug;
+  logE2EDebug?: LogE2EDebug;
 }) => {
   const [storedSystemPrompt, setStoredSystemPrompt] = useStorage<string | null>(
     "selectedSystemPrompt",

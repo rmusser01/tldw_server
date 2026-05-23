@@ -576,6 +576,18 @@ describe("AssistantSelect behavior", () => {
     )
 
     await waitFor(() => {
+      expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "persona",
+          id: "persona-1",
+          name: "Guide Persona",
+          metadata: expect.objectContaining({
+            selectionMode: "overlay"
+          })
+        })
+      )
+    })
+    await waitFor(() => {
       expect(mocks.getPersonaProfile).toHaveBeenCalledWith("persona-1")
     })
     expect(mocks.updateSettings).toHaveBeenCalledWith({

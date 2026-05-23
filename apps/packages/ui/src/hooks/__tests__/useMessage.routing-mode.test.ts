@@ -30,22 +30,44 @@ describe("useMessage routing mode resolution", () => {
     ).toBe("plain")
   })
 
-  it("preserves tracked-character startup for a plain chat with a character draft selection", () => {
+  it("requires explicit tracked intent before routing a draft character through tracked chat", () => {
     expect(
       resolveUseMessageSendMode({
         effectiveMode: "plain",
         hasEffectiveAssistant: true,
         draftAssistantKind: "character"
       })
-    ).toBe("tracked_character")
+    ).toBe("plain")
   })
 
-  it("preserves tracked-persona startup for a plain chat with a persona draft selection", () => {
+  it("requires explicit tracked intent before routing a draft persona through tracked chat", () => {
     expect(
       resolveUseMessageSendMode({
         effectiveMode: "plain",
         hasEffectiveAssistant: true,
         draftAssistantKind: "persona"
+      })
+    ).toBe("plain")
+  })
+
+  it("routes tracked-character startup when the draft explicitly requests tracked mode", () => {
+    expect(
+      resolveUseMessageSendMode({
+        effectiveMode: "plain",
+        hasEffectiveAssistant: true,
+        draftAssistantKind: "character",
+        draftAssistantSelectionMode: "tracked"
+      })
+    ).toBe("tracked_character")
+  })
+
+  it("routes tracked-persona startup when the draft explicitly requests tracked mode", () => {
+    expect(
+      resolveUseMessageSendMode({
+        effectiveMode: "plain",
+        hasEffectiveAssistant: true,
+        draftAssistantKind: "persona",
+        draftAssistantSelectionMode: "tracked"
       })
     ).toBe("tracked_persona")
   })
@@ -56,6 +78,17 @@ describe("useMessage routing mode resolution", () => {
         effectiveMode: "overlay",
         hasEffectiveAssistant: true,
         draftAssistantKind: "persona"
+      })
+    ).toBe("overlay")
+  })
+
+  it("keeps overlay routing when only draft overlay intent exists before settings sync", () => {
+    expect(
+      resolveUseMessageSendMode({
+        effectiveMode: "plain",
+        hasEffectiveAssistant: true,
+        draftAssistantKind: "character",
+        draftAssistantSelectionMode: "overlay"
       })
     ).toBe("overlay")
   })

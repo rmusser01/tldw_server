@@ -9,11 +9,13 @@ export type UseMessageSendMode =
 export const resolveUseMessageSendMode = ({
   effectiveMode,
   hasEffectiveAssistant,
-  draftAssistantKind
+  draftAssistantKind,
+  draftAssistantSelectionMode
 }: {
   effectiveMode: EffectiveAssistantState["mode"]
   hasEffectiveAssistant: boolean
   draftAssistantKind?: "character" | "persona" | null
+  draftAssistantSelectionMode?: "tracked" | "overlay" | null
 }): UseMessageSendMode => {
   if (effectiveMode === "tracked_character") {
     return "tracked_character"
@@ -27,15 +29,25 @@ export const resolveUseMessageSendMode = ({
     return "overlay"
   }
 
+  if (draftAssistantSelectionMode === "overlay" && hasEffectiveAssistant) {
+    return "overlay"
+  }
+
   if (!hasEffectiveAssistant) {
     return "plain"
   }
 
-  if (draftAssistantKind === "character") {
+  if (
+    draftAssistantSelectionMode === "tracked" &&
+    draftAssistantKind === "character"
+  ) {
     return "tracked_character"
   }
 
-  if (draftAssistantKind === "persona") {
+  if (
+    draftAssistantSelectionMode === "tracked" &&
+    draftAssistantKind === "persona"
+  ) {
     return "tracked_persona"
   }
 

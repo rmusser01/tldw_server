@@ -88,6 +88,7 @@ import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
+  getAssistantSelectionMode,
   isPersonaAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection,
@@ -97,6 +98,7 @@ import { useChatLoopState } from "@/services/chat-loop/hooks";
 import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
+import { syncChatSettingsForServerChat } from "@/services/chat-settings";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -443,6 +445,22 @@ export const useMessage = () => {
       id: string,
       options?: { preserveServerChatId?: boolean },
     ) => void,
+    {
+      onServerConversationLinked: (conversationId) => {
+        setServerChatId(conversationId);
+        setServerChatMetaLoaded(false);
+        invalidateServerChatHistory();
+        if (!serverChatId) {
+          void syncChatSettingsForServerChat({
+            historyId,
+            serverChatId: conversationId,
+            allowScratchFallback: true,
+          }).catch(() => {
+            // Best-effort scratch-to-server settings reconciliation.
+          });
+        }
+      },
+    }
   );
   const saveMessageOnError = createSaveMessageOnError(
     temporaryChat,
@@ -2503,6 +2521,7 @@ export const useMessage = () => {
             effectiveMode: effectiveAssistantState.mode,
             hasEffectiveAssistant: Boolean(effectiveSelectedAssistant),
             draftAssistantKind: selectedAssistant?.kind ?? null,
+            draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
           });
           const trackedCharacterForSend =
             sendMode === "tracked_character"

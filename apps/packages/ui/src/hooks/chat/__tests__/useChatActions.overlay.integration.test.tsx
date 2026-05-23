@@ -7,18 +7,16 @@ import { useChatActions } from "../useChatActions"
 
 const {
   createChatMock,
+  normalChatModeMock,
   streamCharacterChatCompletionMock,
-  persistCharacterCompletionMock,
-  normalChatModeMock
-} = vi.hoisted(() => ({
-  createChatMock: vi.fn(),
-  streamCharacterChatCompletionMock: vi.fn(),
-  persistCharacterCompletionMock: vi.fn(async () => ({
-    assistant_message_id: "assistant-server-1",
-    version: 1
-  })),
-  normalChatModeMock: vi.fn()
-}))
+  syncChatSettingsForServerChatMock
+} =
+  vi.hoisted(() => ({
+    createChatMock: vi.fn(),
+    normalChatModeMock: vi.fn(),
+    streamCharacterChatCompletionMock: vi.fn(),
+    syncChatSettingsForServerChatMock: vi.fn(async () => null)
+  }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
   normalChatMode: normalChatModeMock
@@ -45,12 +43,12 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
   createSaveMessageOnSuccess: vi.fn(
     () =>
       async (_payload?: unknown): Promise<string | null> =>
-        "history-character"
+        "history-overlay"
   ),
   createSaveMessageOnError: vi.fn(
     () =>
       async (_payload?: unknown): Promise<string | null> =>
-        "history-character"
+        "history-overlay"
   )
 }))
 
@@ -96,7 +94,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
   selectedCharacterSyncStorage: {
     get: vi.fn(async () => null)
   },
-  parseSelectedCharacterValue: vi.fn((value: unknown) => value)
+  parseSelectedCharacterValue: vi.fn(() => null)
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
@@ -123,12 +121,14 @@ vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
 }))
 
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: syncChatSettingsForServerChatMock
+}))
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
-    persistCharacterCompletion: persistCharacterCompletionMock,
-    addChatMessage: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
     initialize: vi.fn(async () => null)
   }
 }))
@@ -147,7 +147,7 @@ const createHookOptions = () => ({
   setMessages: vi.fn(),
   history: [],
   setHistory: vi.fn(),
-  historyId: "history-character",
+  historyId: "history-overlay",
   setHistoryId: vi.fn(),
   temporaryChat: false,
   selectedModel: "deepseek-chat",
@@ -172,12 +172,13 @@ const createHookOptions = () => ({
   ragEnableCitations: true,
   ragSources: [],
   ragAdvancedOptions: {},
-  serverChatId: "tracked-chat-1",
-  serverChatTitle: "Tracked character chat",
-  serverChatCharacterId: "char-tracked",
-  serverChatAssistantKind: "character" as const,
+  serverChatId: null,
+  serverChatTitle: null,
+  serverChatCharacterId: null,
+  serverChatAssistantKind: null,
   serverChatAssistantId: null,
   serverChatPersonaMemoryMode: null,
+  serverChatMetaLoaded: false,
   serverChatState: "in-progress" as const,
   serverChatTopic: null,
   serverChatClusterId: null,
@@ -196,7 +197,7 @@ const createHookOptions = () => ({
   setServerChatClusterId: vi.fn(),
   setServerChatSource: vi.fn(),
   setServerChatExternalRef: vi.fn(),
-  ensureServerChatHistoryId: vi.fn(async () => "history-character"),
+  ensureServerChatHistoryId: vi.fn(async () => "history-overlay"),
   contextFiles: [],
   setContextFiles: vi.fn(),
   documentContext: null,
@@ -214,25 +215,28 @@ const createHookOptions = () => ({
   setSelectedSystemPrompt: vi.fn(),
   invalidateServerChatHistory: vi.fn(),
   selectedCharacter: {
-    id: "char-stale",
-    name: "Stale Character",
-    system_prompt: "Stale prompt"
+    id: "char-overlay",
+    name: "Overlay Guide",
+    system_prompt: "Overlay guide prompt"
   },
-  selectedAssistant: null,
+  selectedAssistant: {
+    kind: "character" as const,
+    id: "char-overlay",
+    name: "Overlay Guide",
+    system_prompt: "Overlay guide prompt",
+    metadata: {
+      selectionMode: "overlay"
+    }
+  },
   messageSteeringMode: "none" as const,
   messageSteeringForceNarrate: false,
   clearMessageSteering: vi.fn()
 })
 
-describe("useChatActions character integration", () => {
+describe("useChatActions overlay integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     normalChatModeMock.mockResolvedValue(undefined)
-    createChatMock.mockResolvedValue({
-      id: "unexpected-new-chat",
-      character_id: "char-stale",
-      title: "Wrong chat"
-    })
     streamCharacterChatCompletionMock.mockImplementation(async function* () {
       yield {
         choices: [
@@ -246,30 +250,62 @@ describe("useChatActions character integration", () => {
     })
   })
 
-  it("keeps tracked character routing anchored to current chat metadata when global character state is stale", async () => {
+  it("routes overlay character selections through normal chat mode without creating tracked chats", async () => {
     const options = createHookOptions()
     const { result } = renderHook(() => useChatActions(options as any))
 
     await act(async () => {
       await result.current.onSubmit({
-        message: "Hello tracked character",
+        message: "Overlay hello",
         image: ""
       })
     })
 
     expect(createChatMock).not.toHaveBeenCalled()
-    expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
-    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
-      "tracked-chat-1",
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).toHaveBeenCalledTimes(1)
+    expect(normalChatModeMock.mock.calls[0]?.[6]).toEqual(
       expect.objectContaining({
-        include_character_context: true,
-        model: "deepseek-chat"
-      }),
-      expect.any(Object)
+        assistantIdentity: {
+          name: "Overlay Guide",
+          avatarUrl: undefined
+        },
+        overlaySystemPrompt: "Overlay guide prompt"
+      })
     )
-    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("character")
-    expect(options.setServerChatAssistantId).toHaveBeenCalledWith("char-tracked")
-    expect(normalChatModeMock).not.toHaveBeenCalled()
-    expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
+  })
+
+  it("reconciles scratch overlay settings only when a send links a new server conversation", async () => {
+    const options = createHookOptions()
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as {
+        saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
+      }
+      await params.saveMessageOnSuccess({
+        historyId: null,
+        isRegenerate: false,
+        selectedModel: "deepseek-chat",
+        message: "Overlay hello",
+        image: "",
+        fullText: "Overlay reply",
+        source: [],
+        conversationId: "server-chat-42"
+      })
+    })
+
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Overlay hello",
+        image: ""
+      })
+    })
+
+    expect(syncChatSettingsForServerChatMock).toHaveBeenCalledWith({
+      historyId: "history-overlay",
+      serverChatId: "server-chat-42",
+      allowScratchFallback: true
+    })
   })
 })

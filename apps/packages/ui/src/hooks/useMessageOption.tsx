@@ -39,28 +39,6 @@ import type { ChatScope } from "@/types/chat-scope";
 export const useMessageOption = (
   opts: { forceCompareEnabled?: boolean; scope?: ChatScope } = {},
 ) => {
-  const e2eDebugEnabled =
-    typeof window !== "undefined" && (window as any).__tldw_e2e_debug;
-  const e2eDebugCounts = React.useRef({
-    syncSystem: 0,
-    syncQuick: 0,
-    storeSystem: 0,
-    storeQuick: 0,
-  });
-  const logE2EDebug = (
-    key: keyof typeof e2eDebugCounts.current,
-    payload: Record<string, unknown>,
-  ) => {
-    if (!e2eDebugEnabled) return;
-    const counts = e2eDebugCounts.current;
-    counts[key] += 1;
-    if (counts[key] <= 10 || counts[key] % 50 === 0) {
-      console.log(`[E2E_DEBUG] ${key}`, {
-        count: counts[key],
-        ...payload,
-      });
-    }
-  };
   // Controllers come from Context (for aborting streaming requests)
   const { controller: abortController, setController: setAbortController } =
     usePageAssist();
@@ -314,7 +292,6 @@ export const useMessageOption = (
     setSelectedSystemPrompt,
     selectedQuickPrompt,
     setSelectedQuickPrompt,
-    logE2EDebug,
   });
 
   useRagSettings({

@@ -151,6 +151,19 @@ export class ChatTldw {
     }
 
     const handleChunk = (chunk: any) => {
+      const streamedConversationId =
+        typeof chunk?.tldw_conversation_id === "string" &&
+        chunk.tldw_conversation_id.trim().length > 0
+          ? chunk.tldw_conversation_id.trim()
+          : typeof chunk?.conversation_id === "string" &&
+              chunk.conversation_id.trim().length > 0
+            ? chunk.conversation_id.trim()
+            : null
+      if (streamedConversationId) {
+        this.conversationId = streamedConversationId
+        this.saveToDb = true
+      }
+
       const loopEvent = extractChatLoopEvent(chunk)
       if (loopEvent) {
         publishChatLoopEvent(loopEvent)

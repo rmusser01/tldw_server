@@ -1,5 +1,15 @@
 export const WEBUI_CHARACTER_CHAT_SOURCE = "webui-character-chat"
 export const WEBUI_CHAT_SOURCE = "webui-chat"
+export const TRACKED_CHARACTER_CHAT_SOURCES = [
+  WEBUI_CHARACTER_CHAT_SOURCE,
+  "characters-quick-chat"
+] as const
+
+export const isTrackedCharacterChatSource = (value: unknown): boolean => {
+  if (typeof value !== "string") return false
+  const normalized = value.trim().toLowerCase()
+  return TRACKED_CHARACTER_CHAT_SOURCES.some((source) => source === normalized)
+}
 
 const DEFAULT_TITLE_MAX_LENGTH = 80
 

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import {
+  effectiveAssistantStateToSelection,
+  resolveEffectiveAssistantState
+} from "@/hooks/chat/effective-assistant-state"
 
 describe("resolveEffectiveAssistantState", () => {
   it("resolves a tracked character from assistant_kind and character_id", () => {
@@ -185,5 +188,73 @@ describe("resolveEffectiveAssistantState", () => {
       systemPromptSnapshot: "Draft overlay prompt",
       source: "overlay"
     })
+  })
+
+  it("treats an overlay-intent draft selection as overlay before settings hydrate", () => {
+    expect(
+      resolveEffectiveAssistantState({
+        tracked: null,
+        settings: null,
+        draftSelection: {
+          kind: "character",
+          id: "draft-overlay-11",
+          name: "Draft Overlay Character",
+          avatar_url: "https://cdn.example.test/draft-overlay-character.png",
+          system_prompt: "Draft overlay character prompt",
+          metadata: {
+            selectionMode: "overlay"
+          }
+        }
+      })
+    ).toEqual({
+      mode: "overlay",
+      kind: "character",
+      id: "draft-overlay-11",
+      displayName: "Draft Overlay Character",
+      avatarUrl: "https://cdn.example.test/draft-overlay-character.png",
+      systemPromptSnapshot: "Draft overlay character prompt",
+      source: "overlay"
+    })
+  })
+})
+
+describe("effectiveAssistantStateToSelection", () => {
+  it("builds an overlay assistant selection snapshot from effective overlay state", () => {
+    expect(
+      effectiveAssistantStateToSelection({
+        mode: "overlay",
+        kind: "persona",
+        id: "overlay-17",
+        displayName: "Overlay Persona",
+        avatarUrl: "https://cdn.example.test/overlay-17.png",
+        systemPromptSnapshot: "Overlay snapshot prompt",
+        source: "overlay"
+      })
+    ).toEqual({
+      kind: "persona",
+      id: "overlay-17",
+      name: "Overlay Persona",
+      avatar_url: "https://cdn.example.test/overlay-17.png",
+      system_prompt: "Overlay snapshot prompt",
+      metadata: {
+        selectionMode: "overlay"
+      },
+      buddy_summary: null,
+      extensions: null
+    })
+  })
+
+  it("returns null for plain effective assistant state", () => {
+    expect(
+      effectiveAssistantStateToSelection({
+        mode: "plain",
+        kind: null,
+        id: null,
+        displayName: null,
+        avatarUrl: null,
+        systemPromptSnapshot: null,
+        source: "none"
+      })
+    ).toBeNull()
   })
 })

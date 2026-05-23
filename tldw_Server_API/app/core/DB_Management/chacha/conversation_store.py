@@ -237,7 +237,7 @@ class ConversationStore:
         assistant_kind: Any,
         assistant_id: Any,
         persona_memory_mode: Any,
-    ) -> tuple[str, str, int | None, str | None]:
+    ) -> tuple[str | None, str | None, int | None, str | None]:
         normalized_kind = self._db._normalize_nullable_text(assistant_kind)
         normalized_assistant_id = self._db._normalize_nullable_text(assistant_id)
         normalized_memory_mode = self._db._normalize_nullable_text(persona_memory_mode)
@@ -246,7 +246,7 @@ class ConversationStore:
             normalized_kind = "character" if character_id is not None else None
         if normalized_kind is None:
             if character_id is None and normalized_assistant_id is None and normalized_memory_mode is None:
-                raise InputError("Required field 'character_id' is missing")  # noqa: TRY003
+                return None, None, None, None
             raise InputError(
                 "Conversation requires either 'character_id' or assistant identity fields."
             )  # noqa: TRY003
