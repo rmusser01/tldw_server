@@ -174,6 +174,36 @@ Review evidence:
 
 Bandit:
 - Touched files are TypeScript/TSX frontend code; final Bandit decision will be recorded at final verification.
+
+Task 7 completed.
+
+Files touched:
+- apps/packages/ui/src/components/Option/WritingPlayground/index.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingActionBar.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingRevisionQueue.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/WritingTipTapEditor.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx
+- apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx
+
+Commits:
+- 84523191 feat: wire writing revision proposals
+- 665967dd fix: honor saved writing revision preset
+- ecd44d6 test: assert writing revision regeneration metadata
+- a99a715e fix: harden writing revision generation state
+
+TDD evidence:
+- Initial red: integration tests failed because the Writing Playground did not render the revision action bar/queue or create proposed-edit messages.
+- Follow-up reds: saved preset not honored, regenerated proposal metadata unverified, stale action-bar target after selection changes, topbar exposed Stop for non-streaming revision request, rich-editor selection did not refresh action-bar target, and pending revision requests allowed session switching.
+- Final green: cd apps/packages/ui && bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx --maxWorkers=1 --no-file-parallelism passed with 1 test file / 18 tests.
+- Final green: cd apps/packages/ui && bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx src/components/Option/WritingPlayground/__tests__/WritingActionBar.test.tsx src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx --maxWorkers=1 --no-file-parallelism passed with 4 test files / 23 tests.
+
+Review evidence:
+- Spec compliance review initially found missing coverage for regenerated proposal metadata and rich editor apply non-mutation. Fixed in ecd44d6; re-review approved.
+- Code quality review found stale selection gating, fake Stop semantics for revision requests, missing rich-editor selection updates, and session-switch race while revision generation was pending. Fixed in a99a715e. Final re-review reported no remaining Critical or Important issues.
+
+Bandit:
+- Touched files are TypeScript/TSX frontend code; final Bandit decision will be recorded at final verification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
