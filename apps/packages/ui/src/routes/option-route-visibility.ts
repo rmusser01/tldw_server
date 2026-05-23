@@ -1,16 +1,10 @@
-import { CHAT_WORKSPACE_PATH, RESEARCH_STUDIO_PATH } from "./route-paths"
+import {
+  HOSTED_VISIBLE_OPTION_PATHS,
+  HOSTED_VISIBLE_OPTION_PATHS_LIST
+} from "./route-hosted-visibility"
+import { normalizeRoutePath } from "./route-path-normalization"
 
-export const HOSTED_VISIBLE_OPTION_PATHS = new Set([
-  "/",
-  "/chat",
-  CHAT_WORKSPACE_PATH,
-  "/media",
-  "/knowledge",
-  "/collections",
-  RESEARCH_STUDIO_PATH,
-  "/stt",
-  "/tts"
-])
+export { HOSTED_VISIBLE_OPTION_PATHS, HOSTED_VISIBLE_OPTION_PATHS_LIST }
 
 export const isHostedVisibleOptionPath = (path: string) =>
-  HOSTED_VISIBLE_OPTION_PATHS.has(path)
+  HOSTED_VISIBLE_OPTION_PATHS.has(normalizeRoutePath(path))

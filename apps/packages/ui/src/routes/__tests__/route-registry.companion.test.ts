@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { getRouteMetadata } from "../route-metadata"
 
 const optionRouteRegistryPathCandidates = [
   "src/routes/route-registry.tsx",
@@ -31,6 +32,9 @@ const sidepanelRouteRegistrySource = readFileSync(sidepanelRouteRegistryPath, "u
 describe("sidepanel route registry companion parity", () => {
   it("registers a dedicated companion sidepanel route", () => {
     expect(sidepanelRouteRegistrySource).toMatch(/path:\s*"\/companion"/)
+    expect(getRouteMetadata("/companion")?.availability).toContain(
+      "extension_sidepanel"
+    )
   })
 
   it("registers the companion conversation route in both option and sidepanel shells", () => {
@@ -40,5 +44,8 @@ describe("sidepanel route registry companion parity", () => {
       sidepanelRouteRegistrySource.match(/path:\s*"\/companion\/conversation"/g) ?? []
     expect(optionMatches).toHaveLength(1)
     expect(sidepanelMatches).toHaveLength(1)
+    expect(getRouteMetadata("/companion/conversation")?.availability).toContain(
+      "extension_sidepanel"
+    )
   })
 })

@@ -43,6 +43,21 @@ export const readFirstExistingSource = (
   }
 }
 
+export const readOptionalFirstExistingSource = (
+  candidates: string[]
+): RouteRegistrySource | undefined => {
+  const sourcePath = candidates.find((candidate) => existsSync(candidate))
+
+  if (!sourcePath) {
+    return undefined
+  }
+
+  return {
+    path: sourcePath,
+    source: readFileSync(sourcePath, "utf8")
+  }
+}
+
 export const getPropertyNameText = (
   name: ts.PropertyName
 ): string | undefined => {
