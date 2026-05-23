@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
     SyncConflictCreate,
     SyncDataset,
+    SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
@@ -309,6 +310,135 @@ def test_device_registration_rejects_cross_user_device_takeover(sync_service: Sy
             display_name="Other Laptop",
             client_type="chatbook",
             device_id="shared-device",
+        )
+
+
+def test_pending_device_cannot_push_until_authorized(sync_service: SyncV2Service):
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note"],
+    )
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-pending",
+            user_id="user-1",
+            display_name="New laptop",
+            client_type="chatbook",
+            status="pending_authorization",
+        )
+    )
+
+    with pytest.raises(SyncStoreError, match="Sync device was not found or is not accessible"):
+        sync_service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-pending",
+            envelopes=[
+                _m1_note_envelope(
+                    client_envelope_id="env-pending",
+                    device_id="device-pending",
+                )
+            ],
+        )
+
+
+def test_revoked_device_cannot_sync_or_start_device_scoped_blob_upload(
+    tmp_path: Path,
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+):
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=LocalSyncBlobStore(tmp_path / "sync-blobs"),
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_attachment_bytes=8192,
+            max_blob_bytes=8192,
+            max_chunk_bytes=1024,
+            user_blob_quota_bytes=65536,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+    session = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="attachment.ref",
+        entity_id="attachment-before-revoke",
+        attachment_id="attachment-before-revoke",
+        content_type="application/octet-stream",
+        size_bytes=1024,
+        payload_hash=_sha256(b"blob-before-revoke"),
+        chunk_size=1024,
+        chunk_count=1,
+    )
+    service.store.revoke_device(
+        user_id="user-1",
+        device_id="device-1",
+        reason="lost_device",
+        revoke_key_records=True,
+    )
+
+    with pytest.raises(SyncStoreError, match="Sync device was not found or is not accessible"):
+        service.push(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            envelopes=[_m1_note_envelope()],
+        )
+    with pytest.raises(SyncStoreError, match="Sync device was not found or is not accessible"):
+        service.pull(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+        )
+    with pytest.raises(SyncStoreError, match="Sync device was not found or is not accessible"):
+        service.store_key_recovery_bundle(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            key_purpose="dataset_recovery",
+            wrapped_key_blob="wrapped:opaque",
+            kdf_metadata={"algorithm": "argon2id"},
+        )
+    with pytest.raises(SyncStoreError, match="Sync device was not found or is not accessible"):
+        service.upload_blob_chunk(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            upload_id=session.upload_id,
+            chunk_index=0,
+            offset_bytes=0,
+            chunk_payload=b"b" * 1024,
+            chunk_hash=_sha256(b"b" * 1024),
+        )
+    with pytest.raises(SyncStoreError, match="Sync device was not found or is not accessible"):
+        service.create_blob_upload_session(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="attachment.ref",
+            entity_id="attachment-1",
+            attachment_id="attachment-1",
+            content_type="application/octet-stream",
+            size_bytes=1024,
+            payload_hash=_sha256(b"blob"),
+            chunk_size=1024,
+            chunk_count=1,
         )
 
 

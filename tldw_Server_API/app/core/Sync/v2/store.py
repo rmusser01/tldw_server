@@ -23,7 +23,14 @@ from .models import (
     SyncDataset,
     SyncDatasetCreate,
     SyncDevice,
+    SyncDeviceAcknowledgmentSummary,
+    SyncDeviceAuthorization,
+    SyncDeviceAuthorizationCreate,
+    SyncDeviceBlobAck,
+    SyncDeviceBlobAckCreate,
     SyncDeviceCursor,
+    SyncDeviceDomainAck,
+    SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelope,
@@ -44,6 +51,9 @@ class SyncV2Store:
     def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
         return self.db.upsert_device(device)
 
+    def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
+        return self.db.get_device(user_id, device_id)
+
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
 
@@ -58,8 +68,70 @@ class SyncV2Store:
     def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
         return self.db.list_datasets_for_user(user_id)
 
-    def list_devices_for_user(self, user_id: str) -> list[SyncDevice]:
-        return self.db.list_devices_for_user(user_id)
+    def list_devices_for_user(
+        self,
+        user_id: str,
+        *,
+        include_revoked: bool = False,
+    ) -> list[SyncDevice]:
+        return self.db.list_devices_for_user(user_id, include_revoked=include_revoked)
+
+    def create_device_authorization(
+        self,
+        authorization: SyncDeviceAuthorizationCreate,
+    ) -> SyncDeviceAuthorization:
+        return self.db.create_device_authorization(authorization)
+
+    def approve_device_authorization(
+        self,
+        authorization_id: str,
+        *,
+        user_id: str,
+        dataset_id: str,
+        approving_device_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> SyncDeviceAuthorization:
+        return self.db.approve_device_authorization(
+            authorization_id,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            approving_device_id=approving_device_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def revoke_device(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        reason: str | None = None,
+        revoke_key_records: bool = False,
+    ) -> SyncDevice:
+        return self.db.revoke_device(
+            user_id=user_id,
+            device_id=device_id,
+            reason=reason,
+            revoke_key_records=revoke_key_records,
+        )
+
+    def upsert_device_domain_ack(
+        self,
+        acknowledgment: SyncDeviceDomainAckCreate,
+    ) -> SyncDeviceDomainAck:
+        return self.db.upsert_device_domain_ack(acknowledgment)
+
+    def upsert_device_blob_ack(
+        self,
+        acknowledgment: SyncDeviceBlobAckCreate,
+    ) -> SyncDeviceBlobAck:
+        return self.db.upsert_device_blob_ack(acknowledgment)
+
+    def list_device_acknowledgments(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncDeviceAcknowledgmentSummary:
+        return self.db.list_device_acknowledgments(dataset_id, device_id)
 
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         return self.db.get_or_create_default_personal_dataset(user_id)

@@ -42,8 +42,16 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncConflictResolveResponse,
     SyncDatasetEnrollRequest,
     SyncDatasetEnrollResponse,
+    SyncDeviceAcknowledgmentsRequest,
+    SyncDeviceAcknowledgmentsResponse,
+    SyncDeviceAuthorizationApproveRequest,
+    SyncDeviceAuthorizationCreateRequest,
+    SyncDeviceAuthorizationResponse,
     SyncDeviceRegisterRequest,
     SyncDeviceRegisterResponse,
+    SyncDeviceResponse,
+    SyncDeviceRevokeRequest,
+    SyncDeviceUpdateRequest,
     SyncDomain,
     SyncKeyRecoveryBundleListResponse,
     SyncKeyRecoveryBundleRecord,
@@ -74,7 +82,11 @@ from tldw_Server_API.app.core.Sync.v2.factory import (
     sync_v2_service_for_user,
     sync_v2_storage_exists_for_user,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.models import (
+    SyncDeviceBlobAckCreate,
+    SyncDeviceDomainAckCreate,
+    SyncEnvelopeCreate,
+)
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_env,
 )
@@ -291,6 +303,22 @@ def _api_blob_session_from_core(session: Any) -> SyncBlobUploadSessionResponse:
     return SyncBlobUploadSessionResponse(**asdict(session))
 
 
+def _api_device_from_core(device: Any) -> SyncDeviceResponse:
+    return SyncDeviceResponse(**asdict(device))
+
+
+def _api_device_authorization_from_core(
+    authorization: Any,
+) -> SyncDeviceAuthorizationResponse:
+    return SyncDeviceAuthorizationResponse(**asdict(authorization))
+
+
+def _api_device_acknowledgments_from_core(
+    acknowledgments: Any,
+) -> SyncDeviceAcknowledgmentsResponse:
+    return SyncDeviceAcknowledgmentsResponse(**asdict(acknowledgments))
+
+
 def _api_empty_profile(user_id: str, device_id: str | None) -> SyncProfileResponse:
     encryption_status = server_trusted_encryption_status_from_env()
     device = None
@@ -447,6 +475,239 @@ def register_sync_v2_device(
     )
 
 
+@router.get(
+    "/devices",
+    response_model=list[SyncDeviceResponse],
+    summary="List Sync v2 devices for the authenticated user",
+)
+def list_sync_v2_devices(
+    include_revoked: bool = Query(False),
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        devices = service.list_devices(
+            user_id=_sync_user_id(user),
+            include_revoked=include_revoked,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            include_revoked=include_revoked,
+        ) from exc
+    return [_api_device_from_core(device) for device in devices]
+
+
+@router.patch(
+    "/devices/{device_id}",
+    response_model=SyncDeviceResponse,
+    summary="Update Sync v2 device metadata",
+)
+def update_sync_v2_device(
+    device_id: str,
+    request: SyncDeviceUpdateRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        device = service.update_device(
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+            display_name=request.display_name,
+            user_label=request.user_label,
+            client_version=request.client_version,
+            capabilities=request.capabilities,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+        ) from exc
+    return _api_device_from_core(device)
+
+
+@router.post(
+    "/devices/{device_id}/pause",
+    response_model=SyncDeviceResponse,
+    summary="Pause a Sync v2 device",
+)
+def pause_sync_v2_device(
+    device_id: str,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        device = service.pause_device(
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+        ) from exc
+    return _api_device_from_core(device)
+
+
+@router.post(
+    "/devices/{device_id}/resume",
+    response_model=SyncDeviceResponse,
+    summary="Resume a paused Sync v2 device",
+)
+def resume_sync_v2_device(
+    device_id: str,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        device = service.resume_device(
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+        ) from exc
+    return _api_device_from_core(device)
+
+
+@router.post(
+    "/devices/{device_id}/revoke",
+    response_model=SyncDeviceResponse,
+    summary="Revoke a Sync v2 device",
+)
+def revoke_sync_v2_device(
+    device_id: str,
+    request: SyncDeviceRevokeRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        device = service.revoke_device(
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+            reason=request.reason,
+            revoke_key_records=request.revoke_key_records,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            device_id=device_id,
+        ) from exc
+    return _api_device_from_core(device)
+
+
+@router.post(
+    "/device-authorizations",
+    response_model=SyncDeviceAuthorizationResponse,
+    summary="Create a pending Sync v2 device authorization",
+)
+def create_sync_v2_device_authorization(
+    request: SyncDeviceAuthorizationCreateRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        authorization = service.create_device_authorization(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            authorization_method=request.authorization_method,
+            idempotency_key=request.idempotency_key,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    return _api_device_authorization_from_core(authorization)
+
+
+@router.post(
+    "/device-authorizations/{authorization_id}/approve",
+    response_model=SyncDeviceAuthorizationResponse,
+    summary="Approve a pending Sync v2 device authorization",
+)
+def approve_sync_v2_device_authorization(
+    authorization_id: str,
+    request: SyncDeviceAuthorizationApproveRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        authorization = service.approve_device_authorization(
+            authorization_id,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            approving_device_id=request.approving_device_id,
+            idempotency_key=request.idempotency_key,
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            authorization_id=authorization_id,
+        ) from exc
+    return _api_device_authorization_from_core(authorization)
+
+
+@router.post(
+    "/device-acknowledgments",
+    response_model=SyncDeviceAcknowledgmentsResponse,
+    summary="Record Sync v2 device application and blob acknowledgments",
+)
+def acknowledge_sync_v2_device_state(
+    request: SyncDeviceAcknowledgmentsRequest,
+    user: User = Depends(get_request_user),
+    service: SyncV2Service = Depends(get_sync_v2_service),
+):
+    try:
+        acknowledgments = service.acknowledge_device_state(
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+            domain_acks=[
+                SyncDeviceDomainAckCreate(
+                    dataset_id=request.dataset_id,
+                    device_id=request.device_id,
+                    domain=ack.domain,
+                    through_server_sequence=ack.through_server_sequence,
+                    applied_at=ack.applied_at,
+                    idempotency_key=ack.idempotency_key,
+                )
+                for ack in request.domain_acks
+            ],
+            blob_acks=[
+                SyncDeviceBlobAckCreate(
+                    dataset_id=request.dataset_id,
+                    device_id=request.device_id,
+                    attachment_id=ack.attachment_id,
+                    payload_hash=ack.payload_hash,
+                    verified_at=ack.verified_at,
+                    idempotency_key=ack.idempotency_key,
+                )
+                for ack in request.blob_acks
+            ],
+        )
+    except Exception as exc:
+        raise _safe_sync_v2_http_error(
+            exc,
+            user_id=_sync_user_id(user),
+            dataset_id=request.dataset_id,
+            device_id=request.device_id,
+        ) from exc
+    return _api_device_acknowledgments_from_core(acknowledgments)
+
+
 @router.post(
     "/datasets/enroll",
     response_model=SyncDatasetEnrollResponse,
@@ -497,12 +758,14 @@ def enroll_sync_v2_dataset(
 def get_sync_v2_restore_manifest(
     dataset_ids: list[str] | None = Query(None, alias="dataset_id"),
     domains: list[SyncDomain] | None = Query(None, alias="domain"),
+    device_id: str | None = Query(None),
     user: User = Depends(get_request_user),
     service: SyncV2Service = Depends(get_sync_v2_service),
 ):
     try:
         manifest = service.restore_manifest(
             user_id=_sync_user_id(user),
+            device_id=device_id,
             dataset_ids=dataset_ids,
             domains=domains,
         )
@@ -510,6 +773,7 @@ def get_sync_v2_restore_manifest(
         raise _safe_sync_v2_http_error(
             exc,
             user_id=_sync_user_id(user),
+            device_id=device_id,
             dataset_ids=dataset_ids,
             domains=domains,
         ) from exc
@@ -534,6 +798,7 @@ def preview_sync_v2_restore(
     try:
         preview = service.restore_preview(
             user_id=_sync_user_id(user),
+            device_id=request.device_id,
             dataset_ids=request.dataset_ids,
             domains=request.domains,
             selected_object_ids=request.selected_object_ids,
@@ -546,6 +811,7 @@ def preview_sync_v2_restore(
         raise _safe_sync_v2_http_error(
             exc,
             user_id=_sync_user_id(user),
+            device_id=request.device_id,
             dataset_ids=request.dataset_ids,
             domains=request.domains,
         ) from exc
@@ -566,6 +832,7 @@ def repair_sync_v2_projections(
         result = service.repair(
             user_id=_sync_user_id(user),
             dataset_id=request.dataset_id,
+            device_id=request.device_id,
             domains=request.domains,
             since_cursor=request.since_cursor,
             failed_only=request.failed_only,
@@ -576,6 +843,7 @@ def repair_sync_v2_projections(
             exc,
             user_id=_sync_user_id(user),
             dataset_id=request.dataset_id,
+            device_id=request.device_id,
             domains=request.domains,
         ) from exc
     return SyncRepairResponse(**asdict(result))

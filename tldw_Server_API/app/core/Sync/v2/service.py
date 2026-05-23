@@ -50,7 +50,12 @@ from .models import (
     SyncDataset,
     SyncDatasetCreate,
     SyncDevice,
+    SyncDeviceAcknowledgmentSummary,
+    SyncDeviceAuthorization,
+    SyncDeviceAuthorizationCreate,
+    SyncDeviceBlobAckCreate,
     SyncDeviceCursor,
+    SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelope,
@@ -445,6 +450,183 @@ class SyncV2Service:
         )
         return SyncDeviceRegistration(device=device, server_capabilities=self.capabilities())
 
+    def list_devices(
+        self,
+        *,
+        user_id: str,
+        include_revoked: bool = False,
+    ) -> list[SyncDevice]:
+        """List registered devices for a user."""
+
+        return self.store.list_devices_for_user(
+            user_id,
+            include_revoked=include_revoked,
+        )
+
+    def update_device(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        display_name: str | None = None,
+        user_label: str | None = None,
+        client_version: str | None = None,
+        capabilities: dict[str, object] | None = None,
+    ) -> SyncDevice:
+        """Update mutable device metadata without changing lifecycle state."""
+
+        existing = self.store.get_device(user_id, device_id)
+        if existing is None:
+            raise SyncStoreError("Sync device was not found or is not accessible")
+        return self.store.upsert_device(
+            SyncDeviceUpsert(
+                device_id=existing.device_id,
+                user_id=existing.user_id,
+                display_name=display_name or existing.display_name,
+                client_type=existing.client_type,
+                client_version=(
+                    client_version
+                    if client_version is not None
+                    else existing.client_version
+                ),
+                capabilities=(
+                    dict(capabilities)
+                    if capabilities is not None
+                    else dict(existing.capabilities)
+                ),
+                status=existing.status,
+                user_label=user_label if user_label is not None else existing.user_label,
+                authorized_at=existing.authorized_at,
+                revoked_at=existing.revoked_at,
+                revoked_reason=existing.revoked_reason,
+            )
+        )
+
+    def create_device_authorization(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        authorization_method: str,
+        idempotency_key: str | None = None,
+    ) -> SyncDeviceAuthorization:
+        """Create a pending device authorization request."""
+
+        return self.store.create_device_authorization(
+            SyncDeviceAuthorizationCreate(
+                authorization_id=self.id_factory("device-authorization"),
+                dataset_id=dataset_id,
+                user_id=user_id,
+                device_id=device_id,
+                authorization_method=authorization_method,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    def approve_device_authorization(
+        self,
+        authorization_id: str,
+        *,
+        user_id: str,
+        dataset_id: str,
+        approving_device_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> SyncDeviceAuthorization:
+        """Approve a pending device authorization and activate the device."""
+
+        if approving_device_id is not None:
+            self._require_registered_device(user_id, approving_device_id)
+        return self.store.approve_device_authorization(
+            authorization_id,
+            user_id=user_id,
+            dataset_id=dataset_id,
+            approving_device_id=approving_device_id,
+            idempotency_key=idempotency_key,
+        )
+
+    def revoke_device(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        reason: str | None = None,
+        revoke_key_records: bool = False,
+    ) -> SyncDevice:
+        """Revoke a device from future sync operations."""
+
+        return self.store.revoke_device(
+            user_id=user_id,
+            device_id=device_id,
+            reason=reason,
+            revoke_key_records=revoke_key_records,
+        )
+
+    def pause_device(self, *, user_id: str, device_id: str) -> SyncDevice:
+        """Pause a device so it cannot perform device-scoped sync calls."""
+
+        existing = self.store.get_device(user_id, device_id)
+        if existing is None or existing.status == "revoked":
+            raise SyncStoreError("Sync device was not found or is not accessible")
+        return self.store.upsert_device(
+            SyncDeviceUpsert(
+                device_id=existing.device_id,
+                user_id=existing.user_id,
+                display_name=existing.display_name,
+                client_type=existing.client_type,
+                client_version=existing.client_version,
+                capabilities=dict(existing.capabilities),
+                status="paused",
+                user_label=existing.user_label,
+                authorized_at=existing.authorized_at,
+            )
+        )
+
+    def resume_device(self, *, user_id: str, device_id: str) -> SyncDevice:
+        """Resume a paused device after user approval."""
+
+        existing = self.store.get_device(user_id, device_id)
+        if existing is None or existing.status in {"revoked", "pending_authorization"}:
+            raise SyncStoreError("Sync device was not found or is not accessible")
+        return self.store.upsert_device(
+            SyncDeviceUpsert(
+                device_id=existing.device_id,
+                user_id=existing.user_id,
+                display_name=existing.display_name,
+                client_type=existing.client_type,
+                client_version=existing.client_version,
+                capabilities=dict(existing.capabilities),
+                status="active",
+                user_label=existing.user_label,
+                authorized_at=existing.authorized_at or self.clock(),
+            )
+        )
+
+    def acknowledge_device_state(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        domain_acks: Sequence[SyncDeviceDomainAckCreate] = (),
+        blob_acks: Sequence[SyncDeviceBlobAckCreate] = (),
+    ) -> SyncDeviceAcknowledgmentSummary:
+        """Record a device's durable application/verification acknowledgments."""
+
+        self._require_registered_device(user_id, device_id)
+        dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
+        if dataset is None:
+            raise SyncStoreError("Sync dataset was not found or is not accessible")
+        for acknowledgment in domain_acks:
+            if acknowledgment.dataset_id != dataset_id or acknowledgment.device_id != device_id:
+                raise SyncStoreError("Sync acknowledgment device or dataset does not match request")
+            self.store.upsert_device_domain_ack(acknowledgment)
+        for acknowledgment in blob_acks:
+            if acknowledgment.dataset_id != dataset_id or acknowledgment.device_id != device_id:
+                raise SyncStoreError("Sync acknowledgment device or dataset does not match request")
+            self.store.upsert_device_blob_ack(acknowledgment)
+        return self.store.list_device_acknowledgments(dataset_id, device_id)
+
     def enroll_dataset(
         self,
         *,
@@ -754,9 +936,12 @@ class SyncV2Service:
         self,
         *,
         user_id: str,
+        device_id: str | None = None,
         dataset_ids: Sequence[str] | None = None,
         domains: Sequence[SyncDomain] | None = None,
     ) -> SyncRestoreManifest:
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
         allowed_dataset_ids = set(dataset_ids or [])
         selected_domains = set(domains or [])
         datasets = [
@@ -793,6 +978,7 @@ class SyncV2Service:
         self,
         *,
         user_id: str,
+        device_id: str | None = None,
         dataset_ids: Sequence[str] | None = None,
         domains: Sequence[SyncDomain] | None = None,
         selected_object_ids: Sequence[str] | None = None,
@@ -803,6 +989,8 @@ class SyncV2Service:
     ) -> SyncRestorePreview:
         """Return metadata needed to preview a restore plan for Sync v2 M1."""
 
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
         allowed_dataset_ids = set(dataset_ids or [])
         selected_domains = set(domains or [])
         selected_object_id_set = _normalize_selection_set(selected_object_ids)
@@ -1161,6 +1349,7 @@ class SyncV2Service:
         *,
         user_id: str,
         dataset_id: str,
+        device_id: str | None = None,
         domains: Sequence[SyncDomain] | None = None,
         since_cursor: int = 0,
         failed_only: bool = False,
@@ -1172,6 +1361,8 @@ class SyncV2Service:
             raise SyncStoreError("Invalid sync cursor: repair since_cursor must be non-negative")
         if limit is not None and limit < 1:
             raise SyncStoreError("Sync repair limit must be greater than zero")
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
         dataset = self.store.get_dataset(dataset_id, owner_user_id=user_id)
         if dataset is None:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
@@ -1301,6 +1492,8 @@ class SyncV2Service:
         self._require_blob_transfer()
         if encryption_policy != DEFAULT_M1_ENCRYPTION_POLICY:
             raise SyncStoreError("Sync blob upload requires server_trusted_v1 encryption")
+        if device_id is not None:
+            self._require_registered_device(user_id, device_id)
         self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id, domain=domain)
         self._validate_blob_limits(
             user_id=user_id,
@@ -1343,6 +1536,8 @@ class SyncV2Service:
         session = self.store.get_blob_upload_session(upload_id, dataset_id=dataset_id)
         if session is None:
             raise SyncStoreError(f"Sync blob upload session not found: {upload_id}")
+        if session.device_id is not None:
+            self._require_registered_device(user_id, session.device_id)
         return session
 
     def upload_blob_chunk(
@@ -1444,8 +1639,12 @@ class SyncV2Service:
         """Cancel an upload session and remove staged chunks."""
 
         blob_store = self._require_blob_transfer()
-        self._require_blob_dataset(user_id=user_id, dataset_id=dataset_id)
-        session = self.store.cancel_blob_upload_session(upload_id, dataset_id=dataset_id)
+        session = self.get_blob_upload_session(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            upload_id=upload_id,
+        )
+        session = self.store.cancel_blob_upload_session(session.upload_id, dataset_id=dataset_id)
         blob_store.discard_upload(upload_id)
         return session
 
@@ -1853,9 +2052,13 @@ class SyncV2Service:
     def _require_registered_device(self, user_id: str, device_id: str) -> SyncDevice:
         if not device_id:
             raise SyncStoreError("Sync device was not found or is not accessible")
-        for device in self.store.list_devices_for_user(user_id):
-            if device.device_id == device_id and device.revoked_at is None:
-                return device
+        device = self.store.get_device(user_id, device_id)
+        if (
+            device is not None
+            and device.revoked_at is None
+            and device.status == "active"
+        ):
+            return device
         raise SyncStoreError("Sync device was not found or is not accessible")
 
     def _require_server_trusted_encryption_ready(self) -> None:

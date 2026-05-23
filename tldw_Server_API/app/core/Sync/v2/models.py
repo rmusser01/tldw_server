@@ -27,6 +27,8 @@ SyncBlobUploadStatus = Literal[
     "expired",
     "verify_failed",
 ]
+SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
+SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
 SyncRestoreCompletenessStatus = Literal[
     "metadata_ready",
     "blocked_by_conflicts",
@@ -78,7 +80,11 @@ class SyncDeviceUpsert:
     client_type: str
     client_version: str | None = None
     capabilities: dict[str, Any] = field(default_factory=dict)
+    status: SyncDeviceStatus = "active"
+    user_label: str | None = None
+    authorized_at: str | None = None
     revoked_at: str | None = None
+    revoked_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +99,99 @@ class SyncDevice:
     capabilities: dict[str, Any]
     registered_at: str
     last_seen_at: str
+    status: SyncDeviceStatus = "active"
+    user_label: str | None = None
+    authorized_at: str | None = None
     revoked_at: str | None = None
+    revoked_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceAuthorizationCreate:
+    """Device authorization request accepted by the Sync v2 store."""
+
+    authorization_id: str
+    dataset_id: str
+    user_id: str
+    device_id: str
+    authorization_method: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceAuthorization:
+    """Stored device authorization request."""
+
+    authorization_id: str
+    dataset_id: str
+    user_id: str
+    device_id: str
+    authorization_method: str
+    status: SyncDeviceAuthorizationStatus
+    requested_at: str
+    approved_at: str | None = None
+    approving_device_id: str | None = None
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceDomainAckCreate:
+    """Per-device domain acknowledgment accepted by the Sync v2 store."""
+
+    dataset_id: str
+    device_id: str
+    domain: SyncDomain
+    through_server_sequence: int
+    applied_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceDomainAck:
+    """Stored per-device domain acknowledgment."""
+
+    dataset_id: str
+    device_id: str
+    domain: SyncDomain
+    through_server_sequence: int
+    applied_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceBlobAckCreate:
+    """Per-device blob verification acknowledgment accepted by the Sync v2 store."""
+
+    dataset_id: str
+    device_id: str
+    attachment_id: str
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceBlobAck:
+    """Stored per-device blob verification acknowledgment."""
+
+    dataset_id: str
+    device_id: str
+    attachment_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncDeviceAcknowledgmentSummary:
+    """Aggregated device acknowledgments for one dataset/device."""
+
+    dataset_id: str
+    device_id: str
+    domain_acks: dict[SyncDomain, SyncDeviceDomainAck] = field(default_factory=dict)
+    blob_acks: list[SyncDeviceBlobAck] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,6 +545,7 @@ class SyncBlobUploadSession:
     size_bytes: int
     payload_hash: str
     content_type: str
+    device_id: str | None = None
     uploaded_chunks: list[int] = field(default_factory=list)
     missing_chunks: list[int] = field(default_factory=list)
     quota: dict[str, Any] = field(default_factory=dict)

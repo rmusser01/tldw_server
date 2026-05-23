@@ -78,20 +78,20 @@
 
 **Tests:** Store tests, service tests, endpoint tests, cross-user/revoked-device regression tests.
 
-**Status:** Not Started
+**Status:** Complete
 
-- [ ] **Step 1: Write failing store tests**
+- [x] **Step 1: Write failing store tests**
 
   Cover device status fields, pending authorization, revocation, idempotent
   acknowledgments, and cursor lag queries in
   `tldw_Server_API/tests/Sync/test_sync_v2_store.py`.
 
-- [ ] **Step 2: Implement store schema and methods**
+- [x] **Step 2: Implement store schema and methods**
 
   Extend `sync_devices`, add acknowledgment tables, and expose repository
   helpers through `SyncV2Store`.
 
-- [ ] **Step 3: Write failing service/endpoint tests**
+- [x] **Step 3: Write failing service/endpoint tests**
 
   Cover `GET /sync/devices`, `PATCH /sync/devices/{device_id}`,
   `POST /sync/device-authorizations`,
@@ -99,12 +99,12 @@
   `POST /sync/devices/{device_id}/revoke`, and
   `POST /sync/device-acknowledgments`.
 
-- [ ] **Step 4: Implement service and endpoint behavior**
+- [x] **Step 4: Implement service and endpoint behavior**
 
   Add Pydantic models, service methods, revoked-device checks, and safe error
   mapping.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
   Run targeted Sync tests, Ruff on touched files, Bandit on touched production
   scope, and `git diff --check`.

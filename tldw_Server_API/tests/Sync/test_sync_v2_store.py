@@ -24,7 +24,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncBlobUploadSessionCreate,
     SyncConflictCreate,
     SyncDatasetCreate,
+    SyncDeviceAuthorizationCreate,
+    SyncDeviceBlobAckCreate,
     SyncDeviceCursor,
+    SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncEnvelopeCreate,
     SyncKeyRecordCreate,
@@ -163,6 +166,9 @@ def test_sync_database_bootstrap_creates_required_tables(sync_store: SyncV2Store
     required_tables = {
         "sync_devices",
         "sync_datasets",
+        "sync_device_authorizations",
+        "sync_device_domain_acks",
+        "sync_device_blob_acks",
         "sync_domain_state",
         "sync_envelopes",
         "sync_object_state",
@@ -533,6 +539,117 @@ def test_device_upsert_rejects_cross_user_takeover(sync_store: SyncV2Store):
 
     assert [device.user_id for device in sync_store.list_devices_for_user("user-1")] == ["user-1"]
     assert sync_store.list_devices_for_user("user-2") == []
+
+
+def test_device_lifecycle_status_authorization_and_acknowledgments(sync_store: SyncV2Store):
+    sync_store.enroll_dataset(_dataset())
+    pending = sync_store.upsert_device(
+        _device(
+            status="pending_authorization",
+            user_label="new laptop",
+            authorized_at=None,
+        )
+    )
+
+    assert pending.status == "pending_authorization"
+    assert pending.user_label == "new laptop"
+    assert pending.authorized_at is None
+
+    authorization = sync_store.create_device_authorization(
+        SyncDeviceAuthorizationCreate(
+            authorization_id="auth-1",
+            dataset_id="dataset-1",
+            user_id="user-1",
+            device_id="device-1",
+            authorization_method="existing_device",
+            idempotency_key="authorize-device-1",
+        )
+    )
+    retry = sync_store.create_device_authorization(
+        SyncDeviceAuthorizationCreate(
+            authorization_id="auth-retry",
+            dataset_id="dataset-1",
+            user_id="user-1",
+            device_id="device-1",
+            authorization_method="existing_device",
+            idempotency_key="authorize-device-1",
+        )
+    )
+
+    assert retry.authorization_id == authorization.authorization_id
+    assert authorization.status == "pending"
+
+    approved = sync_store.approve_device_authorization(
+        authorization.authorization_id,
+        user_id="user-1",
+        dataset_id="dataset-1",
+        approving_device_id="device-1",
+        idempotency_key="approve-device-1",
+    )
+    active = sync_store.get_device("user-1", "device-1")
+
+    assert approved.status == "approved"
+    assert approved.approving_device_id == "device-1"
+    assert active is not None
+    assert active.status == "active"
+    assert active.authorized_at is not None
+
+    domain_ack = sync_store.upsert_device_domain_ack(
+        SyncDeviceDomainAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            through_server_sequence=3,
+            applied_at="2026-05-23T18:30:00+00:00",
+            idempotency_key="domain-ack-3",
+        )
+    )
+    stale_domain_ack = sync_store.upsert_device_domain_ack(
+        SyncDeviceDomainAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            domain="notes.note",
+            through_server_sequence=2,
+            applied_at="2026-05-23T18:29:00+00:00",
+            idempotency_key="domain-ack-stale",
+        )
+    )
+    blob_ack = sync_store.upsert_device_blob_ack(
+        SyncDeviceBlobAckCreate(
+            dataset_id="dataset-1",
+            device_id="device-1",
+            attachment_id="attachment-1",
+            payload_hash="sha256:" + "a" * 64,
+            verified_at="2026-05-23T18:31:00+00:00",
+            idempotency_key="blob-ack-1",
+        )
+    )
+    summary = sync_store.list_device_acknowledgments("dataset-1", "device-1")
+
+    assert domain_ack.through_server_sequence == 3
+    assert stale_domain_ack.through_server_sequence == 3
+    assert blob_ack.attachment_id == "attachment-1"
+    assert summary.domain_acks["notes.note"].through_server_sequence == 3
+    assert summary.blob_acks[0].payload_hash == "sha256:" + "a" * 64
+
+
+def test_revoked_device_is_hidden_by_default_but_auditable(sync_store: SyncV2Store):
+    sync_store.upsert_device(_device(device_id="device-1"))
+
+    revoked = sync_store.revoke_device(
+        user_id="user-1",
+        device_id="device-1",
+        reason="lost_device",
+        revoke_key_records=True,
+    )
+
+    assert revoked.status == "revoked"
+    assert revoked.revoked_at is not None
+    assert revoked.revoked_reason == "lost_device"
+    assert sync_store.list_devices_for_user("user-1") == []
+    assert [device.device_id for device in sync_store.list_devices_for_user("user-1", include_revoked=True)] == [
+        "device-1"
+    ]
 
 
 def test_dataset_enrollment_is_idempotent(sync_store: SyncV2Store):

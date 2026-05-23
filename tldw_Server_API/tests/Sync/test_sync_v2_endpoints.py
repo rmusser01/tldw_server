@@ -169,6 +169,153 @@ def test_profile_endpoint_is_read_only_when_no_dataset_exists(
     assert sync_service.store.list_devices_for_user("user-1") == []
 
 
+def test_device_lifecycle_endpoints_authorize_acknowledge_and_revoke(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-1",
+            user_id="user-1",
+            display_name="Trusted laptop",
+            client_type="chatbook",
+        )
+    )
+    sync_service.store.upsert_device(
+        SyncDeviceUpsert(
+            device_id="device-2",
+            user_id="user-1",
+            display_name="New laptop",
+            client_type="chatbook",
+            status="pending_authorization",
+            user_label="untrusted",
+        )
+    )
+    sync_service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+
+    renamed = client.patch(
+        "/api/v1/sync/devices/device-2",
+        json={"user_label": "travel laptop"},
+    )
+    requested = client.post(
+        "/api/v1/sync/device-authorizations",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "authorization_method": "existing_device",
+            "idempotency_key": "authorize-device-2",
+        },
+    )
+    retry = client.post(
+        "/api/v1/sync/device-authorizations",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "authorization_method": "existing_device",
+            "idempotency_key": "authorize-device-2",
+        },
+    )
+    authorization_id = requested.json().get("authorization_id", "missing")
+    approved = client.post(
+        f"/api/v1/sync/device-authorizations/{authorization_id}/approve",
+        json={
+            "dataset_id": "dataset-1",
+            "approving_device_id": "device-1",
+            "idempotency_key": "approve-device-2",
+        },
+    )
+    paused = client.post("/api/v1/sync/devices/device-2/pause")
+    paused_ack = client.post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "domain_acks": [
+                {
+                    "domain": "notes.note",
+                    "through_server_sequence": 4,
+                    "applied_at": "2026-05-23T18:29:00+00:00",
+                }
+            ],
+        },
+    )
+    resumed = client.post("/api/v1/sync/devices/device-2/resume")
+    acknowledged = client.post(
+        "/api/v1/sync/device-acknowledgments",
+        json={
+            "dataset_id": "dataset-1",
+            "device_id": "device-2",
+            "domain_acks": [
+                {
+                    "domain": "notes.note",
+                    "through_server_sequence": 5,
+                    "applied_at": "2026-05-23T18:30:00+00:00",
+                    "idempotency_key": "notes-ack-5",
+                }
+            ],
+            "blob_acks": [
+                {
+                    "attachment_id": "attachment-1",
+                    "payload_hash": _sha256(b"attachment-1"),
+                    "verified_at": "2026-05-23T18:31:00+00:00",
+                    "idempotency_key": "blob-ack-1",
+                }
+            ],
+        },
+    )
+    revoked = client.post(
+        "/api/v1/sync/devices/device-2/revoke",
+        json={"reason": "lost_device", "revoke_key_records": True},
+    )
+    revoked_restore_manifest = client.get(
+        "/api/v1/sync/restore-manifest",
+        params={"device_id": "device-2", "dataset_id": "dataset-1"},
+    )
+    revoked_restore_preview = client.post(
+        "/api/v1/sync/restore/preview",
+        json={"device_id": "device-2", "dataset_ids": ["dataset-1"]},
+    )
+    revoked_repair = client.post(
+        "/api/v1/sync/repair",
+        json={"dataset_id": "dataset-1", "device_id": "device-2"},
+    )
+    visible = client.get("/api/v1/sync/devices")
+    auditable = client.get("/api/v1/sync/devices", params={"include_revoked": "true"})
+
+    assert renamed.status_code == 200
+    assert renamed.json()["user_label"] == "travel laptop"
+    assert requested.status_code == 200
+    assert retry.status_code == 200
+    assert retry.json()["authorization_id"] == requested.json()["authorization_id"]
+    assert requested.json()["status"] == "pending"
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+    assert approved.json()["approving_device_id"] == "device-1"
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+    assert paused_ack.status_code == 404
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "active"
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["domain_acks"]["notes.note"]["through_server_sequence"] == 5
+    assert acknowledged.json()["blob_acks"][0]["attachment_id"] == "attachment-1"
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
+    assert revoked.json()["revoked_reason"] == "lost_device"
+    assert revoked_restore_manifest.status_code == 404
+    assert revoked_restore_preview.status_code == 404
+    assert revoked_repair.status_code == 404
+    assert [device["device_id"] for device in visible.json()] == ["device-1"]
+    assert {
+        device["device_id"]: device["status"]
+        for device in auditable.json()
+    } == {"device-1": "active", "device-2": "revoked"}
+
+
 def test_profile_endpoint_for_fresh_user_does_not_create_sync_db(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

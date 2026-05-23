@@ -38,7 +38,14 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncDataset,
     SyncDatasetCreate,
     SyncDevice,
+    SyncDeviceAcknowledgmentSummary,
+    SyncDeviceAuthorization,
+    SyncDeviceAuthorizationCreate,
+    SyncDeviceBlobAck,
+    SyncDeviceBlobAckCreate,
     SyncDeviceCursor,
+    SyncDeviceDomainAck,
+    SyncDeviceDomainAckCreate,
     SyncDeviceUpsert,
     SyncDomain,
     SyncEnvelope,
@@ -75,9 +82,60 @@ CREATE TABLE IF NOT EXISTS sync_devices (
     capabilities_json TEXT NOT NULL DEFAULT '{}',
     registered_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
-    revoked_at TEXT
+    status TEXT NOT NULL DEFAULT 'active',
+    user_label TEXT,
+    authorized_at TEXT,
+    revoked_at TEXT,
+    revoked_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sync_devices_user ON sync_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_sync_devices_user_status
+    ON sync_devices(user_id, status, last_seen_at);
+
+CREATE TABLE IF NOT EXISTS sync_device_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    authorization_method TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    approved_at TEXT,
+    approving_device_id TEXT,
+    idempotency_key TEXT,
+    approval_idempotency_key TEXT,
+    UNIQUE(dataset_id, device_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_dataset_device
+    ON sync_device_authorizations(dataset_id, device_id, requested_at);
+CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_user_status
+    ON sync_device_authorizations(user_id, status, requested_at);
+
+CREATE TABLE IF NOT EXISTS sync_device_domain_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    through_server_sequence INTEGER NOT NULL DEFAULT 0,
+    applied_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, domain)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_domain_acks_device
+    ON sync_device_domain_acks(device_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_device_blob_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, attachment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_blob_acks_device
+    ON sync_device_blob_acks(device_id, dataset_id);
 
 CREATE TABLE IF NOT EXISTS sync_datasets (
     dataset_id TEXT PRIMARY KEY,
@@ -329,9 +387,60 @@ CREATE TABLE IF NOT EXISTS sync_devices (
     capabilities_json TEXT NOT NULL DEFAULT '{}',
     registered_at TIMESTAMPTZ NOT NULL,
     last_seen_at TIMESTAMPTZ NOT NULL,
-    revoked_at TIMESTAMPTZ
+    status TEXT NOT NULL DEFAULT 'active',
+    user_label TEXT,
+    authorized_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    revoked_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sync_devices_user ON sync_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_sync_devices_user_status
+    ON sync_devices(user_id, status, last_seen_at);
+
+CREATE TABLE IF NOT EXISTS sync_device_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    authorization_method TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_at TIMESTAMPTZ NOT NULL,
+    approved_at TIMESTAMPTZ,
+    approving_device_id TEXT,
+    idempotency_key TEXT,
+    approval_idempotency_key TEXT,
+    UNIQUE(dataset_id, device_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_dataset_device
+    ON sync_device_authorizations(dataset_id, device_id, requested_at);
+CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_user_status
+    ON sync_device_authorizations(user_id, status, requested_at);
+
+CREATE TABLE IF NOT EXISTS sync_device_domain_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    through_server_sequence BIGINT NOT NULL DEFAULT 0,
+    applied_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, domain)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_domain_acks_device
+    ON sync_device_domain_acks(device_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS sync_device_blob_acks (
+    dataset_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    verified_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT,
+    PRIMARY KEY(dataset_id, device_id, attachment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_device_blob_acks_device
+    ON sync_device_blob_acks(device_id, dataset_id);
 
 CREATE TABLE IF NOT EXISTS sync_datasets (
     dataset_id TEXT PRIMARY KEY,
@@ -676,6 +785,7 @@ def _version_from_storage(value: str | None) -> str | int | None:
 
 
 def _device_from_row(row: dict[str, Any]) -> SyncDevice:
+    status = row.get("status") or ("revoked" if row.get("revoked_at") else "active")
     return SyncDevice(
         device_id=row["device_id"],
         user_id=row["user_id"],
@@ -683,9 +793,52 @@ def _device_from_row(row: dict[str, Any]) -> SyncDevice:
         client_type=row["client_type"],
         client_version=row.get("client_version"),
         capabilities=decode_json(row.get("capabilities_json"), default={}),
-        registered_at=row["registered_at"],
-        last_seen_at=row["last_seen_at"],
-        revoked_at=row.get("revoked_at"),
+        registered_at=_timestamp_to_string(row.get("registered_at")) or "",
+        last_seen_at=_timestamp_to_string(row.get("last_seen_at")) or "",
+        status=status,
+        user_label=row.get("user_label"),
+        authorized_at=_timestamp_to_string(row.get("authorized_at")),
+        revoked_at=_timestamp_to_string(row.get("revoked_at")),
+        revoked_reason=row.get("revoked_reason"),
+    )
+
+
+def _device_authorization_from_row(row: dict[str, Any]) -> SyncDeviceAuthorization:
+    return SyncDeviceAuthorization(
+        authorization_id=row["authorization_id"],
+        dataset_id=row["dataset_id"],
+        user_id=row["user_id"],
+        device_id=row["device_id"],
+        authorization_method=row["authorization_method"],
+        status=row["status"],
+        requested_at=_timestamp_to_string(row.get("requested_at")) or "",
+        approved_at=_timestamp_to_string(row.get("approved_at")),
+        approving_device_id=row.get("approving_device_id"),
+        idempotency_key=row.get("idempotency_key"),
+    )
+
+
+def _device_domain_ack_from_row(row: dict[str, Any]) -> SyncDeviceDomainAck:
+    return SyncDeviceDomainAck(
+        dataset_id=row["dataset_id"],
+        device_id=row["device_id"],
+        domain=row["domain"],
+        through_server_sequence=int(row["through_server_sequence"]),
+        applied_at=_timestamp_to_string(row.get("applied_at")) or "",
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        idempotency_key=row.get("idempotency_key"),
+    )
+
+
+def _device_blob_ack_from_row(row: dict[str, Any]) -> SyncDeviceBlobAck:
+    return SyncDeviceBlobAck(
+        dataset_id=row["dataset_id"],
+        device_id=row["device_id"],
+        attachment_id=row["attachment_id"],
+        payload_hash=row["payload_hash"],
+        verified_at=_timestamp_to_string(row.get("verified_at")) or "",
+        updated_at=_timestamp_to_string(row.get("updated_at")) or "",
+        idempotency_key=row.get("idempotency_key"),
     )
 
 
@@ -862,6 +1015,7 @@ def _blob_upload_session_from_row(
         size_bytes=int(row["size_bytes"]),
         payload_hash=row["payload_hash"],
         content_type=row["content_type"],
+        device_id=row.get("device_id"),
         uploaded_chunks=uploaded,
         missing_chunks=missing,
         quota={"reserved_blob_bytes": int(row["reserved_quota_bytes"])},
@@ -1080,6 +1234,26 @@ def _key_record_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _device_authorization_fingerprint_from_create(
+    authorization: SyncDeviceAuthorizationCreate,
+) -> dict[str, Any]:
+    return {
+        "dataset_id": authorization.dataset_id,
+        "user_id": authorization.user_id,
+        "device_id": authorization.device_id,
+        "authorization_method": authorization.authorization_method,
+    }
+
+
+def _device_authorization_fingerprint_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "dataset_id": row["dataset_id"],
+        "user_id": row["user_id"],
+        "device_id": row["device_id"],
+        "authorization_method": row["authorization_method"],
+    }
+
+
 def _attachment_fingerprint_from_create(attachment: SyncAttachmentCreate) -> dict[str, Any]:
     """Return idempotency-comparable fields from an attachment create model."""
 
@@ -1285,6 +1459,8 @@ class SyncDatabase:
             if self.backend.table_exists("sync_envelopes", connection=conn):
                 self._ensure_envelope_m1_columns(connection=conn)
             self.backend.create_tables(schema, connection=conn)
+            self._ensure_device_lifecycle_columns(connection=conn)
+            self._ensure_device_lifecycle_tables(connection=conn)
             self._ensure_envelope_m1_columns(connection=conn)
             self._ensure_sync_object_state_table(connection=conn)
             self._ensure_envelope_m1_indexes(connection=conn)
@@ -1350,6 +1526,43 @@ class SyncDatabase:
         if domain not in _dataset_domains_from_row(row):
             raise SyncInvalidDomainError(
                 f"Sync domain is not enrolled for dataset {dataset_id}: {domain}"
+            )
+        return row
+
+    def _get_device_row(
+        self,
+        user_id: str,
+        device_id: str,
+        *,
+        connection: Any | None = None,
+    ) -> dict[str, Any] | None:
+        return _first(
+            self.execute(
+                """
+                SELECT * FROM sync_devices
+                 WHERE user_id = ? AND device_id = ?
+                """,
+                (user_id, device_id),
+                connection=connection,
+            )
+        )
+
+    def _require_device_for_dataset(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        connection: Any,
+    ) -> dict[str, Any]:
+        dataset_row = self._require_dataset(dataset_id, connection=connection)
+        row = self._get_device_row(
+            str(dataset_row["owner_user_id"]),
+            device_id,
+            connection=connection,
+        )
+        if row is None:
+            raise SyncStoreError(
+                f"Sync device is not registered for dataset {dataset_id}: {device_id}"
             )
         return row
 
@@ -1434,6 +1647,24 @@ class SyncDatabase:
                     raise SyncStoreError(
                         f"Sync device already belongs to another user: {device.device_id}"
                     )
+                existing_status = existing.get("status") or (
+                    "revoked" if existing.get("revoked_at") else "active"
+                )
+                if existing_status == "revoked" and device.status != "revoked":
+                    status = "revoked"
+                    authorized_at = existing.get("authorized_at") or device.authorized_at
+                    revoked_at = existing.get("revoked_at") or now
+                    revoked_reason = existing.get("revoked_reason") or device.revoked_reason
+                elif device.status == "revoked" or device.revoked_at is not None:
+                    status = "revoked"
+                    authorized_at = device.authorized_at or existing.get("authorized_at")
+                    revoked_at = device.revoked_at or now
+                    revoked_reason = device.revoked_reason or existing.get("revoked_reason")
+                else:
+                    status = device.status
+                    authorized_at = device.authorized_at or existing.get("authorized_at")
+                    revoked_at = None
+                    revoked_reason = None
                 self.execute(
                     """
                     UPDATE sync_devices
@@ -1443,7 +1674,11 @@ class SyncDatabase:
                            client_version = ?,
                            capabilities_json = ?,
                            last_seen_at = ?,
-                           revoked_at = ?
+                           status = ?,
+                           user_label = ?,
+                           authorized_at = ?,
+                           revoked_at = ?,
+                           revoked_reason = ?
                      WHERE device_id = ?
                     """,
                     (
@@ -1453,19 +1688,30 @@ class SyncDatabase:
                         device.client_version,
                         encode_json(device.capabilities, default={}),
                         now,
-                        device.revoked_at,
+                        status,
+                        device.user_label or existing.get("user_label"),
+                        authorized_at,
+                        revoked_at,
+                        revoked_reason,
                         device.device_id,
                     ),
                     connection=conn,
                 )
             else:
+                status = (
+                    "revoked"
+                    if device.status == "revoked" or device.revoked_at is not None
+                    else device.status
+                )
+                revoked_at = device.revoked_at or (now if status == "revoked" else None)
                 self.execute(
                     """
                     INSERT INTO sync_devices (
                         device_id, user_id, display_name, client_type, client_version,
-                        capabilities_json, registered_at, last_seen_at, revoked_at
+                        capabilities_json, registered_at, last_seen_at, status,
+                        user_label, authorized_at, revoked_at, revoked_reason
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         device.device_id,
@@ -1476,7 +1722,11 @@ class SyncDatabase:
                         encode_json(device.capabilities, default={}),
                         now,
                         now,
-                        device.revoked_at,
+                        status,
+                        device.user_label,
+                        device.authorized_at,
+                        revoked_at,
+                        device.revoked_reason,
                     ),
                     connection=conn,
                 )
@@ -1598,18 +1848,422 @@ class SyncDatabase:
         )
         return [_dataset_from_row(row) for row in result.rows]
 
-    def list_devices_for_user(self, user_id: str) -> list[SyncDevice]:
+    def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
+        """Return one Sync v2 device for a user."""
+
+        row = self._get_device_row(user_id, device_id)
+        if row is None:
+            return None
+        return _device_from_row(row)
+
+    def list_devices_for_user(
+        self,
+        user_id: str,
+        *,
+        include_revoked: bool = False,
+    ) -> list[SyncDevice]:
         """List Sync v2 devices registered by a user."""
 
-        result = self.execute(
-            """
+        sql = """
             SELECT * FROM sync_devices
              WHERE user_id = ?
-             ORDER BY last_seen_at DESC, device_id ASC
-            """,
-            (user_id,),
-        )
+        """
+        params: list[Any] = [user_id]
+        if not include_revoked:
+            sql += " AND status <> 'revoked' AND revoked_at IS NULL"
+        sql += " ORDER BY last_seen_at DESC, device_id ASC"
+        result = self.execute(sql, tuple(params))
         return [_device_from_row(row) for row in result.rows]
+
+    def create_device_authorization(
+        self,
+        authorization: SyncDeviceAuthorizationCreate,
+    ) -> SyncDeviceAuthorization:
+        """Create or idempotently return a device authorization request."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            dataset_row = self._require_dataset(
+                authorization.dataset_id,
+                connection=conn,
+            )
+            if str(dataset_row["owner_user_id"]) != str(authorization.user_id):
+                raise SyncDatasetNotFoundError(
+                    f"Sync dataset not found: {authorization.dataset_id}"
+                )
+            if (
+                self._get_device_row(
+                    authorization.user_id,
+                    authorization.device_id,
+                    connection=conn,
+                )
+                is None
+            ):
+                raise SyncStoreError(
+                    f"Sync device is not registered: {authorization.device_id}"
+                )
+            if authorization.idempotency_key:
+                existing = _first(
+                    self.execute(
+                        """
+                        SELECT * FROM sync_device_authorizations
+                         WHERE dataset_id = ? AND device_id = ? AND idempotency_key = ?
+                        """,
+                        (
+                            authorization.dataset_id,
+                            authorization.device_id,
+                            authorization.idempotency_key,
+                        ),
+                        connection=conn,
+                    )
+                )
+                if existing is not None:
+                    if (
+                        _device_authorization_fingerprint_from_row(existing)
+                        != _device_authorization_fingerprint_from_create(authorization)
+                    ):
+                        raise SyncIdempotencyConflictError(
+                            "Sync device authorization idempotency key was reused"
+                        )
+                    return _device_authorization_from_row(existing)
+            self.execute(
+                """
+                INSERT INTO sync_device_authorizations (
+                    authorization_id, dataset_id, user_id, device_id,
+                    authorization_method, status, requested_at, idempotency_key
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (authorization_id) DO NOTHING
+                """,
+                (
+                    authorization.authorization_id,
+                    authorization.dataset_id,
+                    authorization.user_id,
+                    authorization.device_id,
+                    authorization.authorization_method,
+                    "pending",
+                    now,
+                    authorization.idempotency_key,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_authorizations
+                     WHERE authorization_id = ?
+                    """,
+                    (authorization.authorization_id,),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError(
+                    "Sync device authorization insert did not produce a retrievable record"
+                )
+            if (
+                _device_authorization_fingerprint_from_row(row)
+                != _device_authorization_fingerprint_from_create(authorization)
+            ):
+                raise SyncIdempotencyConflictError(
+                    "Sync device authorization ID was reused"
+                )
+        return _device_authorization_from_row(row)
+
+    def approve_device_authorization(
+        self,
+        authorization_id: str,
+        *,
+        user_id: str,
+        dataset_id: str,
+        approving_device_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> SyncDeviceAuthorization:
+        """Approve a pending device authorization and activate the device."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_authorizations
+                     WHERE authorization_id = ?
+                       AND dataset_id = ?
+                       AND user_id = ?
+                    """,
+                    (authorization_id, dataset_id, user_id),
+                    connection=conn,
+                )
+            )
+            if row is None:
+                raise SyncStoreError(f"Sync device authorization not found: {authorization_id}")
+            if row["status"] == "rejected":
+                raise SyncStoreError("Sync device authorization has been rejected")
+            if row["status"] == "pending":
+                self.execute(
+                    """
+                    UPDATE sync_device_authorizations
+                       SET status = 'approved',
+                           approved_at = ?,
+                           approving_device_id = ?,
+                           approval_idempotency_key = ?
+                     WHERE authorization_id = ?
+                       AND status = 'pending'
+                    """,
+                    (now, approving_device_id, idempotency_key, authorization_id),
+                    connection=conn,
+                )
+            device_row = self._get_device_row(user_id, row["device_id"], connection=conn)
+            if device_row is None:
+                raise SyncStoreError(f"Sync device is not registered: {row['device_id']}")
+            self.execute(
+                """
+                UPDATE sync_devices
+                   SET status = 'active',
+                       authorized_at = COALESCE(authorized_at, ?),
+                       revoked_at = NULL,
+                       revoked_reason = NULL,
+                       last_seen_at = ?
+                 WHERE user_id = ? AND device_id = ?
+                """,
+                (now, now, user_id, row["device_id"]),
+                connection=conn,
+            )
+            approved = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_authorizations
+                     WHERE authorization_id = ?
+                    """,
+                    (authorization_id,),
+                    connection=conn,
+                )
+            )
+        return _device_authorization_from_row(approved)
+
+    def revoke_device(
+        self,
+        *,
+        user_id: str,
+        device_id: str,
+        reason: str | None = None,
+        revoke_key_records: bool = False,
+    ) -> SyncDevice:
+        """Revoke a Sync v2 device and optionally revoke its key records."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            existing = self._get_device_row(user_id, device_id, connection=conn)
+            if existing is None:
+                raise SyncStoreError(f"Sync device is not registered: {device_id}")
+            self.execute(
+                """
+                UPDATE sync_devices
+                   SET status = 'revoked',
+                       revoked_at = COALESCE(revoked_at, ?),
+                       revoked_reason = COALESCE(?, revoked_reason),
+                       last_seen_at = ?
+                 WHERE user_id = ? AND device_id = ?
+                """,
+                (now, reason, now, user_id, device_id),
+                connection=conn,
+            )
+            if revoke_key_records:
+                self.execute(
+                    """
+                    UPDATE sync_key_records
+                       SET revoked_at = COALESCE(revoked_at, ?)
+                     WHERE user_id = ?
+                       AND device_id = ?
+                    """,
+                    (now, user_id, device_id),
+                    connection=conn,
+                )
+            row = self._get_device_row(user_id, device_id, connection=conn)
+        return _device_from_row(row)
+
+    def upsert_device_domain_ack(
+        self,
+        acknowledgment: SyncDeviceDomainAckCreate,
+    ) -> SyncDeviceDomainAck:
+        """Record the highest accepted sequence a device has applied for a domain."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self._require_dataset_domain(
+                acknowledgment.dataset_id,
+                acknowledgment.domain,
+                connection=conn,
+            )
+            self._require_device_for_dataset(
+                acknowledgment.dataset_id,
+                acknowledgment.device_id,
+                connection=conn,
+            )
+            existing = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_domain_acks
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.domain,
+                    ),
+                    connection=conn,
+                )
+            )
+            if existing is None:
+                self.execute(
+                    """
+                    INSERT INTO sync_device_domain_acks (
+                        dataset_id, device_id, domain, through_server_sequence,
+                        applied_at, updated_at, idempotency_key
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.domain,
+                        acknowledgment.through_server_sequence,
+                        acknowledgment.applied_at,
+                        now,
+                        acknowledgment.idempotency_key,
+                    ),
+                    connection=conn,
+                )
+            elif acknowledgment.through_server_sequence >= int(
+                existing["through_server_sequence"]
+            ):
+                self.execute(
+                    """
+                    UPDATE sync_device_domain_acks
+                       SET through_server_sequence = ?,
+                           applied_at = ?,
+                           updated_at = ?,
+                           idempotency_key = ?
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                    """,
+                    (
+                        acknowledgment.through_server_sequence,
+                        acknowledgment.applied_at,
+                        now,
+                        acknowledgment.idempotency_key,
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.domain,
+                    ),
+                    connection=conn,
+                )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_domain_acks
+                     WHERE dataset_id = ? AND device_id = ? AND domain = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.domain,
+                    ),
+                    connection=conn,
+                )
+            )
+        return _device_domain_ack_from_row(row)
+
+    def upsert_device_blob_ack(
+        self,
+        acknowledgment: SyncDeviceBlobAckCreate,
+    ) -> SyncDeviceBlobAck:
+        """Record a device-level blob verification acknowledgment."""
+
+        now = utcnow_iso()
+        with self.backend.transaction() as conn:
+            self._require_device_for_dataset(
+                acknowledgment.dataset_id,
+                acknowledgment.device_id,
+                connection=conn,
+            )
+            self.execute(
+                """
+                INSERT INTO sync_device_blob_acks (
+                    dataset_id, device_id, attachment_id, payload_hash,
+                    verified_at, updated_at, idempotency_key
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (dataset_id, device_id, attachment_id)
+                DO UPDATE SET
+                    payload_hash = excluded.payload_hash,
+                    verified_at = excluded.verified_at,
+                    updated_at = excluded.updated_at,
+                    idempotency_key = excluded.idempotency_key
+                """,
+                (
+                    acknowledgment.dataset_id,
+                    acknowledgment.device_id,
+                    acknowledgment.attachment_id,
+                    acknowledgment.payload_hash,
+                    acknowledgment.verified_at,
+                    now,
+                    acknowledgment.idempotency_key,
+                ),
+                connection=conn,
+            )
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_device_blob_acks
+                     WHERE dataset_id = ? AND device_id = ? AND attachment_id = ?
+                    """,
+                    (
+                        acknowledgment.dataset_id,
+                        acknowledgment.device_id,
+                        acknowledgment.attachment_id,
+                    ),
+                    connection=conn,
+                )
+            )
+        return _device_blob_ack_from_row(row)
+
+    def list_device_acknowledgments(
+        self,
+        dataset_id: str,
+        device_id: str,
+    ) -> SyncDeviceAcknowledgmentSummary:
+        """Return all domain and blob acknowledgments for one device in a dataset."""
+
+        with self.backend.transaction() as conn:
+            self._require_device_for_dataset(dataset_id, device_id, connection=conn)
+            domain_rows = self.execute(
+                """
+                SELECT * FROM sync_device_domain_acks
+                 WHERE dataset_id = ? AND device_id = ?
+                 ORDER BY domain ASC
+                """,
+                (dataset_id, device_id),
+                connection=conn,
+            ).rows
+            blob_rows = self.execute(
+                """
+                SELECT * FROM sync_device_blob_acks
+                 WHERE dataset_id = ? AND device_id = ?
+                 ORDER BY updated_at ASC, attachment_id ASC
+                """,
+                (dataset_id, device_id),
+                connection=conn,
+            ).rows
+        domain_acks = {
+            row["domain"]: _device_domain_ack_from_row(row)
+            for row in domain_rows
+        }
+        return SyncDeviceAcknowledgmentSummary(
+            dataset_id=dataset_id,
+            device_id=device_id,
+            domain_acks=domain_acks,
+            blob_acks=[_device_blob_ack_from_row(row) for row in blob_rows],
+        )
 
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         """Return the user's default Chatbook personal dataset, creating it if needed."""
@@ -3265,6 +3919,147 @@ class SyncDatabase:
             attachment_size_classes=dict(sorted(attachment_size_classes.items())),
             key_recovery_available=key_row is not None,
         )
+
+    def _ensure_device_lifecycle_columns(self, *, connection: Any) -> None:
+        existing = {
+            column.get("name")
+            for column in self.backend.get_table_info("sync_devices", connection=connection)
+            if isinstance(column, dict)
+        }
+        if self.backend_type == BackendType.POSTGRESQL:
+            column_specs = {
+                "status": "TEXT NOT NULL DEFAULT 'active'",
+                "user_label": "TEXT",
+                "authorized_at": "TIMESTAMPTZ",
+                "revoked_reason": "TEXT",
+            }
+        else:
+            column_specs = {
+                "status": "TEXT NOT NULL DEFAULT 'active'",
+                "user_label": "TEXT",
+                "authorized_at": "TEXT",
+                "revoked_reason": "TEXT",
+            }
+        for column_name, column_spec in column_specs.items():
+            if column_name in existing:
+                continue
+            self.execute(
+                f"ALTER TABLE sync_devices ADD COLUMN {column_name} {column_spec}",
+                connection=connection,
+            )
+        self.execute(
+            """
+            UPDATE sync_devices
+               SET status = 'revoked'
+             WHERE revoked_at IS NOT NULL
+               AND (status IS NULL OR status <> 'revoked')
+            """,
+            connection=connection,
+        )
+        self.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_devices_user_status
+                ON sync_devices(user_id, status, last_seen_at)
+            """,
+            connection=connection,
+        )
+
+    def _ensure_device_lifecycle_tables(self, *, connection: Any) -> None:
+        if self.backend_type == BackendType.POSTGRESQL:
+            schema = """
+            CREATE TABLE IF NOT EXISTS sync_device_authorizations (
+                authorization_id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                authorization_method TEXT NOT NULL,
+                status TEXT NOT NULL,
+                requested_at TIMESTAMPTZ NOT NULL,
+                approved_at TIMESTAMPTZ,
+                approving_device_id TEXT,
+                idempotency_key TEXT,
+                approval_idempotency_key TEXT,
+                UNIQUE(dataset_id, device_id, idempotency_key)
+            );
+            CREATE TABLE IF NOT EXISTS sync_device_domain_acks (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                through_server_sequence BIGINT NOT NULL DEFAULT 0,
+                applied_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                idempotency_key TEXT,
+                PRIMARY KEY(dataset_id, device_id, domain)
+            );
+            CREATE TABLE IF NOT EXISTS sync_device_blob_acks (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                verified_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                idempotency_key TEXT,
+                PRIMARY KEY(dataset_id, device_id, attachment_id)
+            );
+            """
+        else:
+            schema = """
+            CREATE TABLE IF NOT EXISTS sync_device_authorizations (
+                authorization_id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                authorization_method TEXT NOT NULL,
+                status TEXT NOT NULL,
+                requested_at TEXT NOT NULL,
+                approved_at TEXT,
+                approving_device_id TEXT,
+                idempotency_key TEXT,
+                approval_idempotency_key TEXT,
+                UNIQUE(dataset_id, device_id, idempotency_key)
+            );
+            CREATE TABLE IF NOT EXISTS sync_device_domain_acks (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                through_server_sequence INTEGER NOT NULL DEFAULT 0,
+                applied_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                idempotency_key TEXT,
+                PRIMARY KEY(dataset_id, device_id, domain)
+            );
+            CREATE TABLE IF NOT EXISTS sync_device_blob_acks (
+                dataset_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                attachment_id TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                verified_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                idempotency_key TEXT,
+                PRIMARY KEY(dataset_id, device_id, attachment_id)
+            );
+            """
+        self.backend.create_tables(schema, connection=connection)
+        statements = [
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_dataset_device
+                ON sync_device_authorizations(dataset_id, device_id, requested_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_user_status
+                ON sync_device_authorizations(user_id, status, requested_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_device_domain_acks_device
+                ON sync_device_domain_acks(device_id, dataset_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_sync_device_blob_acks_device
+                ON sync_device_blob_acks(device_id, dataset_id)
+            """,
+        ]
+        for statement in statements:
+            self.execute(statement, connection=connection)
 
     def _ensure_domain_state(
         self,

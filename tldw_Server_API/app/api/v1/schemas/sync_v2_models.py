@@ -15,6 +15,8 @@ ConflictResolutionAction = Literal["overwrite", "duplicate_rename", "skip"]
 SyncApplyStatus = Literal["pending", "applied", "failed", "conflict"]
 SyncProfileBootstrapMode = Literal["server_frontend", "offline_sync"]
 SyncRestorePreviewAction = Literal["apply", "append", "delete", "hide", "noop"]
+SyncDeviceStatus = Literal["pending_authorization", "active", "paused", "revoked"]
+SyncDeviceAuthorizationStatus = Literal["pending", "approved", "rejected"]
 SyncBlobAvailabilityStatus = Literal[
     "metadata_only",
     "uploading",
@@ -185,6 +187,137 @@ class SyncDeviceRegisterResponse(BaseModel):
     last_seen_at: str | None = None
 
 
+class SyncDeviceResponse(BaseModel):
+    """Device lifecycle metadata returned by Sync v2 M3 endpoints."""
+
+    device_id: str
+    user_id: str
+    display_name: str
+    client_type: str
+    client_version: str | None = None
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    registered_at: str
+    last_seen_at: str
+    status: SyncDeviceStatus = "active"
+    user_label: str | None = None
+    authorized_at: str | None = None
+    revoked_at: str | None = None
+    revoked_reason: str | None = None
+
+
+class SyncDeviceUpdateRequest(BaseModel):
+    """Mutable user-facing metadata for an existing Sync v2 device."""
+
+    display_name: str | None = None
+    user_label: str | None = None
+    client_version: str | None = None
+    capabilities: dict[str, Any] | None = None
+
+
+class SyncDeviceRevokeRequest(BaseModel):
+    """Request to revoke a Sync v2 device."""
+
+    reason: str | None = None
+    revoke_key_records: bool = False
+
+
+class SyncDeviceAuthorizationCreateRequest(BaseModel):
+    """Request to create a pending Sync v2 device authorization."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str = Field(..., min_length=1)
+    authorization_method: str = Field(..., min_length=1)
+    idempotency_key: str | None = None
+
+
+class SyncDeviceAuthorizationApproveRequest(BaseModel):
+    """Request to approve a pending Sync v2 device authorization."""
+
+    dataset_id: str = Field(..., min_length=1)
+    approving_device_id: str | None = None
+    idempotency_key: str | None = None
+
+
+class SyncDeviceAuthorizationResponse(BaseModel):
+    """Stored Sync v2 device authorization metadata."""
+
+    authorization_id: str
+    dataset_id: str
+    user_id: str
+    device_id: str
+    authorization_method: str
+    status: SyncDeviceAuthorizationStatus
+    requested_at: str
+    approved_at: str | None = None
+    approving_device_id: str | None = None
+    idempotency_key: str | None = None
+
+
+class SyncDeviceDomainAckRequest(BaseModel):
+    """Per-domain device acknowledgment submitted by a Sync v2 client."""
+
+    domain: SyncDomain
+    through_server_sequence: int = Field(..., ge=0)
+    applied_at: str
+    idempotency_key: str | None = None
+
+
+class SyncDeviceBlobAckRequest(BaseModel):
+    """Per-blob device verification acknowledgment submitted by a Sync v2 client."""
+
+    attachment_id: str = Field(..., min_length=1)
+    payload_hash: str
+    verified_at: str
+    idempotency_key: str | None = None
+
+    @field_validator("payload_hash")
+    @classmethod
+    def _validate_payload_hash(cls, value: Any) -> str:
+        return _validate_sha256_hash(value)
+
+
+class SyncDeviceAcknowledgmentsRequest(BaseModel):
+    """Batch of domain/blob acknowledgments for one dataset/device."""
+
+    dataset_id: str = Field(..., min_length=1)
+    device_id: str = Field(..., min_length=1)
+    domain_acks: list[SyncDeviceDomainAckRequest] = Field(default_factory=list)
+    blob_acks: list[SyncDeviceBlobAckRequest] = Field(default_factory=list)
+
+
+class SyncDeviceDomainAckResponse(BaseModel):
+    """Stored per-domain device acknowledgment."""
+
+    dataset_id: str
+    device_id: str
+    domain: SyncDomain
+    through_server_sequence: int = Field(..., ge=0)
+    applied_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+class SyncDeviceBlobAckResponse(BaseModel):
+    """Stored per-blob device verification acknowledgment."""
+
+    dataset_id: str
+    device_id: str
+    attachment_id: str
+    payload_hash: str
+    verified_at: str
+    updated_at: str
+    idempotency_key: str | None = None
+
+
+class SyncDeviceAcknowledgmentsResponse(BaseModel):
+    """Stored acknowledgment summary for one dataset/device pair."""
+
+    dataset_id: str
+    device_id: str
+    domain_acks: dict[SyncDomain, SyncDeviceDomainAckResponse] = Field(default_factory=dict)
+    blob_acks: list[SyncDeviceBlobAckResponse] = Field(default_factory=list)
+
+
 class SyncDatasetEnrollRequest(BaseModel):
     """Request to create or join a sync dataset."""
 
@@ -345,6 +478,7 @@ class SyncRestorePreviewLocalInventoryItem(BaseModel):
 class SyncRestorePreviewRequest(BaseModel):
     """Client inventory request for a Sync v2 M1 restore preview."""
 
+    device_id: str | None = None
     dataset_ids: list[str] = Field(default_factory=list)
     domains: list[SyncDomain] = Field(default_factory=list)
     selected_object_ids: list[str] = Field(default_factory=list)
@@ -846,6 +980,7 @@ class SyncRepairRequest(BaseModel):
     """Request to replay accepted envelopes into server-side projections."""
 
     dataset_id: str = Field(..., min_length=1)
+    device_id: str | None = None
     domains: list[SyncDomain] = Field(default_factory=list)
     since_cursor: int = Field(0, ge=0)
     failed_only: bool = False
