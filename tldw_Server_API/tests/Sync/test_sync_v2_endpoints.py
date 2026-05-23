@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
@@ -383,6 +384,47 @@ def test_lower_level_register_and_enroll_routes_remain_available_for_internal_ca
     assert enrolled.json()["encryption_policy"] == "server_trusted_v1"
     assert enrolled.json()["domains"] == list(M1_SYNC_DOMAINS)
     assert enrolled.json()["key_setup_required"] is False
+
+
+def test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    sync_service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+    )
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    secret = "wrapped:super-secret-key-material"
+    log_messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: log_messages.append(str(message)),
+        format="{message} {extra}",
+        level="WARNING",
+    )
+    try:
+        response = client.post(
+            "/api/v1/sync/keys/recovery-bundle",
+            json={
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "key_purpose": "workspace_share",
+                "wrapped_key_blob": secret,
+                "kdf_metadata": {"algorithm": "scrypt", "salt": "secret-salt"},
+            },
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "sync_validation_failed"
+    assert secret not in response.text
+    assert "secret-salt" not in response.text
+    rendered_logs = "\n".join(log_messages)
+    assert secret not in rendered_logs
+    assert "secret-salt" not in rendered_logs
 
 
 def test_datasets_enroll_endpoint_fails_closed_when_encryption_is_not_ready(

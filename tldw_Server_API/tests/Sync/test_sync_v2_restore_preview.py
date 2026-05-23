@@ -337,7 +337,10 @@ def test_restore_preview_includes_attachment_refs_and_missing_blob_warning(
         ("attachment-1", "notes.note", "note-1")
     ]
     assert [item.attachment_id for item in preview.missing_blobs] == ["attachment-1"]
-    assert [warning.code for warning in preview.warnings] == ["sync_attachment_blob_missing"]
+    assert [warning.code for warning in preview.warnings] == [
+        "sync_key_recovery_missing",
+        "sync_attachment_blob_missing",
+    ]
 
 
 def test_restore_preview_endpoint_blocks_requested_cross_user_dataset(

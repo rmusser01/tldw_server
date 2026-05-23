@@ -194,6 +194,9 @@ def _safe_sync_v2_http_error(exc: Exception, **context: object) -> HTTPException
             or "requested unsupported domains" in lowered
             or "client_family" in lowered
             or "client_profile_id" in lowered
+            or "key recovery bundle" in lowered
+            or "wrapping metadata" in lowered
+            or "key purpose" in lowered
         ):
             return HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

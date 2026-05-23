@@ -83,9 +83,30 @@ from .security import (
 )
 from .store import SyncV2Store
 
+SYNC_DATASET_RECOVERY_KEY_PURPOSE = "dataset_recovery"
+SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES = 64 * 1024
+
 
 def _safe_projection_error_message(exc: Exception) -> str:
     return f"Projection failed: {type(exc).__name__}"
+
+
+def _key_recovery_metadata_string(
+    metadata: Mapping[str, object],
+    *keys: str,
+    nested_parent: str | None = None,
+) -> str | None:
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    nested = metadata.get(nested_parent) if nested_parent else None
+    if isinstance(nested, Mapping):
+        for key in keys:
+            value = nested.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -821,6 +842,17 @@ class SyncV2Service:
             key_status[dataset.dataset_id] = {
                 "key_recovery_available": stats.key_recovery_available,
             }
+            if not stats.key_recovery_available:
+                warnings.append(
+                    SyncRestorePreviewWarning(
+                        code="sync_key_recovery_missing",
+                        message=(
+                            "No active Sync v2 key recovery bundle is available "
+                            "for this dataset."
+                        ),
+                        dataset_id=dataset.dataset_id,
+                    )
+                )
             for domain, count in stats.approximate_counts.items():
                 total_counts[domain] = total_counts.get(domain, 0) + count
             domain_envelopes = {
@@ -1701,6 +1733,14 @@ class SyncV2Service:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
         if device_id is not None:
             self._require_registered_device(user_id, device_id)
+        self._validate_key_recovery_bundle(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
+            key_purpose=key_purpose,
+            wrapped_key_blob=wrapped_key_blob,
+            kdf_metadata=kdf_metadata,
+            rotation_of_key_record_id=rotation_of_key_record_id,
+        )
         return self.store.store_key_record(
             SyncKeyRecordCreate(
                 key_record_id=self.id_factory("key"),
@@ -1736,6 +1776,51 @@ class SyncV2Service:
             )
             if record.revoked_at is None
         ]
+
+    def _validate_key_recovery_bundle(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        key_purpose: str,
+        wrapped_key_blob: str,
+        kdf_metadata: Mapping[str, object] | None,
+        rotation_of_key_record_id: str | None,
+    ) -> None:
+        if key_purpose != SYNC_DATASET_RECOVERY_KEY_PURPOSE:
+            self._raise_invalid_key_recovery_bundle()
+        if not isinstance(wrapped_key_blob, str) or not wrapped_key_blob.strip():
+            self._raise_invalid_key_recovery_bundle()
+        if len(wrapped_key_blob.encode("utf-8")) > SYNC_KEY_RECOVERY_MAX_WRAPPED_KEY_BYTES:
+            self._raise_invalid_key_recovery_bundle()
+
+        metadata = dict(kdf_metadata or {})
+        algorithm = _key_recovery_metadata_string(
+            metadata,
+            "algorithm",
+            "wrapping_algorithm",
+            nested_parent="wrapping",
+        )
+        salt = _key_recovery_metadata_string(metadata, "salt", nested_parent="kdf")
+        if algorithm is None or salt is None:
+            self._raise_invalid_key_recovery_bundle()
+
+        if rotation_of_key_record_id is None:
+            return
+        active_rotation_target = any(
+            record.key_record_id == rotation_of_key_record_id and record.revoked_at is None
+            for record in self.store.list_key_records(
+                dataset_id,
+                user_id=user_id,
+                key_purpose=SYNC_DATASET_RECOVERY_KEY_PURPOSE,
+            )
+        )
+        if not active_rotation_target:
+            self._raise_invalid_key_recovery_bundle()
+
+    @staticmethod
+    def _raise_invalid_key_recovery_bundle() -> None:
+        raise SyncStoreError("Sync key recovery bundle is invalid")
 
     def _evaluate_envelope(
         self,

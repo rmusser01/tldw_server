@@ -360,20 +360,22 @@ git commit -m "feat(sync): report restore completeness with blobs"
 
 **Success Criteria:** Restore manifest/preview report recovery readiness safely, docs describe M2 behavior, and targeted tests plus Bandit pass.
 
-**Tests:** `tldw_Server_API/tests/Sync/test_sync_v2_security.py`, targeted Sync suite, Bandit touched production scope.
+**Tests:** `tldw_Server_API/tests/Sync/test_sync_v2_service.py`, `tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py`, targeted Sync suite, Bandit touched production scope.
 
-**Status:** Not Started
+**Status:** Complete
 
 **Files:**
 
 - Modify: `tldw_Server_API/app/core/Sync/v2/service.py`
-- Modify: `tldw_Server_API/app/core/DB_Management/Sync_DB.py`
-- Modify: `tldw_Server_API/app/api/v1/schemas/sync_v2_models.py`
-- Modify: `Docs/API/Sync_V2_M1.md` or create `Docs/API/Sync_V2_M2.md`
+- Modify: `tldw_Server_API/app/api/v1/endpoints/sync.py`
 - Modify: `Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md`
-- Test: `tldw_Server_API/tests/Sync/test_sync_v2_security.py`
+- Modify: `Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md`
+- Test: `tldw_Server_API/tests/Sync/test_sync_v2_service.py`
+- Test: `tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py`
+- Test: `tldw_Server_API/tests/Sync/test_sync_v2_attachment_refs.py`
+- Test: `tldw_Server_API/tests/Sync/test_sync_v2_restore_preview.py`
 
-- [ ] **Step 1: Write failing key recovery hardening tests**
+- [x] **Step 1: Write failing key recovery hardening tests**
 
 Cover:
 
@@ -383,18 +385,22 @@ Cover:
 - restore preview warns when no active recovery bundle exists.
 - safe error/log paths never include wrapped key material.
 
-- [ ] **Step 2: Run security tests and verify failure**
+- [x] **Step 2: Run key recovery tests and verify failure**
 
 Run:
 
 ```bash
 source .venv/bin/activate
-python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_security.py -v
+python -m pytest \
+  tldw_Server_API/tests/Sync/test_sync_v2_service.py::test_store_key_recovery_bundle_validates_purpose_wrapping_metadata_and_rotation \
+  tldw_Server_API/tests/Sync/test_sync_v2_service.py::test_restore_preview_warns_when_selected_dataset_lacks_active_key_recovery \
+  tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py::test_key_recovery_bundle_validation_error_does_not_expose_wrapped_material \
+  -v
 ```
 
 Expected: FAIL until hardening is implemented.
 
-- [ ] **Step 3: Implement hardening and docs**
+- [x] **Step 3: Implement hardening and docs**
 
 Tighten validation and restore readiness, then document:
 
@@ -404,25 +410,19 @@ Tighten validation and restore readiness, then document:
 - restore completeness statuses
 - M2 non-goals and M3 deferred encryption modes
 
-- [ ] **Step 4: Run targeted Sync tests**
+- [x] **Step 4: Run targeted Sync tests**
 
 Run:
 
 ```bash
 source .venv/bin/activate
-python -m pytest \
-  tldw_Server_API/tests/Sync/test_sync_v2_models.py \
-  tldw_Server_API/tests/Sync/test_sync_v2_store.py \
-  tldw_Server_API/tests/Sync/test_sync_v2_service.py \
-  tldw_Server_API/tests/Sync/test_sync_v2_security.py \
-  tldw_Server_API/tests/Sync/test_sync_v2_api.py \
-  tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py \
-  -v
+python -m pytest tldw_Server_API/tests/Sync -v
+python -m pytest tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py -v
 ```
 
 Expected: PASS or document unrelated pre-existing failures with exact tests.
 
-- [ ] **Step 5: Run Bandit on touched production scope**
+- [x] **Step 5: Run Bandit on touched production scope**
 
 Run:
 
@@ -430,10 +430,8 @@ Run:
 source .venv/bin/activate
 python -m bandit -r \
   tldw_Server_API/app/api/v1/endpoints/sync.py \
-  tldw_Server_API/app/api/v1/schemas/sync_v2_models.py \
   tldw_Server_API/app/core/Sync/v2 \
-  tldw_Server_API/app/core/DB_Management/Sync_DB.py \
-  -f json -o /tmp/bandit_sync_v2_m2.json
+  -f json -o /tmp/bandit_sync_v2_m2_key_recovery.json
 ```
 
 Expected: PASS with no new findings in touched code.
@@ -442,12 +440,15 @@ Expected: PASS with no new findings in touched code.
 
 ```bash
 git add tldw_Server_API/app/core/Sync/v2/service.py \
-  tldw_Server_API/app/core/DB_Management/Sync_DB.py \
-  tldw_Server_API/app/api/v1/schemas/sync_v2_models.py \
-  Docs/API/Sync_V2_M2.md \
+  tldw_Server_API/app/api/v1/endpoints/sync.py \
   Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md \
-  tldw_Server_API/tests/Sync/test_sync_v2_security.py
-git commit -m "docs(sync): finalize sync v2 m2 blob restore contract"
+  Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md \
+  tldw_Server_API/tests/Sync/test_sync_v2_service.py \
+  tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py \
+  tldw_Server_API/tests/Sync/test_sync_v2_attachment_refs.py \
+  tldw_Server_API/tests/Sync/test_sync_v2_restore_preview.py \
+  "backlog/tasks/task-490.12.6 - Sync-v2-M2-Key-recovery-hardening.md"
+git commit -m "feat(sync): harden sync v2 key recovery readiness"
 ```
 
 ## Final Verification For M2

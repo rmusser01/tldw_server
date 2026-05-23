@@ -251,15 +251,26 @@ should be clearer and safer:
 
 - Capabilities and restore manifest must show whether the dataset has at least
   one active recovery bundle for the current policy.
-- Recovery records should validate `key_purpose`, `wrapping_algorithm`,
-  `device_id`, and dataset ownership.
+- Recovery bundle writes must validate that the authenticated user owns the
+  dataset, `key_purpose` is `dataset_recovery`, `device_id` is registered to
+  that user when supplied, and wrapping metadata includes a non-empty
+  `algorithm` or `wrapping_algorithm` plus `salt`. Nested `wrapping` or `kdf`
+  metadata may be accepted for client compatibility, but validation errors must
+  stay generic.
+- `rotation_of_key_record_id`, when supplied, must point to an active
+  non-revoked recovery bundle for the same user and dataset. M2 does not add a
+  complete key-rotation workflow; it only prevents stale or revoked rotation
+  pointers from being accepted.
 - Revoked recovery records must be excluded from readiness calculations.
-- Logs and error messages must not include wrapped key material.
+- Logs, HTTP errors, and restore readiness responses must not include wrapped
+  key material or KDF/wrapping secrets. Invalid bundles should surface as the
+  generic `sync_validation_failed` API error.
 - Restore preview should warn when a selected dataset has no active recovery
-  record even if normal authentication currently unlocks it.
+  record even if normal authentication currently unlocks it. The stable warning
+  code is `sync_key_recovery_missing`.
 
-Passphrase unlock, device-key unlock, client-only encryption, and key rotation
-remain M3 work.
+Passphrase unlock, device-key unlock, client-only encryption, and full
+key-rotation workflows remain M3 work.
 
 ## Testing Strategy
 

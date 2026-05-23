@@ -365,6 +365,14 @@ def test_restore_preview_reports_attachment_refs_and_missing_blobs(
     assert [item["attachment_id"] for item in body["missing_blobs"]] == ["att-1"]
     assert body["warnings"] == [
         {
+            "code": "sync_key_recovery_missing",
+            "message": "No active Sync v2 key recovery bundle is available for this dataset.",
+            "dataset_id": "dataset-1",
+            "attachment_id": None,
+            "object_id": None,
+            "payload_hash": None,
+        },
+        {
             "code": "sync_attachment_blob_missing",
             "message": "Attachment blob is not available from the Sync v2 M1 server.",
             "dataset_id": "dataset-1",
@@ -398,7 +406,16 @@ def test_restore_preview_omits_tombstoned_attachment_refs(
     body = response.json()
     assert body["attachment_refs"] == []
     assert body["missing_blobs"] == []
-    assert body["warnings"] == []
+    assert body["warnings"] == [
+        {
+            "code": "sync_key_recovery_missing",
+            "message": "No active Sync v2 key recovery bundle is available for this dataset.",
+            "dataset_id": "dataset-1",
+            "attachment_id": None,
+            "object_id": None,
+            "payload_hash": None,
+        }
+    ]
 
 
 def test_blob_upload_and_download_are_explicitly_unsupported_in_m1(

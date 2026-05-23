@@ -2317,6 +2317,111 @@ def test_list_key_recovery_bundles_returns_filtered_opaque_material(
     assert "opaque-salt" not in str(manifest)
 
 
+def test_store_key_recovery_bundle_validates_purpose_wrapping_metadata_and_rotation(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+):
+    issued_ids: list[str] = []
+
+    def _unique_id(prefix: str) -> str:
+        issued_ids.append(prefix)
+        return f"{prefix}-{len(issued_ids)}"
+
+    sync_service.id_factory = _unique_id
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    original = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:original-key",
+        kdf_metadata={"algorithm": "scrypt", "salt": "opaque-salt"},
+    )
+    sync_store.store_key_record(
+        SyncKeyRecordCreate(
+            key_record_id="key-revoked",
+            dataset_id="dataset-1",
+            user_id="user-1",
+            device_id="device-1",
+            key_purpose="dataset_recovery",
+            wrapped_key_blob="wrapped:revoked-key",
+            kdf_metadata={"algorithm": "scrypt", "salt": "revoked-salt"},
+            revoked_at="2026-05-10T12:30:00+00:00",
+        )
+    )
+
+    invalid_cases = [
+        {"key_purpose": "workspace_share"},
+        {"kdf_metadata": {}},
+        {"kdf_metadata": {"algorithm": "scrypt"}},
+        {"rotation_of_key_record_id": "missing-key"},
+        {"rotation_of_key_record_id": "key-revoked"},
+    ]
+    for overrides in invalid_cases:
+        kwargs = {
+            "user_id": "user-1",
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "key_purpose": "dataset_recovery",
+            "wrapped_key_blob": "wrapped:super-secret-key-material",
+            "kdf_metadata": {"algorithm": "scrypt", "salt": "opaque-salt"},
+        }
+        kwargs.update(overrides)
+
+        with pytest.raises(SyncStoreError, match="Sync key recovery bundle is invalid") as exc_info:
+            sync_service.store_key_recovery_bundle(**kwargs)
+
+        assert "wrapped:super-secret-key-material" not in str(exc_info.value)
+        assert "opaque-salt" not in str(exc_info.value)
+
+    rotated = sync_service.store_key_recovery_bundle(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        key_purpose="dataset_recovery",
+        wrapped_key_blob="wrapped:rotated-key",
+        kdf_metadata={"algorithm": "scrypt", "salt": "rotated-salt"},
+        rotation_of_key_record_id=original.key_record_id,
+    )
+
+    assert rotated.rotation_of_key_record_id == original.key_record_id
+
+
+def test_restore_preview_warns_when_selected_dataset_lacks_active_key_recovery(
+    sync_service: SyncV2Service,
+    sync_store: SyncV2Store,
+):
+    sync_service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    sync_store.store_key_record(
+        SyncKeyRecordCreate(
+            key_record_id="key-revoked",
+            dataset_id="dataset-1",
+            user_id="user-1",
+            device_id="device-1",
+            key_purpose="dataset_recovery",
+            wrapped_key_blob="wrapped:revoked-key",
+            kdf_metadata={"algorithm": "scrypt", "salt": "revoked-salt"},
+            revoked_at="2026-05-10T12:30:00+00:00",
+        )
+    )
+
+    manifest = sync_service.restore_manifest(user_id="user-1", dataset_ids=["dataset-1"])
+    preview = sync_service.restore_preview(user_id="user-1", dataset_ids=["dataset-1"])
+    records = sync_service.list_key_recovery_bundles(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        key_purpose="dataset_recovery",
+    )
+
+    assert manifest.datasets[0].key_recovery_available is False
+    assert preview.key_status == {"dataset-1": {"key_recovery_available": False}}
+    assert preview.datasets[0].key_recovery_available is False
+    assert [warning.code for warning in preview.warnings] == ["sync_key_recovery_missing"]
+    assert preview.warnings[0].dataset_id == "dataset-1"
+    assert "revoked-key" not in repr(preview)
+    assert records == []
+
+
 def test_list_key_recovery_bundles_rejects_inaccessible_dataset(
     sync_service: SyncV2Service,
 ):
