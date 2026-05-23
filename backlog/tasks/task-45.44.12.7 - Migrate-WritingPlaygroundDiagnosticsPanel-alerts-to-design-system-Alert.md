@@ -1,7 +1,7 @@
 ---
 id: TASK-45.44.12.7
 title: Migrate WritingPlaygroundDiagnosticsPanel alerts to design-system Alert
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -13,6 +13,7 @@ references:
 - apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
 - Docs/Design/tldw_web_design_system_contract.md
+- https://github.com/rmusser01/tldw_server/pull/1972
 modified_files:
 - apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundDiagnosticsPanel.tsx
 - apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlaygroundDiagnosticsPanel.design-system-alert.test.tsx
@@ -56,12 +57,13 @@ Migrate the diagnostics panel offline and unsupported product-state AntD Alerts 
 - Verification: `git diff --check` passed.
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 on existing repo-wide UI type debt; `/tmp/tldw_writing_diagnostics_tsc.log` contains no diagnostics for the touched component or new test.
 - Bandit: skipped because this slice only touches frontend TypeScript/TSX and JSON task metadata.
+- PR: https://github.com/rmusser01/tldw_server/pull/1972
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Migrated the `WritingPlaygroundDiagnosticsPanel` offline and unsupported states to the shared design-system Alert primitive, added focused marker coverage for both states, and removed the retired product-state baseline exceptions. Verification passed for the focused diagnostics tests, product-state guard test, `verify:design-system-state`, baseline absence check, and `git diff --check`; the slice reduces the product-state baseline to 283 total exceptions and Writing/Review to 13.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -70,6 +72,6 @@ Migrate the diagnostics panel offline and unsupported product-state AntD Alerts 
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
