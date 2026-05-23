@@ -16,6 +16,7 @@ references:
     Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md
   - apps/packages/ui/scripts/design-system-product-state-baseline.json
   - 'https://github.com/rmusser01/tldw_server/pull/2000'
+  - 'https://github.com/rmusser01/tldw_server/pull/2002'
 parent_task_id: TASK-45.44
 priority: medium
 documentation:
@@ -24,6 +25,11 @@ documentation:
     error Alert to the design-system Alert primitive. Baseline evidence: total product-state
     exceptions 265 -> 264; Flashcards/Quiz/study-flow exceptions 41 -> 40; FlashcardTemplateValueModal
     target rows 1 -> 0. Verification recorded in TASK-45.44.9.7.
+  - >-
+    TASK-45.44.9.8 / PR #2002 migrated the Flashcards ExportPanel export-preview Alert
+    to the design-system Alert primitive. Baseline evidence: total product-state exceptions
+    264 -> 263; Flashcards/Quiz/study-flow exceptions 40 -> 39; ExportPanel target rows
+    1 -> 0. Verification recorded in TASK-45.44.9.8.
 ---
 
 ## Description

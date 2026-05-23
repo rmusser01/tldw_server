@@ -15,6 +15,7 @@ references:
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/ExportPanel.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx
 - apps/packages/ui/scripts/design-system-product-state-baseline.json
+- https://github.com/rmusser01/tldw_server/pull/2002
 modified_files:
 - apps/packages/ui/src/components/Flashcards/tabs/ImportExport/ExportPanel.tsx
 - apps/packages/ui/src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx
