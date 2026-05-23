@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest"
 
-import { PAGES } from "../../../../../tldw-frontend/e2e/smoke/page-inventory"
+import { PAGES } from "../../e2e/smoke/page-inventory"
 import {
   getRouteHeadingPolicy,
   getRouteMetadata,
   normalizeRoutePath,
   ROUTE_METADATA
-} from "../route-metadata"
+} from "../../../packages/ui/src/routes/route-metadata"
 
 const sorted = (values: string[]): string[] => [...values].sort()
 
-describe("route heading governance", () => {
+describe("route heading governance metadata", () => {
   it("requires active smoke inventory routes to have an h1 policy or metadata exception", () => {
     const routesWithoutHeadingPolicy = PAGES
       .filter((entry) => !entry.skip)

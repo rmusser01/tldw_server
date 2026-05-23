@@ -412,15 +412,16 @@ Expected: PASS.
 - [x] **Step 6: Commit heading and command governance**
 
 ```bash
-git add apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.ts apps/packages/ui/src/components/Common/__tests__/CommandPalette.route-targets.test.tsx apps/packages/ui/src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx apps/packages/ui/src/components/Common/CommandPalette.tsx apps/packages/ui/src/components/Common/CommandPaletteHost.tsx
+git add apps/tldw-frontend/e2e/smoke/route-heading-governance.spec.ts apps/tldw-frontend/__tests__/smoke/route-heading-governance.metadata.test.ts apps/packages/ui/src/components/Common/__tests__/CommandPalette.route-targets.test.tsx apps/packages/ui/src/components/Common/__tests__/CommandPalette.shortcuts.test.tsx apps/packages/ui/src/components/Common/CommandPalette.tsx apps/packages/ui/src/components/Common/CommandPaletteHost.tsx
 git commit -m "test: govern headings and command targets"
 ```
 
 Implementation outcome:
 - Added metadata-backed command labels and h1 policy helpers in route metadata.
-- Added command palette route-target governance and route heading governance tests.
+- Added command palette route-target governance and frontend-owned route heading governance tests.
 - Browser QA initially found `/media` and `/notes` heading failures; `/media` needed route test mocks, and `/notes` now exposes its existing title as the page `h1`.
 - Kept CommandPaletteHost and shortcut behavior unchanged because the new target contract passed without host changes.
+- Follow-up review moved the metadata-only heading governance test out of `@tldw/ui` so the package no longer imports frontend smoke inventory.
 
 ### Task 3: Govern Sidepanel And Hosted Visibility
 

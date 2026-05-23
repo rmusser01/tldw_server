@@ -63,6 +63,12 @@ const renderOpenGlobalPalette = async (): Promise<HTMLElement[]> => {
 }
 
 describe("CommandPalette route target governance", () => {
+  it("uses route-owned command label overrides for settings routes", () => {
+    expect(getRouteCommandPaletteLabel("/settings/health")).toBe(
+      "Go to Health & Diagnostics"
+    )
+  })
+
   it("keeps default navigation commands backed by visible route metadata", async () => {
     const navigationOptions = await renderOpenGlobalPalette()
     const invalidTargets = navigationOptions
@@ -108,10 +114,15 @@ describe("CommandPalette route target governance", () => {
     const targetsByLabel = new Map<string, Set<string>>()
 
     for (const option of navigationOptions) {
-      const label = option.querySelector(".font-medium")?.textContent?.trim() ?? ""
       const targetPath = normalizeRoutePath(
         option.getAttribute("data-target-path") ?? ""
       )
+      const metadata = getRouteMetadata(targetPath)
+      expect(
+        metadata,
+        `${option.getAttribute("data-command-id")} target ${targetPath} has metadata`
+      ).toBeDefined()
+      const label = getRouteCommandPaletteLabel(metadata!)
 
       if (!targetsByLabel.has(label)) {
         targetsByLabel.set(label, new Set())
