@@ -1210,8 +1210,12 @@ export const shouldClearPendingSessionSave = (
 ): boolean => {
   if (hasCurrentFieldChanges) return false
   if (!isRecord(pendingPayload)) return true
-  return getRevisionPayloadSignature(savedPayload) === getRevisionPayloadSignature(
-    pendingPayload
+  return (
+    getRevisionPayloadSignature(savedPayload) === getRevisionPayloadSignature(
+      pendingPayload
+    ) &&
+    getRevisionPresetIdFromPayload(savedPayload) ===
+      getRevisionPresetIdFromPayload(pendingPayload)
   )
 }
 
